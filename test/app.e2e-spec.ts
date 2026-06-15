@@ -6,8 +6,8 @@ import type { Response } from 'supertest'
 import type { App as SupertestApp } from 'supertest/types'
 import type { ApiResponse } from '../src/common/interfaces/api-response.interface'
 import { AppModule } from '../src/app.module'
-import { setupApp } from '../src/core/bootstrap/setup-app'
-import type { HealthResponseDto } from '../src/features/health/dto/health-response.dto'
+import { setupApp } from '../src/utils/setup-app'
+import type { HealthResponseDto } from '../src/modules/health/dto/health-response.dto'
 
 describe('App', () => {
   let app: INestApplication | undefined

@@ -12,12 +12,7 @@ export const configuration = (): {
     corsOrigins: string[]
   }
   database: {
-    host: string
-    port: number
-    username: string
-    password: string
-    name: string
-    ssl: boolean
+    url: string
     logging: boolean
     synchronize: boolean
   }
@@ -30,12 +25,7 @@ export const configuration = (): {
     ),
   },
   database: {
-    host: process.env.DATABASE_HOST ?? '',
-    port: Number(process.env.DATABASE_PORT ?? 5432),
-    username: process.env.DATABASE_USER ?? '',
-    password: process.env.DATABASE_PASSWORD ?? '',
-    name: process.env.DATABASE_NAME ?? '',
-    ssl: process.env.DATABASE_SSL === 'true',
+    url: process.env.DATABASE_URL ?? 'mongodb://localhost:27017/th_proptech',
     logging: process.env.DATABASE_LOGGING === 'true',
     synchronize:
       process.env.NODE_ENV !== 'production' &&

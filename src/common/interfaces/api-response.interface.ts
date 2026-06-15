@@ -7,11 +7,17 @@ export type ApiErrorBody = {
 export type ApiMeta = {
   requestId?: string
   timestamp: string
+  page?: number
+  limit?: number
+  total?: number
+  totalPages?: number
 }
 
-export type ApiResponse<TData> = {
+export type ApiResponse<TData = unknown> = {
   success: boolean
   data: TData | null
   error: ApiErrorBody | null
   meta: ApiMeta
 }
+
+export type PaginatedResponse<TData> = ApiResponse<TData[]>

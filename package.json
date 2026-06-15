@@ -2,7 +2,7 @@
   "name": "@th-proptech/backend",
   "version": "0.1.0",
   "private": true,
-  "packageManager": "pnpm@10.12.1",
+  "packageManager": "pnpm@11.5.3",
   "engines": {
     "node": ">=22.13.0",
     "pnpm": ">=10.0.0"
@@ -28,13 +28,9 @@
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:e2e": "jest --config ./test/jest-e2e.json",
-    "db:up": "docker compose up -d postgres",
+    "db:up": "docker compose up -d mongodb",
     "db:down": "docker compose down",
-    "db:logs": "docker compose logs -f postgres",
-    "typeorm": "typeorm-ts-node-commonjs -d src/core/database/typeorm-data-source.ts",
-    "migration:generate": "pnpm typeorm migration:generate",
-    "migration:run": "pnpm typeorm migration:run",
-    "migration:revert": "pnpm typeorm migration:revert",
+    "db:logs": "docker compose logs -f mongodb",
     "prepare": "husky",
     "release": "standard-version"
   },
@@ -49,11 +45,13 @@
     "class-validator": "^0.14.2",
     "dotenv": "^16.6.1",
     "joi": "^17.13.3",
-    "pg": "^8.16.3",
+    "mongodb": "^6.16.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2",
     "swagger-ui-express": "^5.0.1",
-    "typeorm": "^0.3.26"
+    "typeorm": "^0.3.26",
+    "winston": "^3.19.0",
+    "winston-daily-rotate-file": "^5.0.0"
   },
   "devDependencies": {
     "@commitlint/cli": "^19.8.1",
@@ -62,6 +60,9 @@
     "@nestjs/cli": "^11.0.10",
     "@nestjs/schematics": "^11.0.7",
     "@nestjs/testing": "^11.1.13",
+    "@swc/cli": "^0.8.1",
+    "@swc/core": "^1.15.41",
+    "@types/express": "^5.0.6",
     "@types/jest": "^30.0.0",
     "@types/node": "^24.10.1",
     "@types/supertest": "^6.0.3",
@@ -80,8 +81,8 @@
     "ts-jest": "^29.4.5",
     "ts-node": "^10.9.2",
     "tsconfig-paths": "^4.2.0",
-    "typescript-eslint": "^8.48.1",
-    "typescript": "^5.9.2"
+    "typescript": "^5.9.2",
+    "typescript-eslint": "^8.48.1"
   },
   "lint-staged": {
     "*.{ts,tsx}": [
