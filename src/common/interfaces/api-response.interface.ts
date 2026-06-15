@@ -13,7 +13,7 @@ export type ApiMeta = {
   totalPages?: number
 }
 
-export type ApiResponse<TData = any> = {
+export type ApiResponse<TData = unknown> = {
   success: boolean
   data: TData | null
   error: ApiErrorBody | null
