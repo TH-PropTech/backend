@@ -109,7 +109,8 @@ export class ApartmentResponseMapper {
       area: apartment.area,
       bedrooms: apartment.bedrooms,
       bathrooms: apartment.bathrooms,
-      status: apartment.status === 'unavailable' ? 'updating' : apartment.status,
+      status:
+        apartment.status === 'unavailable' ? 'updating' : apartment.status,
       verified: apartment.isVerified,
       image: apartment.gallery[0] || '',
       gallery: apartment.gallery,

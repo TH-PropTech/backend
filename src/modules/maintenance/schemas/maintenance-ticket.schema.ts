@@ -1,4 +1,11 @@
-import { Entity, ObjectIdColumn, ObjectId, Column, CreateDateColumn, UpdateDateColumn } from 'typeorm'
+import {
+  Entity,
+  ObjectIdColumn,
+  ObjectId,
+  Column,
+  CreateDateColumn,
+  UpdateDateColumn,
+} from 'typeorm'
 
 @Entity('maintenance_tickets')
 export class MaintenanceTicket {
