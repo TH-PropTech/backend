@@ -1,4 +1,11 @@
-import { Entity, ObjectIdColumn, ObjectId, Column, CreateDateColumn, UpdateDateColumn } from 'typeorm'
+import {
+  Entity,
+  ObjectIdColumn,
+  ObjectId,
+  Column,
+  CreateDateColumn,
+  UpdateDateColumn,
+} from 'typeorm'
 
 export enum UserStatus {
   ACTIVE = 'active',
@@ -28,20 +35,20 @@ export interface SmartOtpInfo {
 
 export interface TwoFactorInfo {
   enabled: boolean
-  secret?: string;
-  enabledAt?: Date;
+  secret?: string
+  enabledAt?: Date
 }
 
 export interface UserPreferences {
-  fontSize: 'compact' | 'default' | 'large';
+  fontSize: 'compact' | 'default' | 'large'
 }
 
 export interface DigitalSignatureInfo {
-  certificateDn?: string       // Distinguished Name của chứng thư số
-  serialNumber?: string        // Số serial của chứng thư số
-  validFrom?: Date             // Ngày bắt đầu hiệu lực
-  validTo?: Date               // Ngày hết hạn hiệu lực
-  provider?: string            // Nhà cung cấp dịch vụ (ví dụ: VNPT SmartCA)
+  certificateDn?: string // Distinguished Name của chứng thư số
+  serialNumber?: string // Số serial của chứng thư số
+  validFrom?: Date // Ngày bắt đầu hiệu lực
+  validTo?: Date // Ngày hết hạn hiệu lực
+  provider?: string // Nhà cung cấp dịch vụ (ví dụ: VNPT SmartCA)
   status: 'active' | 'suspended' | 'expired' | 'revoked'
 }
 
@@ -56,7 +63,7 @@ export interface KycUpdateRequest {
     profile?: UserProfile
     walletAddress?: string
     digitalSignature?: DigitalSignatureInfo
-    kycData?: any
+    kycData?: unknown
   }
 }
 
@@ -100,7 +107,7 @@ export class User {
   kycRejectReason?: string | null
 
   @Column({ type: 'json', nullable: true, default: null })
-  kycData?: any
+  kycData?: unknown
 
   @Column({ nullable: true })
   walletAddress!: string | null
@@ -131,7 +138,7 @@ export class User {
   preferences?: UserPreferences
 
   @Column({ type: 'json', nullable: true, default: null })
-  metadata?: Record<string, any>
+  metadata?: Record<string, unknown>
 
   @Column({ default: false })
   isDeleted!: boolean

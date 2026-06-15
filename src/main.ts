@@ -9,12 +9,13 @@ const dnsServers = process.env.NODE_DNS_SERVERS
 if (dnsServers) {
   const servers = dnsServers
     .split(',')
-    .map((s) => s.trim())
+    .map(s => s.trim())
     .filter(Boolean)
   if (servers.length > 0) {
     try {
       dns.setServers(servers)
     } catch (err) {
+      // eslint-disable-next-line no-console
       console.warn('Không thể thiết lập DNS servers tùy chỉnh:', err)
     }
   }
@@ -37,8 +38,10 @@ async function bootstrap(): Promise<void> {
   const port = configService.getOrThrow<number>('app.port')
   await app.listen(port)
 
-  console.log(`\n Server is running on: http://localhost:${port}`)
-  console.log(` Connected to MongoDB successfully!\n`)
+  // eslint-disable-next-line no-console
+  console.log(`\nServer is running on: http://localhost:${port}`)
+  // eslint-disable-next-line no-console
+  console.log(`Connected to MongoDB successfully!\n`)
 }
 
 void bootstrap()
