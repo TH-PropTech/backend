@@ -10,29 +10,15 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: th_proptech_test
+      mongodb:
+        image: mongo:7.0
         ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+          - 27017:27017
     env:
       NODE_ENV: test
       APP_PORT: 3001
       APP_CORS_ORIGINS: http://localhost:3000
-      DATABASE_HOST: localhost
-      DATABASE_PORT: 5432
-      DATABASE_USER: postgres
-      DATABASE_PASSWORD: postgres
-      DATABASE_NAME: th_proptech_test
-      DATABASE_SSL: false
+      DATABASE_URL: mongodb://localhost:27017/th_proptech_test
       DATABASE_LOGGING: false
       DATABASE_SYNCHRONIZE: false
     steps:
