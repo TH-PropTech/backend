@@ -1,4 +1,10 @@
-import { Entity, ObjectIdColumn, ObjectId, Column, CreateDateColumn } from 'typeorm'
+import {
+  Entity,
+  ObjectIdColumn,
+  ObjectId,
+  Column,
+  CreateDateColumn,
+} from 'typeorm'
 
 @Entity('blockchain_logs')
 export class BlockchainLog {

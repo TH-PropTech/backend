@@ -1,6 +1,6 @@
 export interface UserPayload {
-  id: string;
-  _id?: string;
-  email: string;
-  roles: string[];
+  id: string
+  _id?: string
+  email: string
+  roles: string[]
 }

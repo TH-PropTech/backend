@@ -30,11 +30,9 @@ export class KycVerifiedGuard implements CanActivate {
     )
     if (skipKyc) return true
 
-    const request = context
-      .switchToHttp()
-      .getRequest<{
-        user?: { _id?: string | ObjectId; id?: string | ObjectId }
-      }>()
+    const request = context.switchToHttp().getRequest<{
+      user?: { _id?: string | ObjectId; id?: string | ObjectId }
+    }>()
     const user = request.user
 
     if (!user || (!user._id && !user.id)) {
