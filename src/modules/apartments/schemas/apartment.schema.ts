@@ -16,10 +16,16 @@ export class Apartment {
   title!: string
 
   @Column({ nullable: true })
+  buildingId!: string | null
+
+  @Column({ default: '', nullable: true })
+  buildingName!: string | null
+
+  @Column({ nullable: true })
   projectId!: string | null
 
-  @Column({ default: '' })
-  projectName!: string
+  @Column({ default: '', nullable: true })
+  projectName!: string | null
 
   @Column()
   category!: string
