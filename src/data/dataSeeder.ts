@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-explicit-any */
 import * as dotenv from 'dotenv'
 import * as dns from 'dns'
 import * as path from 'path'
@@ -56,7 +57,6 @@ async function bootstrap(): Promise<void> {
 
     // 1. Dọn dẹp dữ liệu mẫu cũ (Tùy chọn)
     logger.log('Đang dọn dẹp các dữ liệu mẫu cũ...')
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-explicit-any
     await userRepository.delete({
       email: {
         $in: [
@@ -141,7 +141,6 @@ async function bootstrap(): Promise<void> {
 
     // 3. Tạo KYC Record mẫu
     logger.log('Đang tạo hồ sơ KYC mẫu...')
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-explicit-any
     await kycRecordRepository.delete({
       userId: {
         $in: [savedLandlord._id.toHexString(), savedTenant._id.toHexString()],
@@ -181,7 +180,6 @@ async function bootstrap(): Promise<void> {
 
     // 4. Tạo các dự án (Projects) mẫu
     logger.log('Đang tạo các dự án mẫu...')
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-explicit-any
     await projectRepository.delete({
       name: { $in: ['Vinhomes Central Park', 'Masteri Thảo Điền'] } as any,
     })
