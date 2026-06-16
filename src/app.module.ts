@@ -9,6 +9,7 @@ import { HealthModule } from './modules/health/health.module'
 import { UsersModule } from './modules/users/users.module'
 import { KycModule } from './modules/kyc/kyc.module'
 import { ProjectsModule } from './modules/projects/projects.module'
+import { BuildingsModule } from './modules/buildings/buildings.module'
 import { ApartmentsModule } from './modules/apartments/apartments.module'
 import { BookingsModule } from './modules/bookings/bookings.module'
 import { ContractsModule } from './modules/contracts/contracts.module'
@@ -52,6 +53,7 @@ import { PoliciesModule } from './modules/policies/policies.module'
     UsersModule,
     KycModule,
     ProjectsModule,
+    BuildingsModule,
     ApartmentsModule,
     BookingsModule,
     ContractsModule,
