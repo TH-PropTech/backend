@@ -17,7 +17,9 @@ export interface WebApartmentResponse {
   district: string
   ward: string
   street: string
-  projectName: string
+  projectName: string | null
+  buildingId: string | null
+  buildingName: string | null
   bedrooms: number
   bathrooms: number
   direction: string
@@ -36,8 +38,10 @@ export interface WebApartmentResponse {
 export interface MobileApartmentResponse {
   id: string
   title: string
-  projectName: string
+  projectName: string | null
   projectId: string | null
+  buildingId: string | null
+  buildingName: string | null
   location: string
   city: string
   priceMonthly: number
@@ -82,7 +86,9 @@ export class ApartmentResponseMapper {
       district: apartment.district,
       ward: apartment.ward,
       street: apartment.street,
-      projectName: apartment.projectName,
+      projectName: apartment.projectName || null,
+      buildingId: apartment.buildingId || null,
+      buildingName: apartment.buildingName || null,
       bedrooms: apartment.bedrooms,
       bathrooms: apartment.bathrooms,
       direction: apartment.direction,
@@ -107,8 +113,10 @@ export class ApartmentResponseMapper {
     return {
       id: apartment._id.toString(),
       title: apartment.title,
-      projectName: apartment.projectName,
+      projectName: apartment.projectName || null,
       projectId: apartment.projectId || null,
+      buildingId: apartment.buildingId || null,
+      buildingName: apartment.buildingName || null,
       location: apartment.location,
       city: apartment.city,
       priceMonthly: apartment.priceMonthly,
