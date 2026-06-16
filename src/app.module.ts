@@ -15,9 +15,15 @@ import { ContractsModule } from './modules/contracts/contracts.module'
 import { PaymentsModule } from './modules/payments/payments.module'
 import { MaintenanceModule } from './modules/maintenance/maintenance.module'
 import { CommunityModule } from './modules/community/community.module'
-import { BlockchainModule } from './modules/blockchain/blockchain.module'
 import { NotificationsModule } from './modules/notifications/notifications.module'
 import { AiChatsModule } from './modules/ai-chats/ai-chats.module'
+import { DisputesModule } from './modules/disputes/disputes.module'
+import { ReviewsModule } from './modules/reviews/reviews.module'
+import { AuthModule } from './modules/auth/auth.module'
+import { SmartOtpModule } from './modules/smart-otp/smart-otp.module'
+import { TwoFactorModule } from './modules/two-factor/two-factor.module'
+import { FabricModule } from './modules/fabric/fabric.module'
+import { PoliciesModule } from './modules/policies/policies.module'
 
 @Module({
   imports: [
@@ -52,9 +58,15 @@ import { AiChatsModule } from './modules/ai-chats/ai-chats.module'
     PaymentsModule,
     MaintenanceModule,
     CommunityModule,
-    BlockchainModule,
     NotificationsModule,
     AiChatsModule,
+    DisputesModule,
+    ReviewsModule,
+    AuthModule,
+    SmartOtpModule,
+    TwoFactorModule,
+    FabricModule,
+    PoliciesModule,
   ],
 })
 export class AppModule {}
