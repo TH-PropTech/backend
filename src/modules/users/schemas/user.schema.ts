@@ -41,6 +41,11 @@ export interface TwoFactorInfo {
 
 export interface UserPreferences {
   fontSize: 'compact' | 'default' | 'large'
+  monthlyIncome?: number
+  preferredDistricts?: string[]
+  preferredRooms?: number
+  requiresGym?: boolean
+  requiresParking?: boolean
 }
 
 export interface DigitalSignatureInfo {
@@ -87,6 +92,12 @@ export class User {
 
   @Column()
   phone!: string
+
+  @Column({ nullable: true })
+  dateOfBirth?: Date
+
+  @Column({ nullable: true })
+  gender?: string
 
   // ── SYSTEM ROLE & STATUS ──
   @Column({ type: 'string' })

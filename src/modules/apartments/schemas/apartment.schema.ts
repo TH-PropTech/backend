@@ -81,6 +81,10 @@ export class Apartment {
   @Column('array')
   gallery!: string[]
 
+  /** Danh sách ảnh 360 độ của căn hộ (ví dụ: 360 phòng khách, 360 phòng ngủ) */
+  @Column('array')
+  images360!: string[]
+
   @Column({ default: '' })
   vrUrl!: string
 
