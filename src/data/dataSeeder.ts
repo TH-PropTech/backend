@@ -32,6 +32,7 @@ import { Apartment } from '../modules/apartments/schemas/apartment.schema'
 import { KycRecord } from '../modules/kyc/schemas/kyc-record.schema'
 import { Contract } from '../modules/contracts/schemas/contract.schema'
 import { Project } from '../modules/projects/schemas/project.schema'
+import { Building } from '../modules/buildings/schemas/building.schema'
 import { Logger } from '@nestjs/common'
 
 async function bootstrap(): Promise<void> {
@@ -54,9 +55,13 @@ async function bootstrap(): Promise<void> {
     const projectRepository = app.get<Repository<Project>>(
       getRepositoryToken(Project)
     )
+    const buildingRepository = app.get<Repository<Building>>(
+      getRepositoryToken(Building)
+    )
 
     // 1. Dọn dẹp dữ liệu mẫu cũ (Tùy chọn)
     logger.log('Đang dọn dẹp các dữ liệu mẫu cũ...')
+    await buildingRepository.delete({})
     await userRepository.delete({
       email: {
         $in: [
@@ -200,12 +205,8 @@ async function bootstrap(): Promise<void> {
         'Trung tâm thương mại Landmark 81',
       ],
       images: [
-        'https://res.cloudinary.com/dehsnaot1/image/upload/v1781534819/toa1_fp0an5.jpg',
-        'https://res.cloudinary.com/dehsnaot1/image/upload/v1781535081/toa1_matsau_kh18qu.png',
-      ],
-      images360: [
-        'https://res.cloudinary.com/dehsnaot1/image/upload/v1781534880/toa1360do_jq98uv.png',
-        'https://res.cloudinary.com/dehsnaot1/image/upload/v1781535400/toa1360_matsau_f1jgyg.png',
+        'https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?w=1200',
+        'https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?w=1200',
       ],
     })
     const savedProject1 = await projectRepository.save(projectVinhomes)
@@ -227,6 +228,92 @@ async function bootstrap(): Promise<void> {
         'Trung tâm thương mại Vincom Mega Mall',
       ],
       images: [
+        'https://images.unsplash.com/photo-1512917774080-9991f1c4c750?w=1200',
+        'https://images.unsplash.com/photo-1564013799919-ab600027ffc6?w=1200',
+      ],
+    })
+    const savedProject2 = await projectRepository.save(projectMasteri)
+    logger.log(`Tạo dự án mẫu thành công: ${savedProject2.name}`)
+
+    // 4.5. Tạo các tòa nhà (Buildings) mẫu
+    logger.log('Đang tạo các tòa nhà mẫu...')
+
+    // Tòa nhà 1 thuộc Vinhomes Central Park
+    const buildingLandmark = buildingRepository.create({
+      name: 'Tòa Landmark 81',
+      projectId: savedProject1._id.toHexString(),
+      projectName: savedProject1.name,
+      description:
+        'Tòa nhà cao nhất Việt Nam, biểu tượng của sự thịnh vượng với đầy đủ tiện ích và trung tâm thương mại cao cấp.',
+      floorsCount: 81,
+      location: '208 Nguyễn Hữu Cảnh, Phường 22, Bình Thạnh, TP.HCM',
+      city: 'Hồ Chí Minh',
+      district: 'Bình Thạnh',
+      amenities: [
+        'Bể bơi vô cực',
+        'Phòng Gym',
+        'TTTM Vincom Landmark 81',
+        'Đài quan sát',
+        'Bảo vệ 24/7',
+      ],
+      images: [
+        'https://res.cloudinary.com/dehsnaot1/image/upload/v1781534819/toa1_fp0an5.jpg',
+        'https://res.cloudinary.com/dehsnaot1/image/upload/v1781535081/toa1_matsau_kh18qu.png',
+      ],
+      images360: [
+        'https://res.cloudinary.com/dehsnaot1/image/upload/v1781534880/toa1360do_jq98uv.png',
+        'https://res.cloudinary.com/dehsnaot1/image/upload/v1781535400/toa1360_matsau_f1jgyg.png',
+      ],
+    })
+    const savedBuildingLandmark =
+      await buildingRepository.save(buildingLandmark)
+
+    // Tòa nhà 2 thuộc Vinhomes Central Park
+    const buildingPark = buildingRepository.create({
+      name: 'Tòa Park 2',
+      projectId: savedProject1._id.toHexString(),
+      projectName: savedProject1.name,
+      description:
+        'Tòa căn hộ cao cấp ven sông thuộc phân khu The Park với không gian xanh mát.',
+      floorsCount: 45,
+      location: '208 Nguyễn Hữu Cảnh, Phường 22, Bình Thạnh, TP.HCM',
+      city: 'Hồ Chí Minh',
+      district: 'Bình Thạnh',
+      amenities: [
+        'Hồ bơi ngoài trời',
+        'Công viên ven sông 14ha',
+        'Sân tennis',
+        'Khu vui chơi trẻ em',
+      ],
+      images: [
+        'https://res.cloudinary.com/dehsnaot1/image/upload/v1781534819/toa1_fp0an5.jpg',
+        'https://res.cloudinary.com/dehsnaot1/image/upload/v1781535081/toa1_matsau_kh18qu.png',
+      ],
+      images360: [
+        'https://res.cloudinary.com/dehsnaot1/image/upload/v1781534880/toa1360do_jq98uv.png',
+        'https://res.cloudinary.com/dehsnaot1/image/upload/v1781535400/toa1360_matsau_f1jgyg.png',
+      ],
+    })
+    const savedBuildingPark = await buildingRepository.save(buildingPark)
+
+    // Tòa nhà 3 thuộc Masteri Thảo Điền
+    const buildingMasteriT1 = buildingRepository.create({
+      name: 'Tháp T1',
+      projectId: savedProject2._id.toHexString(),
+      projectName: savedProject2.name,
+      description:
+        'Tháp căn hộ dịch vụ và chung cư cao cấp thuộc dự án Masteri Thảo Điền.',
+      floorsCount: 30,
+      location: '159 Xa lộ Hà Nội, Thảo Điền, Quận 2, TP.HCM',
+      city: 'Hồ Chí Minh',
+      district: 'Quận 2',
+      amenities: [
+        'Hồ bơi cảnh quan',
+        'Khu BBQ ngoài trời',
+        'TTTM Vincom Mega Mall',
+        'Phòng Gym hiện đại',
+      ],
+      images: [
         'https://res.cloudinary.com/dehsnaot1/image/upload/v1781575156/toa2_zgy1zk.png',
         'https://res.cloudinary.com/dehsnaot1/image/upload/v1781575156/toa2_matsau_ykiog8.png',
       ],
@@ -235,8 +322,36 @@ async function bootstrap(): Promise<void> {
         'https://res.cloudinary.com/dehsnaot1/image/upload/v1781575195/toa2_matsau360_wc1nsa.png',
       ],
     })
-    const savedProject2 = await projectRepository.save(projectMasteri)
-    logger.log(`Tạo dự án mẫu thành công: ${savedProject2.name}`)
+    const savedBuildingMasteriT1 =
+      await buildingRepository.save(buildingMasteriT1)
+
+    // Tòa nhà 4 độc lập (không thuộc dự án nào)
+    const buildingIndependent = buildingRepository.create({
+      name: 'Nhà phố Nguyên Căn Quận 3',
+      projectId: null,
+      projectName: null,
+      description:
+        'Tòa nhà phố nguyên căn kinh doanh căn hộ dịch vụ độc lập, dịch vụ khép kín chuyên nghiệp.',
+      floorsCount: 3,
+      location: '120 Nguyễn Đình Chiểu, Phường Võ Thị Sáu, Quận 3, TP.HCM',
+      city: 'Hồ Chí Minh',
+      district: 'Quận 3',
+      amenities: [
+        'Khu giặt sấy chung',
+        'Camera an ninh',
+        'Khóa vân tay cửa chính',
+        'Chỗ để xe máy',
+      ],
+      images: [
+        'https://res.cloudinary.com/dehsnaot1/image/upload/v1781575156/toa2_matsau_ykiog8.png',
+      ],
+      images360: [
+        'https://res.cloudinary.com/dehsnaot1/image/upload/v1781575195/toa2_matsau360_wc1nsa.png',
+      ],
+    })
+    const savedBuildingIndependent =
+      await buildingRepository.save(buildingIndependent)
+    logger.log('Tạo các tòa nhà mẫu thành công!')
 
     // 5. Tạo các căn hộ (Apartments) mẫu
     logger.log('Đang tạo các căn hộ mẫu...')
@@ -295,6 +410,8 @@ async function bootstrap(): Promise<void> {
       landlordId: savedLandlord._id.toHexString(),
       projectId: savedProject1._id.toHexString(),
       projectName: savedProject1.name,
+      buildingId: savedBuildingLandmark._id.toHexString(),
+      buildingName: savedBuildingLandmark.name,
     })
     const savedApartment1 = await apartmentRepository.save(apartment1)
     logger.log(`Tạo căn hộ 1 thành công: ${savedApartment1.title}`)
@@ -350,6 +467,8 @@ async function bootstrap(): Promise<void> {
       landlordId: savedLandlord._id.toHexString(),
       projectId: savedProject1._id.toHexString(),
       projectName: savedProject1.name,
+      buildingId: savedBuildingPark._id.toHexString(),
+      buildingName: savedBuildingPark.name,
     })
     const savedApartment2 = await apartmentRepository.save(apartment2)
     logger.log(`Tạo căn hộ 2 thành công: ${savedApartment2.title}`)
@@ -405,6 +524,8 @@ async function bootstrap(): Promise<void> {
       landlordId: savedLandlord._id.toHexString(),
       projectId: savedProject1._id.toHexString(),
       projectName: savedProject1.name,
+      buildingId: savedBuildingLandmark._id.toHexString(),
+      buildingName: savedBuildingLandmark.name,
     })
     const savedApartment3 = await apartmentRepository.save(apartment3)
     logger.log(`Tạo căn hộ 3 thành công: ${savedApartment3.title}`)
@@ -453,6 +574,8 @@ async function bootstrap(): Promise<void> {
       landlordId: savedLandlord._id.toHexString(),
       projectId: savedProject2._id.toHexString(),
       projectName: savedProject2.name,
+      buildingId: savedBuildingMasteriT1._id.toHexString(),
+      buildingName: savedBuildingMasteriT1.name,
     })
     const savedApartment4 = await apartmentRepository.save(apartment4)
     logger.log(`Tạo căn hộ 4 thành công: ${savedApartment4.title}`)
@@ -501,9 +624,91 @@ async function bootstrap(): Promise<void> {
       landlordId: savedLandlord._id.toHexString(),
       projectId: savedProject2._id.toHexString(),
       projectName: savedProject2.name,
+      buildingId: savedBuildingMasteriT1._id.toHexString(),
+      buildingName: savedBuildingMasteriT1.name,
     })
     const savedApartment5 = await apartmentRepository.save(apartment5)
     logger.log(`Tạo căn hộ 5 thành công: ${savedApartment5.title}`)
+
+    // Căn hộ 6 (Nhà phố độc lập thuộc Building nhưng không thuộc Project)
+    const apartment6 = apartmentRepository.create({
+      title: 'Căn hộ dịch vụ cao cấp Quận 3 - Phòng 101',
+      category: 'Căn hộ dịch vụ',
+      description:
+        'Căn hộ dịch vụ thuộc tòa nhà phố nguyên căn Quận 3, trung tâm đi lại thuận tiện.',
+      location: 'Quận 3, TP.HCM',
+      city: 'Hồ Chí Minh',
+      district: 'Quận 3',
+      ward: 'Phường Võ Thị Sáu',
+      street: 'Nguyễn Đình Chiểu',
+      address: '120 Nguyễn Đình Chiểu, Phường Võ Thị Sáu, Quận 3, TP.HCM',
+      priceMonthly: 12000000,
+      area: 35,
+      bedrooms: 1,
+      bathrooms: 1,
+      direction: 'Nam',
+      balconyDirection: 'Nam',
+      furniture: 'Đầy đủ nội thất cơ bản',
+      moveInTime: 'Ngay lập tức',
+      electricity: '4000/kWh',
+      water: '100000/người',
+      internet: '100000/phòng',
+      gallery: [
+        'https://res.cloudinary.com/dehsnaot1/image/upload/v1781535737/khach_ixjldr.jpg',
+      ],
+      images360: [],
+      vrUrl: '',
+      amenities: ['Bảo vệ 24/7', 'Wifi', 'Máy giặt chung'],
+      status: 'available',
+      isVerified: true,
+      landlordId: savedLandlord._id.toHexString(),
+      projectId: null,
+      projectName: null,
+      buildingId: savedBuildingIndependent._id.toHexString(),
+      buildingName: savedBuildingIndependent.name,
+    })
+    const savedApartment6 = await apartmentRepository.save(apartment6)
+    logger.log(`Tạo căn hộ 6 thành công: ${savedApartment6.title}`)
+
+    // Căn hộ 7 (Căn hộ/Nhà riêng độc lập hoàn toàn - không thuộc Building hay Project)
+    const apartment7 = apartmentRepository.create({
+      title: 'Cho thuê nhà riêng nguyên căn Tân Bình',
+      category: 'Nhà riêng',
+      description:
+        'Nhà riêng nguyên căn 1 trệt 1 lầu, thích hợp gia đình ở hoặc làm văn phòng nhỏ.',
+      location: 'Tân Bình, TP.HCM',
+      city: 'Hồ Chí Minh',
+      district: 'Tân Bình',
+      ward: 'Phường 2',
+      street: 'Bạch Đằng',
+      address: '45/12 Bạch Đằng, Phường 2, Tân Bình, TP.HCM',
+      priceMonthly: 15000000,
+      area: 60,
+      bedrooms: 2,
+      bathrooms: 2,
+      direction: 'Bắc',
+      balconyDirection: 'Bắc',
+      furniture: 'Không nội thất',
+      moveInTime: 'Ngay lập tức',
+      electricity: 'Giá nhà nước',
+      water: 'Giá nhà nước',
+      internet: 'Tự lắp',
+      gallery: [
+        'https://res.cloudinary.com/dehsnaot1/image/upload/v1781535737/khach_ixjldr.jpg',
+      ],
+      images360: [],
+      vrUrl: '',
+      amenities: ['Chỗ để xe', 'Ban công'],
+      status: 'available',
+      isVerified: true,
+      landlordId: savedLandlord._id.toHexString(),
+      projectId: null,
+      projectName: null,
+      buildingId: null,
+      buildingName: null,
+    })
+    const savedApartment7 = await apartmentRepository.save(apartment7)
+    logger.log(`Tạo căn hộ 7 thành công: ${savedApartment7.title}`)
 
     // 6. Tạo Hợp đồng mẫu
     logger.log('Đang tạo hợp đồng mẫu...')
