@@ -41,7 +41,7 @@ export function createMockUserPayload(
   data: Partial<UserPayload> = {}
 ): UserPayload {
   return {
-    id: 'mock-user-id',
+    _id: 'mock-user-id',
     email: 'mock@example.com',
     roles: [],
     ...data,
