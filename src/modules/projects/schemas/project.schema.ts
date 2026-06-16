@@ -36,6 +36,10 @@ export class Project {
   @Column('array')
   images!: string[]
 
+  /** Danh sách các liên kết ảnh 360 độ hoặc link VR Tour của dự án */
+  @Column('array')
+  images360!: string[]
+
   @CreateDateColumn()
   createdAt!: Date
 

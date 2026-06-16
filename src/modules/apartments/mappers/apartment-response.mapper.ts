@@ -30,6 +30,7 @@ export interface WebApartmentResponse {
   amenities: string[]
   isVerified: boolean
   hasMedia: boolean
+  images360: string[]
 }
 
 export interface MobileApartmentResponse {
@@ -58,6 +59,7 @@ export interface MobileApartmentResponse {
   water: string
   internet: string
   amenities: string[]
+  images360: string[]
 }
 
 export class ApartmentResponseMapper {
@@ -92,7 +94,11 @@ export class ApartmentResponseMapper {
       internetPriceType: apartment.internet,
       amenities: apartment.amenities,
       isVerified: apartment.isVerified,
-      hasMedia: apartment.gallery.length > 0 || !!apartment.vrUrl,
+      hasMedia:
+        apartment.gallery.length > 0 ||
+        (apartment.images360 && apartment.images360.length > 0) ||
+        !!apartment.vrUrl,
+      images360: apartment.images360 || [],
     }
   }
 
@@ -125,6 +131,7 @@ export class ApartmentResponseMapper {
       water: apartment.water,
       internet: apartment.internet,
       amenities: apartment.amenities,
+      images360: apartment.images360 || [],
     }
   }
 }
