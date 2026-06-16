@@ -27,6 +27,24 @@ export class KycRecord {
   @Column()
   selfieUrl!: string
 
+  @Column({ nullable: true })
+  fullName?: string
+
+  @Column({ nullable: true })
+  dateOfBirth?: string
+
+  @Column({ nullable: true })
+  gender?: string
+
+  @Column({ nullable: true })
+  nationality?: string
+
+  @Column({ nullable: true })
+  placeOfOrigin?: string
+
+  @Column({ nullable: true })
+  placeOfResidence?: string
+
   @Column({ type: 'string', default: 'pending' })
   status!: 'pending' | 'verified' | 'rejected'
 

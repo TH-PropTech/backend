@@ -17,8 +17,12 @@ type ResponseLike = {
   }
 }
 
+import { Logger } from '@nestjs/common'
+
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
+  private readonly logger = new Logger(HttpExceptionFilter.name)
+
   catch(exception: unknown, host: ArgumentsHost): void {
     const http = host.switchToHttp()
     const response = http.getResponse<ResponseLike>()
@@ -27,6 +31,14 @@ export class HttpExceptionFilter implements ExceptionFilter {
       exception instanceof HttpException
         ? exception.getStatus()
         : HttpStatus.INTERNAL_SERVER_ERROR
+
+    if (Number(status) === Number(HttpStatus.INTERNAL_SERVER_ERROR)) {
+      this.logger.error(
+        'Unhandled Server Exception:',
+        exception instanceof Error ? exception.stack : exception
+      )
+    }
+
     const errorBody = toErrorBody(exception, status)
 
     response.status(status).json({

@@ -1,0 +1,6 @@
+export enum OtpSessionStatus {
+  INITIATED = 'INITIATED',
+  VERIFIED = 'VERIFIED',
+  CONSUMED = 'CONSUMED',
+  EXPIRED = 'EXPIRED',
+}
