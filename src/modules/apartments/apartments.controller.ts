@@ -1,4 +1,12 @@
-import { Controller, Get, Param, Query } from '@nestjs/common'
+import {
+  Controller,
+  Get,
+  Param,
+  Query,
+  Patch,
+  Body,
+  UseGuards,
+} from '@nestjs/common'
 import { ApiTags } from '@nestjs/swagger'
 import { ApartmentsService } from './apartments.service'
 import {
@@ -6,6 +14,9 @@ import {
   WebApartmentResponse,
   MobileApartmentResponse,
 } from './mappers/apartment-response.mapper'
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
+import { RolesGuard } from '../../common/guards/roles.guard'
+import { Roles } from '../../common/decorators/roles.decorator'
 
 @ApiTags('apartments')
 @Controller('apartments')
@@ -40,5 +51,22 @@ export class ApartmentsController {
       return ApartmentResponseMapper.toMobileJson(apartment)
     }
     return ApartmentResponseMapper.toWebJson(apartment)
+  }
+
+  @Patch(':id/status')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('staff')
+  async updateStatus(
+    @Param('id') id: string,
+    @Body('status')
+    status: 'available' | 'pending' | 'updating' | 'unavailable',
+    @Body('isVerified') isVerified?: boolean
+  ): Promise<WebApartmentResponse> {
+    const updated = await this.apartmentsService.updateStatus(
+      id,
+      status,
+      isVerified
+    )
+    return ApartmentResponseMapper.toWebJson(updated)
   }
 }

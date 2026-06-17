@@ -18,13 +18,34 @@ export class CommunityPost {
   @Column()
   authorName!: string
 
+  @Column({ default: 'tenant' })
+  authorRole!: 'tenant' | 'landlord' | 'staff' | 'admin'
+
   @Column()
   title!: string
 
   @Column()
   content!: string
 
-  @Column('array')
+  @Column()
+  projectName!: string
+
+  @Column()
+  topic!: 'qa' | 'review' | 'roommate'
+
+  @Column('array', { default: [] })
+  upvotes!: string[]
+
+  @Column({ default: 0 })
+  commentsCount!: number
+
+  @Column('array', { default: [] })
+  images!: string[]
+
+  @Column({ default: 'pending' })
+  status!: 'pending' | 'approved' | 'rejected'
+
+  @Column('array', { default: [] })
   tags!: string[]
 
   @CreateDateColumn()
