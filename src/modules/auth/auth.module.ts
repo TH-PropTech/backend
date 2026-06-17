@@ -5,6 +5,7 @@ import { User } from '../users/schemas/user.schema'
 import { Notification } from '../notifications/schemas/notification.schema'
 import { EmailOtp } from './schemas/email-otp.schema'
 import { SmartOtpModule } from '../smart-otp/smart-otp.module'
+import { TwoFactorModule } from '../two-factor/two-factor.module'
 import { AuthService } from './services/auth.service'
 import { SignupService } from './services/signup.service'
 import { PinService } from './services/pin.service'
@@ -20,6 +21,7 @@ import { AuthController } from './auth.controller'
       signOptions: { expiresIn: '1d' },
     }),
     SmartOtpModule, // Import SmartOtpModule để phục vụ PinService
+    TwoFactorModule, // Import TwoFactorModule để phục vụ xác thực 2FA khi đăng nhập
   ],
   controllers: [AuthController],
   providers: [AuthService, SignupService, PinService, EmailService],

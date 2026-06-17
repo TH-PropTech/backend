@@ -19,6 +19,14 @@ export class LoginDto {
   password!: string
 }
 
+export class Authenticate2faDto {
+  @IsString()
+  twoFactorTempToken!: string
+
+  @IsString()
+  code!: string
+}
+
 export class RequestLoginOtpDto {
   @IsEmail()
   email!: string
@@ -30,14 +38,6 @@ export class RequestSignupOtpDto {
 
   @IsString()
   phone!: string
-}
-
-export class VerifyLoginOtpDto {
-  @IsEmail()
-  email!: string
-
-  @IsString()
-  otp!: string
 }
 
 export class RequestForgotPasswordOtpDto {
@@ -128,6 +128,13 @@ export class AuthController {
     return this.authService.login(dto.emailOrPhone, dto.password)
   }
 
+  @Post('2fa/authenticate')
+  async authenticate2fa(
+    @Body() dto: Authenticate2faDto
+  ): Promise<TokenResponse & { user: UserPayload }> {
+    return this.authService.authenticate2fa(dto.twoFactorTempToken, dto.code)
+  }
+
   @Post('refresh')
   async refresh(
     @Body() dto: RefreshTokenDto
@@ -136,18 +143,15 @@ export class AuthController {
   }
 
   @Post('login-otp/request')
-  async requestLoginOtp(
-    @Body() dto: RequestLoginOtpDto
-  ): Promise<{ success: boolean; message: string }> {
-    await this.authService.requestLoginOtp(dto.email)
-    return { success: true, message: 'Mã OTP đăng nhập đã được gửi qua email.' }
-  }
-
-  @Post('login-otp/verify')
-  async verifyLoginOtp(
-    @Body() dto: VerifyLoginOtpDto
-  ): Promise<TokenResponse & { user: UserPayload }> {
-    return this.authService.verifyLoginOtp(dto.email, dto.otp)
+  async requestLoginOtp(@Body() dto: RequestLoginOtpDto): Promise<{
+    is2faRequired: boolean
+    twoFactorTempToken: string
+    user: {
+      _id: string
+      email: string
+    }
+  }> {
+    return this.authService.requestLoginOtp(dto.email)
   }
 
   @Post('forgot-password/request')

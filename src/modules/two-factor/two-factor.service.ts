@@ -6,6 +6,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 import { ObjectId } from 'mongodb'
+import * as bcrypt from 'bcryptjs'
 import { User } from '../users/schemas/user.schema'
 import { TotpService } from '../smart-otp/services/totp.service'
 
@@ -49,7 +50,7 @@ export class TwoFactorService {
       secret,
     }
 
-    await this.userRepository.save(user)
+    await this.userRepository.update(parsedId, { twoFactor: user.twoFactor })
 
     return { secret, otpauthUrl }
   }
@@ -57,7 +58,10 @@ export class TwoFactorService {
   /**
    * Xác thực token lần đầu để kích hoạt 2FA
    */
-  async enable2fa(userId: string, token: string): Promise<boolean> {
+  async enable2fa(
+    userId: string,
+    token: string
+  ): Promise<{ success: boolean; backupCodes: string[] }> {
     let parsedId: ObjectId
     try {
       parsedId = new ObjectId(userId)
@@ -82,11 +86,35 @@ export class TwoFactorService {
       throw new BadRequestException('Mã xác thực không chính xác')
     }
 
-    user.twoFactor.enabled = true
-    user.twoFactor.enabledAt = new Date()
+    // Sinh mã dự phòng
+    const rawBackupCodes = this.generateBackupCodes(10)
+    const hashedBackupCodes = await Promise.all(
+      rawBackupCodes.map(code => bcrypt.hash(code, 10))
+    )
 
-    await this.userRepository.save(user)
-    return true
+    user.twoFactor = {
+      ...user.twoFactor,
+      enabled: true,
+      enabledAt: new Date(),
+      backupCodes: hashedBackupCodes,
+    }
+
+    await this.userRepository.update(parsedId, { twoFactor: user.twoFactor })
+    return { success: true, backupCodes: rawBackupCodes }
+  }
+
+  private generateBackupCodes(count = 10): string[] {
+    const codes: string[] = []
+    const chars = 'abcdefghijklmnopqrstuvwxyz0123456789'
+    for (let i = 0; i < count; i++) {
+      let code = ''
+      for (let j = 0; j < 8; j++) {
+        if (j === 4) code += '-'
+        code += chars.charAt(Math.floor(Math.random() * chars.length))
+      }
+      codes.push(code)
+    }
+    return codes
   }
 
   /**
@@ -113,7 +141,36 @@ export class TwoFactorService {
       return false
     }
 
-    return this.totpService.verifyToken(user.twoFactor.secret, token, 1)
+    const isOtpValid = this.totpService.verifyToken(
+      user.twoFactor.secret,
+      token,
+      1
+    )
+    if (isOtpValid) {
+      return true
+    }
+
+    // Nếu OTP sai, kiểm tra xem có phải mã dự phòng (backup codes) không
+    if (user.twoFactor.backupCodes && user.twoFactor.backupCodes.length > 0) {
+      for (let i = 0; i < user.twoFactor.backupCodes.length; i++) {
+        const hashedCode = user.twoFactor.backupCodes[i]
+        if (!hashedCode) continue
+        const isMatch = await bcrypt.compare(token, hashedCode)
+        if (isMatch) {
+          user.twoFactor.backupCodes.splice(i, 1)
+          user.twoFactor = {
+            ...user.twoFactor,
+            backupCodes: user.twoFactor.backupCodes,
+          }
+          await this.userRepository.update(parsedId, {
+            twoFactor: user.twoFactor,
+          })
+          return true
+        }
+      }
+    }
+
+    return false
   }
 
   /**
@@ -139,6 +196,6 @@ export class TwoFactorService {
       enabled: false,
     }
 
-    await this.userRepository.save(user)
+    await this.userRepository.update(parsedId, { twoFactor: user.twoFactor })
   }
 }
