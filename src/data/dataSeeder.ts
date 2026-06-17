@@ -66,6 +66,7 @@ async function bootstrap(): Promise<void> {
       email: {
         $in: [
           'landlord@example.com',
+          'individual@example.com',
           'tenant@example.com',
           'staff@example.com',
           'admin@example.com',
@@ -98,6 +99,28 @@ async function bootstrap(): Promise<void> {
     })
     const savedLandlord = await userRepository.save(landlord)
     logger.log(`Tạo Landlord thành công: ${savedLandlord.email}`)
+
+    // Individual Landlord (Chủ lẻ cá nhân)
+    const individualLandlord = userRepository.create({
+      fullName: 'PHẠM THỊ HƯƠNG',
+      email: 'individual@example.com',
+      phone: '0376543210',
+      passwordHash: commonPasswordHash,
+      role: 'landlord',
+      status: UserStatus.ACTIVE,
+      kycStatus: 'verified',
+      walletAddress: '0xIndividualLandlordWallet9876543210',
+      profile: {
+        firstName: 'Hương',
+        lastName: 'Phạm Thị',
+        avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330',
+      },
+    })
+    const savedIndividualLandlord =
+      await userRepository.save(individualLandlord)
+    logger.log(
+      `Tạo Individual Landlord thành công: ${savedIndividualLandlord.email}`
+    )
 
     // Tenant
     const tenant = userRepository.create({
@@ -268,35 +291,7 @@ async function bootstrap(): Promise<void> {
     const savedBuildingLandmark =
       await buildingRepository.save(buildingLandmark)
 
-    // Tòa nhà 2 thuộc Vinhomes Central Park
-    const buildingPark = buildingRepository.create({
-      name: 'Tòa Park 2',
-      projectId: savedProject1._id.toHexString(),
-      projectName: savedProject1.name,
-      description:
-        'Tòa căn hộ cao cấp ven sông thuộc phân khu The Park với không gian xanh mát.',
-      floorsCount: 45,
-      location: '208 Nguyễn Hữu Cảnh, Phường 22, Bình Thạnh, TP.HCM',
-      city: 'Hồ Chí Minh',
-      district: 'Bình Thạnh',
-      amenities: [
-        'Hồ bơi ngoài trời',
-        'Công viên ven sông 14ha',
-        'Sân tennis',
-        'Khu vui chơi trẻ em',
-      ],
-      images: [
-        'https://res.cloudinary.com/dehsnaot1/image/upload/v1781534819/toa1_fp0an5.jpg',
-        'https://res.cloudinary.com/dehsnaot1/image/upload/v1781535081/toa1_matsau_kh18qu.png',
-      ],
-      images360: [
-        'https://res.cloudinary.com/dehsnaot1/image/upload/v1781534880/toa1360do_jq98uv.png',
-        'https://res.cloudinary.com/dehsnaot1/image/upload/v1781535400/toa1360_matsau_f1jgyg.png',
-      ],
-    })
-    const savedBuildingPark = await buildingRepository.save(buildingPark)
-
-    // Tòa nhà 3 thuộc Masteri Thảo Điền
+    // Tòa nhà 2 thuộc Masteri Thảo Điền
     const buildingMasteriT1 = buildingRepository.create({
       name: 'Tháp T1',
       projectId: savedProject2._id.toHexString(),
@@ -324,32 +319,6 @@ async function bootstrap(): Promise<void> {
     })
     const savedBuildingMasteriT1 =
       await buildingRepository.save(buildingMasteriT1)
-
-    // Tòa nhà 4 độc lập (không thuộc dự án nào)
-    const buildingIndependent = buildingRepository.create({
-      name: 'Nhà phố Nguyên Căn Quận 3',
-      projectId: null,
-      projectName: null,
-      description:
-        'Tòa nhà phố nguyên căn kinh doanh căn hộ dịch vụ độc lập, dịch vụ khép kín chuyên nghiệp.',
-      floorsCount: 3,
-      location: '120 Nguyễn Đình Chiểu, Phường Võ Thị Sáu, Quận 3, TP.HCM',
-      city: 'Hồ Chí Minh',
-      district: 'Quận 3',
-      amenities: [
-        'Khu giặt sấy chung',
-        'Camera an ninh',
-        'Khóa vân tay cửa chính',
-        'Chỗ để xe máy',
-      ],
-      images: [
-        'https://res.cloudinary.com/dehsnaot1/image/upload/v1781575156/toa2_matsau_ykiog8.png',
-      ],
-      images360: [
-        'https://res.cloudinary.com/dehsnaot1/image/upload/v1781575195/toa2_matsau360_wc1nsa.png',
-      ],
-    })
-    await buildingRepository.save(buildingIndependent)
     logger.log('Tạo các tòa nhà mẫu thành công!')
 
     // 5. Tạo các căn hộ (Apartments) mẫu
@@ -461,11 +430,11 @@ async function bootstrap(): Promise<void> {
       ],
       status: 'available',
       isVerified: true,
-      landlordId: savedLandlord._id.toHexString(),
-      projectId: savedProject1._id.toHexString(),
-      projectName: savedProject1.name,
-      buildingId: savedBuildingPark._id.toHexString(),
-      buildingName: savedBuildingPark.name,
+      landlordId: savedIndividualLandlord._id.toHexString(),
+      projectId: null,
+      projectName: null,
+      buildingId: null,
+      buildingName: null,
     })
     const savedApartment2 = await apartmentRepository.save(apartment2)
     logger.log(`Tạo căn hộ 2 thành công: ${savedApartment2.title}`)
@@ -518,11 +487,11 @@ async function bootstrap(): Promise<void> {
       ],
       status: 'available',
       isVerified: true,
-      landlordId: savedLandlord._id.toHexString(),
-      projectId: savedProject1._id.toHexString(),
-      projectName: savedProject1.name,
-      buildingId: savedBuildingLandmark._id.toHexString(),
-      buildingName: savedBuildingLandmark.name,
+      landlordId: savedIndividualLandlord._id.toHexString(),
+      projectId: null,
+      projectName: null,
+      buildingId: null,
+      buildingName: null,
     })
     const savedApartment3 = await apartmentRepository.save(apartment3)
     logger.log(`Tạo căn hộ 3 thành công: ${savedApartment3.title}`)
@@ -618,11 +587,11 @@ async function bootstrap(): Promise<void> {
       amenities: ['Bể bơi riêng', 'Phòng gym', 'Sân vườn riêng', 'Bảo vệ 24/7'],
       status: 'available',
       isVerified: true,
-      landlordId: savedLandlord._id.toHexString(),
-      projectId: savedProject2._id.toHexString(),
-      projectName: savedProject2.name,
-      buildingId: savedBuildingMasteriT1._id.toHexString(),
-      buildingName: savedBuildingMasteriT1.name,
+      landlordId: savedIndividualLandlord._id.toHexString(),
+      projectId: null,
+      projectName: null,
+      buildingId: null,
+      buildingName: null,
     })
     const savedApartment5 = await apartmentRepository.save(apartment5)
     logger.log(`Tạo căn hộ 5 thành công: ${savedApartment5.title}`)

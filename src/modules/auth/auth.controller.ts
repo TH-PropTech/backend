@@ -6,6 +6,11 @@ import { IsString, IsEmail } from 'class-validator'
 import { User } from '../users/schemas/user.schema'
 import { TokenResponse, UserPayload } from './interfaces/auth.interface'
 
+export class RefreshTokenDto {
+  @IsString()
+  refreshToken!: string
+}
+
 export class LoginDto {
   @IsString()
   emailOrPhone!: string
@@ -121,6 +126,13 @@ export class AuthController {
     @Body() dto: LoginDto
   ): Promise<TokenResponse & { user: UserPayload }> {
     return this.authService.login(dto.emailOrPhone, dto.password)
+  }
+
+  @Post('refresh')
+  async refresh(
+    @Body() dto: RefreshTokenDto
+  ): Promise<TokenResponse & { user: UserPayload }> {
+    return this.authService.refresh(dto.refreshToken)
   }
 
   @Post('login-otp/request')
