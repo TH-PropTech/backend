@@ -12,6 +12,12 @@ import { User, UserStatus } from '../../users/schemas/user.schema'
 import { EmailOtp } from '../schemas/email-otp.schema'
 import { EmailService } from './email.service'
 import { TokenResponse, UserPayload } from '../interfaces/auth.interface'
+import { TwoFactorService } from '../../two-factor/two-factor.service'
+
+interface TwoFactorTempPayload {
+  _id: string
+  is2faTemp: boolean
+}
 
 @Injectable()
 export class AuthService {
@@ -21,7 +27,8 @@ export class AuthService {
     @InjectRepository(EmailOtp)
     private readonly emailOtpRepository: Repository<EmailOtp>,
     private readonly emailService: EmailService,
-    private readonly jwtService: JwtService
+    private readonly jwtService: JwtService,
+    private readonly twoFactorService: TwoFactorService
   ) {}
 
   /**
@@ -54,9 +61,49 @@ export class AuthService {
   }
 
   /**
-   * Yêu cầu gửi mã OTP để đăng nhập không mật khẩu
+   * Xác thực mã 2FA bằng temp token để lấy JWT chính thức
    */
-  async requestLoginOtp(email: string): Promise<void> {
+  async authenticate2fa(
+    twoFactorTempToken: string,
+    code: string
+  ): Promise<TokenResponse & { user: UserPayload }> {
+    let payload: TwoFactorTempPayload | null = null
+    try {
+      payload = this.jwtService.verify<TwoFactorTempPayload>(twoFactorTempToken)
+    } catch {
+      throw new UnauthorizedException(
+        'Token xác thực tạm thời đã hết hạn hoặc không hợp lệ'
+      )
+    }
+
+    if (!payload || !payload._id || !payload.is2faTemp) {
+      throw new UnauthorizedException('Token xác thực tạm thời không hợp lệ')
+    }
+
+    const isValid = await this.twoFactorService.verify2fa(payload._id, code)
+    if (!isValid) {
+      throw new UnauthorizedException('Mã xác thực 2FA không chính xác')
+    }
+
+    const user = await this.validateUserById(payload._id)
+    if (!user) {
+      throw new UnauthorizedException('Tài khoản không tồn tại')
+    }
+
+    return this.generateAuthToken(user)
+  }
+
+  /**
+   * Yêu cầu đăng nhập không mật khẩu (qua 2FA trực tiếp)
+   */
+  async requestLoginOtp(email: string): Promise<{
+    is2faRequired: boolean
+    twoFactorTempToken: string
+    user: {
+      _id: string
+      email: string
+    }
+  }> {
     const user = await this.userRepository.findOne({
       where: { email },
     })
@@ -74,61 +121,26 @@ export class AuthService {
       )
     }
 
-    // Sinh OTP 6 chữ số ngẫu nhiên
-    const otpCode = Math.floor(100000 + Math.random() * 900000).toString()
-    const expiredAt = new Date()
-    expiredAt.setMinutes(expiredAt.getMinutes() + 5) // Hết hạn sau 5 phút
+    // Nếu tài khoản đã kích hoạt 2FA, trả về token tạm thời để nhập 2FA
+    if (user.twoFactor && user.twoFactor.enabled) {
+      const twoFactorTempToken = this.jwtService.sign(
+        { _id: user._id.toString(), is2faTemp: true },
+        { expiresIn: '5m' }
+      )
+      return {
+        is2faRequired: true,
+        twoFactorTempToken,
+        user: {
+          _id: user._id.toString(),
+          email: user.email,
+        },
+      }
+    }
 
-    const emailOtp = this.emailOtpRepository.create({
-      email,
-      otpCode,
-      action: 'login',
-      isUsed: false,
-      expiredAt,
-    })
-
-    await this.emailOtpRepository.save(emailOtp)
-
-    // Gửi email OTP
-    await this.emailService.sendOtpMail(
-      email,
-      otpCode,
-      'Đăng nhập không mật khẩu'
+    // Nếu chưa kích hoạt 2FA, không gửi OTP mà chặn luôn
+    throw new BadRequestException(
+      'Tài khoản chưa kích hoạt xác thực 2FA. Vui lòng đăng nhập bằng mật khẩu.'
     )
-  }
-
-  /**
-   * Xác thực mã OTP và tiến hành đăng nhập không mật khẩu
-   */
-  async verifyLoginOtp(
-    email: string,
-    otpCode: string
-  ): Promise<TokenResponse & { user: UserPayload }> {
-    const otpRecord = await this.emailOtpRepository.findOne({
-      where: {
-        email,
-        otpCode,
-        action: 'login',
-        isUsed: false,
-      },
-    })
-
-    if (!otpRecord || new Date() > otpRecord.expiredAt) {
-      throw new BadRequestException('Mã OTP không chính xác hoặc đã hết hạn')
-    }
-
-    otpRecord.isUsed = true
-    await this.emailOtpRepository.save(otpRecord)
-
-    const user = await this.userRepository.findOne({
-      where: { email },
-    })
-
-    if (!user) {
-      throw new BadRequestException('Tài khoản không tồn tại')
-    }
-
-    return this.generateAuthToken(user)
   }
 
   /**
