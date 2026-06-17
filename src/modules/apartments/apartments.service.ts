@@ -70,4 +70,28 @@ export class ApartmentsService {
       order: { createdAt: 'DESC' },
     })
   }
+
+  // ── Cập nhật trạng thái kiểm duyệt căn hộ ──
+  async updateStatus(
+    id: string,
+    status: 'available' | 'pending' | 'updating' | 'unavailable',
+    isVerified?: boolean
+  ): Promise<Apartment> {
+    this.logger.log(`Updating status of apartment ${id} to ${status}`)
+    const apartment = await this.apartmentRepository.findOne({
+      where: { _id: new ObjectId(id) },
+    })
+    if (!apartment) {
+      throw new NotFoundException(`Không tìm thấy căn hộ với ID: ${id}`)
+    }
+    apartment.status = status
+    if (isVerified !== undefined) {
+      apartment.isVerified = isVerified
+    } else if (status === 'available') {
+      apartment.isVerified = true
+    } else {
+      apartment.isVerified = false
+    }
+    return this.apartmentRepository.save(apartment)
+  }
 }
