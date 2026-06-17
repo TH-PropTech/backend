@@ -4,6 +4,7 @@ import { Repository, FindOptionsWhere } from 'typeorm'
 import { ObjectId } from 'mongodb'
 import { CommunityPost } from './schemas/community-post.schema'
 import { CommunityComment } from './schemas/community-comment.schema'
+import { Notification } from '../notifications/schemas/notification.schema'
 import { CreatePostDto } from './dto/create-post.dto'
 import { CreateCommentDto } from './dto/create-comment.dto'
 
@@ -15,7 +16,9 @@ export class CommunityService {
     @InjectRepository(CommunityPost)
     private readonly postRepository: Repository<CommunityPost>,
     @InjectRepository(CommunityComment)
-    private readonly commentRepository: Repository<CommunityComment>
+    private readonly commentRepository: Repository<CommunityComment>,
+    @InjectRepository(Notification)
+    private readonly notificationRepository: Repository<Notification>
   ) {}
 
   async createPost(
@@ -157,5 +160,78 @@ export class CommunityService {
     await this.postRepository.save(post)
 
     return savedComment
+  }
+
+  async deletePost(id: string): Promise<void> {
+    this.logger.log(`Deleting community post: ${id}`)
+    const post = await this.findOne(id)
+
+    // Create and save bell notification for the author
+    if (post.authorId) {
+      try {
+        const notification = this.notificationRepository.create({
+          userId: post.authorId,
+          title: 'Bài viết của bạn đã bị gỡ',
+          body: `Bài viết "${post.title}" của bạn đã bị gỡ bỏ do vi phạm tiêu chuẩn cộng đồng.`,
+          type: 'COMMUNITY',
+          isRead: false,
+          data: { postId: id },
+        })
+        await this.notificationRepository.save(notification)
+      } catch (err) {
+        this.logger.warn(
+          `Không thể gửi thông báo gỡ bài viết tới tác giả ${post.authorId}:`,
+          err
+        )
+      }
+    }
+
+    // Delete post comments
+    try {
+      await this.commentRepository.delete({ postId: id })
+    } catch (err) {
+      this.logger.warn(`Không thể xóa bình luận của bài viết ${id}:`, err)
+    }
+
+    // Delete the post
+    await this.postRepository.delete({ _id: new ObjectId(id) })
+  }
+
+  async deleteComment(id: string): Promise<void> {
+    this.logger.log(`Deleting community comment: ${id}`)
+    let comment: CommunityComment | null = null
+    try {
+      comment = await this.commentRepository.findOne({
+        where: { _id: new ObjectId(id) },
+      })
+    } catch {
+      throw new NotFoundException(`ID bình luận không hợp lệ: ${id}`)
+    }
+
+    if (!comment) {
+      throw new NotFoundException(`Không tìm thấy bình luận với ID: ${id}`)
+    }
+
+    // Delete comment
+    await this.commentRepository.delete({ _id: new ObjectId(id) })
+
+    // Also delete any child/nested comments (where parentId === id)
+    try {
+      await this.commentRepository.delete({ parentId: id })
+    } catch (err) {
+      this.logger.warn(`Không thể xóa bình luận con của bình luận ${id}:`, err)
+    }
+
+    // Decrement commentsCount of the post
+    try {
+      const post = await this.findOne(comment.postId)
+      post.commentsCount = Math.max(0, (post.commentsCount || 0) - 1)
+      await this.postRepository.save(post)
+    } catch (err) {
+      this.logger.warn(
+        `Không thể cập nhật commentsCount của bài viết ${comment.postId}:`,
+        err
+      )
+    }
   }
 }
