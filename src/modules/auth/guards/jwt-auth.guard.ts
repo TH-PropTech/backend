@@ -24,6 +24,10 @@ export class JwtAuthGuard implements CanActivate {
 
     const token = authHeader.split(' ')[1]
 
+    if (!token) {
+      throw new UnauthorizedException('Token xác thực không hợp lệ')
+    }
+
     try {
       const payload = this.jwtService.verify<UserPayload>(token)
       request.user = payload
