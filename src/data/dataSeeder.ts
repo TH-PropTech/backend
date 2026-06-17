@@ -349,15 +349,12 @@ async function bootstrap(): Promise<void> {
         'https://res.cloudinary.com/dehsnaot1/image/upload/v1781575195/toa2_matsau360_wc1nsa.png',
       ],
     })
-    const savedBuildingIndependent =
-      await buildingRepository.save(buildingIndependent)
+    await buildingRepository.save(buildingIndependent)
     logger.log('Tạo các tòa nhà mẫu thành công!')
 
     // 5. Tạo các căn hộ (Apartments) mẫu
     logger.log('Đang tạo các căn hộ mẫu...')
-    await apartmentRepository.delete({
-      landlordId: savedLandlord._id.toHexString(),
-    })
+    await apartmentRepository.delete({})
 
     // Căn hộ 1 (Vinhomes Central Park)
     const apartment1 = apartmentRepository.create({
@@ -629,86 +626,6 @@ async function bootstrap(): Promise<void> {
     })
     const savedApartment5 = await apartmentRepository.save(apartment5)
     logger.log(`Tạo căn hộ 5 thành công: ${savedApartment5.title}`)
-
-    // Căn hộ 6 (Nhà phố độc lập thuộc Building nhưng không thuộc Project)
-    const apartment6 = apartmentRepository.create({
-      title: 'Căn hộ dịch vụ cao cấp Quận 3 - Phòng 101',
-      category: 'Căn hộ dịch vụ',
-      description:
-        'Căn hộ dịch vụ thuộc tòa nhà phố nguyên căn Quận 3, trung tâm đi lại thuận tiện.',
-      location: 'Quận 3, TP.HCM',
-      city: 'Hồ Chí Minh',
-      district: 'Quận 3',
-      ward: 'Phường Võ Thị Sáu',
-      street: 'Nguyễn Đình Chiểu',
-      address: '120 Nguyễn Đình Chiểu, Phường Võ Thị Sáu, Quận 3, TP.HCM',
-      priceMonthly: 12000000,
-      area: 35,
-      bedrooms: 1,
-      bathrooms: 1,
-      direction: 'Nam',
-      balconyDirection: 'Nam',
-      furniture: 'Đầy đủ nội thất cơ bản',
-      moveInTime: 'Ngay lập tức',
-      electricity: '4000/kWh',
-      water: '100000/người',
-      internet: '100000/phòng',
-      gallery: [
-        'https://res.cloudinary.com/dehsnaot1/image/upload/v1781535737/khach_ixjldr.jpg',
-      ],
-      images360: [],
-      vrUrl: '',
-      amenities: ['Bảo vệ 24/7', 'Wifi', 'Máy giặt chung'],
-      status: 'available',
-      isVerified: true,
-      landlordId: savedLandlord._id.toHexString(),
-      projectId: null,
-      projectName: null,
-      buildingId: savedBuildingIndependent._id.toHexString(),
-      buildingName: savedBuildingIndependent.name,
-    })
-    const savedApartment6 = await apartmentRepository.save(apartment6)
-    logger.log(`Tạo căn hộ 6 thành công: ${savedApartment6.title}`)
-
-    // Căn hộ 7 (Căn hộ/Nhà riêng độc lập hoàn toàn - không thuộc Building hay Project)
-    const apartment7 = apartmentRepository.create({
-      title: 'Cho thuê nhà riêng nguyên căn Tân Bình',
-      category: 'Nhà riêng',
-      description:
-        'Nhà riêng nguyên căn 1 trệt 1 lầu, thích hợp gia đình ở hoặc làm văn phòng nhỏ.',
-      location: 'Tân Bình, TP.HCM',
-      city: 'Hồ Chí Minh',
-      district: 'Tân Bình',
-      ward: 'Phường 2',
-      street: 'Bạch Đằng',
-      address: '45/12 Bạch Đằng, Phường 2, Tân Bình, TP.HCM',
-      priceMonthly: 15000000,
-      area: 60,
-      bedrooms: 2,
-      bathrooms: 2,
-      direction: 'Bắc',
-      balconyDirection: 'Bắc',
-      furniture: 'Không nội thất',
-      moveInTime: 'Ngay lập tức',
-      electricity: 'Giá nhà nước',
-      water: 'Giá nhà nước',
-      internet: 'Tự lắp',
-      gallery: [
-        'https://res.cloudinary.com/dehsnaot1/image/upload/v1781535737/khach_ixjldr.jpg',
-      ],
-      images360: [],
-      vrUrl: '',
-      amenities: ['Chỗ để xe', 'Ban công'],
-      status: 'available',
-      isVerified: true,
-      landlordId: savedLandlord._id.toHexString(),
-      projectId: null,
-      projectName: null,
-      buildingId: null,
-      buildingName: null,
-    })
-    const savedApartment7 = await apartmentRepository.save(apartment7)
-    logger.log(`Tạo căn hộ 7 thành công: ${savedApartment7.title}`)
 
     // 6. Tạo Hợp đồng mẫu
     logger.log('Đang tạo hợp đồng mẫu...')

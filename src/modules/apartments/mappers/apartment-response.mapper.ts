@@ -33,6 +33,8 @@ export interface WebApartmentResponse {
   isVerified: boolean
   hasMedia: boolean
   images360: string[]
+  image: string
+  gallery: string[]
 }
 
 export interface MobileApartmentResponse {
@@ -69,6 +71,11 @@ export interface MobileApartmentResponse {
 export class ApartmentResponseMapper {
   // Map to Next.js Web Frontend (ApartmentItem type)
   static toWebJson(apartment: Apartment): WebApartmentResponse {
+    const priceInMillions =
+      apartment.priceMonthly >= 1000000
+        ? apartment.priceMonthly / 1000000
+        : apartment.priceMonthly
+
     return {
       id: apartment._id.toString(),
       title: apartment.title,
@@ -77,8 +84,8 @@ export class ApartmentResponseMapper {
       tagText: apartment.status === 'available' ? 'Đang trống' : 'Đang xử lý',
       description: apartment.description,
       location: apartment.location,
-      price: `${apartment.priceMonthly} triệu/tháng`,
-      priceNum: apartment.priceMonthly,
+      price: `${priceInMillions} triệu/tháng`,
+      priceNum: priceInMillions,
       area: `${apartment.area} m²`,
       areaNum: apartment.area,
       rooms: `${apartment.bedrooms} PN - ${apartment.bathrooms} WC`,
@@ -105,11 +112,18 @@ export class ApartmentResponseMapper {
         (apartment.images360 && apartment.images360.length > 0) ||
         !!apartment.vrUrl,
       images360: apartment.images360 || [],
+      image: apartment.gallery[0] || '',
+      gallery: apartment.gallery || [],
     }
   }
 
   // Map to React Native Mobile (PropertyDetail type)
   static toMobileJson(apartment: Apartment): MobileApartmentResponse {
+    const priceInMillions =
+      apartment.priceMonthly >= 1000000
+        ? apartment.priceMonthly / 1000000
+        : apartment.priceMonthly
+
     return {
       id: apartment._id.toString(),
       title: apartment.title,
@@ -119,7 +133,7 @@ export class ApartmentResponseMapper {
       buildingName: apartment.buildingName || null,
       location: apartment.location,
       city: apartment.city,
-      priceMonthly: apartment.priceMonthly,
+      priceMonthly: priceInMillions,
       area: apartment.area,
       bedrooms: apartment.bedrooms,
       bathrooms: apartment.bathrooms,

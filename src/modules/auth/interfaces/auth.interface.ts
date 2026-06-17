@@ -2,9 +2,10 @@ export interface UserPayload {
   _id?: string
   email?: string
   name?: string
+  phone?: string
   username?: string
   roles?: string[]
-  keycloakUserId?: string
+
   kycStatus?: string
 }
 
