@@ -213,6 +213,33 @@ export class AuthService {
   }
 
   /**
+   * Làm mới access token từ refresh token
+   */
+  async refresh(
+    refreshToken: string
+  ): Promise<TokenResponse & { user: UserPayload }> {
+    try {
+      const payload = this.jwtService.verify<UserPayload>(refreshToken)
+      if (!payload || !payload._id) {
+        throw new UnauthorizedException('Refresh token không hợp lệ')
+      }
+
+      const user = await this.validateUserById(payload._id)
+      if (!user) {
+        throw new UnauthorizedException('Tài khoản không tồn tại trên hệ thống')
+      }
+
+      return this.generateAuthToken(user)
+    } catch (err) {
+      throw new UnauthorizedException(
+        err instanceof UnauthorizedException
+          ? err.message
+          : 'Refresh token đã hết hạn hoặc không hợp lệ'
+      )
+    }
+  }
+
+  /**
    * Hàm phụ trợ sinh token JWT
    */
   private generateAuthToken(user: User): TokenResponse & { user: UserPayload } {

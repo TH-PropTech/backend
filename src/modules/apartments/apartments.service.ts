@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 import { ObjectId } from 'mongodb'
 import { Apartment } from './schemas/apartment.schema'
+import { User } from '../users/schemas/user.schema'
 
 @Injectable()
 export class ApartmentsService {
@@ -10,7 +11,9 @@ export class ApartmentsService {
 
   constructor(
     @InjectRepository(Apartment)
-    private readonly apartmentRepository: Repository<Apartment>
+    private readonly apartmentRepository: Repository<Apartment>,
+    @InjectRepository(User)
+    private readonly userRepository: Repository<User>
   ) {}
 
   // ── Lấy toàn bộ danh sách căn hộ ──
@@ -22,7 +25,7 @@ export class ApartmentsService {
   }
 
   // ── Lấy chi tiết căn hộ theo ID ──
-  async findOne(id: string): Promise<Apartment> {
+  async findOne(id: string): Promise<Apartment & { landlord?: User | null }> {
     this.logger.log(`Fetching apartment details for ID: ${id}`)
     try {
       const apartment = await this.apartmentRepository.findOne({
@@ -31,7 +34,24 @@ export class ApartmentsService {
       if (!apartment) {
         throw new NotFoundException(`Không tìm thấy căn hộ với ID: ${id}`)
       }
-      return apartment
+
+      let landlord: User | null = null
+      if (apartment.landlordId) {
+        try {
+          landlord = await this.userRepository.findOne({
+            where: { _id: new ObjectId(apartment.landlordId) },
+          })
+        } catch (err) {
+          this.logger.warn(
+            `Failed to fetch landlord: ${err instanceof Error ? err.message : String(err)}`
+          )
+        }
+      }
+
+      return {
+        ...apartment,
+        landlord,
+      }
     } catch (error) {
       if (error instanceof NotFoundException) {
         throw error
