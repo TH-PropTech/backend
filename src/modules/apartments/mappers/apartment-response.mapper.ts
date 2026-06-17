@@ -1,4 +1,5 @@
 import { Apartment } from '../schemas/apartment.schema'
+import { User } from '../../users/schemas/user.schema'
 
 export interface WebApartmentResponse {
   id: string
@@ -35,6 +36,14 @@ export interface WebApartmentResponse {
   images360: string[]
   image: string
   gallery: string[]
+  landlord?: {
+    id: string
+    fullName: string
+    email: string
+    phone: string
+    avatar: string
+    kycStatus: string
+  } | null
 }
 
 export interface MobileApartmentResponse {
@@ -66,11 +75,21 @@ export interface MobileApartmentResponse {
   internet: string
   amenities: string[]
   images360: string[]
+  landlord?: {
+    id: string
+    fullName: string
+    email: string
+    phone: string
+    avatar: string
+    kycStatus: string
+  } | null
 }
 
 export class ApartmentResponseMapper {
   // Map to Next.js Web Frontend (ApartmentItem type)
-  static toWebJson(apartment: Apartment): WebApartmentResponse {
+  static toWebJson(
+    apartment: Apartment & { landlord?: User | null }
+  ): WebApartmentResponse {
     const priceInMillions =
       apartment.priceMonthly >= 1000000
         ? apartment.priceMonthly / 1000000
@@ -114,11 +133,23 @@ export class ApartmentResponseMapper {
       images360: apartment.images360 || [],
       image: apartment.gallery[0] || '',
       gallery: apartment.gallery || [],
+      landlord: apartment.landlord
+        ? {
+            id: apartment.landlord._id.toString(),
+            fullName: apartment.landlord.fullName,
+            email: apartment.landlord.email,
+            phone: apartment.landlord.phone,
+            avatar: apartment.landlord.profile?.avatar || '',
+            kycStatus: apartment.landlord.kycStatus,
+          }
+        : null,
     }
   }
 
   // Map to React Native Mobile (PropertyDetail type)
-  static toMobileJson(apartment: Apartment): MobileApartmentResponse {
+  static toMobileJson(
+    apartment: Apartment & { landlord?: User | null }
+  ): MobileApartmentResponse {
     const priceInMillions =
       apartment.priceMonthly >= 1000000
         ? apartment.priceMonthly / 1000000
@@ -154,6 +185,16 @@ export class ApartmentResponseMapper {
       internet: apartment.internet,
       amenities: apartment.amenities,
       images360: apartment.images360 || [],
+      landlord: apartment.landlord
+        ? {
+            id: apartment.landlord._id.toString(),
+            fullName: apartment.landlord.fullName,
+            email: apartment.landlord.email,
+            phone: apartment.landlord.phone,
+            avatar: apartment.landlord.profile?.avatar || '',
+            kycStatus: apartment.landlord.kycStatus,
+          }
+        : null,
     }
   }
 }
