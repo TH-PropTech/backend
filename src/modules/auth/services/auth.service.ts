@@ -229,6 +229,7 @@ export class AuthService {
       _id: user._id.toString(),
       email: user.email,
       name: user.fullName,
+      phone: user.phone,
       username: user.email,
       roles: [user.role],
       kycStatus: user.kycStatus,
