@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Patch,
+  Delete,
   Body,
   Param,
   Query,
@@ -122,5 +123,21 @@ export class CommunityController {
       userRole as 'tenant' | 'landlord' | 'staff' | 'admin',
       dto
     )
+  }
+
+  @Delete('posts/:id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('staff', 'admin')
+  async deletePost(@Param('id') id: string): Promise<{ success: boolean }> {
+    await this.communityService.deletePost(id)
+    return { success: true }
+  }
+
+  @Delete('comments/:id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('staff', 'admin')
+  async deleteComment(@Param('id') id: string): Promise<{ success: boolean }> {
+    await this.communityService.deleteComment(id)
+    return { success: true }
   }
 }
