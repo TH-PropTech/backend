@@ -37,6 +37,7 @@ export interface TwoFactorInfo {
   enabled: boolean
   secret?: string
   enabledAt?: Date
+  backupCodes?: string[]
 }
 
 export interface UserPreferences {
