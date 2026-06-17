@@ -1,16 +1,17 @@
-// import { createParamDecorator, ExecutionContext } from '@nestjs/common';
-// import { UserPayload } from '../../modules/auth/interfaces/auth.interface';
+import { createParamDecorator, ExecutionContext } from '@nestjs/common'
+import { UserPayload } from '../../modules/auth/interfaces/auth.interface'
 
-// export const CurrentUser = createParamDecorator(
-//   (data: keyof UserPayload | 'id' | unknown, ctx: ExecutionContext) => {
-//     const request = ctx.switchToHttp().getRequest();
-//     const user = request.user as UserPayload;
-//     if (!user) return null;
+export const CurrentUser = createParamDecorator(
+  (data: keyof UserPayload | 'id' | undefined, ctx: ExecutionContext) => {
+    const request = ctx.switchToHttp().getRequest<{ user?: UserPayload }>()
+    const user = request.user
+    if (!user) return null
 
-//     if (data === 'id') {
-//       return user._id ?? (user as any).sub ?? (user as any).userId ?? (user as any).id;
-//     }
+    if (data === 'id') {
+      const u = user as unknown as Record<string, unknown>
+      return user._id ?? u.sub ?? u.userId ?? u.id
+    }
 
-//     return data ? user[data as keyof UserPayload] : user;
-//   },
-// );
+    return data ? user[data] : user
+  }
+)
