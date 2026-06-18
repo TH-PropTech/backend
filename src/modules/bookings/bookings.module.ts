@@ -5,9 +5,13 @@ import { Apartment } from '../apartments/schemas/apartment.schema'
 import { User } from '../users/schemas/user.schema'
 import { BookingsService } from './bookings.service'
 import { BookingsController } from './bookings.controller'
+import { NotificationsModule } from '../notifications/notifications.module'
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Booking, Apartment, User])],
+  imports: [
+    TypeOrmModule.forFeature([Booking, Apartment, User]),
+    NotificationsModule,
+  ],
   providers: [BookingsService],
   controllers: [BookingsController],
   exports: [TypeOrmModule, BookingsService],

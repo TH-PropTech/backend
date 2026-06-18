@@ -11,6 +11,7 @@ import { ObjectId } from 'mongodb'
 import { Booking } from './schemas/booking.schema'
 import { Apartment } from '../apartments/schemas/apartment.schema'
 import { User } from '../users/schemas/user.schema'
+import { NotificationsService } from '../notifications/notifications.service'
 
 export interface BookingListResult {
   items: (Booking & {
@@ -34,7 +35,8 @@ export class BookingsService {
     @InjectRepository(Apartment)
     private readonly apartmentRepository: Repository<Apartment>,
     @InjectRepository(User)
-    private readonly userRepository: Repository<User>
+    private readonly userRepository: Repository<User>,
+    private readonly notificationsService: NotificationsService
   ) {}
 
   /**
@@ -109,6 +111,20 @@ export class BookingsService {
     this.logger.log(
       `Booking created: ${String(saved._id)} for apartment ${dto.apartmentId}`
     )
+
+    // Gửi thông báo đến chủ nhà
+    try {
+      await this.notificationsService.createNotification(
+        apartment.landlordId,
+        'Yêu cầu đặt lịch hẹn mới',
+        `Khách thuê ${tenantName ?? 'Ẩn danh'} muốn đặt lịch xem căn hộ "${apartment.title}" vào lúc ${new Date(dto.visitAt).toLocaleString('vi-VN')}.`,
+        'BOOKING',
+        { bookingId: String(saved._id), apartmentId: dto.apartmentId }
+      )
+    } catch (err) {
+      this.logger.warn(`Không thể gửi thông báo đặt lịch cho chủ nhà:`, err)
+    }
+
     return saved
   }
 
@@ -148,7 +164,33 @@ export class BookingsService {
     booking.rejectedReason =
       status === 'rejected' ? (rejectedReason ?? null) : null
 
-    return this.bookingRepository.save(booking)
+    const saved = await this.bookingRepository.save(booking)
+
+    // Gửi thông báo đến khách thuê
+    try {
+      const title =
+        status === 'confirmed'
+          ? 'Lịch hẹn xem nhà được xác nhận'
+          : 'Lịch hẹn xem nhà bị từ chối'
+      const body =
+        status === 'confirmed'
+          ? `Chủ nhà đã đồng ý lịch hẹn xem căn hộ "${booking.apartmentTitle}" vào lúc ${new Date(booking.visitAt).toLocaleString('vi-VN')}.`
+          : `Chủ nhà đã từ chối lịch hẹn xem căn hộ "${booking.apartmentTitle}". Lý do: ${rejectedReason}`
+      await this.notificationsService.createNotification(
+        booking.tenantId,
+        title,
+        body,
+        'BOOKING',
+        { bookingId: String(booking._id), status, rejectedReason }
+      )
+    } catch (err) {
+      this.logger.warn(
+        `Không thể gửi thông báo cập nhật lịch hẹn cho khách thuê:`,
+        err
+      )
+    }
+
+    return saved
   }
 
   /**
@@ -170,7 +212,22 @@ export class BookingsService {
     }
 
     booking.status = 'cancelled'
-    return this.bookingRepository.save(booking)
+    const saved = await this.bookingRepository.save(booking)
+
+    // Gửi thông báo đến chủ nhà
+    try {
+      await this.notificationsService.createNotification(
+        booking.landlordId,
+        'Lịch hẹn xem nhà bị hủy',
+        `Khách thuê ${booking.tenantName ?? 'Ẩn danh'} đã hủy lịch hẹn xem căn hộ "${booking.apartmentTitle}" vào lúc ${new Date(booking.visitAt).toLocaleString('vi-VN')}.`,
+        'BOOKING',
+        { bookingId: String(booking._id), status: 'cancelled' }
+      )
+    } catch (err) {
+      this.logger.warn(`Không thể gửi thông báo hủy lịch hẹn cho chủ nhà:`, err)
+    }
+
+    return saved
   }
 
   /**
