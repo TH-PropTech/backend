@@ -14,6 +14,7 @@ import {
   WebApartmentResponse,
   MobileApartmentResponse,
 } from './mappers/apartment-response.mapper'
+import { ApartmentFilterDto } from './dto/apartment-filter.dto'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { RolesGuard } from '../../common/guards/roles.guard'
 import { Roles } from '../../common/decorators/roles.decorator'
@@ -25,9 +26,10 @@ export class ApartmentsController {
 
   @Get()
   async findAll(
-    @Query('format') format?: 'web' | 'mobile'
+    @Query() query: ApartmentFilterDto & { format?: 'web' | 'mobile' }
   ): Promise<WebApartmentResponse[] | MobileApartmentResponse[]> {
-    const apartments = await this.apartmentsService.findAll()
+    const { format, ...filters } = query
+    const apartments = await this.apartmentsService.findAll(filters)
     if (format === 'web') {
       return apartments.map(apt => ApartmentResponseMapper.toWebJson(apt))
     }
