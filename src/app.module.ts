@@ -25,6 +25,7 @@ import { SmartOtpModule } from './modules/smart-otp/smart-otp.module'
 import { TwoFactorModule } from './modules/two-factor/two-factor.module'
 import { FabricModule } from './modules/fabric/fabric.module'
 import { PoliciesModule } from './modules/policies/policies.module'
+import { AiConsultationModule } from './modules/ai-consultation/ai-consultation.module'
 
 @Module({
   imports: [
@@ -69,6 +70,7 @@ import { PoliciesModule } from './modules/policies/policies.module'
     TwoFactorModule,
     FabricModule,
     PoliciesModule,
+    AiConsultationModule,
   ],
 })
 export class AppModule {}

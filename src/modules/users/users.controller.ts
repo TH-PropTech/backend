@@ -47,4 +47,19 @@ export class UsersController {
 
     return result
   }
+
+  @Get()
+  @UseGuards(JwtAuthGuard)
+  async getAll(): Promise<Partial<User>[]> {
+    const users = await this.userRepository.find()
+    return users.map(user => {
+      const { passwordHash, pin, twoFactor, ...safeUser } = user
+      void passwordHash
+      return {
+        ...safeUser,
+        hasPin: !!pin?.hash,
+        twoFactorEnabled: twoFactor?.enabled || false,
+      }
+    })
+  }
 }
