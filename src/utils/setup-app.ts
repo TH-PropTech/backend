@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger'
+import { WsAdapter } from '@nestjs/platform-ws'
 import { HttpExceptionFilter } from '@/common/filters/http-exception.filter'
 import { ResponseEnvelopeInterceptor } from '@/common/interceptors/response-envelope.interceptor'
 
@@ -21,6 +22,7 @@ export function setupApp(
     origin: configService.getOrThrow<string[]>('app.corsOrigins'),
     credentials: true,
   })
+  app.useWebSocketAdapter(new WsAdapter(app))
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
