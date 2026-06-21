@@ -9,6 +9,7 @@ export const configuration = (): {
   app: {
     env: AppEnvironment
     port: number
+    url: string
     corsOrigins: string[]
   }
   database: {
@@ -20,6 +21,7 @@ export const configuration = (): {
   app: {
     env: (process.env.NODE_ENV ?? 'local') as AppEnvironment,
     port: Number(process.env.APP_PORT ?? 3001),
+    url: process.env.APP_URL ?? 'http://localhost:3001',
     corsOrigins: parseCsv(
       process.env.APP_CORS_ORIGINS ?? 'http://localhost:3000'
     ),

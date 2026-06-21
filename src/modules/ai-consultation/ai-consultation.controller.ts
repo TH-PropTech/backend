@@ -62,7 +62,11 @@ export class AiConsultationController {
 
   @Get('chat-view')
   getChatView(@Query('logId') logId: string, @Res() res: Response): void {
-    const html = getChatViewHtml(logId)
+    const origins = process.env.APP_CORS_ORIGINS ?? 'http://localhost:3000'
+    const frontendUrl = (
+      origins.split(',')[0] || 'http://localhost:3000'
+    ).trim()
+    const html = getChatViewHtml(logId, frontendUrl)
     res.type('html').send(html)
   }
 }

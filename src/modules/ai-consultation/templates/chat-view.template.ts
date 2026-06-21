@@ -1,4 +1,4 @@
-export function getChatViewHtml(logId: string): string {
+export function getChatViewHtml(logId: string, frontendUrl: string): string {
   return `
 <!DOCTYPE html>
 <html lang="vi">
@@ -15,26 +15,27 @@ export function getChatViewHtml(logId: string): string {
       --surface-muted: #f4eee7;
       --fg: #2b211e;
       --muted: #7a6a61;
+      --subtle: #a49389;
       --primary: #c65a3a;
       --primary-hover: #9f3f2a;
+      --primary-soft: #f5e3dc;
+      --on-control: #fffdf9;
+      --accent: #f2b66d;
       --border: #e3d8d0;
       --border-light: rgba(227, 216, 208, 0.4);
       --success: #6b8e4e;
+      --success-soft: #e8f0df;
+      --warning: #e9a23b;
       --danger: #d64545;
-    }
-    
-    body.dark {
-      --bg: #0f0c0b;
-      --surface: #181413;
-      --surface-muted: #241e1d;
-      --fg: #fffdf9;
-      --muted: #a49389;
-      --primary: #c65a3a;
-      --primary-hover: #e57654;
-      --border: #3b322f;
-      --border-light: rgba(59, 50, 47, 0.4);
-      --success: #88b368;
-      --danger: #e95d5d;
+      --danger-soft: #f8dfdf;
+      --font-display: 'Space Grotesk', 'Be Vietnam Pro', 'Segoe UI', sans-serif;
+      --font-body: 'Be Vietnam Pro', 'Segoe UI', system-ui, sans-serif;
+      --font-mono: 'JetBrains Mono', 'SF Mono', Consolas, monospace;
+      --radius-sm: 8px;
+      --radius-md: 12px;
+      --radius-lg: 16px;
+      --shadow-sm: 0 1px 2px rgba(43, 33, 30, 0.06);
+      --shadow-md: 0 12px 32px rgba(43, 33, 30, 0.08);
     }
     
     * {
@@ -44,13 +45,12 @@ export function getChatViewHtml(logId: string): string {
     }
     
     body {
-      font-family: 'Be Vietnam Pro', sans-serif;
+      font-family: var(--font-body);
       background: var(--bg);
       color: var(--fg);
       min-height: 100vh;
       display: flex;
       flex-direction: column;
-      transition: background 0.3s, color 0.3s;
       overflow-x: hidden;
       position: relative;
     }
@@ -98,7 +98,7 @@ export function getChatViewHtml(logId: string): string {
       position: absolute;
       left: 24px;
       top: 100px;
-      font-family: monospace;
+      font-family: var(--font-mono);
       font-size: 8px;
       line-height: 1.6;
       opacity: 0.25;
@@ -128,7 +128,7 @@ export function getChatViewHtml(logId: string): string {
     }
     
     .logo {
-      font-family: 'Lora', Georgia, serif;
+      font-family: var(--font-display);
       font-size: 20px;
       font-weight: 700;
       color: var(--primary);
@@ -136,7 +136,7 @@ export function getChatViewHtml(logId: string): string {
     }
     
     .badge {
-      font-family: monospace;
+      font-family: var(--font-mono);
       font-size: 9px;
       text-transform: uppercase;
       opacity: 0.6;
@@ -167,7 +167,7 @@ export function getChatViewHtml(logId: string): string {
       position: relative;
       z-index: 10;
       flex: 1;
-      max-width: 1000px;
+      max-width: 1200px;
       width: 100%;
       margin: 0 auto;
       padding: 24px;
@@ -215,21 +215,43 @@ export function getChatViewHtml(logId: string): string {
       flex: 1;
     }
     
+    @media (max-width: 1024px) {
+      main {
+        padding: 16px;
+      }
+      .dashboard-grid {
+        gap: 16px;
+      }
+    }
+    
     @media (max-width: 768px) {
       .dashboard-grid {
         flex-direction: column;
       }
       .chat-card {
         max-width: 100%;
-        height: 380px;
+        min-height: 340px;
+        height: auto;
       }
       .dashboard-grid.chat-collapsed .chat-card {
         max-height: 0;
-        height: 0;
+        min-height: 0;
         padding: 0;
         margin: 0;
         border: none;
         opacity: 0;
+      }
+    }
+    
+    @media (max-width: 480px) {
+      main {
+        padding: 12px;
+      }
+      .card {
+        padding: 16px;
+      }
+      header {
+        padding: 12px 16px;
       }
     }
     
@@ -329,14 +351,14 @@ export function getChatViewHtml(logId: string): string {
     .inner-orb.active {
       background: var(--success);
       border-color: var(--surface);
-      color: #fffdf9;
+      color: var(--on-control);
       transform: scale(1.02);
     }
     
     .inner-orb.speaking {
       background: var(--primary);
       border-color: var(--surface);
-      color: #fffdf9;
+      color: var(--on-control);
       transform: scale(1.05);
     }
     
@@ -364,7 +386,7 @@ export function getChatViewHtml(logId: string): string {
     
     .wave-bar {
       width: 4px;
-      background: #fffdf9;
+      background: var(--on-control);
       border-radius: 20px;
       transform-origin: bottom;
     }
@@ -418,7 +440,7 @@ export function getChatViewHtml(logId: string): string {
     .btn-primary {
       background: var(--primary);
       border-color: var(--primary);
-      color: #fffdf9;
+      color: var(--on-control);
     }
     
     .btn-primary:hover {
@@ -428,11 +450,11 @@ export function getChatViewHtml(logId: string): string {
     .btn-danger {
       background: var(--danger);
       border-color: var(--danger);
-      color: #fffdf9;
+      color: var(--on-control);
     }
     
     .chat-card {
-      height: 480px;
+      min-height: 480px;
     }
     
     .chat-header {
@@ -461,19 +483,47 @@ export function getChatViewHtml(logId: string): string {
       padding-right: 4px;
     }
     
+    .chat-empty {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      color: var(--muted);
+      text-align: center;
+      padding: 24px;
+    }
+    
+    .chat-empty-icon {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: var(--primary-soft);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--primary);
+    }
+    
+    .chat-empty-text {
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    
     .message-bubble {
       max-width: 80%;
       padding: 10px 14px;
-      border-radius: 12px;
-      font-size: 12px;
-      line-height: 1.5;
+      border-radius: var(--radius-md);
+      font-size: 13px;
+      line-height: 1.55;
       position: relative;
     }
     
     .message-bubble.user {
       align-self: flex-end;
       background: var(--primary);
-      color: #fffdf9;
+      color: var(--on-control);
       border-top-right-radius: 0;
     }
     
@@ -494,10 +544,11 @@ export function getChatViewHtml(logId: string): string {
       flex: 1;
       padding: 12px;
       border: 1px solid var(--border);
-      border-radius: 8px;
+      border-radius: var(--radius-sm);
       background: var(--surface-muted);
       color: var(--fg);
-      font-size: 12px;
+      font-family: var(--font-body);
+      font-size: 13px;
       outline: none;
       transition: border-color 0.2s;
     }
@@ -509,9 +560,9 @@ export function getChatViewHtml(logId: string): string {
     .send-btn {
       background: var(--primary);
       border: none;
-      color: #fffdf9;
+      color: var(--on-control);
       padding: 10px 14px;
-      border-radius: 8px;
+      border-radius: var(--radius-sm);
       cursor: pointer;
       display: flex;
       align-items: center;
@@ -573,7 +624,7 @@ export function getChatViewHtml(logId: string): string {
     }
     
     .completed-title {
-      font-family: 'Lora', Georgia, serif;
+      font-family: var(--font-display);
       font-size: 22px;
       font-weight: 700;
       margin-bottom: 12px;
@@ -597,7 +648,7 @@ export function getChatViewHtml(logId: string): string {
     .completed-btn-primary {
       padding: 14px 24px;
       background: var(--primary);
-      color: #fffdf9;
+      color: var(--on-control);
       border-radius: 30px;
       font-weight: 700;
       font-size: 13px;
@@ -1066,9 +1117,8 @@ export function getChatViewHtml(logId: string): string {
       0% { transform: rotate(-2deg) scaleY(0.95); }
       100% { transform: rotate(4deg) scaleY(1.02); }
     }
-  </style>
 </head>
-<body class="dark">
+<body>
   <div class="grid-bg"></div>
   <div class="glow-blob-1"></div>
   <div class="glow-blob-2"></div>
@@ -1087,14 +1137,14 @@ export function getChatViewHtml(logId: string): string {
     </div>
     
     <div style="display: flex; gap: 8px;">
-      <button class="theme-toggle" id="toggle-chat-btn" title="Hiện/Ẩn bản ghi hội thoại" style="display: flex; align-items: center; justify-content: center;">
+      <button class="theme-toggle" id="toggle-chat-btn" title="Hiện/Ẩn bản ghi hội thoại" aria-label="Hiện hoặc ẩn bản ghi hội thoại" style="display: flex; align-items: center; justify-content: center;">
         <!-- Chat Icon SVG -->
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
         </svg>
       </button>
 
-      <button class="theme-toggle" id="avatar-style-btn" title="Đổi giao diện Trợ lý (Mascot/Quả cầu)" style="display: flex; align-items: center; justify-content: center;">
+      <button class="theme-toggle" id="avatar-style-btn" title="Đổi giao diện Trợ lý (Mascot/Quả cầu)" aria-label="Đổi kiểu hiển thị trợ lý AI" style="display: flex; align-items: center; justify-content: center;">
         <!-- Bot Icon SVG -->
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <rect x="3" y="11" width="18" height="10" rx="2" />
@@ -1102,25 +1152,6 @@ export function getChatViewHtml(logId: string): string {
           <path d="M12 7v4" />
           <line x1="8" y1="16" x2="8" y2="16" />
           <line x1="16" y1="16" x2="16" y2="16" />
-        </svg>
-      </button>
-      
-      <button class="theme-toggle" id="theme-btn">
-        <!-- Sun Icon SVG -->
-        <svg id="sun-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display: block;">
-          <circle cx="12" cy="12" r="5" fill="none"/>
-          <line x1="12" y1="1" x2="12" y2="3" />
-          <line x1="12" y1="21" x2="12" y2="23" />
-          <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
-          <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
-          <line x1="1" y1="12" x2="3" y2="12" />
-          <line x1="21" y1="12" x2="23" y2="12" />
-          <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
-          <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
-        </svg>
-        <!-- Moon Icon SVG -->
-        <svg id="moon-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display: none;">
-          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
         </svg>
       </button>
     </div>
@@ -1240,11 +1271,18 @@ export function getChatViewHtml(logId: string): string {
         </div>
         
         <div class="chat-log" id="chat-log">
-          <!-- Messages will be appended here -->
+          <div class="chat-empty" id="chat-empty">
+            <div class="chat-empty-icon">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+              </svg>
+            </div>
+            <span class="chat-empty-text">Bắt đầu cuộc trò chuyện bằng giọng nói hoặc nhập tin nhắn bên dưới.</span>
+          </div>
         </div>
         
         <form class="chat-form" id="chat-form">
-          <input type="text" class="chat-input" id="chat-input" placeholder="Nhập tin nhắn..." disabled>
+          <textarea class="chat-input" id="chat-input" placeholder="Nhập tin nhắn..." rows="1" disabled style="resize: none; max-height: 120px; overflow-y: auto;"></textarea>
           <button type="submit" class="send-btn" id="send-btn" disabled>
             <!-- Send SVG -->
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
@@ -1270,7 +1308,7 @@ export function getChatViewHtml(logId: string): string {
       <p class="completed-desc">Trợ lý AI đã ghi nhận nhu cầu của bạn và hoàn tất buổi tư vấn!</p>
       
       <div class="completed-action-box">
-        <a href="http://localhost:3000/properties" class="completed-btn-primary">
+        <a href="${frontendUrl}/properties" class="completed-btn-primary">
           <!-- Home SVG -->
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
@@ -1278,7 +1316,7 @@ export function getChatViewHtml(logId: string): string {
           </svg>
           Xem danh sách căn hộ
         </a>
-        <a href="http://localhost:3000/" class="completed-btn-secondary">
+        <a href="${frontendUrl}/" class="completed-btn-secondary">
           Quay về Trang chủ
         </a>
       </div>
@@ -1288,6 +1326,7 @@ export function getChatViewHtml(logId: string): string {
 
   <script>
     const logId = "${logId}";
+    const frontendUrl = "${frontendUrl}";
     
     // Collapse/Expand chat panel toggle
     const toggleChatBtn = document.getElementById('toggle-chat-btn');
@@ -1305,22 +1344,7 @@ export function getChatViewHtml(logId: string): string {
       });
     }
     
-    // Theme toggle
-    const themeBtn = document.getElementById('theme-btn');
-    const sunIcon = document.getElementById('sun-icon');
-    const moonIcon = document.getElementById('moon-icon');
-    
-    themeBtn.addEventListener('click', () => {
-      document.body.classList.toggle('dark');
-      const isDark = document.body.classList.contains('dark');
-      if (isDark) {
-        sunIcon.style.display = 'block';
-        moonIcon.style.display = 'none';
-      } else {
-        sunIcon.style.display = 'none';
-        moonIcon.style.display = 'block';
-      }
-    });
+
 
     // Avatar Style Toggle
     const avatarStyleBtn = document.getElementById('avatar-style-btn');
@@ -1385,6 +1409,10 @@ export function getChatViewHtml(logId: string): string {
     let isPlaying = false;
     let aiSpeaking = false;
     let sessionCompletedPending = false;
+    let reconnectAttempts = 0;
+    const maxReconnectAttempts = 5;
+    let reconnectTimeoutId = null;
+    let isIntentionalClose = false;
     
     const chatLog = document.getElementById('chat-log');
     const chatInput = document.getElementById('chat-input');
@@ -1397,6 +1425,8 @@ export function getChatViewHtml(logId: string): string {
     const waveBars = document.getElementById('wave-bars');
 
     function addMessage(sender, text) {
+      const emptyEl = document.getElementById('chat-empty');
+      if (emptyEl) emptyEl.style.display = 'none';
       const bubble = document.createElement('div');
       bubble.classList.add('message-bubble', sender);
       bubble.innerText = text;
@@ -1518,7 +1548,7 @@ export function getChatViewHtml(logId: string): string {
         seconds--;
         if (seconds <= 0) {
           clearInterval(interval);
-          window.location.href = "http://localhost:3000/properties";
+          window.location.href = frontendUrl + "/properties";
         } else {
           countdownTxt.innerText = "Trang sẽ tự động chuyển hướng sau " + seconds + " giây...";
         }
@@ -1527,6 +1557,11 @@ export function getChatViewHtml(logId: string): string {
 
     // Connect WebSocket
     function connect() {
+      if (reconnectTimeoutId) {
+        clearTimeout(reconnectTimeoutId);
+        reconnectTimeoutId = null;
+      }
+      
       const loc = window.location;
       const wsProtocol = loc.protocol === 'https:' ? 'wss:' : 'ws:';
       const wsUrl = wsProtocol + '//' + loc.host + '/ws/ai-consultation?logId=' + logId;
@@ -1534,6 +1569,8 @@ export function getChatViewHtml(logId: string): string {
       socket = new WebSocket(wsUrl);
       
       socket.onopen = () => {
+        reconnectAttempts = 0;
+        isIntentionalClose = false;
         connectionStatus.innerText = 'Sẵn sàng đàm thoại';
         statusDot.classList.add('active');
         statusText.innerText = 'Nhấn nút Microphone bên dưới để nói';
@@ -1566,6 +1603,7 @@ export function getChatViewHtml(logId: string): string {
           if (payload.event === 'session_completed') {
             sessionCompletedPending = true;
             if (!isPlaying && audioQueue.length === 0) {
+              isIntentionalClose = true;
               showCompletedScreen();
             }
           }
@@ -1582,11 +1620,23 @@ export function getChatViewHtml(logId: string): string {
       socket.onclose = () => {
         connectionStatus.innerText = 'Chưa kết nối';
         statusDot.classList.remove('active');
-        statusText.innerText = 'Phiên đàm thoại kết thúc.';
         micBtn.disabled = true;
         chatInput.disabled = true;
         sendBtn.disabled = true;
         stopMicrophone();
+        
+        if (isIntentionalClose) {
+          statusText.innerText = 'Phiên đàm thoại kết thúc.';
+        } else if (reconnectAttempts < maxReconnectAttempts) {
+          reconnectAttempts++;
+          const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 10000);
+          statusText.innerText = 'Lỗi kết nối. Đang kết nối lại sau ' + (delay / 1000) + 's (Lần ' + reconnectAttempts + '/' + maxReconnectAttempts + ')...';
+          reconnectTimeoutId = setTimeout(() => {
+            connect();
+          }, delay);
+        } else {
+          statusText.innerText = 'Kết nối thất bại. Vui lòng tải lại trang.';
+        }
       };
     }
 
@@ -1624,6 +1674,8 @@ export function getChatViewHtml(logId: string): string {
       return buf.buffer;
     }
 
+    let audioWorkletUrl = null;
+
     async function startMicrophone() {
       try {
         mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -1631,13 +1683,30 @@ export function getChatViewHtml(logId: string): string {
         const AudioCtx = window.AudioContext || window.webkitAudioContext;
         audioContext = new AudioCtx({ sampleRate: 8000 });
         
-        const source = audioContext.createMediaStreamSource(mediaStream);
-        processor = audioContext.createScriptProcessor(2048, 1, 1);
+        // Register inline AudioWorkletProcessor using a Blob URL
+        const workletCode = \`
+          class AudioProcessor extends AudioWorkletProcessor {
+            process(inputs, outputs, parameters) {
+              const input = inputs[0];
+              if (input && input[0]) {
+                this.port.postMessage(input[0]);
+              }
+              return true;
+            }
+          }
+          registerProcessor('audio-processor', AudioProcessor);
+        \`;
+        const blob = new Blob([workletCode], { type: 'application/javascript' });
+        audioWorkletUrl = URL.createObjectURL(blob);
+        await audioContext.audioWorklet.addModule(audioWorkletUrl);
         
-        processor.onaudioprocess = (e) => {
+        const source = audioContext.createMediaStreamSource(mediaStream);
+        processor = new AudioWorkletNode(audioContext, 'audio-processor');
+        
+        processor.port.onmessage = (e) => {
           if (aiSpeaking) return;
           
-          const inputData = e.inputBuffer.getChannelData(0);
+          const inputData = e.data;
           const inputSampleRate = audioContext.sampleRate;
           const downsampledData = downsampleBuffer(inputData, inputSampleRate, 8000);
           const int16Buffer = convertFloat32ToInt16(downsampledData);
@@ -1683,6 +1752,10 @@ export function getChatViewHtml(logId: string): string {
         audioContext.close().catch(() => {});
         audioContext = null;
       }
+      if (audioWorkletUrl) {
+        URL.revokeObjectURL(audioWorkletUrl);
+        audioWorkletUrl = null;
+      }
       if (mediaStream) {
         mediaStream.getTracks().forEach(t => t.stop());
         mediaStream = null;
@@ -1711,6 +1784,21 @@ export function getChatViewHtml(logId: string): string {
     });
 
     const chatForm = document.getElementById('chat-form');
+    
+    // Auto-resize for textarea chat input
+    chatInput.addEventListener('input', function() {
+      this.style.height = 'auto';
+      this.style.height = (this.scrollHeight) + 'px';
+    });
+
+    chatInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        // Trigger submit
+        chatForm.dispatchEvent(new Event('submit'));
+      }
+    });
+
     chatForm.addEventListener('submit', (e) => {
       e.preventDefault();
       const text = chatInput.value.trim();
@@ -1721,6 +1809,7 @@ export function getChatViewHtml(logId: string): string {
         data: { text: text }
       }));
       chatInput.value = '';
+      chatInput.style.height = 'auto'; // Reset height after submit
       setUIState('thinking');
       aiSpeaking = true;
     });
