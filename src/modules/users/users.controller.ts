@@ -4,6 +4,8 @@ import { Repository } from 'typeorm'
 import { ObjectId } from 'mongodb'
 import { User } from './schemas/user.schema'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
+import { RolesGuard } from '../../common/guards/roles.guard'
+import { Roles } from '../../common/decorators/roles.decorator'
 
 @Controller('users')
 export class UsersController {
@@ -49,7 +51,8 @@ export class UsersController {
   }
 
   @Get()
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
   async getAll(): Promise<Partial<User>[]> {
     const users = await this.userRepository.find()
     return users.map(user => {
