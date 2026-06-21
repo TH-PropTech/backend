@@ -3,10 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 import { ObjectId } from 'mongodb'
 import { User } from '../../users/schemas/user.schema'
-import {
-  AiConsultationLog,
-  MessageItem,
-} from '../schemas/ai-consultation-log.schema'
+import { AiConsultationLog } from '../schemas/ai-consultation-log.schema'
 import { ConsultationEmailService } from './consultation-email.service'
 import { GroqLlmService } from './groq-llm.service'
 
@@ -80,7 +77,9 @@ export class AiConsultationService {
     }
   }
 
-  checkTransferRules(messages: MessageItem[]): boolean {
+  checkTransferRules(
+    messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>
+  ): boolean {
     const lastMessage = messages[messages.length - 1]
     if (!lastMessage || lastMessage.role !== 'user') return false
 

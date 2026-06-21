@@ -84,6 +84,9 @@ export class ConsultationEmailService {
   private getInvitationHtml(fullName: string, ctaUrl: string): string {
     return `
       <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; width: 100%; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e3d8d0; border-radius: 16px; background-color: #fffdf9; color: #2B211E; box-sizing: border-box;">
+        <!-- Preheader text -->
+        <span style="display: none; max-height: 0px; overflow: hidden;">Mời bạn trải nghiệm Trợ lý ảo AI đàm thoại bằng giọng nói để tìm thuê căn hộ nhanh chóng.</span>
+        
         <div style="text-align: center; margin-bottom: 24px;">
           <h2 style="color: #c65a3a; margin: 0; font-size: 24px; font-weight: 800; letter-spacing: -0.5px;">TH PropTech</h2>
           <p style="font-size: 12px; color: #8e7a6f; margin: 4px 0 0 0; text-transform: uppercase; letter-spacing: 1.5px;">Nền tảng Quản lý Thuê Nhà Thông Minh</p>
@@ -99,7 +102,8 @@ export class ConsultationEmailService {
         </div>
         <div style="font-size: 12px; color: #8e7a6f; line-height: 1.6; border-top: 1px solid #e3d8d0; padding-top: 20px;">
           <p style="margin: 0 0 8px 0;"><strong>Lưu ý:</strong> Link trải nghiệm có giá trị định danh phiên tư vấn của riêng bạn.</p>
-          <p style="margin: 0;">Nếu cần hỗ trợ thêm, vui lòng liên hệ hotline hoặc gửi phản hồi qua email support@th-proptech.vn.</p>
+          <p style="margin: 0 0 8px 0;">Nếu cần hỗ trợ thêm, vui lòng liên hệ hotline hoặc gửi phản hồi qua email support@th-proptech.vn.</p>
+          <p style="margin: 0; font-size: 11px; color: #a49389;">Bạn nhận được thư này từ hệ thống TH PropTech. Nếu không muốn nhận email tương tự, bạn có thể <a href="#" style="color: #c65a3a; text-decoration: underline;">hủy đăng ký nhận thư</a>.</p>
         </div>
       </div>
     `
@@ -112,6 +116,9 @@ export class ConsultationEmailService {
   ): string {
     return `
       <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; width: 100%; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e3d8d0; border-radius: 16px; background-color: #fffdf9; color: #2B211E; box-sizing: border-box;">
+        <!-- Preheader text -->
+        <span style="display: none; max-height: 0px; overflow: hidden;">Báo cáo tóm tắt cuộc đàm thoại tư vấn thuê căn hộ của bạn cùng Trợ lý ảo AI.</span>
+        
         <div style="text-align: center; margin-bottom: 24px;">
           <h2 style="color: #c65a3a; margin: 0; font-size: 24px; font-weight: 800; letter-spacing: -0.5px;">TH PropTech</h2>
           <p style="font-size: 12px; color: #8e7a6f; margin: 4px 0 0 0; text-transform: uppercase; letter-spacing: 1.5px;">Nền tảng Quản lý Thuê Nhà Thông Minh</p>
@@ -128,7 +135,8 @@ export class ConsultationEmailService {
           <p style="margin: 0; font-size: 14px; line-height: 1.5;"><strong>Ghi chú tóm tắt:</strong> ${notes || 'Chưa có ghi chú'}</p>
         </div>
         <div style="font-size: 12px; color: #8e7a6f; line-height: 1.6; border-top: 1px solid #e3d8d0; padding-top: 20px;">
-          <p style="margin: 0;">Trợ lý AI đã ghi nhận nhu cầu của bạn và sẽ thông báo đến nhân viên vận hành để sớm sắp xếp lịch hẹn xem nhà thực tế.</p>
+          <p style="margin: 0 0 8px 0;">Trợ lý AI đã ghi nhận nhu cầu của bạn và sẽ thông báo đến nhân viên vận hành để sớm sắp xếp lịch hẹn xem nhà thực tế.</p>
+          <p style="margin: 0; font-size: 11px; color: #a49389;">Bạn nhận được thư này từ hệ thống TH PropTech. Nếu không muốn nhận email tương tự, bạn có thể <a href="#" style="color: #c65a3a; text-decoration: underline;">hủy đăng ký nhận thư</a>.</p>
         </div>
       </div>
     `
