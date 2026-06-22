@@ -4,14 +4,24 @@ import {
   ExecutionContext,
   UnauthorizedException,
 } from '@nestjs/common'
+import { Reflector } from '@nestjs/core'
 import { JwtService } from '@nestjs/jwt'
+import { IS_PUBLIC_KEY } from '../../../common/decorators/public.decorator'
 import { UserPayload } from '../interfaces/auth.interface'
 
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
-  constructor(private readonly jwtService: JwtService) {}
+  constructor(
+    private readonly jwtService: JwtService,
+    private readonly reflector: Reflector
+  ) {}
 
   canActivate(context: ExecutionContext): boolean {
+    const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ])
+
     const request = context.switchToHttp().getRequest<{
       headers: Record<string, string | undefined>
       user?: UserPayload
@@ -19,12 +29,14 @@ export class JwtAuthGuard implements CanActivate {
     const authHeader = request.headers['authorization']
 
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      if (isPublic) return true
       throw new UnauthorizedException('Token xác thực không hợp lệ')
     }
 
     const token = authHeader.split(' ')[1]
 
     if (!token) {
+      if (isPublic) return true
       throw new UnauthorizedException('Token xác thực không hợp lệ')
     }
 
@@ -33,6 +45,7 @@ export class JwtAuthGuard implements CanActivate {
       request.user = payload
       return true
     } catch {
+      if (isPublic) return true
       throw new UnauthorizedException('Token đã hết hạn hoặc không hợp lệ')
     }
   }

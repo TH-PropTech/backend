@@ -12,6 +12,7 @@ import { Booking } from './schemas/booking.schema'
 import { Apartment } from '../apartments/schemas/apartment.schema'
 import { User } from '../users/schemas/user.schema'
 import { NotificationsService } from '../notifications/notifications.service'
+import { CreateBookingDto } from './dto/create-booking.dto'
 
 export interface BookingListResult {
   items: (Booking & {
@@ -44,16 +45,11 @@ export class BookingsService {
    * Tự động resolve landlordId từ apartment.
    */
   async create(
-    tenantId: string,
-    dto: {
-      apartmentId: string
-      visitAt: string
-      method: 'onsite' | 'video'
-      note?: string
-    }
+    tenantId: string | null,
+    dto: CreateBookingDto
   ): Promise<Booking> {
     this.logger.log(
-      `Tenant ${tenantId} creating booking for apartment ${dto.apartmentId}`
+      `Tenant ${tenantId ?? 'anonymous'} creating booking for apartment ${dto.apartmentId}`
     )
 
     // Lấy thông tin căn hộ để resolve landlordId
@@ -71,32 +67,35 @@ export class BookingsService {
     }
 
     // Không cho chủ nhà tự đặt lịch xem căn hộ của mình
-    if (apartment.landlordId === tenantId) {
+    if (tenantId && apartment.landlordId === tenantId) {
       throw new BadRequestException(
         'Bạn không thể đặt lịch xem căn hộ của chính mình'
       )
     }
 
     // Lấy thông tin tenant để snapshot
-    let tenantName: string | null = null
-    let tenantPhone: string | null = null
-    try {
-      const tenant = await this.userRepository.findOne({
-        where: { _id: new ObjectId(tenantId) },
-      })
-      if (tenant) {
-        tenantName = tenant.fullName ?? null
-        tenantPhone = tenant.phone ?? null
+    let tenantName: string | null = dto.tenantName || null
+    let tenantPhone: string | null = dto.tenantPhone || null
+
+    if (tenantId) {
+      try {
+        const tenant = await this.userRepository.findOne({
+          where: { _id: new ObjectId(tenantId) },
+        })
+        if (tenant) {
+          tenantName = tenant.fullName ?? tenantName
+          tenantPhone = tenant.phone ?? tenantPhone
+        }
+      } catch {
+        this.logger.warn(`Could not fetch tenant info for ${tenantId}`)
       }
-    } catch {
-      this.logger.warn(`Could not fetch tenant info for ${tenantId}`)
     }
 
     const booking = this.bookingRepository.create({
       apartmentId: dto.apartmentId,
       apartmentTitle: apartment.title,
       landlordId: apartment.landlordId,
-      tenantId,
+      tenantId: tenantId || 'anonymous',
       tenantName,
       tenantPhone,
       visitAt: new Date(dto.visitAt),
@@ -134,7 +133,7 @@ export class BookingsService {
   async updateStatus(
     bookingId: string,
     landlordId: string,
-    status: 'confirmed' | 'rejected',
+    status: 'confirmed' | 'rejected' | 'completed',
     rejectedReason?: string
   ): Promise<Booking> {
     this.logger.log(
@@ -147,17 +146,25 @@ export class BookingsService {
 
     const booking = await this.findOneById(bookingId)
 
-    // Chỉ chủ nhà của căn hộ mới được duyệt/từ chối
+    // Chỉ chủ nhà của căn hộ mới được duyệt/từ chối/hoàn thành
     if (booking.landlordId !== landlordId) {
       throw new ForbiddenException(
         'Bạn không có quyền duyệt lịch hẹn cho căn hộ này'
       )
     }
 
-    if (booking.status !== 'pending') {
-      throw new BadRequestException(
-        `Lịch hẹn đã ở trạng thái "${booking.status}", không thể thay đổi`
-      )
+    if (status === 'completed') {
+      if (booking.status !== 'confirmed') {
+        throw new BadRequestException(
+          'Chỉ có thể hoàn thành lịch hẹn đã được xác nhận trước đó'
+        )
+      }
+    } else {
+      if (booking.status !== 'pending') {
+        throw new BadRequestException(
+          `Lịch hẹn đã ở trạng thái "${booking.status}", không thể thay đổi`
+        )
+      }
     }
 
     booking.status = status
@@ -166,16 +173,33 @@ export class BookingsService {
 
     const saved = await this.bookingRepository.save(booking)
 
+    // Cập nhật trạng thái thông báo của chủ nhà
+    try {
+      await this.notificationsService.updateBookingNotificationStatus(
+        bookingId,
+        status
+      )
+    } catch (err) {
+      this.logger.warn(
+        `Không thể cập nhật trạng thái thông báo cho chủ nhà:`,
+        err
+      )
+    }
+
     // Gửi thông báo đến khách thuê
     try {
       const title =
         status === 'confirmed'
           ? 'Lịch hẹn xem nhà được xác nhận'
-          : 'Lịch hẹn xem nhà bị từ chối'
+          : status === 'rejected'
+            ? 'Lịch hẹn xem nhà bị từ chối'
+            : 'Lịch hẹn xem nhà hoàn tất'
       const body =
         status === 'confirmed'
           ? `Chủ nhà đã đồng ý lịch hẹn xem căn hộ "${booking.apartmentTitle}" vào lúc ${new Date(booking.visitAt).toLocaleString('vi-VN')}.`
-          : `Chủ nhà đã từ chối lịch hẹn xem căn hộ "${booking.apartmentTitle}". Lý do: ${rejectedReason}`
+          : status === 'rejected'
+            ? `Chủ nhà đã từ chối lịch hẹn xem căn hộ "${booking.apartmentTitle}". Lý do: ${rejectedReason}`
+            : `Lịch hẹn xem căn hộ "${booking.apartmentTitle}" của bạn đã hoàn tất.`
       await this.notificationsService.createNotification(
         booking.tenantId,
         title,
@@ -213,6 +237,19 @@ export class BookingsService {
 
     booking.status = 'cancelled'
     const saved = await this.bookingRepository.save(booking)
+
+    // Cập nhật trạng thái thông báo
+    try {
+      await this.notificationsService.updateBookingNotificationStatus(
+        bookingId,
+        'cancelled'
+      )
+    } catch (err) {
+      this.logger.warn(
+        `Không thể cập nhật trạng thái thông báo hủy lịch hẹn:`,
+        err
+      )
+    }
 
     // Gửi thông báo đến chủ nhà
     try {
