@@ -121,7 +121,7 @@ export class NotificationsService {
    */
   async updateBookingNotificationStatus(
     bookingId: string,
-    status: 'confirmed' | 'rejected' | 'cancelled'
+    status: 'confirmed' | 'rejected' | 'cancelled' | 'completed'
   ): Promise<void> {
     this.logger.log(
       `Updating notifications for booking ${bookingId} to status ${status}`
