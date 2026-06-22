@@ -26,4 +26,14 @@ export class CreateBookingDto {
   @IsOptional()
   @IsString()
   note?: string
+
+  @ApiPropertyOptional({ description: 'Họ tên khách thuê' })
+  @IsOptional()
+  @IsString()
+  tenantName?: string
+
+  @ApiPropertyOptional({ description: 'Số điện thoại khách thuê' })
+  @IsOptional()
+  @IsString()
+  tenantPhone?: string
 }

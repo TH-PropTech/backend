@@ -19,6 +19,7 @@ import { UpdateBookingStatusDto } from './dto/update-booking-status.dto'
 import { BookingQueryDto } from './dto/booking-query.dto'
 import { UserPayload } from '../auth/interfaces/auth.interface'
 import { Booking } from './schemas/booking.schema'
+import { Public } from '../../common/decorators/public.decorator'
 
 @ApiTags('bookings')
 @Controller('bookings')
@@ -32,13 +33,13 @@ export class BookingsController {
    * POST /api/v1/bookings
    * Tenant: Gửi yêu cầu đặt lịch xem nhà
    */
+  @Public()
   @Post()
   async create(
-    @Request() req: { user: UserPayload },
+    @Request() req: { user?: UserPayload },
     @Body() dto: CreateBookingDto
   ): Promise<Booking> {
-    const tenantId = req.user._id
-    if (!tenantId) throw new Error('Không thể xác thực người dùng')
+    const tenantId = req.user?._id ?? null
     return this.bookingsService.create(tenantId, dto)
   }
 

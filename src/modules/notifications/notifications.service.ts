@@ -115,4 +115,30 @@ export class NotificationsService {
       await this.notificationRepository.save(unread)
     }
   }
+
+  /**
+   * Cập nhật trạng thái thông báo đặt lịch (đã đọc và lưu status mới)
+   */
+  async updateBookingNotificationStatus(
+    bookingId: string,
+    status: 'confirmed' | 'rejected' | 'cancelled'
+  ): Promise<void> {
+    this.logger.log(
+      `Updating notifications for booking ${bookingId} to status ${status}`
+    )
+    const notifications = await this.notificationRepository.find({
+      where: { type: 'BOOKING' } as FindOptionsWhere<Notification>,
+    })
+
+    for (const notif of notifications) {
+      if (notif.data && String(notif.data.bookingId) === bookingId) {
+        notif.isRead = true
+        notif.data = {
+          ...notif.data,
+          status,
+        }
+        await this.notificationRepository.save(notif)
+      }
+    }
+  }
 }
