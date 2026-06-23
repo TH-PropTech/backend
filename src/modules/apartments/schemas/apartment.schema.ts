@@ -97,14 +97,35 @@ export class Apartment {
   @Column('array')
   amenities!: string[]
 
-  @Column({ type: 'string', default: 'available' })
-  status!: 'available' | 'pending' | 'updating' | 'unavailable'
+  @Column({ type: 'string', default: 'pending' })
+  status!:
+    | 'pending'
+    | 'available'
+    | 'rejected'
+    | 'expired'
+    | 'unavailable'
+    | 'updating'
 
   @Column({ default: false })
   isVerified!: boolean
 
   @Column()
   landlordId!: string
+
+  @Column({ nullable: true })
+  submittedAt?: Date | null
+
+  @Column({ nullable: true })
+  approvedAt?: Date | null
+
+  @Column({ nullable: true })
+  approvedBy?: string | null
+
+  @Column({ nullable: true })
+  expiresAt?: Date | null
+
+  @Column({ default: '', nullable: true })
+  rejectedReason?: string | null
 
   @CreateDateColumn()
   createdAt!: Date

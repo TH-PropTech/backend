@@ -1,10 +1,19 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common'
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  ForbiddenException,
+  BadRequestException,
+  OnApplicationBootstrap,
+} from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 import { ObjectId } from 'mongodb'
 import { Apartment } from './schemas/apartment.schema'
 import { User } from '../users/schemas/user.schema'
 import { ApartmentFilterDto } from './dto/apartment-filter.dto'
+import { CreateApartmentDto } from './dto/create-apartment.dto'
+import { NotificationsService } from '../notifications/notifications.service'
 
 interface ApartmentMongoQuery {
   $or?: Array<Record<string, unknown>>
@@ -134,15 +143,59 @@ function buildVietnameseRegex(str: string): string {
 }
 
 @Injectable()
-export class ApartmentsService {
+export class ApartmentsService implements OnApplicationBootstrap {
   private readonly logger = new Logger(ApartmentsService.name)
 
   constructor(
     @InjectRepository(Apartment)
     private readonly apartmentRepository: Repository<Apartment>,
     @InjectRepository(User)
-    private readonly userRepository: Repository<User>
+    private readonly userRepository: Repository<User>,
+    private readonly notificationsService: NotificationsService
   ) {}
+
+  onApplicationBootstrap(): void {
+    this.logger.log(
+      'ApartmentsService initialized. Checking listing expirations...'
+    )
+    this.checkExpiration().catch(err => {
+      this.logger.error('Error checking listing expirations on startup:', err)
+    })
+
+    // Run expiration check every hour
+    setInterval(
+      () => {
+        this.checkExpiration().catch(err => {
+          this.logger.error(
+            'Error checking listing expirations in interval:',
+            err
+          )
+        })
+      },
+      60 * 60 * 1000
+    )
+  }
+
+  async checkExpiration(): Promise<void> {
+    const now = new Date()
+    const expiredApartments = await this.apartmentRepository.find({
+      where: {
+        status: 'available',
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment
+        expiresAt: { $lte: now } as any,
+      },
+    })
+
+    if (expiredApartments.length > 0) {
+      this.logger.log(
+        `Checking expiration: Found ${expiredApartments.length} expired apartments. Expiring them...`
+      )
+      for (const apt of expiredApartments) {
+        apt.status = 'unavailable'
+        await this.apartmentRepository.save(apt)
+      }
+    }
+  }
 
   // ── Lấy toàn bộ danh sách căn hộ kèm bộ lọc ──
   async findAll(filters?: ApartmentFilterDto): Promise<Apartment[]> {
@@ -385,5 +438,232 @@ export class ApartmentsService {
       apartment.isVerified = false
     }
     return this.apartmentRepository.save(apartment)
+  }
+
+  // ── Tạo bài đăng căn hộ mới ──
+  async create(
+    dto: CreateApartmentDto,
+    landlordId: string
+  ): Promise<Apartment> {
+    this.logger.log(
+      `Creating apartment: ${dto.title} by landlord: ${landlordId}`
+    )
+
+    const apartment = this.apartmentRepository.create({
+      title: dto.title,
+      buildingId: dto.buildingId || null,
+      buildingName: dto.buildingName || '',
+      projectId: dto.projectId || null,
+      projectName: dto.projectName || '',
+      category: dto.category,
+      description: dto.description,
+      location: dto.location,
+      city: dto.city,
+      district: dto.district,
+      ward: dto.ward,
+      street: dto.street,
+      address: dto.address,
+      priceMonthly: dto.priceMonthly,
+      area: dto.area,
+      bedrooms: dto.bedrooms,
+      bathrooms: dto.bathrooms,
+      direction: dto.direction,
+      balconyDirection: dto.balconyDirection,
+      furniture: dto.furniture,
+      moveInTime: dto.moveInTime,
+      electricity: dto.electricity,
+      water: dto.water,
+      internet: dto.internet,
+      gallery: dto.gallery || [],
+      images360: dto.images360 || [],
+      vrUrl: dto.vrUrl || '',
+      amenities: dto.amenities || [],
+      status: 'pending',
+      isVerified: false,
+      landlordId,
+      submittedAt: new Date(),
+    })
+
+    const saved = await this.apartmentRepository.save(apartment)
+    this.notifyStaffNewListing(saved).catch(err => {
+      this.logger.error('Error notifying staff of new listing:', err)
+    })
+    return saved
+  }
+
+  // ── Phê duyệt bài đăng ──
+  async approve(id: string, staffId: string): Promise<Apartment> {
+    this.logger.log(`Approving apartment: ${id} by staff: ${staffId}`)
+    const apartment = await this.apartmentRepository.findOne({
+      where: { _id: new ObjectId(id) },
+    })
+    if (!apartment) {
+      throw new NotFoundException(`Không tìm thấy căn hộ với ID: ${id}`)
+    }
+
+    apartment.status = 'available'
+    apartment.isVerified = true
+    apartment.approvedAt = new Date()
+    apartment.approvedBy = staffId
+    apartment.expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) // 30 ngày
+    apartment.rejectedReason = null
+
+    const saved = await this.apartmentRepository.save(apartment)
+    this.notificationsService
+      .createNotification(
+        saved.landlordId,
+        'Tin đăng đã được duyệt',
+        `Tin đăng "${saved.title}" của bạn đã được duyệt và đăng tải thành công.`,
+        'listing-approved',
+        { apartmentId: saved._id.toString() }
+      )
+      .catch(err =>
+        this.logger.error(
+          'Error sending landlord listing-approved notification:',
+          err
+        )
+      )
+
+    return saved
+  }
+
+  // ── Từ chối bài đăng ──
+  async reject(id: string, reason: string): Promise<Apartment> {
+    this.logger.log(`Rejecting apartment: ${id} for reason: ${reason}`)
+    const apartment = await this.apartmentRepository.findOne({
+      where: { _id: new ObjectId(id) },
+    })
+    if (!apartment) {
+      throw new NotFoundException(`Không tìm thấy căn hộ với ID: ${id}`)
+    }
+
+    apartment.status = 'rejected'
+    apartment.isVerified = false
+    apartment.rejectedReason = reason
+
+    const saved = await this.apartmentRepository.save(apartment)
+    this.notificationsService
+      .createNotification(
+        saved.landlordId,
+        'Tin đăng bị từ chối duyệt',
+        `Tin đăng "${saved.title}" của bạn đã bị từ chối. Lý do: ${reason}`,
+        'listing-rejected',
+        { apartmentId: saved._id.toString(), rejectedReason: reason }
+      )
+      .catch(err =>
+        this.logger.error(
+          'Error sending landlord listing-rejected notification:',
+          err
+        )
+      )
+
+    return saved
+  }
+
+  // ── Gửi lại bài đăng bị từ chối ──
+  async resubmit(
+    id: string,
+    dto: CreateApartmentDto,
+    landlordId: string
+  ): Promise<Apartment> {
+    this.logger.log(`Resubmitting apartment: ${id} by landlord: ${landlordId}`)
+    const apartment = await this.apartmentRepository.findOne({
+      where: { _id: new ObjectId(id) },
+    })
+    if (!apartment) {
+      throw new NotFoundException(`Không tìm thấy căn hộ với ID: ${id}`)
+    }
+
+    if (apartment.landlordId !== landlordId) {
+      throw new ForbiddenException('Bạn không có quyền chỉnh sửa bài đăng này')
+    }
+
+    if (apartment.status !== 'rejected') {
+      throw new BadRequestException('Chỉ có thể nộp lại bài đăng bị từ chối')
+    }
+
+    // Cập nhật thông tin mới
+    Object.assign(apartment, {
+      title: dto.title,
+      buildingId: dto.buildingId || null,
+      buildingName: dto.buildingName || '',
+      projectId: dto.projectId || null,
+      projectName: dto.projectName || '',
+      category: dto.category,
+      description: dto.description,
+      location: dto.location,
+      city: dto.city,
+      district: dto.district,
+      ward: dto.ward,
+      street: dto.street,
+      address: dto.address,
+      priceMonthly: dto.priceMonthly,
+      area: dto.area,
+      bedrooms: dto.bedrooms,
+      bathrooms: dto.bathrooms,
+      direction: dto.direction,
+      balconyDirection: dto.balconyDirection,
+      furniture: dto.furniture,
+      moveInTime: dto.moveInTime,
+      electricity: dto.electricity,
+      water: dto.water,
+      internet: dto.internet,
+      gallery: dto.gallery || [],
+      images360: dto.images360 || [],
+      vrUrl: dto.vrUrl || '',
+      amenities: dto.amenities || [],
+      status: 'pending',
+      isVerified: false,
+      submittedAt: new Date(),
+      rejectedReason: null,
+    })
+
+    const saved = await this.apartmentRepository.save(apartment)
+    this.notifyStaffNewListing(saved).catch(err => {
+      this.logger.error('Error notifying staff of resubmitted listing:', err)
+    })
+    return saved
+  }
+
+  // ── Gia hạn bài đăng (30 ngày) ──
+  async renew(id: string, landlordId: string): Promise<Apartment> {
+    this.logger.log(`Renewing apartment: ${id} by landlord: ${landlordId}`)
+    const apartment = await this.apartmentRepository.findOne({
+      where: { _id: new ObjectId(id) },
+    })
+    if (!apartment) {
+      throw new NotFoundException(`Không tìm thấy căn hộ với ID: ${id}`)
+    }
+
+    if (apartment.landlordId !== landlordId) {
+      throw new ForbiddenException('Bạn không có quyền gia hạn bài đăng này')
+    }
+
+    if (apartment.status !== 'available' && apartment.status !== 'expired') {
+      throw new BadRequestException(
+        'Chỉ có thể gia hạn bài đăng đang hoạt động hoặc đã hết hạn'
+      )
+    }
+
+    apartment.status = 'available'
+    apartment.expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) // Gia hạn thêm 30 ngày
+    apartment.rejectedReason = null
+
+    return this.apartmentRepository.save(apartment)
+  }
+
+  private async notifyStaffNewListing(apartment: Apartment): Promise<void> {
+    const staffMembers = await this.userRepository.find({
+      where: { role: 'staff' },
+    })
+    for (const staff of staffMembers) {
+      await this.notificationsService.createNotification(
+        staff._id.toString(),
+        'Bài đăng mới chờ duyệt',
+        `Tin đăng "${apartment.title}" đang chờ duyệt.`,
+        'new-listing',
+        { apartmentId: apartment._id.toString() }
+      )
+    }
   }
 }

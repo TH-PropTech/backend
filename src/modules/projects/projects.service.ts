@@ -5,6 +5,7 @@ import { ObjectId } from 'mongodb'
 import { Project } from './schemas/project.schema'
 import { Apartment } from '../apartments/schemas/apartment.schema'
 import { ProjectFilterDto } from './dto/project-filter.dto'
+import { CreateProjectDto } from './dto/create-project.dto'
 
 function normalizeCity(city?: string): string {
   if (!city) return ''
@@ -270,5 +271,32 @@ export class ProjectsService {
         `ID dự án không hợp lệ hoặc không tìm thấy: ${id}`
       )
     }
+  }
+
+  // ── Tìm hoặc Tạo mới dự án ──
+  async findOrCreate(dto: CreateProjectDto): Promise<Project> {
+    this.logger.log(`Find or Create project: ${dto.name}`)
+    const existing = await this.projectRepository.findOne({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment
+      where: { name: { $regex: `^${dto.name}$`, $options: 'i' } } as any,
+    })
+    if (existing) {
+      this.logger.log(
+        `Found existing project: ${dto.name} with ID: ${existing._id.toString()}`
+      )
+      return existing
+    }
+
+    const project = this.projectRepository.create({
+      name: dto.name,
+      city: dto.city,
+      district: dto.district,
+      location: dto.location,
+      description: dto.description || '',
+      investor: dto.investor || '',
+      amenities: dto.amenities || [],
+      images: dto.images || [],
+    })
+    return this.projectRepository.save(project)
   }
 }
