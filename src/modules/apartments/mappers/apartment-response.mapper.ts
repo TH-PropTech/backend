@@ -36,6 +36,12 @@ export interface WebApartmentResponse {
   images360: string[]
   image: string
   gallery: string[]
+  status: string
+  submittedAt?: Date | null
+  approvedAt?: Date | null
+  approvedBy?: string | null
+  expiresAt?: Date | null
+  rejectedReason?: string | null
   landlord?: {
     id: string
     fullName: string
@@ -75,6 +81,11 @@ export interface MobileApartmentResponse {
   internet: string
   amenities: string[]
   images360: string[]
+  submittedAt?: Date | null
+  approvedAt?: Date | null
+  approvedBy?: string | null
+  expiresAt?: Date | null
+  rejectedReason?: string | null
   landlord?: {
     id: string
     fullName: string
@@ -95,12 +106,38 @@ export class ApartmentResponseMapper {
         ? apartment.priceMonthly / 1000000
         : apartment.priceMonthly
 
+    let tag = 'pending'
+    let tagText = 'Chờ duyệt'
+
+    switch (apartment.status) {
+      case 'available':
+        tag = 'empty'
+        tagText = 'Đang trống'
+        break
+      case 'rejected':
+        tag = 'rejected'
+        tagText = 'Bị từ chối'
+        break
+      case 'expired':
+        tag = 'expired'
+        tagText = 'Hết hạn'
+        break
+      case 'unavailable':
+        tag = 'unavailable'
+        tagText = 'Đã ẩn/Đóng'
+        break
+      case 'updating':
+        tag = 'updating'
+        tagText = 'Đang cập nhật'
+        break
+    }
+
     return {
       id: apartment._id.toString(),
       title: apartment.title,
       category: apartment.category,
-      tag: apartment.status === 'available' ? 'empty' : apartment.status,
-      tagText: apartment.status === 'available' ? 'Đang trống' : 'Đang xử lý',
+      tag,
+      tagText,
       description: apartment.description,
       location: apartment.location,
       price: `${priceInMillions} triệu/tháng`,
@@ -133,6 +170,12 @@ export class ApartmentResponseMapper {
       images360: apartment.images360 || [],
       image: apartment.gallery[0] || '',
       gallery: apartment.gallery || [],
+      status: apartment.status,
+      submittedAt: apartment.submittedAt ?? null,
+      approvedAt: apartment.approvedAt ?? null,
+      approvedBy: apartment.approvedBy ?? null,
+      expiresAt: apartment.expiresAt ?? null,
+      rejectedReason: apartment.rejectedReason ?? null,
       landlord: apartment.landlord
         ? {
             id: apartment.landlord._id.toString(),
@@ -168,8 +211,7 @@ export class ApartmentResponseMapper {
       area: apartment.area,
       bedrooms: apartment.bedrooms,
       bathrooms: apartment.bathrooms,
-      status:
-        apartment.status === 'unavailable' ? 'updating' : apartment.status,
+      status: apartment.status,
       verified: apartment.isVerified,
       image: apartment.gallery[0] || '',
       gallery: apartment.gallery,
@@ -185,6 +227,11 @@ export class ApartmentResponseMapper {
       internet: apartment.internet,
       amenities: apartment.amenities,
       images360: apartment.images360 || [],
+      submittedAt: apartment.submittedAt ?? null,
+      approvedAt: apartment.approvedAt ?? null,
+      approvedBy: apartment.approvedBy ?? null,
+      expiresAt: apartment.expiresAt ?? null,
+      rejectedReason: apartment.rejectedReason ?? null,
       landlord: apartment.landlord
         ? {
             id: apartment.landlord._id.toString(),

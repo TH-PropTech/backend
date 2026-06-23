@@ -8,11 +8,14 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger'
 import { WsAdapter } from '@nestjs/platform-ws'
 import { HttpExceptionFilter } from '@/common/filters/http-exception.filter'
 import { ResponseEnvelopeInterceptor } from '@/common/interceptors/response-envelope.interceptor'
+import * as express from 'express'
+import * as path from 'path'
 
 export function setupApp(
   app: INestApplication,
   configService: ConfigService
 ): void {
+  app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')))
   app.setGlobalPrefix('api')
   app.enableVersioning({
     type: VersioningType.URI,
