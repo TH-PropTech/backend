@@ -1,9 +1,15 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common'
+import {
+  Injectable,
+  Logger,
+  OnModuleInit,
+  OnModuleDestroy,
+} from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 import * as crypto from 'crypto'
 import * as fs from 'fs'
+import * as path from 'path'
 import * as grpc from '@grpc/grpc-js'
 import {
   connect,
@@ -14,18 +20,11 @@ import {
 } from '@hyperledger/fabric-gateway'
 import { BlockchainLog } from './schemas/blockchain-log.schema'
 
-interface PeerConfig {
-  url?: string
-}
-
-interface ConnectionProfile {
-  peers?: Record<string, PeerConfig>
-}
-
 @Injectable()
-export class FabricService implements OnModuleInit {
+export class FabricService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(FabricService.name)
   private gateway: Gateway | null = null
+  private grpcClient: grpc.Client | null = null
   private isSimulationMode = true
 
   private mspId = ''
@@ -49,56 +48,66 @@ export class FabricService implements OnModuleInit {
 
     try {
       this.mspId = this.configService.getOrThrow<string>('FABRIC_MSP_ID')
-      this.channelName = this.configService.getOrThrow<string>('FABRIC_CHANNEL')
-      this.chaincodeName =
-        this.configService.getOrThrow<string>('FABRIC_CHAINCODE')
-
-      const connectionProfilePath = this.configService.getOrThrow<string>(
-        'FABRIC_CONNECTION_PROFILE'
+      this.channelName = this.configService.getOrThrow<string>(
+        'FABRIC_CHANNEL_NAME'
       )
+      this.chaincodeName = this.configService.getOrThrow<string>(
+        'FABRIC_CHAINCODE_NAME'
+      )
+
       const certPath = this.configService.getOrThrow<string>('FABRIC_CERT_PATH')
       const keyPath = this.configService.getOrThrow<string>('FABRIC_KEY_PATH')
+      const tlsCertPath = this.configService.getOrThrow<string>(
+        'FABRIC_TLS_CERT_PATH'
+      )
+      const peerEndpoint = this.configService.getOrThrow<string>(
+        'FABRIC_PEER_ENDPOINT'
+      )
+      const peerHostAlias = this.configService.getOrThrow<string>(
+        'FABRIC_PEER_HOST_ALIAS'
+      )
+
+      // 1. Tạo gRPC client với TLS credentials (bắt buộc — Fabric test network luôn bật TLS)
+      const tlsRootCert = fs.readFileSync(path.resolve(tlsCertPath))
+      const tlsCredentials = grpc.credentials.createSsl(tlsRootCert)
+
+      // Override hostname để khớp SAN (Subject Alternative Name) trong chứng chỉ TLS của peer
+      this.grpcClient = new grpc.Client(peerEndpoint, tlsCredentials, {
+        'grpc.ssl_target_name_override': peerHostAlias,
+      })
+
+      // 2. Thiết lập Identity (X.509 certificate)
+      const certificate = fs.readFileSync(path.resolve(certPath))
+      const identity: Identity = { mspId: this.mspId, credentials: certificate }
+
+      // 3. Thiết lập Signer (Private key)
+      const resolvedKeyPath = path.resolve(keyPath)
+      let privateKeyPem: Buffer
 
       if (
-        !fs.existsSync(connectionProfilePath) ||
-        !fs.existsSync(certPath) ||
-        !fs.existsSync(keyPath)
+        fs.existsSync(resolvedKeyPath) &&
+        fs.statSync(resolvedKeyPath).isDirectory()
       ) {
-        throw new Error('One or more Fabric credential files do not exist')
+        // keyPath là thư mục (keystore/) — tìm file *_sk
+        const keyFiles = fs.readdirSync(resolvedKeyPath)
+        const skFile = keyFiles.find(f => f.endsWith('_sk'))
+        if (!skFile) {
+          throw new Error(
+            `Không tìm thấy file private key (*_sk) trong: ${keyPath}`
+          )
+        }
+        privateKeyPem = fs.readFileSync(path.join(resolvedKeyPath, skFile))
+      } else {
+        // keyPath trỏ trực tiếp tới file key
+        privateKeyPem = fs.readFileSync(resolvedKeyPath)
       }
 
-      // Load certificate & private key
-      const credentials = fs.readFileSync(certPath)
-      const identity: Identity = { mspId: this.mspId, credentials }
-
-      const privateKeyPem = fs.readFileSync(keyPath)
       const privateKey = crypto.createPrivateKey(privateKeyPem)
       const signer: Signer = signers.newPrivateKeySigner(privateKey)
 
-      // Parse connection profile to get gRPC endpoint
-      const profile = JSON.parse(
-        fs.readFileSync(connectionProfilePath, 'utf8')
-      ) as ConnectionProfile
-      const peers = profile.peers ?? {}
-      const peerName = Object.keys(peers)[0]
-      if (!peerName) {
-        throw new Error('No peers found in connection profile')
-      }
-      const peerUrl = peers[peerName]?.url
-      if (!peerUrl) {
-        throw new Error('Peer URL not found in connection profile')
-      }
-      const finalPeerUrl: string = peerUrl
-
-      // Parse peer url for gRPC connection
-      const cleanUrl = finalPeerUrl.replace(/^grpcs?:\/\//, '')
-      const client = new grpc.Client(
-        cleanUrl,
-        grpc.credentials.createInsecure()
-      )
-
+      // 4. Kết nối Gateway (theo chuẩn @hyperledger/fabric-gateway — Fabric v2.4+)
       this.gateway = connect({
-        client,
+        client: this.grpcClient,
         identity,
         signer,
         evaluateOptions: () => ({ deadline: Date.now() + 5000 }),
@@ -108,7 +117,7 @@ export class FabricService implements OnModuleInit {
 
       this.isSimulationMode = false
       this.logger.log(
-        `Successfully connected to Hyperledger Fabric channel: ${this.channelName}`
+        `Successfully connected to Hyperledger Fabric — channel: ${this.channelName}, chaincode: ${this.chaincodeName}`
       )
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error)
@@ -117,6 +126,12 @@ export class FabricService implements OnModuleInit {
       )
       this.isSimulationMode = true
     }
+  }
+
+  onModuleDestroy(): void {
+    this.gateway?.close()
+    this.grpcClient?.close()
+    this.logger.log('Fabric Gateway disconnected')
   }
 
   /**
