@@ -5,6 +5,7 @@ import {
   ForbiddenException,
   BadRequestException,
   OnApplicationBootstrap,
+  OnModuleDestroy,
 } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
@@ -14,6 +15,8 @@ import { User } from '../users/schemas/user.schema'
 import { ApartmentFilterDto } from './dto/apartment-filter.dto'
 import { CreateApartmentDto } from './dto/create-apartment.dto'
 import { NotificationsService } from '../notifications/notifications.service'
+import { ProjectsService } from '../projects/projects.service'
+import { BuildingsService } from '../buildings/buildings.service'
 
 interface ApartmentMongoQuery {
   $or?: Array<Record<string, unknown>>
@@ -143,15 +146,21 @@ function buildVietnameseRegex(str: string): string {
 }
 
 @Injectable()
-export class ApartmentsService implements OnApplicationBootstrap {
+// TODO: Migrate to @nestjs/schedule @Cron('0 * * * *') when @nestjs/schedule is installed
+export class ApartmentsService
+  implements OnApplicationBootstrap, OnModuleDestroy
+{
   private readonly logger = new Logger(ApartmentsService.name)
+  private expirationInterval: ReturnType<typeof setInterval> | null = null
 
   constructor(
     @InjectRepository(Apartment)
     private readonly apartmentRepository: Repository<Apartment>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
-    private readonly notificationsService: NotificationsService
+    private readonly notificationsService: NotificationsService,
+    private readonly projectsService: ProjectsService,
+    private readonly buildingsService: BuildingsService
   ) {}
 
   onApplicationBootstrap(): void {
@@ -163,7 +172,7 @@ export class ApartmentsService implements OnApplicationBootstrap {
     })
 
     // Run expiration check every hour
-    setInterval(
+    this.expirationInterval = setInterval(
       () => {
         this.checkExpiration().catch(err => {
           this.logger.error(
@@ -174,6 +183,14 @@ export class ApartmentsService implements OnApplicationBootstrap {
       },
       60 * 60 * 1000
     )
+  }
+
+  onModuleDestroy(): void {
+    if (this.expirationInterval) {
+      clearInterval(this.expirationInterval)
+      this.expirationInterval = null
+      this.logger.log('Cleared expiration check interval.')
+    }
   }
 
   async checkExpiration(): Promise<void> {
@@ -191,7 +208,7 @@ export class ApartmentsService implements OnApplicationBootstrap {
         `Checking expiration: Found ${expiredApartments.length} expired apartments. Expiring them...`
       )
       for (const apt of expiredApartments) {
-        apt.status = 'unavailable'
+        apt.status = 'expired'
         await this.apartmentRepository.save(apt)
       }
     }
@@ -362,6 +379,11 @@ export class ApartmentsService implements OnApplicationBootstrap {
       }
     }
 
+    // Mặc định chỉ hiển thị bài đăng đã duyệt cho public
+    if (!query.status && !query.landlordId) {
+      query.status = 'available'
+    }
+
     return this.apartmentRepository.find({
       // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment
       where: query as any,
@@ -416,6 +438,15 @@ export class ApartmentsService implements OnApplicationBootstrap {
     })
   }
 
+  // ── Lấy danh sách bài đăng chờ duyệt (cho Staff/Admin) ──
+  async findPending(): Promise<Apartment[]> {
+    this.logger.log('Fetching pending apartment listings for staff review')
+    return this.apartmentRepository.find({
+      where: { status: 'pending' },
+      order: { createdAt: 'ASC' }, // FIFO — bài cũ nhất duyệt trước
+    })
+  }
+
   // ── Cập nhật trạng thái kiểm duyệt căn hộ ──
   async updateStatus(
     id: string,
@@ -449,12 +480,42 @@ export class ApartmentsService implements OnApplicationBootstrap {
       `Creating apartment: ${dto.title} by landlord: ${landlordId}`
     )
 
+    // Auto find-or-create Project nếu có tên nhưng không có ID
+    let resolvedProjectId = dto.projectId || null
+    let resolvedProjectName = dto.projectName || ''
+    if (!resolvedProjectId && resolvedProjectName) {
+      const project = await this.projectsService.findOrCreate({
+        name: resolvedProjectName,
+        city: dto.city,
+        district: dto.district,
+        location: dto.location,
+      })
+      resolvedProjectId = project._id.toString()
+      resolvedProjectName = project.name
+    }
+
+    // Auto find-or-create Building nếu có tên nhưng không có ID
+    let resolvedBuildingId = dto.buildingId || null
+    let resolvedBuildingName = dto.buildingName || ''
+    if (!resolvedBuildingId && resolvedBuildingName) {
+      const building = await this.buildingsService.findOrCreate({
+        name: resolvedBuildingName,
+        projectId: resolvedProjectId ?? null,
+        projectName: resolvedProjectName || null,
+        city: dto.city,
+        district: dto.district,
+        location: dto.location,
+      })
+      resolvedBuildingId = building._id.toString()
+      resolvedBuildingName = building.name
+    }
+
     const apartment = this.apartmentRepository.create({
       title: dto.title,
-      buildingId: dto.buildingId || null,
-      buildingName: dto.buildingName || '',
-      projectId: dto.projectId || null,
-      projectName: dto.projectName || '',
+      buildingId: resolvedBuildingId,
+      buildingName: resolvedBuildingName,
+      projectId: resolvedProjectId,
+      projectName: resolvedProjectName,
       category: dto.category,
       description: dto.description,
       location: dto.location,

@@ -77,6 +77,19 @@ export class ApartmentsController {
     return apartments.map(apt => ApartmentResponseMapper.toWebJson(apt))
   }
 
+  @Get('pending')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('staff', 'admin')
+  async getPendingListings(
+    @Query('format') format?: 'web' | 'mobile'
+  ): Promise<WebApartmentResponse[] | MobileApartmentResponse[]> {
+    const apartments = await this.apartmentsService.findPending()
+    if (format === 'mobile') {
+      return apartments.map(apt => ApartmentResponseMapper.toMobileJson(apt))
+    }
+    return apartments.map(apt => ApartmentResponseMapper.toWebJson(apt))
+  }
+
   @Get()
   async findAll(
     @Query() query: ApartmentFilterDto & { format?: 'web' | 'mobile' }
@@ -124,7 +137,7 @@ export class ApartmentsController {
 
   @Patch(':id/approve')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('staff')
+  @Roles('staff', 'admin')
   async approve(
     @Param('id') id: string,
     @CurrentUser('id') staffId: string
@@ -135,7 +148,7 @@ export class ApartmentsController {
 
   @Patch(':id/reject')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('staff')
+  @Roles('staff', 'admin')
   async reject(
     @Param('id') id: string,
     @Body() rejectApartmentDto: RejectApartmentDto
