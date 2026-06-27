@@ -264,13 +264,18 @@ export class AuthService {
       )
     }
 
+    const roles =
+      user.role === 'tenant' || user.role === 'landlord'
+        ? ['tenant', 'landlord']
+        : [user.role]
+
     const payload: UserPayload = {
       _id: user._id.toString(),
       email: user.email,
       name: user.fullName,
       phone: user.phone,
       username: user.email,
-      roles: [user.role],
+      roles,
       kycStatus: user.kycStatus,
     }
 
