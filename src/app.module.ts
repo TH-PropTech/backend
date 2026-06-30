@@ -4,6 +4,7 @@ import { TypeOrmModule } from '@nestjs/typeorm'
 import { configuration } from './config/configuration'
 import { envValidationSchema } from './config/env.validation'
 import { LoggerModule } from './common/logger/logger.module'
+import { ThrottlerModule } from '@nestjs/throttler'
 
 import { HealthModule } from './modules/health/health.module'
 import { UsersModule } from './modules/users/users.module'
@@ -49,6 +50,12 @@ import { AiConsultationModule } from './modules/ai-consultation/ai-consultation.
         autoLoadEntities: true,
       }),
     }),
+    ThrottlerModule.forRoot([
+      {
+        ttl: 60000,
+        limit: 10,
+      },
+    ]),
     LoggerModule,
     HealthModule,
     UsersModule,

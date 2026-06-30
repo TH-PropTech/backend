@@ -11,6 +11,8 @@ import * as crypto from 'crypto'
 import { Contract } from './schemas/contract.schema'
 import { PoliciesService } from '../policies/policies.service'
 import { FabricService } from '../fabric/fabric.service'
+import { KycService } from '../kyc/kyc.service'
+import { EkycProxyService } from '../kyc/ekyc-proxy.service'
 
 interface CreateContractInput {
   propertyId: string
@@ -44,7 +46,9 @@ export class ContractsService {
     @InjectRepository(Contract)
     private readonly contractRepository: Repository<Contract>,
     private readonly policiesService: PoliciesService,
-    private readonly fabricService: FabricService
+    private readonly fabricService: FabricService,
+    private readonly kycService: KycService,
+    private readonly ekycProxyService: EkycProxyService
   ) {}
 
   // ── Tạo hợp đồng mới — validate theo chính sách pháp luật ──
@@ -302,6 +306,68 @@ export class ContractsService {
       currentHash,
       storedHash: contract.contractHash,
       blockchainAddress: contract.blockchainAddress,
+    }
+  }
+
+  // ── Xác thực khuôn mặt người ký hợp đồng ──
+
+  async verifySigner(
+    contractId: string,
+    role: 'tenant' | 'landlord',
+    selfie: Express.Multer.File
+  ): Promise<{
+    verified: boolean
+    faceMatch: boolean
+    liveness: boolean
+    spoofScore: number
+  }> {
+    this.logger.log(
+      `Verifying signer identity for contract ${contractId}, role: ${role}`
+    )
+
+    let userId: string
+    try {
+      const contract = await this.findOne(contractId)
+      userId = role === 'tenant' ? contract.tenantId : contract.landlordId
+    } catch {
+      this.logger.warn(
+        `Contract ${contractId} not found. Falling back to looking up KYC record by contractId as userId.`
+      )
+      userId = contractId
+    }
+
+    if (!userId || !ObjectId.isValid(userId)) {
+      throw new BadRequestException(
+        `Hợp đồng thiếu thông tin ID hoặc ID không hợp lệ cho ${role}`
+      )
+    }
+
+    const kycRecord = await this.kycService.findByUserId(userId)
+    if (!kycRecord || kycRecord.status !== 'verified') {
+      throw new BadRequestException(
+        `Người ký (${role}) chưa hoàn tất xác minh KYC hoặc trạng thái không hợp lệ`
+      )
+    }
+
+    if (!kycRecord.frontCardUrl) {
+      throw new BadRequestException(
+        'Hồ sơ KYC thiếu ảnh mặt trước CCCD để đối sánh'
+      )
+    }
+
+    const verificationResult = await this.ekycProxyService.verifySigner(
+      selfie,
+      kycRecord.frontCardUrl
+    )
+
+    const isMatch = verificationResult.results?.face_matching === true
+    const isLive = verificationResult.results?.liveness === true
+
+    return {
+      verified: isMatch && isLive,
+      faceMatch: isMatch,
+      liveness: isLive,
+      spoofScore: verificationResult.results?.spoof_score ?? 0,
     }
   }
 }

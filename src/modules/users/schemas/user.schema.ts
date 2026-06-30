@@ -5,6 +5,7 @@ import {
   Column,
   CreateDateColumn,
   UpdateDateColumn,
+  Index,
 } from 'typeorm'
 
 export enum UserStatus {
@@ -92,6 +93,7 @@ export class User {
   passwordHash!: string
 
   @Column()
+  @Index({ unique: true })
   phone!: string
 
   @Column({ nullable: true })

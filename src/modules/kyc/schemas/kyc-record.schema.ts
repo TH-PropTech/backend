@@ -60,6 +60,26 @@ export class KycRecord {
   @Column({ type: 'float', nullable: true })
   ocrMatchRate?: number
 
+  /** Ngày cấp CCCD (trích xuất từ OCR mặt sau) */
+  @Column({ nullable: true })
+  issueDate?: string
+
+  /** Nơi cấp CCCD (trích xuất từ OCR mặt sau) */
+  @Column({ nullable: true })
+  placeOfIssue?: string
+
+  /** Kết quả so khớp khuôn mặt selfie vs CCCD */
+  @Column({ nullable: true })
+  faceMatchResult?: boolean
+
+  /** Kết quả Liveness Detection (thật/giả) */
+  @Column({ nullable: true })
+  livenessResult?: boolean
+
+  /** Điểm Anti-Spoofing (0.0 - 1.0) */
+  @Column({ type: 'float', nullable: true })
+  spoofScore?: number
+
   /**
    * Trạng thái KYC:
    * - pending: Đã nộp, chờ xử lý

@@ -5,6 +5,8 @@ import { AuthService } from './services/auth.service'
 import { SignupService } from './services/signup.service'
 import { PinService } from './services/pin.service'
 import { UnauthorizedException } from '@nestjs/common'
+import { ThrottlerModule } from '@nestjs/throttler'
+import { JwtService } from '@nestjs/jwt'
 
 describe('AuthController Integration', () => {
   let controller: AuthController
@@ -21,6 +23,7 @@ describe('AuthController Integration', () => {
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
+      imports: [ThrottlerModule.forRoot([{ ttl: 60000, limit: 10 }])],
       controllers: [AuthController],
       providers: [
         {
@@ -34,6 +37,10 @@ describe('AuthController Integration', () => {
         {
           provide: PinService,
           useValue: mockPinService,
+        },
+        {
+          provide: JwtService,
+          useValue: { verify: jest.fn(), sign: jest.fn() },
         },
       ],
     }).compile()

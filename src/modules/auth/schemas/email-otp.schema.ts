@@ -5,9 +5,11 @@ import {
   Column,
   CreateDateColumn,
   UpdateDateColumn,
+  Index,
 } from 'typeorm'
 
 @Entity('email_otps')
+@Index(['email', 'otpCode', 'action', 'isUsed'])
 export class EmailOtp {
   @ObjectIdColumn()
   _id!: ObjectId

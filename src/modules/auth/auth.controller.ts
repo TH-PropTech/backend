@@ -1,10 +1,12 @@
-import { Controller, Post, Body } from '@nestjs/common'
+import { Controller, Post, Body, UseGuards, Request } from '@nestjs/common'
 import { AuthService } from './services/auth.service'
 import { SignupService, SignupDto } from './services/signup.service'
 import { PinService } from './services/pin.service'
-import { IsString, IsEmail } from 'class-validator'
+import { IsString, IsEmail, Length, Matches } from 'class-validator'
 import { User } from '../users/schemas/user.schema'
 import { TokenResponse, UserPayload } from './interfaces/auth.interface'
+import { JwtAuthGuard } from './guards/jwt-auth.guard'
+import { ThrottlerGuard } from '@nestjs/throttler'
 
 export class RefreshTokenDto {
   @IsString()
@@ -58,9 +60,8 @@ export class ResetPasswordDto {
 
 export class SetupPinDto {
   @IsString()
-  userId!: string
-
-  @IsString()
+  @Length(6, 6, { message: 'PIN phải có độ dài đúng 6 chữ số' })
+  @Matches(/^\d{6}$/, { message: 'PIN chỉ được chứa các chữ số' })
   pin!: string
 
   @IsString()
@@ -69,20 +70,20 @@ export class SetupPinDto {
 
 export class VerifyPinDto {
   @IsString()
-  userId!: string
-
-  @IsString()
+  @Length(6, 6, { message: 'PIN phải có độ dài đúng 6 chữ số' })
+  @Matches(/^\d{6}$/, { message: 'PIN chỉ được chứa các chữ số' })
   pin!: string
 }
 
 export class ChangePinDto {
   @IsString()
-  userId!: string
-
-  @IsString()
+  @Length(6, 6, { message: 'PIN phải có độ dài đúng 6 chữ số' })
+  @Matches(/^\d{6}$/, { message: 'PIN chỉ được chứa các chữ số' })
   oldPin!: string
 
   @IsString()
+  @Length(6, 6, { message: 'PIN phải có độ dài đúng 6 chữ số' })
+  @Matches(/^\d{6}$/, { message: 'PIN chỉ được chứa các chữ số' })
   newPin!: string
 
   @IsString()
@@ -91,9 +92,8 @@ export class ChangePinDto {
 
 export class ResetPinDto {
   @IsString()
-  userId!: string
-
-  @IsString()
+  @Length(6, 6, { message: 'PIN phải có độ dài đúng 6 chữ số' })
+  @Matches(/^\d{6}$/, { message: 'PIN chỉ được chứa các chữ số' })
   newPin!: string
 
   @IsString()
@@ -114,6 +114,7 @@ export class AuthController {
   }
 
   @Post('signup/request-otp')
+  @UseGuards(ThrottlerGuard)
   async requestSignupOtp(
     @Body() dto: RequestSignupOtpDto
   ): Promise<{ success: boolean; message: string }> {
@@ -122,6 +123,7 @@ export class AuthController {
   }
 
   @Post('login')
+  @UseGuards(ThrottlerGuard)
   async login(
     @Body() dto: LoginDto
   ): Promise<TokenResponse & { user: UserPayload }> {
@@ -143,6 +145,7 @@ export class AuthController {
   }
 
   @Post('login-otp/request')
+  @UseGuards(ThrottlerGuard)
   async requestLoginOtp(@Body() dto: RequestLoginOtpDto): Promise<{
     is2faRequired: boolean
     twoFactorTempToken: string
@@ -155,6 +158,7 @@ export class AuthController {
   }
 
   @Post('forgot-password/request')
+  @UseGuards(ThrottlerGuard)
   async requestForgotPasswordOtp(
     @Body() dto: RequestForgotPasswordOtpDto
   ): Promise<{ success: boolean; message: string }> {
@@ -166,6 +170,7 @@ export class AuthController {
   }
 
   @Post('forgot-password/reset')
+  @UseGuards(ThrottlerGuard)
   async resetPasswordWithOtp(
     @Body() dto: ResetPasswordDto
   ): Promise<{ success: boolean; message: string }> {
@@ -178,25 +183,30 @@ export class AuthController {
   }
 
   @Post('pin/status')
+  @UseGuards(JwtAuthGuard)
   async getPinStatus(
-    @Body('userId') userId: string
+    @Request() req: { user: UserPayload }
   ): Promise<{ hasPin: boolean; pinSetAt?: Date }> {
-    return this.pinService.getStatus(userId)
+    return this.pinService.getStatus(req.user._id!)
   }
 
   @Post('pin/setup')
+  @UseGuards(JwtAuthGuard)
   async setupPin(
-    @Body() dto: SetupPinDto
+    @Body() dto: SetupPinDto,
+    @Request() req: { user: UserPayload }
   ): Promise<{ success: boolean; message: string }> {
-    await this.pinService.setupPin(dto.userId, dto.pin, dto.sessionId)
+    await this.pinService.setupPin(req.user._id!, dto.pin, dto.sessionId)
     return { success: true, message: 'Thiết lập PIN thành công' }
   }
 
   @Post('pin/verify')
+  @UseGuards(JwtAuthGuard, ThrottlerGuard)
   async verifyPin(
-    @Body() dto: VerifyPinDto
+    @Body() dto: VerifyPinDto,
+    @Request() req: { user: UserPayload }
   ): Promise<{ isValid: boolean; message: string }> {
-    const isValid = await this.pinService.verifyPin(dto.userId, dto.pin)
+    const isValid = await this.pinService.verifyPin(req.user._id!, dto.pin)
     return {
       isValid,
       message: isValid ? 'Mã PIN chính xác' : 'Mã PIN không đúng',
@@ -204,11 +214,13 @@ export class AuthController {
   }
 
   @Post('pin/change')
+  @UseGuards(JwtAuthGuard)
   async changePin(
-    @Body() dto: ChangePinDto
+    @Body() dto: ChangePinDto,
+    @Request() req: { user: UserPayload }
   ): Promise<{ success: boolean; message: string }> {
     await this.pinService.changePin(
-      dto.userId,
+      req.user._id!,
       dto.oldPin,
       dto.newPin,
       dto.sessionId
@@ -217,10 +229,12 @@ export class AuthController {
   }
 
   @Post('pin/reset')
+  @UseGuards(JwtAuthGuard)
   async resetPin(
-    @Body() dto: ResetPinDto
+    @Body() dto: ResetPinDto,
+    @Request() req: { user: UserPayload }
   ): Promise<{ success: boolean; message: string }> {
-    await this.pinService.resetPin(dto.userId, dto.newPin, dto.sessionId)
+    await this.pinService.resetPin(req.user._id!, dto.newPin, dto.sessionId)
     return { success: true, message: 'Đặt lại PIN thành công' }
   }
 }
