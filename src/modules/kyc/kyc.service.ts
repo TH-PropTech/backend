@@ -9,6 +9,7 @@ import { Repository, FindManyOptions, FindOptionsWhere } from 'typeorm'
 import { ObjectId } from 'mongodb'
 import { KycRecord } from './schemas/kyc-record.schema'
 import { User } from '../users/schemas/user.schema'
+import { SubmitKycDto } from './dto/submit-kyc.dto'
 
 export interface KycListResult {
   items: (KycRecord & { user?: { email: string; phone: string } | null })[]
@@ -140,6 +141,15 @@ export class KycService {
   }
 
   /**
+   * Lấy hồ sơ KYC của một người dùng theo userId.
+   */
+  async findByUserId(userId: string): Promise<KycRecord | null> {
+    return this.kycRepository.findOne({
+      where: { userId },
+    })
+  }
+
+  /**
    * Staff duyệt hoặc từ chối hồ sơ KYC.
    * Đồng thời cập nhật kycStatus trên User entity.
    */
@@ -231,5 +241,75 @@ export class KycService {
         `Failed to sync user KYC status: ${err instanceof Error ? err.message : String(err)}`
       )
     }
+  }
+
+  /**
+   * Người dùng nộp hồ sơ KYC.
+   * Tạo mới hoặc cập nhật hồ sơ cũ nếu đã có.
+   */
+  async submitKyc(userId: string, dto: SubmitKycDto): Promise<KycRecord> {
+    this.logger.log(`Submitting KYC record for user: ${userId}`)
+
+    // 1. Kiểm tra user có tồn tại không
+    const user = await this.userRepository.findOne({
+      where: { _id: new ObjectId(userId) },
+    })
+    if (!user) {
+      throw new NotFoundException('Không tìm thấy tài khoản người dùng')
+    }
+
+    if (user.kycStatus === 'verified') {
+      throw new BadRequestException('Tài khoản đã được xác minh KYC thành công')
+    }
+
+    // 2. Tìm KYC record cũ của user này
+    let record = await this.kycRepository.findOne({
+      where: { userId },
+    })
+
+    if (!record) {
+      record = new KycRecord()
+      record.userId = userId
+    }
+
+    // 3. Cập nhật các trường từ DTO
+    record.idCardNumber = dto.idCardNumber
+    record.frontCardUrl = dto.frontCardUrl
+    record.backCardUrl = dto.backCardUrl
+    record.selfieUrl = dto.selfieUrl
+
+    if (dto.fullName !== undefined) record.fullName = dto.fullName
+    if (dto.dateOfBirth !== undefined) record.dateOfBirth = dto.dateOfBirth
+    if (dto.gender !== undefined) record.gender = dto.gender
+    if (dto.nationality !== undefined) record.nationality = dto.nationality
+    if (dto.placeOfOrigin !== undefined)
+      record.placeOfOrigin = dto.placeOfOrigin
+    if (dto.placeOfResidence !== undefined)
+      record.placeOfResidence = dto.placeOfResidence
+    if (dto.issueDate !== undefined) record.issueDate = dto.issueDate
+    if (dto.placeOfIssue !== undefined) record.placeOfIssue = dto.placeOfIssue
+    if (dto.faceMatchResult !== undefined)
+      record.faceMatchResult = dto.faceMatchResult
+    if (dto.livenessResult !== undefined)
+      record.livenessResult = dto.livenessResult
+    if (dto.spoofScore !== undefined) record.spoofScore = dto.spoofScore
+    if (dto.ocrMatchRate !== undefined) record.ocrMatchRate = dto.ocrMatchRate
+
+    // Cập nhật trạng thái
+    record.status = 'pending'
+    record.reviewedBy = null
+    record.verifiedAt = null
+    record.rejectedReason = null
+
+    // 4. Lưu KYC record
+    const savedRecord = await this.kycRepository.save(record)
+
+    // 5. Cập nhật trạng thái trên User entity
+    user.kycStatus = 'pending'
+    user.kycRejectReason = null
+    await this.userRepository.save(user)
+
+    this.logger.log(`KYC record submitted successfully for user: ${userId}`)
+    return savedRecord
   }
 }
