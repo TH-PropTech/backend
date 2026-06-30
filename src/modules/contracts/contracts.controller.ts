@@ -1,6 +1,18 @@
-import { Controller, Get, Post, Put, Body, Param, Query } from '@nestjs/common'
+import {
+  Controller,
+  Get,
+  Post,
+  Put,
+  Body,
+  Param,
+  Query,
+  UseInterceptors,
+  UploadedFile,
+  BadRequestException,
+} from '@nestjs/common'
 import { ApiTags } from '@nestjs/swagger'
-import { IsString, IsNumber, IsNotEmpty, Min, Max } from 'class-validator'
+import { FileInterceptor } from '@nestjs/platform-express'
+import { IsString, IsNotEmpty, IsNumber, Min, Max } from 'class-validator'
 import { ContractsService } from './contracts.service'
 import { Contract } from './schemas/contract.schema'
 
@@ -124,5 +136,22 @@ export class ContractsController {
     blockchainAddress: string | null
   }> {
     return this.contractsService.verifyIntegrity(id)
+  }
+
+  @Post(':id/verify-signer')
+  @UseInterceptors(FileInterceptor('selfie'))
+  async verifySigner(
+    @Param('id') id: string,
+    @Body('role') role: 'tenant' | 'landlord',
+    @UploadedFile() file: Express.Multer.File
+  ): Promise<{
+    verified: boolean
+    faceMatch: boolean
+    liveness: boolean
+    spoofScore: number
+  }> {
+    if (!file) throw new BadRequestException('Thiếu file selfie')
+    if (!role) throw new BadRequestException('Thiếu tham số role')
+    return this.contractsService.verifySigner(id, role, file)
   }
 }
