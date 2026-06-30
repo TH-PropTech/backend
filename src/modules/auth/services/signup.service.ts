@@ -86,24 +86,7 @@ export class SignupService {
    * Đăng ký tài khoản cục bộ mới (yêu cầu OTP)
    */
   async signup(dto: SignupDto): Promise<User> {
-    // A. Xác thực mã OTP đăng ký trước
-    const otpRecord = await this.emailOtpRepository.findOne({
-      where: {
-        email: dto.email,
-        otpCode: dto.otp,
-        action: 'signup',
-        isUsed: false,
-      },
-    })
-
-    if (!otpRecord || new Date() > otpRecord.expiredAt) {
-      throw new BadRequestException('Mã OTP không chính xác hoặc đã hết hạn')
-    }
-
-    otpRecord.isUsed = true
-    await this.emailOtpRepository.save(otpRecord)
-
-    // 1. Kiểm tra định dạng và dữ liệu trùng lặp
+    // 1. Kiểm tra định dạng và dữ liệu trùng lặp trước
     const existingEmail = await this.userRepository.findOne({
       where: { email: dto.email },
     })
@@ -119,6 +102,23 @@ export class SignupService {
         'Số điện thoại đã được đăng ký trên hệ thống'
       )
     }
+
+    // 2. Xác thực mã OTP đăng ký sau khi xác thực dữ liệu thành công
+    const otpRecord = await this.emailOtpRepository.findOne({
+      where: {
+        email: dto.email,
+        otpCode: dto.otp,
+        action: 'signup',
+        isUsed: false,
+      },
+    })
+
+    if (!otpRecord || new Date() > otpRecord.expiredAt) {
+      throw new BadRequestException('Mã OTP không chính xác hoặc đã hết hạn')
+    }
+
+    otpRecord.isUsed = true
+    await this.emailOtpRepository.save(otpRecord)
 
     // 2. Mã hóa mật khẩu
     const passwordHash = await bcrypt.hash(dto.password, 10)

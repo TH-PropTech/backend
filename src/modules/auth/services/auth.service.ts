@@ -38,15 +38,9 @@ export class AuthService {
     emailOrPhone: string,
     password: string
   ): Promise<TokenResponse & { user: UserPayload }> {
-    let user = await this.userRepository.findOne({
-      where: { email: emailOrPhone },
+    const user = await this.userRepository.findOne({
+      where: [{ email: emailOrPhone }, { phone: emailOrPhone }],
     })
-
-    if (!user) {
-      user = await this.userRepository.findOne({
-        where: { phone: emailOrPhone },
-      })
-    }
 
     if (!user) {
       throw new UnauthorizedException('Tài khoản hoặc mật khẩu không chính xác')
