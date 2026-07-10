@@ -11,6 +11,7 @@ export const configuration = (): {
     port: number
     url: string
     corsOrigins: string[]
+    recommendationApiUrl: string
   }
   database: {
     url: string
@@ -25,6 +26,8 @@ export const configuration = (): {
     corsOrigins: parseCsv(
       process.env.APP_CORS_ORIGINS ?? 'http://localhost:3000'
     ),
+    recommendationApiUrl:
+      process.env.RECOMMENDATION_API_URL ?? 'http://localhost:5001/api',
   },
   database: {
     url: process.env.DATABASE_URL ?? 'mongodb://localhost:27017/th_proptech',

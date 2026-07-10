@@ -129,6 +129,10 @@ class EnvironmentVariables {
   @IsOptional()
   @IsNumber()
   DEFAULT_BNPL_CREDIT_LIMIT!: number
+
+  @IsOptional()
+  @IsString()
+  RECOMMENDATION_API_URL!: string
 }
 
 export function validate(
