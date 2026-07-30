@@ -395,9 +395,21 @@ export class ApartmentsService
   async findOne(id: string): Promise<Apartment & { landlord?: User | null }> {
     this.logger.log(`Fetching apartment details for ID: ${id}`)
     try {
-      const apartment = await this.apartmentRepository.findOne({
-        where: { _id: new ObjectId(id) },
-      })
+      let apartment: Apartment | null = null
+      if (ObjectId.isValid(id)) {
+        apartment = await this.apartmentRepository.findOne({
+          where: { _id: new ObjectId(id) },
+        })
+      }
+      if (!apartment) {
+        const allApartments = await this.apartmentRepository.find()
+        apartment =
+          allApartments.find(
+            a =>
+              a.title.toLowerCase().includes(id.toLowerCase()) ||
+              id.toLowerCase().includes(a.title.toLowerCase())
+          ) ?? null
+      }
       if (!apartment) {
         throw new NotFoundException(`Không tìm thấy căn hộ với ID: ${id}`)
       }

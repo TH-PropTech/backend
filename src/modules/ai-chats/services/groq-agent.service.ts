@@ -56,12 +56,12 @@ export class GroqAgentService {
                   'Tên quận, khu vực hoặc tên chung cư/dự án (ví dụ: Quận 7, Bình Thạnh, Vinhomes Central Park).',
               },
               maxPrice: {
-                type: 'number',
+                anyOf: [{ type: 'number' }, { type: 'string' }],
                 description:
                   'Giá thuê phòng tối đa hàng tháng bằng Việt Nam Đồng (VNĐ). Ví dụ: 15000000.',
               },
               bedrooms: {
-                type: 'number',
+                anyOf: [{ type: 'number' }, { type: 'string' }],
                 description: 'Số lượng phòng ngủ mong muốn (ví dụ: 1, 2, 3).',
               },
             },
@@ -98,7 +98,7 @@ export class GroqAgentService {
               apartmentId: {
                 type: 'string',
                 description:
-                  'Mã định danh duy nhất của căn hộ (ví dụ: 60f7a9...).',
+                  'Mã định danh MongoDB hoặc tiêu đề căn hộ thu được từ kết quả tìm kiếm.',
               },
               visitAt: {
                 type: 'string',
@@ -119,7 +119,10 @@ export class GroqAgentService {
     ]
   }
 
-  async chat(messages: ChatMessage[]): Promise<{
+  async chat(
+    messages: ChatMessage[],
+    disableTools = false
+  ): Promise<{
     content: string | null
     toolCalls?: ToolCall[]
   }> {
@@ -134,17 +137,39 @@ export class GroqAgentService {
 Bạn trò chuyện thân thiện bằng tiếng Việt.
 Bạn hỗ trợ khách thuê (cả khách đăng nhập và khách vãng lai) giải đáp quy trình thuê căn hộ, tìm kiếm căn hộ phù hợp và đặt lịch xem nhà.
 
-Quy tắc quan trọng:
-1. Nếu khách hàng muốn tìm kiếm hoặc hỏi về căn hộ theo nhu cầu (khu vực, giá, phòng ngủ), hãy sử dụng tool search_apartments để tìm kiếm. Không tự bịa thông tin căn hộ.
-2. Khi giới thiệu căn hộ, luôn hiển thị thông tin chủ nhà (Họ tên, SĐT) dựa trên dữ liệu trả về từ tool.
-3. TUYỆT ĐỐI KHÔNG hiển thị mã định danh kỹ thuật (ID căn hộ / MongoDB ObjectId như 60f7a9...) trong văn bản trò chuyện gửi cho khách hàng. Chỉ sử dụng tên căn hộ (ví dụ: "Căn hộ Vinhomes Central Park 2PN") để trao đổi.
-4. Khi khách hàng bày tỏ mong muốn đặt lịch hẹn hoặc đồng ý đi xem một căn hộ cụ thể, hãy gọi ngay tool request_booking với ID căn hộ đó để hiển thị Thẻ Đặt Lịch Tương Tác cho họ chọn ngày/giờ trực tiếp. Không tự hỏi thời gian bằng văn bản.
-5. Khi người dùng bấm nút xác nhận trên Thẻ Đặt Lịch, hệ thống client sẽ gửi lên tin nhắn chứa ngày giờ cụ thể (ví dụ: "Đặt lịch xem căn hộ [Tên Căn Hộ] vào lúc [Giờ] ngày [Ngày]"). Khi nhận tin nhắn này, hãy lập tức trích xuất ngày giờ và ID căn hộ tương ứng để gọi tool create_booking_draft.
-6. Trả lời ngắn gọn, lịch sự, trực diện, không dài dòng. Không dùng markdown quá phức tạp ngoài dạng gạch đầu dòng.`
+Quy tắc quan trọng về luồng xử lý (BẮT BUỘC TUÂN THỦ TỪNG BƯỚC):
+1. BƯỚC TÌM KIẾM (Search Intent): Khi khách hàng gõ từ khóa tìm kiếm (ví dụ: "Tìm căn hộ Vinhomes 2PN"), bạn CHỈ ĐƯỢC GỌI tool \`search_apartments\`. TUYỆT ĐỐI KHÔNG tự ý gọi \`request_booking\` hay \`create_booking_draft\`. CHỈ điền các tham số lọc khi người dùng thực sự cung cấp. Tuyệt đối không tự ý giả định hay bịa thêm tham số. Khi giới thiệu kết quả, hãy mô tả ngắn gọn thông tin căn hộ kèm tên & SĐT chủ nhà từ tool.
+2. BƯỚC HIỂN THỊ FORM ĐẶT LỊCH (Booking Request): Bạn CHỈ gọi tool \`request_booking\` khi người dùng thể hiện rõ ý định muốn đặt lịch xem một căn hộ cụ thể (ví dụ: bấm nút "Đặt lịch" hoặc nói "Cho tôi xem căn hộ này" / "Tôi muốn đặt lịch xem nhà").
+   - KẾ THỪA CĂN HỘ TỪ LỊCH SỬ: Nếu khách hàng nói "Tôi muốn đặt lịch xem nhà" mà trước đó phiên chat từng nhắc đến/tìm kiếm căn hộ X, bạn ĐƯỢC PHÉP kế thừa ID căn hộ X đó để gọi tool \`request_booking\`.
+   - KHI GỌI TOOL \`request_booking\`: Văn bản câu trả lời của bạn BẮT BUỘC CHỈ ĐƯỢC LÀ LỜI MỜI người dùng chọn ngày giờ (ví dụ: "Dưới đây là thẻ đặt lịch xem căn hộ [Tên căn hộ]. Bạn vui lòng chọn ngày và giờ phù hợp ở khung bên dưới:").
+   - TUYỆT ĐỐI KHÔNG ĐƯỢC đọc các tin nhắn xác nhận lịch cũ trong lịch sử hội thoại để ghi "Lịch hẹn xem nhà đã được đặt thành công!" ở bước này vì người dùng đang yêu cầu lên lịch xem phòng MỚI, CHƯA chọn ngày giờ và CHƯA bấm nút xác nhận.
+3. BƯỚC XÁC NHẬN ĐẶT LỊCH NHÁP (Confirm Booking Draft): Bạn CHỈ gọi tool \`create_booking_draft\` khi nhận được tin nhắn từ client chứa ngày giờ cụ thể được gửi từ Form chọn lịch (ví dụ: "Đặt lịch xem căn hộ [Tên] vào lúc [Giờ] ngày [Ngày]"). CHỈ KHI tool \`create_booking_draft\` đã thực thi xong, lúc này câu trả lời của bạn MỚI ĐƯỢC PHÉP thông báo: "Lịch hẹn xem nhà đã được đặt thành công! Bạn sẽ xem căn hộ [Tên căn hộ] vào lúc [Giờ] ngày [Ngày]...".
+4. Khác:
+   - TUYỆT ĐỐI KHÔNG hiển thị mã định danh kỹ thuật (ID căn hộ / MongoDB ObjectId) trong văn bản gửi cho khách hàng.
+   - Nếu khách hàng hỏi quy trình, điều khoản hay FAQ chung chung, giải thích rõ bằng văn bản và không gọi bất kỳ tool nào.
+   - Trả lời ngắn gọn, lịch sự, trực diện, không dài dòng.`
+
+    // Safe sliding window: keep up to 5 user turns (including their subsequent tool calls & assistant replies)
+    // to optimize token usage and avoid context dilution, while preserving tool calling structure.
+    const MAX_USER_TURNS = 5
+    let userTurnCount = 0
+    let sliceIndex = 0
+
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i]
+      if (msg && msg.role === 'user') {
+        userTurnCount++
+        if (userTurnCount > MAX_USER_TURNS) {
+          sliceIndex = i + 1
+          break
+        }
+      }
+    }
+    const slicedMessages = messages.slice(sliceIndex)
 
     const fullMessages = [
       { role: 'system', content: systemPrompt },
-      ...messages.map(m => ({
+      ...slicedMessages.map(m => ({
         role: m.role,
         content: m.content || '',
         name: m.name,
@@ -165,7 +190,7 @@ Quy tắc quan trọng:
           body: JSON.stringify({
             model: this.model,
             messages: fullMessages,
-            tools: this.getTools(),
+            ...(disableTools ? {} : { tools: this.getTools() }),
             temperature: 0.3,
             stream: false,
           }),
@@ -228,7 +253,7 @@ Quy tắc quan trọng:
 
       return {
         content: choice.content || null,
-        toolCalls: parsedToolCalls,
+        ...(parsedToolCalls ? { toolCalls: parsedToolCalls } : {}),
       }
     } catch (error) {
       this.logger.error('Error during chat completion with Groq:', error)

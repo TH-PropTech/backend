@@ -18,7 +18,11 @@ export class AiChatsController {
     @Query('userId') userId?: string,
     @Query('deviceId') deviceId?: string
   ): Promise<AiChat> {
-    return this.aiChatsService.getOrCreateSession({ userId, deviceId })
+    const sessionKey = {
+      ...(userId ? { userId } : {}),
+      ...(deviceId ? { deviceId } : {}),
+    }
+    return this.aiChatsService.getOrCreateSession(sessionKey)
   }
 
   @Delete('history')
@@ -27,6 +31,10 @@ export class AiChatsController {
     @Query('userId') userId?: string,
     @Query('deviceId') deviceId?: string
   ): Promise<void> {
-    await this.aiChatsService.clearHistory({ userId, deviceId })
+    const sessionKey = {
+      ...(userId ? { userId } : {}),
+      ...(deviceId ? { deviceId } : {}),
+    }
+    await this.aiChatsService.clearHistory(sessionKey)
   }
 }

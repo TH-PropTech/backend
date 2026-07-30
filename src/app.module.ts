@@ -27,6 +27,7 @@ import { TwoFactorModule } from './modules/two-factor/two-factor.module'
 import { FabricModule } from './modules/fabric/fabric.module'
 import { PoliciesModule } from './modules/policies/policies.module'
 import { AiConsultationModule } from './modules/ai-consultation/ai-consultation.module'
+import { RedisModule } from './modules/redis/redis.module'
 
 @Module({
   imports: [
@@ -78,6 +79,7 @@ import { AiConsultationModule } from './modules/ai-consultation/ai-consultation.
     FabricModule,
     PoliciesModule,
     AiConsultationModule,
+    RedisModule,
   ],
 })
 export class AppModule {}

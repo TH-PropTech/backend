@@ -1,12 +1,3 @@
-import {
-  Entity,
-  ObjectIdColumn,
-  ObjectId,
-  Column,
-  CreateDateColumn,
-  UpdateDateColumn,
-} from 'typeorm'
-
 export interface PropertyCardMetadata {
   id: string
   title: string
@@ -23,32 +14,30 @@ export interface BookingRequestMetadata {
 }
 
 export interface ChatMessage {
-  role: 'user' | 'assistant' | 'system'
+  role: 'user' | 'assistant' | 'system' | 'tool'
   content: string
-  timestamp: Date
+  timestamp?: Date
+  name?: string
+  tool_call_id?: string
+  tool_calls?: Array<{
+    id: string
+    type: 'function'
+    function: {
+      name: string
+      arguments: string
+    }
+  }>
   metadata?: {
     propertyCard?: PropertyCardMetadata
+    propertyCards?: PropertyCardMetadata[]
     bookingRequest?: BookingRequestMetadata
   }
 }
 
-@Entity('ai_chats')
 export class AiChat {
-  @ObjectIdColumn()
-  _id!: ObjectId
-
-  @Column({ nullable: true })
   userId?: string
-
-  @Column({ nullable: true })
   deviceId?: string
-
-  @Column()
   messages!: ChatMessage[]
-
-  @CreateDateColumn()
   createdAt!: Date
-
-  @UpdateDateColumn()
   updatedAt!: Date
 }

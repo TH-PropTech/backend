@@ -7,14 +7,16 @@ import {
   ChatMessage as LLMChatMessage,
 } from './groq-agent.service'
 import { ApartmentsService } from '../../apartments/apartments.service'
+import { ApartmentFilterDto } from '../../apartments/dto/apartment-filter.dto'
 import { BookingsService } from '../../bookings/bookings.service'
 import { User } from '../../users/schemas/user.schema'
 import { ObjectId } from 'mongodb'
+import { RedisService } from '../../redis/redis.service'
 
 interface SearchApartmentsArgs {
   location?: string
-  bedrooms?: number
-  maxPrice?: number
+  bedrooms?: number | string
+  maxPrice?: number | string
 }
 
 interface CreateBookingDraftArgs {
@@ -28,8 +30,7 @@ export class AiChatsService {
   private readonly logger = new Logger(AiChatsService.name)
 
   constructor(
-    @InjectRepository(AiChat)
-    private readonly aiChatRepository: Repository<AiChat>,
+    private readonly redisService: RedisService,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
     private readonly groqAgentService: GroqAgentService,
@@ -37,30 +38,159 @@ export class AiChatsService {
     private readonly bookingsService: BookingsService
   ) {}
 
+  private formatPhoneNumber(phone?: string): string {
+    if (!phone) return ''
+    let cleaned = phone.replace(/\D/g, '')
+    if (cleaned.startsWith('84')) {
+      cleaned = '0' + cleaned.slice(2)
+    }
+    // Chuyển đổi đầu số Mobifone 11 số cũ (0120, 0121, 0122, 0126, 0128) sang 10 số chuẩn
+    if (cleaned.startsWith('0120') && cleaned.length === 11) {
+      cleaned = '070' + cleaned.slice(4)
+    } else if (cleaned.startsWith('0121') && cleaned.length === 11) {
+      cleaned = '079' + cleaned.slice(4)
+    } else if (cleaned.startsWith('0122') && cleaned.length === 11) {
+      cleaned = '077' + cleaned.slice(4)
+    } else if (cleaned.startsWith('0126') && cleaned.length === 11) {
+      cleaned = '076' + cleaned.slice(4)
+    } else if (cleaned.startsWith('0128') && cleaned.length === 11) {
+      cleaned = '078' + cleaned.slice(4)
+    }
+    return cleaned
+  }
+
+  private async resolveApartmentId(
+    sessionKey: { userId?: string; deviceId?: string },
+    inputApartmentId?: string
+  ): Promise<string | null> {
+    if (inputApartmentId && inputApartmentId.trim() !== '') {
+      // 1. Kiểm tra nếu inputApartmentId là ObjectId 24-hex và thực sự tồn tại trong DB
+      if (ObjectId.isValid(inputApartmentId)) {
+        try {
+          const apt = await this.apartmentsService.findOne(inputApartmentId)
+          if (apt && apt._id) {
+            return apt._id.toString()
+          }
+        } catch {
+          // ID 24-hex không tồn tại trong DB, tiếp tục tra cứu
+        }
+      }
+
+      // 2. Tra cứu fuzzy theo tiêu đề/tên dự án trong Database từ input
+      try {
+        const apartments = await this.apartmentsService.findAll({
+          search: inputApartmentId,
+        })
+        const firstApt = apartments?.[0]
+        if (firstApt && firstApt._id) {
+          return firstApt._id.toString()
+        }
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err)
+        this.logger.warn(`Lỗi tra cứu apartmentId theo tiêu đề: ${errMsg}`)
+      }
+
+      // 3. Trích xuất tên căn hộ trong ngoặc kép nếu có
+      const titleMatch = inputApartmentId.match(/["'“]([^"'”]+)["'”]/)
+      if (titleMatch && titleMatch[1]) {
+        try {
+          const apartments = await this.apartmentsService.findAll({
+            search: titleMatch[1],
+          })
+          const firstApt = apartments?.[0]
+          if (firstApt && firstApt._id) {
+            return firstApt._id.toString()
+          }
+        } catch {
+          // Ignore
+        }
+      }
+    }
+
+    // 4. Tra cứu trong lịch sử Redis Session gần nhất (với kiểm tra tồn tại thực tế trong DB)
+    try {
+      const chat = await this.getOrCreateSession(sessionKey)
+      if (chat.messages && chat.messages.length > 0) {
+        for (let i = chat.messages.length - 1; i >= 0; i--) {
+          const msg = chat.messages[i]
+          const meta = msg?.metadata
+          const candidateId =
+            meta?.bookingRequest?.apartmentId ||
+            meta?.propertyCard?.id ||
+            meta?.propertyCards?.[0]?.id
+
+          if (candidateId && ObjectId.isValid(candidateId)) {
+            try {
+              const apt = await this.apartmentsService.findOne(candidateId)
+              if (apt && apt._id) {
+                return apt._id.toString()
+              }
+            } catch {
+              // ID trong lịch sử không còn tồn tại trong DB, tiếp tục tìm ở tin nhắn cũ hơn
+            }
+          }
+        }
+      }
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err)
+      this.logger.warn(`Lỗi tra cứu apartmentId từ session metadata: ${errMsg}`)
+    }
+
+    // 5. Fallback lấy căn hộ đang hoạt động (available) gần nhất trong Database
+    try {
+      const available = await this.apartmentsService.findAll()
+      const firstAvail = available?.[0]
+      if (firstAvail && firstAvail._id) {
+        return firstAvail._id.toString()
+      }
+    } catch {
+      // Ignore
+    }
+
+    return null
+  }
+
+  private getRedisKey(sessionKey: {
+    userId?: string
+    deviceId?: string
+  }): string {
+    const { userId, deviceId } = sessionKey
+    return `ai-chat:session:${userId || deviceId}`
+  }
+
   async getOrCreateSession(sessionKey: {
     userId?: string
     deviceId?: string
   }): Promise<AiChat> {
     const { userId, deviceId } = sessionKey
+    const key = this.getRedisKey(sessionKey)
 
-    let chat: AiChat | null = null
-
-    if (userId) {
-      chat = await this.aiChatRepository.findOne({ where: { userId } })
-    } else if (deviceId) {
-      chat = await this.aiChatRepository.findOne({ where: { deviceId } })
+    const cached = await this.redisService.get(key)
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached) as AiChat
+        if (parsed.createdAt) parsed.createdAt = new Date(parsed.createdAt)
+        if (parsed.updatedAt) parsed.updatedAt = new Date(parsed.updatedAt)
+        if (parsed.messages) {
+          parsed.messages.forEach(m => {
+            if (m.timestamp) m.timestamp = new Date(m.timestamp)
+          })
+        }
+        return parsed
+      } catch {
+        this.logger.error(`Failed to parse cached chat session for key: ${key}`)
+      }
     }
 
-    if (!chat) {
-      chat = this.aiChatRepository.create({
-        userId: userId || undefined,
-        deviceId: deviceId || undefined,
-        messages: [],
-      })
-      await this.aiChatRepository.save(chat)
+    const newChat: AiChat = {
+      ...(userId ? { userId } : {}),
+      ...(deviceId ? { deviceId } : {}),
+      messages: [],
+      createdAt: new Date(),
+      updatedAt: new Date(),
     }
-
-    return chat
+    await this.redisService.set(key, JSON.stringify(newChat), 3600)
+    return newChat
   }
 
   async addMessage(
@@ -74,23 +204,26 @@ export class AiChatsService {
       role,
       content,
       timestamp: new Date(),
-      metadata,
+      ...(metadata ? { metadata } : {}),
     }
     chat.messages.push(newMessage)
 
     if (chat.messages.length > 50) {
       chat.messages = chat.messages.slice(chat.messages.length - 50)
     }
-    return this.aiChatRepository.save(chat)
+    chat.updatedAt = new Date()
+
+    const key = this.getRedisKey(sessionKey)
+    await this.redisService.set(key, JSON.stringify(chat), 3600)
+    return chat
   }
 
   async clearHistory(sessionKey: {
     userId?: string
     deviceId?: string
   }): Promise<void> {
-    const chat = await this.getOrCreateSession(sessionKey)
-    chat.messages = []
-    await this.aiChatRepository.save(chat)
+    const key = this.getRedisKey(sessionKey)
+    await this.redisService.del(key)
   }
 
   async handleUserMessage(
@@ -117,6 +250,7 @@ export class AiChatsService {
 
     let loopLimit = 3
     let metadata: ChatMessage['metadata'] = undefined
+    let disableTools = false
 
     // 4. Handle Tool Calls if LLM requests them
     while (
@@ -126,6 +260,8 @@ export class AiChatsService {
     ) {
       loopLimit--
       const toolCall = response.toolCalls[0]
+      if (!toolCall) break
+
       this.logger.log(
         `LLM requested tool call: ${toolCall.function.name} with args ${JSON.stringify(toolCall.function.arguments)}`
       )
@@ -136,17 +272,29 @@ export class AiChatsService {
         const args = toolCall.function
           .arguments as unknown as SearchApartmentsArgs
         const location = args.location
-        const bedrooms = args.bedrooms
-        const maxPrice = args.maxPrice // in VNĐ
+        const bedrooms =
+          args.bedrooms !== undefined &&
+          args.bedrooms !== null &&
+          args.bedrooms !== ''
+            ? Number(args.bedrooms)
+            : undefined
+        const maxPrice =
+          args.maxPrice !== undefined &&
+          args.maxPrice !== null &&
+          args.maxPrice !== ''
+            ? Number(args.maxPrice)
+            : undefined
 
         // Convert maxPrice from VNĐ to Millions VNĐ for ApartmentsService
         const filterMaxPrice = maxPrice ? maxPrice / 1000000 : undefined
 
-        const apartments = await this.apartmentsService.findAll({
-          search: location,
-          bedrooms,
-          maxPrice: filterMaxPrice,
-        })
+        const filter: ApartmentFilterDto = {
+          ...(location ? { search: location } : {}),
+          ...(bedrooms !== undefined ? { bedrooms } : {}),
+          ...(filterMaxPrice !== undefined ? { maxPrice: filterMaxPrice } : {}),
+        }
+
+        const apartments = await this.apartmentsService.findAll(filter)
 
         if (apartments && apartments.length > 0) {
           // Fetch landlord details for each apartment
@@ -161,7 +309,7 @@ export class AiChatsService {
                   })
                   if (landlord) {
                     landlordName = landlord.fullName || 'Chưa xác định'
-                    landlordPhone = landlord.phone || ''
+                    landlordPhone = this.formatPhoneNumber(landlord.phone)
                   }
                 } catch (err) {
                   const errorObject = err as Record<string, unknown>
@@ -191,21 +339,44 @@ export class AiChatsService {
               })
               .join('\n')
 
-          // Extract first apartment to return as metadata for visual card rendering
-          const firstApt = apartmentsWithLandlord[0]
-          const firstAptId = firstApt._id ? firstApt._id.toString() : 'unknown'
-          metadata = {
-            propertyCard: {
-              id: firstAptId,
-              title: firstApt.title,
-              price: firstApt.priceMonthly,
+          // Map all search results to return as metadata for visual carousel rendering
+          const propertyCards = apartmentsWithLandlord.map(apt => {
+            const aptId = apt._id ? apt._id.toString() : 'unknown'
+            return {
+              id: aptId,
+              title: apt.title,
+              price: apt.priceMonthly,
               image:
-                firstApt.gallery?.[0] ||
+                apt.gallery?.[0] ||
                 'https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?auto=format&fit=crop&w=600&q=80',
-              location: firstApt.location || 'Bình Thạnh, TP.HCM',
-              landlordName: firstApt.landlordName,
-              landlordPhone: firstApt.landlordPhone,
-            },
+              location: apt.location || 'Bình Thạnh, TP.HCM',
+              landlordName: apt.landlordName,
+              landlordPhone: apt.landlordPhone,
+            }
+          })
+
+          // Maintain backward compatibility by keeping single propertyCard as the first result
+          const firstApt = apartmentsWithLandlord[0]
+          if (firstApt) {
+            const firstAptId = firstApt._id
+              ? firstApt._id.toString()
+              : 'unknown'
+
+            metadata = {
+              ...(metadata || {}),
+              propertyCard: {
+                id: firstAptId,
+                title: firstApt.title,
+                price: firstApt.priceMonthly,
+                image:
+                  firstApt.gallery?.[0] ||
+                  'https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?auto=format&fit=crop&w=600&q=80',
+                location: firstApt.location || 'Bình Thạnh, TP.HCM',
+                landlordName: firstApt.landlordName,
+                landlordPhone: firstApt.landlordPhone,
+              },
+              propertyCards,
+            }
           }
         } else {
           toolResultContent = 'Không tìm thấy căn hộ nào phù hợp với yêu cầu.'
@@ -213,55 +384,78 @@ export class AiChatsService {
       } else if (toolCall.function.name === 'create_booking_draft') {
         const args = toolCall.function
           .arguments as unknown as CreateBookingDraftArgs
-        const apartmentId = args.apartmentId
+        const inputApartmentId = args.apartmentId
         const visitAt = args.visitAt
         const method = args.method || 'onsite'
 
-        try {
-          const booking = await this.bookingsService.create(
-            sessionKey.userId || null,
-            {
-              apartmentId,
-              visitAt,
-              method,
-              note: 'Tạo tự động qua trợ lý ảo AI',
-            }
-          )
-          const bookingId = booking._id ? booking._id.toString() : 'unknown'
-          const formattedVisitAt = booking.visitAt
-            ? booking.visitAt.toString()
-            : 'unknown'
-          toolResultContent = `Đặt lịch hẹn xem nhà nháp thành công! Chi tiết lịch hẹn:\n- ID lịch: ${bookingId}\n- Tên căn hộ: ${booking.apartmentTitle}\n- Thời gian: ${formattedVisitAt}\n- Trạng thái: ${booking.status}`
-        } catch (e) {
-          const errMsg = e instanceof Error ? e.message : 'Unknown error'
-          this.logger.error('Failed to create booking draft via tool:', e)
-          toolResultContent = `Có lỗi khi đặt lịch hẹn: ${errMsg}`
+        const resolvedApartmentId = await this.resolveApartmentId(
+          sessionKey,
+          inputApartmentId
+        )
+
+        if (!resolvedApartmentId) {
+          toolResultContent = `Không tìm thấy thông tin căn hộ với tham số "${inputApartmentId}". Bạn vui lòng hướng dẫn khách hàng chọn lại căn hộ từ danh sách gợi ý để đặt lịch xem phòng.`
+        } else {
+          try {
+            const booking = await this.bookingsService.create(
+              sessionKey.userId || null,
+              {
+                apartmentId: resolvedApartmentId,
+                visitAt,
+                method,
+                note: 'Tạo tự động qua trợ lý ảo AI',
+              }
+            )
+            const bookingId = booking._id ? booking._id.toString() : 'unknown'
+            const formattedVisitAt = booking.visitAt
+              ? new Date(booking.visitAt).toLocaleString('vi-VN')
+              : 'unknown'
+            toolResultContent = `Đặt lịch hẹn xem nhà nháp thành công! Chi tiết lịch hẹn:\n- ID lịch: ${bookingId}\n- Tên căn hộ: ${booking.apartmentTitle}\n- Thời gian: ${formattedVisitAt}\n- Trạng thái: ${booking.status}`
+          } catch (e) {
+            const errMsg = e instanceof Error ? e.message : 'Unknown error'
+            this.logger.error('Failed to create booking draft via tool:', e)
+            toolResultContent = `Không thể đặt lịch hẹn cho căn hộ này: ${errMsg}`
+          }
         }
       } else if (toolCall.function.name === 'request_booking') {
         const args = toolCall.function.arguments as unknown as {
           apartmentId: string
         }
-        const apartmentId = args.apartmentId
+        const inputApartmentId = args?.apartmentId
 
-        let apartmentTitle = 'Căn hộ'
-        try {
-          const apt = await this.apartmentsService.findOne(apartmentId)
-          if (apt) {
-            apartmentTitle = apt.title
+        const resolvedApartmentId = await this.resolveApartmentId(
+          sessionKey,
+          inputApartmentId
+        )
+
+        if (!resolvedApartmentId) {
+          toolResultContent = `Không tìm thấy thông tin căn hộ để mở thẻ đặt lịch. Bạn vui lòng giới thiệu danh sách căn hộ cho khách hàng chọn trước.`
+        } else {
+          try {
+            const apt =
+              await this.apartmentsService.findOne(resolvedApartmentId)
+            if (apt) {
+              const realAptId = apt._id
+                ? apt._id.toString()
+                : resolvedApartmentId
+              toolResultContent = `Đã hiển thị thẻ chọn ngày và giờ đặt lịch xem căn hộ "${apt.title}" cho khách hàng.`
+              metadata = {
+                ...(metadata || {}),
+                bookingRequest: {
+                  apartmentId: realAptId,
+                  apartmentTitle: apt.title,
+                },
+              }
+            } else {
+              toolResultContent = `Không tìm thấy thông tin căn hộ với ID "${inputApartmentId}".`
+            }
+          } catch (e) {
+            const errMsg = e instanceof Error ? e.message : String(e)
+            this.logger.error(
+              `Failed to fetch apartment for booking request card: ${errMsg}`
+            )
+            toolResultContent = `Lỗi hệ thống khi tìm căn hộ: ${errMsg}`
           }
-        } catch (e) {
-          const errMsg = e instanceof Error ? e.message : String(e)
-          this.logger.error(
-            `Failed to fetch apartment for booking request card: ${errMsg}`
-          )
-        }
-
-        toolResultContent = `Đã hiển thị thẻ chọn ngày và giờ đặt lịch xem căn hộ "${apartmentTitle}" cho khách hàng.`
-        metadata = {
-          bookingRequest: {
-            apartmentId,
-            apartmentTitle,
-          },
         }
       }
 
@@ -288,12 +482,48 @@ export class AiChatsService {
         content: toolResultContent,
       })
 
+      if (toolResultContent.startsWith('Lỗi:')) {
+        disableTools = true
+      }
+
       // Call LLM again with tool results
-      response = await this.groqAgentService.chat(llmMessages)
+      response = await this.groqAgentService.chat(llmMessages, disableTools)
+
+      if (disableTools) {
+        break
+      }
     }
 
-    const finalAnswer =
+    let finalAnswer =
       response.content || 'Xin lỗi, tôi không thể xử lý yêu cầu của bạn.'
+
+    // Guardrail Sanitizer: Nếu metadata có bookingRequest (mở Form chọn ngày/giờ),
+    // nhưng câu thoại do LLM sinh ra bị nhiễm ngữ cảnh cũ và báo "đã được đặt thành công"
+    if (metadata?.bookingRequest) {
+      const title = metadata.bookingRequest.apartmentTitle || 'căn hộ'
+      const isFalseClaim =
+        finalAnswer.toLowerCase().includes('đã được đặt thành công') ||
+        finalAnswer.toLowerCase().includes('đã đặt thành công') ||
+        finalAnswer.toLowerCase().includes('bạn sẽ xem căn hộ')
+      if (isFalseClaim || !finalAnswer.trim()) {
+        finalAnswer = `Dưới đây là thẻ lên lịch xem căn hộ "${title}". Bạn vui lòng lựa chọn ngày và giờ xem phòng phù hợp ở khung bên dưới nhé:`
+      }
+    }
+
+    // Guardrail Sanitizer: Nếu metadata có propertyCard hoặc propertyCards (kết quả tìm kiếm căn hộ),
+    // nhưng câu thoại do LLM trả về bị rỗng hoặc là câu báo lỗi mặc định
+    if (
+      metadata?.propertyCard ||
+      (metadata?.propertyCards && metadata.propertyCards.length > 0)
+    ) {
+      const isFallbackError =
+        finalAnswer === 'Xin lỗi, tôi không thể xử lý yêu cầu của bạn.' ||
+        !finalAnswer.trim()
+      if (isFallbackError) {
+        const count = metadata.propertyCards?.length || 1
+        finalAnswer = `Dưới đây là ${count} căn hộ phù hợp với yêu cầu tìm kiếm của bạn:`
+      }
+    }
 
     // 5. Save assistant reply to history
     await this.addMessage(sessionKey, 'assistant', finalAnswer, metadata)

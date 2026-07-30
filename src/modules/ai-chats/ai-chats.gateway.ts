@@ -44,7 +44,10 @@ export class AiChatsGateway
       return
     }
 
-    const session: ClientSession = { userId, deviceId }
+    const session: ClientSession = {
+      ...(userId ? { userId } : {}),
+      ...(deviceId ? { deviceId } : {}),
+    }
     this.sessions.set(client, session)
     this.logger.log(
       `Client connected to /ws/ai-chats. Session: ${JSON.stringify(session)}`
@@ -53,16 +56,13 @@ export class AiChatsGateway
     try {
       const greeting = `Xin chào! Tôi là Trợ lý ảo TH-PropTech. Tôi có thể giúp gì cho bạn hôm nay? Bạn có thể nhờ tôi tìm kiếm căn hộ hoặc lên lịch đặt lịch hẹn xem phòng.`
 
-      const chat = await this.aiChatsService.getOrCreateSession({
-        userId,
-        deviceId,
-      })
+      const chatTarget = {
+        ...(userId ? { userId } : {}),
+        ...(deviceId ? { deviceId } : {}),
+      }
+      const chat = await this.aiChatsService.getOrCreateSession(chatTarget)
       if (chat.messages.length === 0) {
-        await this.aiChatsService.addMessage(
-          { userId, deviceId },
-          'assistant',
-          greeting
-        )
+        await this.aiChatsService.addMessage(chatTarget, 'assistant', greeting)
       }
 
       if (client.readyState === WebSocket.OPEN) {
@@ -103,8 +103,12 @@ export class AiChatsGateway
     }
 
     try {
+      const chatTarget = {
+        ...(userId ? { userId } : {}),
+        ...(deviceId ? { deviceId } : {}),
+      }
       const result = await this.aiChatsService.handleUserMessage(
-        { userId, deviceId },
+        chatTarget,
         data.text,
         chunkText => {
           if (client.readyState === WebSocket.OPEN) {
