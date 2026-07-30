@@ -4,7 +4,7 @@ import {
   BadRequestException,
 } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
-import { Repository } from 'typeorm'
+import { Repository, FindOptionsWhere } from 'typeorm'
 import { JwtService } from '@nestjs/jwt'
 import { ObjectId } from 'mongodb'
 import * as bcrypt from 'bcryptjs'
@@ -39,7 +39,9 @@ export class AuthService {
     password: string
   ): Promise<TokenResponse & { user: UserPayload }> {
     const user = await this.userRepository.findOne({
-      where: [{ email: emailOrPhone }, { phone: emailOrPhone }],
+      where: {
+        $or: [{ email: emailOrPhone }, { phone: emailOrPhone }],
+      } as unknown as FindOptionsWhere<User>,
     })
 
     if (!user) {

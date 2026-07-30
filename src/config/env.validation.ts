@@ -10,4 +10,5 @@ export const envValidationSchema = Joi.object({
   DATABASE_URL: Joi.string().uri().required(),
   DATABASE_LOGGING: Joi.boolean().default(false),
   DATABASE_SYNCHRONIZE: Joi.boolean().default(false),
+  REDIS_URL: Joi.string().default('redis://localhost:6379'),
 })

@@ -1,19 +1,17 @@
 services:
-  mongodb:
-    image: mongo:8
-    container_name: th-proptech-mongodb
+  redis:
+    image: redis:7-alpine
+    container_name: th-proptech-redis
     restart: unless-stopped
-    environment:
-      MONGO_INITDB_DATABASE: th_proptech
     ports:
-      - '27017:27017'
+      - '6379:6379'
     volumes:
-      - mongodb-data:/data/db
+      - redis-data:/data
     healthcheck:
-      test: ['CMD', 'mongosh', '--eval', "db.adminCommand('ping')"]
+      test: ['CMD', 'redis-cli', 'ping']
       interval: 10s
       timeout: 5s
       retries: 5
 
 volumes:
-  mongodb-data:
+  redis-data:
