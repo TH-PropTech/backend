@@ -57,7 +57,7 @@ export class AuthService {
   }
 
   /**
-   * Xác thực mã 2FA bằng temp token để lấy JWT chính thức
+   * Xác thực mã 2FA bằng temp token để lấy JWT
    */
   async authenticate2fa(
     twoFactorTempToken: string,
