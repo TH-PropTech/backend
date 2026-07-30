@@ -1,32 +1,43 @@
-import {
-  Entity,
-  ObjectIdColumn,
-  ObjectId,
-  Column,
-  CreateDateColumn,
-  UpdateDateColumn,
-} from 'typeorm'
-
-export interface ChatMessage {
-  role: 'user' | 'assistant' | 'system'
-  content: string
-  timestamp: Date
+export interface PropertyCardMetadata {
+  id: string
+  title: string
+  price: number
+  image: string
+  location: string
+  landlordName?: string
+  landlordPhone?: string
 }
 
-@Entity('ai_chats')
+export interface BookingRequestMetadata {
+  apartmentId: string
+  apartmentTitle: string
+}
+
+export interface ChatMessage {
+  role: 'user' | 'assistant' | 'system' | 'tool'
+  content: string
+  timestamp?: Date
+  name?: string
+  tool_call_id?: string
+  tool_calls?: Array<{
+    id: string
+    type: 'function'
+    function: {
+      name: string
+      arguments: string
+    }
+  }>
+  metadata?: {
+    propertyCard?: PropertyCardMetadata
+    propertyCards?: PropertyCardMetadata[]
+    bookingRequest?: BookingRequestMetadata
+  }
+}
+
 export class AiChat {
-  @ObjectIdColumn()
-  _id!: ObjectId
-
-  @Column()
-  userId!: string
-
-  @Column()
+  userId?: string
+  deviceId?: string
   messages!: ChatMessage[]
-
-  @CreateDateColumn()
   createdAt!: Date
-
-  @UpdateDateColumn()
   updatedAt!: Date
 }

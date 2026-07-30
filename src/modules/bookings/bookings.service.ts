@@ -53,9 +53,22 @@ export class BookingsService {
     )
 
     // Lấy thông tin căn hộ để resolve landlordId
-    const apartment = await this.apartmentRepository.findOne({
-      where: { _id: new ObjectId(dto.apartmentId) },
-    })
+    let apartment: Apartment | null = null
+    if (ObjectId.isValid(dto.apartmentId)) {
+      apartment = await this.apartmentRepository.findOne({
+        where: { _id: new ObjectId(dto.apartmentId) },
+      })
+    }
+    if (!apartment) {
+      const allApartments = await this.apartmentRepository.find()
+      apartment =
+        allApartments.find(
+          a =>
+            a.title.toLowerCase().includes(dto.apartmentId.toLowerCase()) ||
+            dto.apartmentId.toLowerCase().includes(a.title.toLowerCase())
+        ) ?? null
+    }
+
     if (!apartment) {
       throw new NotFoundException(`Không tìm thấy căn hộ: ${dto.apartmentId}`)
     }

@@ -41,13 +41,22 @@ export class KycVerifiedGuard implements CanActivate {
       )
     }
 
-    const userIdStr = user._id || user.id
+    const userIdRaw = user._id || user.id
+    if (!userIdRaw) {
+      throw new ForbiddenException(
+        'Bạn cần đăng nhập để thực hiện chức năng này.'
+      )
+    }
+
     let userId: ObjectId
     try {
-      userId =
-        typeof userIdStr === 'string'
-          ? new ObjectId(userIdStr)
-          : (userIdStr as ObjectId)
+      if (userIdRaw instanceof ObjectId) {
+        userId = userIdRaw
+      } else if (typeof userIdRaw === 'string' && ObjectId.isValid(userIdRaw)) {
+        userId = new ObjectId(userIdRaw)
+      } else {
+        throw new ForbiddenException('ID người dùng không hợp lệ.')
+      }
     } catch {
       throw new ForbiddenException('ID người dùng không hợp lệ.')
     }

@@ -18,6 +18,9 @@ export const configuration = (): {
     logging: boolean
     synchronize: boolean
   }
+  redis: {
+    url: string
+  }
 } => ({
   app: {
     env: (process.env.NODE_ENV ?? 'local') as AppEnvironment,
@@ -35,6 +38,9 @@ export const configuration = (): {
     synchronize:
       process.env.NODE_ENV !== 'production' &&
       process.env.DATABASE_SYNCHRONIZE === 'true',
+  },
+  redis: {
+    url: process.env.REDIS_URL ?? 'redis://localhost:6379',
   },
 })
 

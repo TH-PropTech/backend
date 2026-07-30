@@ -27,6 +27,7 @@ import { TwoFactorModule } from './modules/two-factor/two-factor.module'
 import { FabricModule } from './modules/fabric/fabric.module'
 import { PoliciesModule } from './modules/policies/policies.module'
 import { AiConsultationModule } from './modules/ai-consultation/ai-consultation.module'
+import { RedisModule } from './modules/redis/redis.module'
 import { RecommendationsModule } from './modules/recommendations/recommendations.module'
 
 @Module({
@@ -79,6 +80,7 @@ import { RecommendationsModule } from './modules/recommendations/recommendations
     FabricModule,
     PoliciesModule,
     AiConsultationModule,
+    RedisModule,
     RecommendationsModule,
   ],
 })
