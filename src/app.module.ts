@@ -28,6 +28,7 @@ import { FabricModule } from './modules/fabric/fabric.module'
 import { PoliciesModule } from './modules/policies/policies.module'
 import { AiConsultationModule } from './modules/ai-consultation/ai-consultation.module'
 import { RedisModule } from './modules/redis/redis.module'
+import { RecommendationsModule } from './modules/recommendations/recommendations.module'
 
 @Module({
   imports: [
@@ -80,6 +81,7 @@ import { RedisModule } from './modules/redis/redis.module'
     PoliciesModule,
     AiConsultationModule,
     RedisModule,
+    RecommendationsModule,
   ],
 })
 export class AppModule {}
