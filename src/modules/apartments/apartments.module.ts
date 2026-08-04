@@ -7,6 +7,7 @@ import { ApartmentsController } from './apartments.controller'
 import { NotificationsModule } from '../notifications/notifications.module'
 import { ProjectsModule } from '../projects/projects.module'
 import { BuildingsModule } from '../buildings/buildings.module'
+import { SavedSearchesModule } from '../saved-searches/saved-searches.module'
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { BuildingsModule } from '../buildings/buildings.module'
     NotificationsModule,
     ProjectsModule,
     BuildingsModule,
+    SavedSearchesModule,
   ],
   providers: [ApartmentsService],
   controllers: [ApartmentsController],
