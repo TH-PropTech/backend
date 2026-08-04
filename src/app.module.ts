@@ -29,6 +29,10 @@ import { PoliciesModule } from './modules/policies/policies.module'
 import { AiConsultationModule } from './modules/ai-consultation/ai-consultation.module'
 import { RedisModule } from './modules/redis/redis.module'
 import { RecommendationsModule } from './modules/recommendations/recommendations.module'
+import { SafetyReportsModule } from './modules/safety-reports/safety-reports.module'
+import { SavedSearchesModule } from './modules/saved-searches/saved-searches.module'
+import { LivingCostModule } from './modules/living-cost/living-cost.module'
+import { SupportTicketsModule } from './modules/support-tickets/support-tickets.module'
 
 @Module({
   imports: [
@@ -82,6 +86,10 @@ import { RecommendationsModule } from './modules/recommendations/recommendations
     AiConsultationModule,
     RedisModule,
     RecommendationsModule,
+    SafetyReportsModule,
+    SavedSearchesModule,
+    LivingCostModule,
+    SupportTicketsModule,
   ],
 })
 export class AppModule {}

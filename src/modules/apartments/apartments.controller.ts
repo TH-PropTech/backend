@@ -21,6 +21,7 @@ import {
 import { ApartmentFilterDto } from './dto/apartment-filter.dto'
 import { CreateApartmentDto } from './dto/create-apartment.dto'
 import { RejectApartmentDto } from './dto/reject-apartment.dto'
+import { UpdateApartmentPriceDto } from './dto/update-apartment-price.dto'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { RolesGuard } from '../../common/guards/roles.guard'
 import { Roles } from '../../common/decorators/roles.decorator'
@@ -185,6 +186,22 @@ export class ApartmentsController {
   ): Promise<WebApartmentResponse> {
     const renewed = await this.apartmentsService.renew(id, landlordId)
     return ApartmentResponseMapper.toWebJson(renewed)
+  }
+
+  @Patch(':id/price')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('landlord')
+  async updatePrice(
+    @Param('id') id: string,
+    @Body() dto: UpdateApartmentPriceDto,
+    @CurrentUser('id') landlordId: string
+  ): Promise<WebApartmentResponse> {
+    const updated = await this.apartmentsService.updatePrice(
+      id,
+      dto.priceMonthly,
+      landlordId
+    )
+    return ApartmentResponseMapper.toWebJson(updated)
   }
 
   @Patch(':id/status')
