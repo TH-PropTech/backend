@@ -25,15 +25,15 @@ export class CreateBookingDto {
   @ApiPropertyOptional({ description: 'Ghi chú thêm' })
   @IsOptional()
   @IsString()
-  note?: string
+  note?: string | null | undefined
 
   @ApiPropertyOptional({ description: 'Họ tên khách thuê' })
   @IsOptional()
   @IsString()
-  tenantName?: string
+  tenantName?: string | null | undefined
 
   @ApiPropertyOptional({ description: 'Số điện thoại khách thuê' })
   @IsOptional()
   @IsString()
-  tenantPhone?: string
+  tenantPhone?: string | null | undefined
 }
