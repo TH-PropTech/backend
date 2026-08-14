@@ -21,6 +21,9 @@ export const configuration = (): {
   redis: {
     url: string
   }
+  groq: {
+    apiKey: string
+  }
 } => ({
   app: {
     env: (process.env.NODE_ENV ?? 'local') as AppEnvironment,
@@ -41,6 +44,9 @@ export const configuration = (): {
   },
   redis: {
     url: process.env.REDIS_URL ?? 'redis://localhost:6379',
+  },
+  groq: {
+    apiKey: process.env.GROQ_API_KEY ?? '',
   },
 })
 
