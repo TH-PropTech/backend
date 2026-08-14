@@ -61,6 +61,8 @@ export interface MobileApartmentResponse {
   buildingName: string | null
   location: string
   city: string
+  district: string
+  ward: string
   priceMonthly: number
   area: number
   bedrooms: number
@@ -207,6 +209,8 @@ export class ApartmentResponseMapper {
       buildingName: apartment.buildingName || null,
       location: apartment.location,
       city: apartment.city,
+      district: apartment.district,
+      ward: apartment.ward,
       priceMonthly: priceInMillions,
       area: apartment.area,
       bedrooms: apartment.bedrooms,

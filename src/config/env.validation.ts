@@ -11,6 +11,7 @@ export const envValidationSchema = Joi.object({
   DATABASE_LOGGING: Joi.boolean().default(false),
   DATABASE_SYNCHRONIZE: Joi.boolean().default(false),
   REDIS_URL: Joi.string().default('redis://localhost:6379'),
+  GROQ_API_KEY: Joi.string().allow('').optional(),
   RECOMMENDATION_API_URL: Joi.string()
     .uri()
     .default('http://localhost:5001/api'),

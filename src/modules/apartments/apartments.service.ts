@@ -17,6 +17,7 @@ import { CreateApartmentDto } from './dto/create-apartment.dto'
 import { NotificationsService } from '../notifications/notifications.service'
 import { ProjectsService } from '../projects/projects.service'
 import { BuildingsService } from '../buildings/buildings.service'
+import { SavedSearchesService } from '../saved-searches/saved-searches.service'
 
 interface ApartmentMongoQuery {
   $or?: Array<Record<string, unknown>>
@@ -160,7 +161,8 @@ export class ApartmentsService
     private readonly userRepository: Repository<User>,
     private readonly notificationsService: NotificationsService,
     private readonly projectsService: ProjectsService,
-    private readonly buildingsService: BuildingsService
+    private readonly buildingsService: BuildingsService,
+    private readonly savedSearchesService: SavedSearchesService
   ) {}
 
   onApplicationBootstrap(): void {
@@ -472,6 +474,7 @@ export class ApartmentsService
     if (!apartment) {
       throw new NotFoundException(`Không tìm thấy căn hộ với ID: ${id}`)
     }
+    const previousStatus = apartment.status
     apartment.status = status
     if (isVerified !== undefined) {
       apartment.isVerified = isVerified
@@ -480,7 +483,39 @@ export class ApartmentsService
     } else {
       apartment.isVerified = false
     }
-    return this.apartmentRepository.save(apartment)
+    const saved = await this.apartmentRepository.save(apartment)
+    await this.publishSearchAlerts(saved, 'status_change', {
+      previousValue: previousStatus,
+      newValue: saved.status,
+    })
+    return saved
+  }
+
+  async updatePrice(
+    id: string,
+    priceMonthly: number,
+    landlordId: string
+  ): Promise<Apartment> {
+    const apartment = await this.apartmentRepository.findOne({
+      where: { _id: new ObjectId(id) },
+    })
+    if (!apartment) {
+      throw new NotFoundException(`Không tìm thấy căn hộ với ID: ${id}`)
+    }
+    if (apartment.landlordId !== landlordId) {
+      throw new ForbiddenException(
+        'Bạn không có quyền cập nhật giá tin đăng này'
+      )
+    }
+
+    const previousPrice = apartment.priceMonthly
+    apartment.priceMonthly = priceMonthly
+    const saved = await this.apartmentRepository.save(apartment)
+    await this.publishSearchAlerts(saved, 'price_change', {
+      previousValue: String(previousPrice),
+      newValue: String(saved.priceMonthly),
+    })
+    return saved
   }
 
   // ── Tạo bài đăng căn hộ mới ──
@@ -596,6 +631,8 @@ export class ApartmentsService
           err
         )
       )
+
+    await this.publishSearchAlerts(saved, 'new_listing')
 
     return saved
   }
@@ -736,6 +773,25 @@ export class ApartmentsService
         `Tin đăng "${apartment.title}" đang chờ duyệt.`,
         'new-listing',
         { apartmentId: apartment._id.toString() }
+      )
+    }
+  }
+
+  private async publishSearchAlerts(
+    apartment: Apartment,
+    triggerType: 'new_listing' | 'price_change' | 'status_change',
+    details: { previousValue?: string; newValue?: string } = {}
+  ): Promise<void> {
+    try {
+      await this.savedSearchesService.generateAlertsForApartment(
+        apartment,
+        triggerType,
+        details
+      )
+    } catch (error: unknown) {
+      this.logger.error(
+        `Failed to generate saved-search alerts for apartment ${apartment._id.toString()}`,
+        error instanceof Error ? error.stack : String(error)
       )
     }
   }
