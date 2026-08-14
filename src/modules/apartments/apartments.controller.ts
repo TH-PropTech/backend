@@ -11,7 +11,7 @@ import {
   UploadedFiles,
   BadRequestException,
 } from '@nestjs/common'
-import { ApiTags } from '@nestjs/swagger'
+import { ApiOkResponse, ApiTags } from '@nestjs/swagger'
 import { ApartmentsService } from './apartments.service'
 import {
   ApartmentResponseMapper,
@@ -31,6 +31,11 @@ import { diskStorage } from 'multer'
 import { extname } from 'path'
 import * as fs from 'fs'
 import { ConfigService } from '@nestjs/config'
+import {
+  ListingQualityService,
+  type QualityScoreResult,
+} from './listing-quality.service'
+import { QualityScoreResponseDto } from './dto/quality-score-response.dto'
 
 import { Request } from 'express'
 
@@ -61,12 +66,14 @@ const storage = diskStorage({
 export class ApartmentsController {
   constructor(
     private readonly apartmentsService: ApartmentsService,
-    private readonly configService: ConfigService
+    private readonly configService: ConfigService,
+    private readonly listingQualityService: ListingQualityService
   ) {}
 
   @Get('my-listings')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('landlord')
+  @ApiOkResponse({ type: QualityScoreResponseDto })
   async getMyListings(
     @CurrentUser('id') landlordId: string,
     @Query('format') format?: 'web' | 'mobile'
@@ -105,6 +112,17 @@ export class ApartmentsController {
     }
     // Mặc định trả về định dạng Web cho tương thích tốt nhất
     return apartments.map(apt => ApartmentResponseMapper.toWebJson(apt))
+  }
+
+  /** GET /api/v1/apartments/:id/quality — Owner listing quality [uc_staff_apartment] */
+  @Get(':id/quality')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('landlord')
+  async getQualityScore(
+    @Param('id') id: string,
+    @CurrentUser('id') ownerId: string
+  ): Promise<QualityScoreResult> {
+    return this.listingQualityService.calculateQualityScore(id, ownerId)
   }
 
   @Get(':id')

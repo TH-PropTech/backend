@@ -8,6 +8,7 @@ import { NotificationsModule } from '../notifications/notifications.module'
 import { ProjectsModule } from '../projects/projects.module'
 import { BuildingsModule } from '../buildings/buildings.module'
 import { SavedSearchesModule } from '../saved-searches/saved-searches.module'
+import { ListingQualityService } from './listing-quality.service'
 
 @Module({
   imports: [
@@ -17,7 +18,7 @@ import { SavedSearchesModule } from '../saved-searches/saved-searches.module'
     BuildingsModule,
     SavedSearchesModule,
   ],
-  providers: [ApartmentsService],
+  providers: [ApartmentsService, ListingQualityService],
   controllers: [ApartmentsController],
   exports: [TypeOrmModule, ApartmentsService],
 })

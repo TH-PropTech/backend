@@ -33,6 +33,13 @@ import { SafetyReportsModule } from './modules/safety-reports/safety-reports.mod
 import { SavedSearchesModule } from './modules/saved-searches/saved-searches.module'
 import { LivingCostModule } from './modules/living-cost/living-cost.module'
 import { SupportTicketsModule } from './modules/support-tickets/support-tickets.module'
+import { ListingFreshnessModule } from './modules/listing-freshness/listing-freshness.module'
+import { PriceBenchmarkModule } from './modules/price-benchmark/price-benchmark.module'
+import { ViewingNotesModule } from './modules/viewing-notes/viewing-notes.module'
+import { AreaProfilesModule } from './modules/area-profiles/area-profiles.module'
+import { RentalApplicationsModule } from './modules/rental-applications/rental-applications.module'
+import { ConditionAnalysisModule } from './modules/condition-analysis/condition-analysis.module'
+import { LocationRiskModule } from './modules/location-risk/location-risk.module'
 
 @Module({
   imports: [
@@ -90,6 +97,13 @@ import { SupportTicketsModule } from './modules/support-tickets/support-tickets.
     SavedSearchesModule,
     LivingCostModule,
     SupportTicketsModule,
+    ListingFreshnessModule,
+    PriceBenchmarkModule,
+    ViewingNotesModule,
+    AreaProfilesModule,
+    RentalApplicationsModule,
+    ConditionAnalysisModule,
+    LocationRiskModule,
   ],
 })
 export class AppModule {}
