@@ -27,12 +27,14 @@ import { AppModule } from '../app.module'
 import { getRepositoryToken } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 import * as bcrypt from 'bcryptjs'
+import * as fs from 'fs'
 import { User, UserStatus } from '../modules/users/schemas/user.schema'
 import { Apartment } from '../modules/apartments/schemas/apartment.schema'
 import { KycRecord } from '../modules/kyc/schemas/kyc-record.schema'
 import { Contract } from '../modules/contracts/schemas/contract.schema'
 import { Project } from '../modules/projects/schemas/project.schema'
 import { Building } from '../modules/buildings/schemas/building.schema'
+import { RecommendationHistory } from '../modules/recommendations/schemas/recommendation-history.schema'
 import { Logger } from '@nestjs/common'
 
 async function bootstrap(): Promise<void> {
@@ -57,6 +59,9 @@ async function bootstrap(): Promise<void> {
     )
     const buildingRepository = app.get<Repository<Building>>(
       getRepositoryToken(Building)
+    )
+    const historyRepository = app.get<Repository<RecommendationHistory>>(
+      getRepositoryToken(RecommendationHistory)
     )
 
     // 1. Dọn dẹp dữ liệu mẫu cũ (Tùy chọn)
@@ -596,6 +601,221 @@ async function bootstrap(): Promise<void> {
     const savedApartment5 = await apartmentRepository.save(apartment5)
     logger.log(`Tạo căn hộ 5 thành công: ${savedApartment5.title}`)
 
+    // Căn hộ 6 (Vinhomes Central Park - Căn 6)
+    const apartment6 = apartmentRepository.create({
+      title: 'Vinhomes Central Park - Căn hộ 2PN #Park3-1502',
+      category: 'Chung cư',
+      description:
+        'Căn hộ 2 phòng ngủ Vinhomes Central Park sang trọng, phòng khách rộng rãi, view công viên 14ha mát mẻ.',
+      location: 'Bình Thạnh, TP.HCM',
+      city: 'Hồ Chí Minh',
+      district: 'Bình Thạnh',
+      ward: 'Phường 22',
+      street: 'Nguyễn Hữu Cảnh',
+      address:
+        'Vinhomes Central Park, 208 Nguyễn Hữu Cảnh, Phường 22, Bình Thạnh, TP.HCM',
+      priceMonthly: 21000000,
+      area: 78,
+      bedrooms: 2,
+      bathrooms: 2,
+      direction: 'Đông Nam',
+      balconyDirection: 'Đông Nam',
+      furniture: 'Đầy đủ nội thất cao cấp',
+      moveInTime: 'Ngay lập tức',
+      electricity: 'Giá nhà nước',
+      water: 'Giá nhà nước',
+      internet: 'Miễn phí',
+      gallery: [
+        'https://res.cloudinary.com/dehsnaot1/image/upload/v1786370603/khach_m6yoyy.png',
+        'https://res.cloudinary.com/dehsnaot1/image/upload/v1786370658/ngu_tewd5h.png',
+        'https://res.cloudinary.com/dehsnaot1/image/upload/v1786370642/wc_at9jmg.jpg',
+        'https://res.cloudinary.com/dehsnaot1/image/upload/v1786370615/bep_fa9fo6.png',
+        'https://res.cloudinary.com/dehsnaot1/image/upload/v1786370605/bancong_jjrsl8.jpg',
+      ],
+      images360: [
+        'https://res.cloudinary.com/dehsnaot1/image/upload/v1786370756/khach_360_zgkgz1.png',
+        'https://res.cloudinary.com/dehsnaot1/image/upload/v1786370736/ngu_360_wj6idg.png',
+        'https://res.cloudinary.com/dehsnaot1/image/upload/v1786370741/wc_360_ulhe3y.png',
+        'https://res.cloudinary.com/dehsnaot1/image/upload/v1786370743/bep_360_ralifx.png',
+        'https://res.cloudinary.com/dehsnaot1/image/upload/v1786370747/bancong_360_buoz0m.png',
+      ],
+      vrUrl: 'https://my.matterport.com/show/?m=vinhomes-can6',
+      amenities: [
+        'Bể bơi',
+        'Phòng gym',
+        'Công viên',
+        'Bảo vệ 24/7',
+        'Siêu thị',
+      ],
+      status: 'available',
+      isVerified: true,
+      landlordId: savedLandlord._id.toHexString(),
+      projectId: savedProject1._id.toHexString(),
+      projectName: savedProject1.name,
+      buildingId: savedBuildingLandmark._id.toHexString(),
+      buildingName: savedBuildingLandmark.name,
+    })
+    const savedApartment6 = await apartmentRepository.save(apartment6)
+    logger.log(`Tạo căn hộ 6 thành công: ${savedApartment6.title}`)
+
+    // Căn hộ 7 (Masteri Thảo Điền - Căn 7)
+    const apartment7 = apartmentRepository.create({
+      title: 'Masteri Thảo Điền - Căn hộ 2PN #T3-2208',
+      category: 'Chung cư',
+      description:
+        'Căn hộ Masteri Thảo Điền 2 phòng ngủ hiện đại, thiết kế tinh tế, ban công view sông Sài Gòn tuyệt đẹp.',
+      location: 'Quận 2, TP.HCM',
+      city: 'Hồ Chí Minh',
+      district: 'Quận 2',
+      ward: 'Phường Thảo Điền',
+      street: 'Xa lộ Hà Nội',
+      address: 'Masteri Thảo Điền, 159 Xa lộ Hà Nội, Thảo Điền, Quận 2, TP.HCM',
+      priceMonthly: 22000000,
+      area: 72,
+      bedrooms: 2,
+      bathrooms: 2,
+      direction: 'Nam',
+      balconyDirection: 'Nam',
+      furniture: 'Đầy đủ nội thất cao cấp',
+      moveInTime: 'Ngay lập tức',
+      electricity: 'Giá nhà nước',
+      water: 'Giá nhà nước',
+      internet: 'Miễn phí',
+      gallery: [
+        'https://res.cloudinary.com/dehsnaot1/image/upload/v1786371452/khach_ddzvsd.png',
+        'https://res.cloudinary.com/dehsnaot1/image/upload/v1786371552/ngu_hjvwkd.png',
+        'https://res.cloudinary.com/dehsnaot1/image/upload/v1786371493/wc_z8bhkt.png',
+        'https://res.cloudinary.com/dehsnaot1/image/upload/v1786371513/bep_upz5z1.png',
+        'https://res.cloudinary.com/dehsnaot1/image/upload/v1786371532/bancong_bg8wja.png',
+      ],
+      images360: [
+        'https://res.cloudinary.com/dehsnaot1/image/upload/v1786371624/khach360_r4h9dp.png',
+        'https://res.cloudinary.com/dehsnaot1/image/upload/v1786371615/ngu360_lveyyl.png',
+        'https://res.cloudinary.com/dehsnaot1/image/upload/v1786371627/wc360_u2ucil.png',
+        'https://res.cloudinary.com/dehsnaot1/image/upload/v1786371622/bep360_p6zrbh.png',
+        'https://res.cloudinary.com/dehsnaot1/image/upload/v1786371618/bancong360_mnzg48.png',
+      ],
+      vrUrl: 'https://my.matterport.com/show/?m=masteri-can7',
+      amenities: ['Bể bơi', 'Phòng gym', 'Khu BBQ', 'Bảo vệ 24/7'],
+      status: 'available',
+      isVerified: true,
+      landlordId: savedLandlord._id.toHexString(),
+      projectId: savedProject2._id.toHexString(),
+      projectName: savedProject2.name,
+      buildingId: savedBuildingMasteriT1._id.toHexString(),
+      buildingName: savedBuildingMasteriT1.name,
+    })
+    const savedApartment7 = await apartmentRepository.save(apartment7)
+    logger.log(`Tạo căn hộ 7 thành công: ${savedApartment7.title}`)
+
+    // Căn hộ 8 (Sunrise City - Căn 8)
+    const apartment8 = apartmentRepository.create({
+      title: 'Sunrise City - Căn hộ 3PN #W1-1804',
+      category: 'Chung cư',
+      description:
+        'Căn hộ 3 phòng ngủ Sunrise City Quận 7 thiết kế sang trọng, view toàn cảnh khu Nam Sài Gòn.',
+      location: 'Quận 7, TP.HCM',
+      city: 'Hồ Chí Minh',
+      district: 'Quận 7',
+      ward: 'Phường Tân Hưng',
+      street: 'Nguyễn Hữu Thọ',
+      address:
+        'Sunrise City, 23 Nguyễn Hữu Thọ, Phường Tân Hưng, Quận 7, TP.HCM',
+      priceMonthly: 25000000,
+      area: 105,
+      bedrooms: 3,
+      bathrooms: 2,
+      direction: 'Tây Nam',
+      balconyDirection: 'Tây Nam',
+      furniture: 'Nội thất nhập khẩu',
+      moveInTime: 'Ngay lập tức',
+      electricity: 'Giá nhà nước',
+      water: 'Giá nhà nước',
+      internet: 'Miễn phí',
+      gallery: [
+        'https://res.cloudinary.com/dehsnaot1/image/upload/v1786371997/khach_ukzdy7.png',
+        'https://res.cloudinary.com/dehsnaot1/image/upload/v1786371995/ngu_ddp9sf.png',
+        'https://res.cloudinary.com/dehsnaot1/image/upload/v1786371994/wc_vb8h9p.png',
+        'https://res.cloudinary.com/dehsnaot1/image/upload/v1786371991/bep_qdqewy.png',
+        'https://res.cloudinary.com/dehsnaot1/image/upload/v1786372000/bancong_fszsqa.png',
+      ],
+      images360: [
+        'https://res.cloudinary.com/dehsnaot1/image/upload/v1786372039/khach360_x49014.png',
+        'https://res.cloudinary.com/dehsnaot1/image/upload/v1786372036/ngu360_zx5qvn.png',
+        'https://res.cloudinary.com/dehsnaot1/image/upload/v1786372042/wc360_lk9xeb.png',
+        'https://res.cloudinary.com/dehsnaot1/image/upload/v1786372045/bep360_pt02yb.png',
+        'https://res.cloudinary.com/dehsnaot1/image/upload/v1786372048/bancong360_xyarqd.png',
+      ],
+      vrUrl: 'https://my.matterport.com/show/?m=sunrisecity-can8',
+      amenities: [
+        'Bể bơi',
+        'Phòng gym',
+        'Bãi đỗ xe',
+        'Bảo vệ 24/7',
+        'Siêu thị',
+      ],
+      status: 'available',
+      isVerified: true,
+      landlordId: savedIndividualLandlord._id.toHexString(),
+      projectId: null,
+      projectName: null,
+      buildingId: null,
+      buildingName: null,
+    })
+    const savedApartment8 = await apartmentRepository.save(apartment8)
+    logger.log(`Tạo căn hộ 8 thành công: ${savedApartment8.title}`)
+
+    // Căn hộ 9 (Vinhomes Smart City - Căn 9)
+    const apartment9 = apartmentRepository.create({
+      title: 'Vinhomes Smart City - Căn hộ 2PN+ #S2-0915',
+      category: 'Chung cư',
+      description:
+        'Căn hộ 2 phòng ngủ thông minh Vinhomes Smart City thiết kế không gian tối ưu, thoáng mát.',
+      location: 'Nam Từ Liêm, Hà Nội',
+      city: 'Hà Nội',
+      district: 'Nam Từ Liêm',
+      ward: 'Phường Tây Mỗ',
+      street: 'Đại Lộ Thăng Long',
+      address:
+        'Vinhomes Smart City, Đại Lộ Thăng Long, Phường Tây Mỗ, Nam Từ Liêm, Hà Nội',
+      priceMonthly: 14500000,
+      area: 65,
+      bedrooms: 2,
+      bathrooms: 1,
+      direction: 'Đông Bắc',
+      balconyDirection: 'Đông Bắc',
+      furniture: 'Đầy đủ nội thất hiện đại',
+      moveInTime: 'Ngay lập tức',
+      electricity: 'Giá nhà nước',
+      water: 'Giá nhà nước',
+      internet: 'Miễn phí',
+      gallery: [
+        'https://res.cloudinary.com/dehsnaot1/image/upload/v1786372514/khach_ngse9d.png',
+        'https://res.cloudinary.com/dehsnaot1/image/upload/v1786372519/ngu_z18iub.png',
+        'https://res.cloudinary.com/dehsnaot1/image/upload/v1786372522/wc_ymnhrp.png',
+        'https://res.cloudinary.com/dehsnaot1/image/upload/v1786372512/bep_cngirw.png',
+        'https://res.cloudinary.com/dehsnaot1/image/upload/v1786372516/bancong_neh2ki.png',
+      ],
+      images360: [
+        'https://res.cloudinary.com/dehsnaot1/image/upload/v1786372537/khach360_ogkpn4.png',
+        'https://res.cloudinary.com/dehsnaot1/image/upload/v1786372540/ngu360_nfm3jh.png',
+        'https://res.cloudinary.com/dehsnaot1/image/upload/v1786372546/wc360_zc19j2.png',
+        'https://res.cloudinary.com/dehsnaot1/image/upload/v1786372543/bep360_vjjqcw.png',
+        'https://res.cloudinary.com/dehsnaot1/image/upload/v1786372549/bancong360_ditvgk.png',
+      ],
+      vrUrl: 'https://my.matterport.com/show/?m=smartcity-can9',
+      amenities: ['Bể bơi', 'Phòng gym', 'Công viên', 'Bảo vệ 24/7'],
+      status: 'available',
+      isVerified: true,
+      landlordId: savedIndividualLandlord._id.toHexString(),
+      projectId: null,
+      projectName: null,
+      buildingId: null,
+      buildingName: null,
+    })
+    const savedApartment9 = await apartmentRepository.save(apartment9)
+    logger.log(`Tạo căn hộ 9 thành công: ${savedApartment9.title}`)
+
     // 6. Tạo Hợp đồng mẫu
     logger.log('Đang tạo hợp đồng mẫu...')
     await contractRepository.delete({
@@ -635,6 +855,90 @@ async function bootstrap(): Promise<void> {
     })
     await contractRepository.save(contract)
     logger.log('Tạo hợp đồng mẫu thành công!')
+
+    // 7. Khởi tạo dữ liệu lịch sử huấn luyện AI (Recommendation History)
+    const historyCount = await historyRepository.count()
+    if (historyCount === 0) {
+      logger.log('Đang nạp dữ liệu lịch sử thuê nhà cho AI Naive Bayes...')
+      const csvPath = path.resolve(
+        __dirname,
+        '..',
+        '..',
+        '..',
+        'python',
+        'building-recommendation',
+        'dataset',
+        'rental_history.csv'
+      )
+      if (fs.existsSync(csvPath)) {
+        const content = fs.readFileSync(csvPath, 'utf-8')
+        const lines = content.split('\n').filter(l => l.trim() !== '')
+        const recordsToInsert: Partial<RecommendationHistory>[] = []
+
+        for (let i = 1; i < lines.length; i++) {
+          const line = lines[i]
+          if (!line) continue
+          const parts = line.split(',').map(p => p.trim())
+          if (parts.length < 7) continue
+          const rawAge = parts[0]
+          const rawIncome = parts[1]
+          const rawDistrict = parts[2]
+          const rawBedrooms = parts[3]
+          const rawGym = parts[4]
+          const rawParking = parts[5]
+          const rawAptId = parts[6]
+          const rawScore = parts[7]
+
+          if (
+            !rawAge ||
+            !rawIncome ||
+            !rawDistrict ||
+            !rawBedrooms ||
+            !rawGym ||
+            !rawParking ||
+            !rawAptId
+          ) {
+            continue
+          }
+
+          const userAge = parseInt(rawAge, 10)
+          const userIncome = parseFloat(rawIncome)
+          const preferredDistrict = rawDistrict
+          const preferredBedrooms = parseInt(rawBedrooms, 10)
+          const requiresGym = parseInt(rawGym, 10)
+          const requiresParking = parseInt(rawParking, 10)
+          const rentedApartmentId = rawAptId
+          const satisfactionScore = rawScore ? parseFloat(rawScore) : 5.0
+
+          if (!isNaN(userAge) && !isNaN(userIncome)) {
+            recordsToInsert.push({
+              userAge,
+              userIncome,
+              preferredDistrict,
+              preferredBedrooms,
+              requiresGym,
+              requiresParking,
+              rentedApartmentId,
+              satisfactionScore,
+            })
+          }
+        }
+
+        const batchSize = 1000
+        for (let i = 0; i < recordsToInsert.length; i += batchSize) {
+          const batch = recordsToInsert.slice(i, i + batchSize)
+          const entities = historyRepository.create(batch)
+          await historyRepository.save(entities)
+        }
+        logger.log(
+          `Nạp thành công ${recordsToInsert.length} bản ghi lịch sử thuê nhà vào MongoDB!`
+        )
+      } else {
+        logger.warn('Không tìm thấy tệp rental_history.csv để nạp dữ liệu AI.')
+      }
+    } else {
+      logger.log(`Đã có ${historyCount} bản ghi lịch sử AI, bỏ qua nạp lại.`)
+    }
 
     logger.log('Database Seeding hoàn tất thành công!')
   } catch (error) {
