@@ -1,444 +1,210 @@
-import { Injectable, HttpException, HttpStatus, Logger } from '@nestjs/common'
-import { ConfigService } from '@nestjs/config'
+import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common'
+import { InjectRepository } from '@nestjs/typeorm'
+import { Repository } from 'typeorm'
 import { ApartmentsService } from '../apartments/apartments.service'
+import { Apartment } from '../apartments/schemas/apartment.schema'
 import { RecommendDto } from './dto/recommend.dto'
-import { FeedbackDto } from './dto/feedback.dto'
+import { FeedbackDto, FeedbackType } from './dto/feedback.dto'
 import {
   RecommendationResult,
   FeedbackResponse,
   SyncResponse,
-  PythonServiceResponse,
 } from './interfaces/recommendation.interface'
+import { NaiveBayesEngine } from './engine/naive-bayes.engine'
+import { RecommendationHistory } from './schemas/recommendation-history.schema'
+import {
+  BuildingRecord,
+  TrainingRecord,
+  UserProfile,
+} from './engine/naive-bayes.types'
 
 @Injectable()
-export class RecommendationsService {
+export class RecommendationsService implements OnApplicationBootstrap {
   private readonly logger = new Logger(RecommendationsService.name)
-  private readonly recommendationUrl: string
+  private isModelTrained = false
 
   constructor(
-    private readonly configService: ConfigService,
-    private readonly apartmentsService: ApartmentsService
-  ) {
-    this.recommendationUrl = this.configService.getOrThrow<string>(
-      'app.recommendationApiUrl'
-    )
-  }
+    @InjectRepository(RecommendationHistory)
+    private readonly historyRepository: Repository<RecommendationHistory>,
+    private readonly apartmentsService: ApartmentsService,
+    private readonly nbEngine: NaiveBayesEngine
+  ) {}
 
-  async recommend(dto: RecommendDto): Promise<RecommendationResult[]> {
+  async onApplicationBootstrap(): Promise<void> {
     try {
-      const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 10_000)
-
-      const response = await fetch(`${this.recommendationUrl}/recommend`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(dto),
-        signal: controller.signal,
-      })
-      clearTimeout(timeoutId)
-
-      if (!response.ok) {
-        const errorText = await response.text()
-        this.logger.error(`Python server error: ${errorText}`)
-        throw new HttpException(
-          `Failed to get recommendation: ${response.statusText}`,
-          HttpStatus.BAD_GATEWAY
-        )
-      }
-
-      const body = (await response.json()) as PythonServiceResponse<
-        RecommendationResult[]
-      >
-      if (body.success && body.data) {
-        return body.data
-      }
-      throw new HttpException(
-        body.error || 'Failed to get recommendation data',
-        HttpStatus.BAD_GATEWAY
-      )
+      this.logger.log('Initializing Native Naive Bayes recommendation model...')
+      await this.retrainModel()
     } catch (error) {
-      // Re-throw intentional HTTP exceptions (e.g. 400, 502) to the client
-      if (error instanceof HttpException) {
-        throw error
-      }
-
+      const msg = error instanceof Error ? error.message : String(error)
       this.logger.warn(
-        `Python recommendation service unreachable or returned error. Running heuristic fallback engine...`
+        `Failed to initialize recommendation model on bootstrap: ${msg}`
       )
-      try {
-        return await this.heuristicRecommend(dto)
-      } catch (fallbackError) {
-        const msg =
-          fallbackError instanceof Error
-            ? fallbackError.message
-            : String(fallbackError)
-        this.logger.error(`Heuristic fallback recommendation failed: ${msg}`)
-        throw new HttpException(
-          'AI recommendation service is temporarily unavailable',
-          HttpStatus.SERVICE_UNAVAILABLE
-        )
-      }
-    }
-  }
-
-  async feedback(dto: FeedbackDto): Promise<FeedbackResponse> {
-    try {
-      const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 10_000)
-
-      const response = await fetch(`${this.recommendationUrl}/feedback`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(dto),
-        signal: controller.signal,
-      })
-      clearTimeout(timeoutId)
-
-      if (!response.ok) {
-        const errorText = await response.text()
-        this.logger.error(`Python feedback error: ${errorText}`)
-        throw new HttpException(
-          `Failed to send feedback: ${response.statusText}`,
-          HttpStatus.BAD_GATEWAY
-        )
-      }
-
-      const body =
-        (await response.json()) as PythonServiceResponse<FeedbackResponse>
-      if (body.success && body.data) {
-        return body.data
-      }
-      throw new HttpException(
-        body.error || 'Failed to process feedback data',
-        HttpStatus.BAD_GATEWAY
-      )
-    } catch (error) {
-      if (error instanceof HttpException) {
-        throw error
-      }
-      this.logger.warn(
-        `Python service offline. Feedback like/dislike processed locally.`
-      )
-      return {
-        status: 'success',
-        message: 'Feedback processed locally (fallback)',
-      }
-    }
-  }
-
-  async sync(): Promise<SyncResponse> {
-    try {
-      const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 30_000)
-
-      const response = await fetch(`${this.recommendationUrl}/sync`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        signal: controller.signal,
-      })
-      clearTimeout(timeoutId)
-
-      if (!response.ok) {
-        const errorText = await response.text()
-        this.logger.error(`Python sync error: ${errorText}`)
-        throw new HttpException(
-          `Failed to sync apartments: ${response.statusText}`,
-          HttpStatus.BAD_GATEWAY
-        )
-      }
-
-      const body =
-        (await response.json()) as PythonServiceResponse<SyncResponse>
-      if (body.success && body.data) {
-        return body.data
-      }
-      throw new HttpException(
-        body.error || 'Failed to process sync data',
-        HttpStatus.BAD_GATEWAY
-      )
-    } catch (error) {
-      if (error instanceof HttpException) {
-        throw error
-      }
-      this.logger.warn(`Python service offline. Sync skipped.`)
-      return {
-        status: 'success',
-        message: 'Sync skipped (fallback)',
-        apartments_loaded: 0,
-      }
     }
   }
 
   /**
-   * Infer target age range from monthly rent price tier.
-   * Matches the Python recommender's _infer_demographics() logic.
+   * Maps an Apartment entity into a BuildingRecord for the Naive Bayes engine.
    */
-  private inferDemographics(price: number): { ageMin: number; ageMax: number } {
-    if (price <= 8_000_000) return { ageMin: 20, ageMax: 35 }
-    if (price <= 15_000_000) return { ageMin: 23, ageMax: 45 }
-    if (price <= 25_000_000) return { ageMin: 25, ageMax: 50 }
-    return { ageMin: 28, ageMax: 60 }
+  private mapApartmentToBuilding(apt: Apartment): BuildingRecord {
+    const amenities = (apt.amenities || []).map(a => a.toLowerCase())
+    const price = apt.priceMonthly || 0
+    const demo = this.nbEngine.inferDemographics(price)
+
+    const hasGym = amenities.some(
+      a => a.includes('gym') || a.includes('bể bơi') || a.includes('pool')
+    )
+      ? 1
+      : 0
+
+    const hasParking = amenities.some(
+      a =>
+        a.includes('đỗ xe') ||
+        a.includes('parking') ||
+        a.includes('bãi đỗ') ||
+        a.includes('xe')
+    )
+      ? 1
+      : 0
+
+    const aptId = apt._id ? apt._id.toString() : ''
+    const title =
+      apt.buildingName || apt.projectName || apt.title || 'Căn hộ chung cư'
+
+    return {
+      id: aptId,
+      name: title,
+      district: apt.district || 'TP.HCM',
+      rent_price: price,
+      min_income: demo.minIncome,
+      target_age_min: demo.targetAgeMin,
+      target_age_max: demo.targetAgeMax,
+      rooms: apt.bedrooms || 1,
+      has_gym: hasGym,
+      has_parking: hasParking,
+      image_url:
+        (apt.gallery && apt.gallery.length > 0 ? apt.gallery[0] : '') || '',
+    }
   }
 
-  private async heuristicRecommend(
-    dto: RecommendDto
-  ): Promise<RecommendationResult[]> {
-    const apartments = await this.apartmentsService.findAll()
+  /**
+   * Retrains the Naive Bayes engine using real database apartments and historical records.
+   */
+  public async retrainModel(): Promise<{
+    buildingCount: number
+    historyRecords: number
+  }> {
+    const allApartments = await this.apartmentsService.findAll()
+    const availableApartments = allApartments.filter(
+      apt => apt.status === 'available'
+    )
 
-    const { age, income, preferred_district, rooms, has_gym, has_parking } = dto
+    const buildingRecords: BuildingRecord[] = availableApartments.map(apt =>
+      this.mapApartmentToBuilding(apt)
+    )
 
-    const candidatesMap = new Map<
-      string,
-      {
-        id: string
-        name: string
-        district: string
-        rent_price: number
-        rooms: number
-        has_gym: boolean
-        has_parking: boolean
-        image_url: string
-        target_age_min: number
-        target_age_max: number
-        count: number
-      }
-    >()
+    const dbHistories = await this.historyRepository.find()
+    const trainingRecords: TrainingRecord[] = dbHistories.map(h => ({
+      user_age: h.userAge,
+      user_income: h.userIncome,
+      preferred_district: h.preferredDistrict,
+      preferred_bedrooms: h.preferredBedrooms,
+      requires_gym: h.requiresGym,
+      requires_parking: h.requiresParking,
+      rented_apartment_id: h.rentedApartmentId,
+    }))
 
-    for (const apt of apartments) {
-      if (apt.status !== 'available') continue
+    this.nbEngine.train(buildingRecords, trainingRecords)
+    this.isModelTrained = true
 
-      const key = apt.buildingId || apt.buildingName || apt._id.toString()
-      const name = apt.buildingName || apt.projectName || apt.title
-      const district = apt.district || 'TP.HCM'
-      const rent = apt.priceMonthly || 0
-      const hasGym =
-        apt.amenities?.some(
-          a =>
-            a.toLowerCase().includes('gym') ||
-            a.toLowerCase().includes('bể bơi') ||
-            a.toLowerCase().includes('pool')
-        ) || false
-      const hasParking =
-        apt.amenities?.some(
-          a =>
-            a.toLowerCase().includes('xe') ||
-            a.toLowerCase().includes('đỗ') ||
-            a.toLowerCase().includes('parking')
-        ) || false
+    this.logger.log(
+      `Model retrained: ${buildingRecords.length} available apartments, ${trainingRecords.length} history records.`
+    )
 
-      const { ageMin, ageMax } = this.inferDemographics(rent)
+    return {
+      buildingCount: buildingRecords.length,
+      historyRecords: trainingRecords.length,
+    }
+  }
 
-      const existing = candidatesMap.get(key)
-      if (existing) {
-        existing.rent_price =
-          (existing.rent_price * existing.count + rent) / (existing.count + 1)
-        existing.rooms = Math.round(
-          (existing.rooms * existing.count + apt.bedrooms) /
-            (existing.count + 1)
-        )
-        existing.has_gym = existing.has_gym || hasGym
-        existing.has_parking = existing.has_parking || hasParking
-        existing.count += 1
-      } else {
-        candidatesMap.set(key, {
-          id: key,
-          name,
-          district,
-          rent_price: rent,
-          rooms: apt.bedrooms || 1,
-          has_gym: hasGym,
-          has_parking: hasParking,
-          image_url: apt.gallery?.[0] || '',
-          target_age_min: ageMin,
-          target_age_max: ageMax,
-          count: 1,
-        })
-      }
+  /**
+   * Main recommendation entry point.
+   */
+  async recommend(dto: RecommendDto): Promise<RecommendationResult[]> {
+    if (!this.isModelTrained) {
+      await this.retrainModel()
     }
 
-    const recommendations: RecommendationResult[] = []
+    const userProfile: UserProfile = {
+      age: dto.age,
+      income: dto.income,
+      preferred_district: dto.preferred_district,
+      rooms: dto.rooms,
+      has_gym: Boolean(dto.has_gym),
+      has_parking: Boolean(dto.has_parking),
+    }
 
-    for (const item of candidatesMap.values()) {
-      const rent = item.rent_price
-      if (rent > income * 0.5) {
-        continue
-      }
+    const recommendations = this.nbEngine.recommend(userProfile, 5)
 
-      const reasons: string[] = []
+    return recommendations.map(rec => ({
+      id: rec.id,
+      name: rec.name,
+      district: rec.district,
+      rent_price: rec.rent_price,
+      rooms: rec.rooms,
+      has_gym: rec.has_gym,
+      has_parking: rec.has_parking,
+      image_url: rec.image_url,
+      match_score: rec.match_score,
+      reasons: rec.reasons,
+      confidence: rec.confidence,
+      contributions: rec.contributions,
+    }))
+  }
 
-      // 1. Finance Pillar (max score: 50)
-      let financeScore = 0
-      const rentRatio = rent / income
-      const rentPercentage = Math.round(rentRatio * 100)
-      if (rentRatio >= 0.15 && rentRatio <= 0.3) {
-        financeScore += 35
-        reasons.push(`Giá thuê chỉ chiếm ${rentPercentage}% thu nhập`)
-      } else if (rentRatio < 0.15) {
-        financeScore += 25
-        reasons.push(`Tiết kiệm tối đa (chỉ ${rentPercentage}% thu nhập)`)
-      } else {
-        if (rentRatio > 0.35) {
-          financeScore += 0
-        } else {
-          financeScore += 10
-        }
-        reasons.push(`Chi phí thuê khá cao (${rentPercentage}% thu nhập)`)
-      }
-      const distFromIdeal = Math.abs(rentRatio - 0.25)
-      const densityScore = Math.max(0, 15 - distFromIdeal * 60)
-      financeScore += densityScore
-
-      // 2. Location Pillar (max score: 45)
-      let locationScore = 0
-      const isExact =
-        item.district
-          .toLowerCase()
-          .includes(preferred_district.toLowerCase()) ||
-        preferred_district.toLowerCase().includes(item.district.toLowerCase())
-
-      const neighbors: Record<string, string[]> = {
-        'quận 1': ['quận 3', 'quận 4', 'quận 10', 'bình thạnh', 'quận 2'],
-        'quận 2': ['quận 1', 'quận 9', 'quận 7', 'thủ đức', 'bình thạnh'],
-        'quận 7': ['quận 4', 'quận 8', 'quận 2', 'nhà bè'],
-        'quận 4': ['quận 1', 'quận 7', 'quận 5', 'quận 8'],
-        'bình thạnh': ['quận 1', 'quận 3', 'quận 2', 'phú nhuận', 'gò vấp'],
-      }
-      const prefLower = preferred_district.toLowerCase()
-      const itemLower = item.district.toLowerCase()
-      const isNeigh =
-        neighbors[prefLower]?.some(n => itemLower.includes(n)) ||
-        neighbors[itemLower]?.some(n => prefLower.includes(n))
-
-      if (isExact) {
-        locationScore += 30
-        reasons.push(`Đúng ${preferred_district} đã chọn`)
-      } else if (isNeigh) {
-        locationScore += 18
-        reasons.push(`Giáp ranh ${preferred_district} (thuộc ${item.district})`)
-      } else {
-        reasons.push(`Khu vực ${item.district}`)
-        locationScore += 5
-      }
-      locationScore += isExact ? 15 : isNeigh ? 8 : 0
-
-      // 3. Demographics Pillar (max score: 20)
-      let demographicsScore = 0
-      if (item.target_age_min <= age && age <= item.target_age_max) {
-        demographicsScore += 10
-        reasons.push(
-          `Cộng đồng tuổi ${item.target_age_min}-${item.target_age_max} năng động`
-        )
-      }
-      demographicsScore += 10
-
-      // 4. Amenities Pillar (max score: 35)
-      let amenitiesScore = 0
-      if (item.rooms === rooms) {
-        amenitiesScore += 15
-        if (rooms === 1) {
-          reasons.push('1PN riêng tư, tối ưu chi phí')
-        } else if (rooms === 2) {
-          reasons.push('2PN phù hợp gia đình trẻ')
-        } else {
-          reasons.push(`${rooms}PN rộng rãi cho cả nhà`)
-        }
-      } else {
-        amenitiesScore += Math.max(0, 15 - Math.abs(item.rooms - rooms) * 5)
-      }
-
-      let gymScore = 0
-      if (has_gym) {
-        if (item.has_gym) {
-          gymScore += 10
-          reasons.push('Có phòng Gym nâng cao sức khỏe')
-        } else {
-          gymScore -= 5
-        }
-      } else {
-        if (item.has_gym) {
-          gymScore += 5
-        }
-      }
-
-      let parkingScore = 0
-      if (has_parking) {
-        if (item.has_parking) {
-          parkingScore += 10
-          reasons.push('Có bãi đỗ xe ô tô theo nhu cầu')
-        }
-      }
-      amenitiesScore += Math.max(0, gymScore + parkingScore)
-
-      const contributions = {
-        finance: Math.min(
-          100,
-          Math.max(0, Math.round((financeScore / 50.0) * 100))
-        ),
-        location: Math.min(
-          100,
-          Math.max(0, Math.round((locationScore / 45.0) * 100))
-        ),
-        demographics: Math.min(
-          100,
-          Math.max(0, Math.round((demographicsScore / 20.0) * 100))
-        ),
-        amenities: Math.min(
-          100,
-          Math.max(0, Math.round((amenitiesScore / 35.0) * 100))
-        ),
-      }
-
-      const checklistContent =
-        (rentRatio >= 0.15 && rentRatio <= 0.3
-          ? 35
-          : rentRatio < 0.15
-            ? 25
-            : 10) +
-        (isExact ? 30 : isNeigh ? 18 : 0) +
-        (item.rooms === rooms
-          ? 15
-          : Math.max(0, 15 - Math.abs(item.rooms - rooms) * 5)) +
-        Math.max(0, gymScore + parkingScore) +
-        (item.target_age_min <= age && age <= item.target_age_max ? 10 : 0)
-
-      let finalChecklistContent = checklistContent
-      if (rentRatio > 0.35) {
-        const excess = rentRatio - 0.35
-        const penalty = Math.min(35, Math.round(excess * 150))
-        finalChecklistContent = Math.max(0, checklistContent - penalty)
-      }
-      const match_score = Math.min(
-        100.0,
-        Math.max(
-          0.0,
-          Math.round((finalChecklistContent / 110.0) * 100 * 10) / 10
-        )
-      )
-
-      recommendations.push({
-        id: item.id,
-        name: item.name,
-        district: item.district,
-        rent_price: rent,
-        rooms: item.rooms,
-        has_gym: item.has_gym,
-        has_parking: item.has_parking,
-        image_url: item.image_url,
-        match_score,
-        reasons: reasons.slice(0, 3),
-        confidence: 'Trung bình',
-        contributions,
+  /**
+   * Records user feedback and performs online learning.
+   */
+  async feedback(dto: FeedbackDto): Promise<FeedbackResponse> {
+    if (dto.feedback_type === FeedbackType.LIKE) {
+      const historyEntity = this.historyRepository.create({
+        userAge: dto.age,
+        userIncome: dto.income,
+        preferredDistrict: dto.preferred_district,
+        preferredBedrooms: dto.rooms,
+        requiresGym: dto.has_gym ? 1 : 0,
+        requiresParking: dto.has_parking ? 1 : 0,
+        rentedApartmentId: dto.building_id,
+        satisfactionScore: 5.0,
       })
+
+      await this.historyRepository.save(historyEntity)
+      const { historyRecords } = await this.retrainModel()
+
+      return {
+        status: 'success',
+        message:
+          "Feedback 'like' recorded successfully and model retrained on-the-fly.",
+        history_records: historyRecords,
+      }
     }
 
-    return recommendations
-      .sort((a, b) => b.match_score - a.match_score)
-      .slice(0, 5)
+    const currentCount = await this.historyRepository.count()
+    return {
+      status: 'success',
+      message: "Feedback 'dislike' recorded successfully.",
+      history_records: currentCount,
+    }
+  }
+
+  /**
+   * Admin endpoint to sync data and trigger retraining.
+   */
+  async sync(): Promise<SyncResponse> {
+    const { buildingCount } = await this.retrainModel()
+    return {
+      status: 'success',
+      message: 'Apartment data synced and model retrained successfully',
+      apartments_loaded: buildingCount,
+    }
   }
 }

@@ -31,9 +31,3 @@ export interface SyncResponse {
   message: string
   apartments_loaded: number
 }
-
-export interface PythonServiceResponse<T> {
-  success: boolean
-  data?: T
-  error?: string
-}
