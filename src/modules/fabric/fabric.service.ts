@@ -20,6 +20,12 @@ import {
 } from '@hyperledger/fabric-gateway'
 import { BlockchainLog } from './schemas/blockchain-log.schema'
 
+/**
+ * Hàm read-only rẻ nhất trên chaincode, dùng để xác nhận peer thực sự sống
+ * lúc khởi động. Phải tồn tại trong blockchain/chaincode/lib/proptech-contract.js.
+ */
+const FABRIC_HEALTHCHECK_FN = 'getAllContracts'
+
 @Injectable()
 export class FabricService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(FabricService.name)
@@ -37,7 +43,7 @@ export class FabricService implements OnModuleInit, OnModuleDestroy {
     private readonly configService: ConfigService
   ) {}
 
-  onModuleInit(): void {
+  async onModuleInit(): Promise<void> {
     const enabled = this.configService.get<string>('FABRIC_ENABLED') === 'true'
     if (!enabled) {
       this.logger.warn(
@@ -115,6 +121,14 @@ export class FabricService implements OnModuleInit, OnModuleDestroy {
         commitStatusOptions: () => ({ deadline: Date.now() + 60000 }),
       })
 
+      // 5. Health check thật.
+      // `new grpc.Client()` và `connect()` đều lazy — không mở kết nối mạng nào.
+      // Nếu bỏ qua bước này, service sẽ log "connected" kể cả khi peer đã chết,
+      // và lỗi chỉ nổ ra lúc người dùng kích hoạt hợp đồng.
+      const network = this.gateway.getNetwork(this.channelName)
+      const contract = network.getContract(this.chaincodeName)
+      await contract.evaluateTransaction(FABRIC_HEALTHCHECK_FN)
+
       this.isSimulationMode = false
       this.logger.log(
         `Successfully connected to Hyperledger Fabric — channel: ${this.channelName}, chaincode: ${this.chaincodeName}`
@@ -124,6 +138,11 @@ export class FabricService implements OnModuleInit, OnModuleDestroy {
       this.logger.error(
         `Failed to initialize Fabric connection: ${errMsg}. Falling back to Simulation Mode.`
       )
+      // Dọn gateway/gRPC client nửa vời để không rò socket khi health check trượt.
+      this.gateway?.close()
+      this.grpcClient?.close()
+      this.gateway = null
+      this.grpcClient = null
       this.isSimulationMode = true
     }
   }
