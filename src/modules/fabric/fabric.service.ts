@@ -20,6 +20,8 @@ import {
 } from '@hyperledger/fabric-gateway'
 import { BlockchainLog } from './schemas/blockchain-log.schema'
 
+const utf8Decoder = new TextDecoder()
+
 /**
  * Hàm read-only rẻ nhất trên chaincode, dùng để xác nhận peer thực sự sống
  * lúc khởi động. Phải tồn tại trong blockchain/chaincode/lib/proptech-contract.js.
@@ -196,7 +198,8 @@ export class FabricService implements OnModuleInit, OnModuleDestroy {
 
       // Submit transaction
       const resultBuffer = await contract.submitTransaction(action, ...args)
-      const result = JSON.parse(resultBuffer.toString() || '{}') as Record<
+      const resultString = utf8Decoder.decode(resultBuffer).trim()
+      const result = (resultString ? JSON.parse(resultString) : {}) as Record<
         string,
         unknown
       >
@@ -259,7 +262,8 @@ export class FabricService implements OnModuleInit, OnModuleDestroy {
       const contract = network.getContract(this.chaincodeName)
 
       const resultBuffer = await contract.evaluateTransaction(action, ...args)
-      return JSON.parse(resultBuffer.toString() || '{}') as unknown
+      const resultString = utf8Decoder.decode(resultBuffer).trim()
+      return resultString ? (JSON.parse(resultString) as unknown) : []
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error)
       this.logger.error(`Error querying Fabric: ${errMsg}`)
