@@ -1,4 +1,13 @@
-import { Controller, Get, UseGuards, Request } from '@nestjs/common'
+import {
+  Controller,
+  Get,
+  Patch,
+  Param,
+  Body,
+  UseGuards,
+  Request,
+  NotFoundException,
+} from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 import { ObjectId } from 'mongodb'
@@ -6,7 +15,11 @@ import { User } from './schemas/user.schema'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { RolesGuard } from '../../common/guards/roles.guard'
 import { Roles } from '../../common/decorators/roles.decorator'
+import { UpdateUserPermissionsDto } from './dto/update-user-permissions.dto'
+import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger'
 
+@ApiTags('users')
+@ApiBearerAuth()
 @Controller('users')
 export class UsersController {
   constructor(
@@ -64,5 +77,86 @@ export class UsersController {
         twoFactorEnabled: twoFactor?.enabled || false,
       }
     })
+  }
+
+  /**
+   * Cập nhật ma trận phân quyền cho user theo role
+   * Admin chỉ định permission matrix cho một user/role cụ thể
+   * Permissions được lưu vào metadata.permissions
+   * [uc_admin_rbac]
+   */
+  @ApiOperation({ summary: 'Admin cập nhật permission matrix cho user' })
+  @Patch(':id/permissions')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  async updatePermissions(
+    @Param('id') id: string,
+    @Body() dto: UpdateUserPermissionsDto
+  ): Promise<{
+    success: boolean
+    userId: string
+    permissions: Record<string, boolean>
+  }> {
+    let objectId: ObjectId
+    try {
+      objectId = new ObjectId(id)
+    } catch {
+      throw new NotFoundException('Người dùng không tồn tại')
+    }
+
+    const user = await this.userRepository.findOne({
+      where: { _id: objectId },
+    })
+
+    if (!user) {
+      throw new NotFoundException('Người dùng không tồn tại')
+    }
+
+    const updatedMetadata: Record<string, unknown> = {
+      ...(user.metadata ?? {}),
+      permissions: dto.permissions,
+    }
+
+    user.metadata = updatedMetadata
+    await this.userRepository.save(user)
+
+    return {
+      success: true,
+      userId: id,
+      permissions: dto.permissions,
+    }
+  }
+
+  /**
+   * Admin cập nhật role của user
+   * [uc_admin_rbac]
+   */
+  @ApiOperation({ summary: 'Admin cập nhật role của user' })
+  @Patch(':id/role')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  async updateRole(
+    @Param('id') id: string,
+    @Body('role') role: 'tenant' | 'landlord' | 'staff' | 'admin'
+  ): Promise<{ success: boolean; userId: string; role: string }> {
+    let objectId: ObjectId
+    try {
+      objectId = new ObjectId(id)
+    } catch {
+      throw new NotFoundException('Người dùng không tồn tại')
+    }
+
+    const user = await this.userRepository.findOne({
+      where: { _id: objectId },
+    })
+
+    if (!user) {
+      throw new NotFoundException('Người dùng không tồn tại')
+    }
+
+    user.role = role
+    await this.userRepository.save(user)
+
+    return { success: true, userId: id, role }
   }
 }
