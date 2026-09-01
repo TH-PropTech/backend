@@ -14,6 +14,8 @@ import { FabricService } from '../fabric/fabric.service'
 import { KycService } from '../kyc/kyc.service'
 import { EkycProxyService } from '../kyc/ekyc-proxy.service'
 
+// ── Interfaces ──
+
 interface CreateContractInput {
   propertyId: string
   propertyTitle: string
@@ -38,6 +40,17 @@ interface CreateContractInput {
   terminationNoticeDays: number
 }
 
+/** Kết quả từ chaincode verifyContract */
+interface ChainVerifyResult {
+  valid: boolean
+  reason: 'MATCH' | 'HASH_MISMATCH' | 'NOT_FOUND'
+  onChainHash?: string
+  txId?: string
+  recordedAt?: string
+}
+
+// ── Service ──
+
 @Injectable()
 export class ContractsService {
   private readonly logger = new Logger(ContractsService.name)
@@ -50,6 +63,39 @@ export class ContractsService {
     private readonly kycService: KycService,
     private readonly ekycProxyService: EkycProxyService
   ) {}
+
+  // ── Private helpers ──
+
+  /**
+   * Tính SHA-256 của payload hợp đồng.
+   * Dùng chung cho signContract() và verifyIntegrity() để đảm bảo tính nhất quán.
+   */
+  private buildContractHash(
+    contract: Contract,
+    policies: Record<string, string>
+  ): string {
+    const payload = JSON.stringify({
+      contractCode: contract.contractCode,
+      propertyId: contract.propertyId,
+      propertyTitle: contract.propertyTitle,
+      propertyAddress: contract.propertyAddress,
+      propertyArea: contract.propertyArea,
+      landlordId: contract.landlordId,
+      landlordName: contract.landlordName,
+      landlordCccd: contract.landlordCccd,
+      tenantId: contract.tenantId,
+      tenantName: contract.tenantName,
+      tenantCccd: contract.tenantCccd,
+      monthlyRent: contract.monthlyRent,
+      deposit: contract.deposit,
+      latePenaltyRate: contract.latePenaltyRate,
+      terminationNoticeDays: contract.terminationNoticeDays,
+      startDate: contract.startDate,
+      endDate: contract.endDate,
+      appliedPolicies: policies,
+    })
+    return crypto.createHash('sha256').update(payload).digest('hex')
+  }
 
   // ── Tạo hợp đồng mới — validate theo chính sách pháp luật ──
 
@@ -68,7 +114,6 @@ export class ContractsService {
     // Bước 2: Kiểm tra tuân thủ pháp luật (Compliance Check)
     const violations: string[] = []
 
-    // Kiểm tra lãi suất phạt — Khoản 1 Điều 468 BLDS 2015
     if (input.latePenaltyRate > Number(maxInterestRate)) {
       violations.push(
         `Lãi suất phạt chậm đóng ${input.latePenaltyRate}%/năm vượt mức tối đa ${maxInterestRate}%/năm ` +
@@ -76,7 +121,6 @@ export class ContractsService {
       )
     }
 
-    // Kiểm tra thời hạn báo trước chấm dứt — Khoản 3 Điều 130 LNO 2023
     if (input.terminationNoticeDays < Number(minNoticeDays)) {
       violations.push(
         `Thời hạn báo trước chấm dứt ${input.terminationNoticeDays} ngày thấp hơn tối thiểu ${minNoticeDays} ngày ` +
@@ -84,7 +128,6 @@ export class ContractsService {
       )
     }
 
-    // Kiểm tra tỷ lệ cọc — Khoản 5 Điều 23 LKDBDS 2023
     if (input.propertyValue > 0) {
       const depositPercent = (input.deposit / input.propertyValue) * 100
       if (depositPercent > Number(maxDepositPercent)) {
@@ -95,14 +138,12 @@ export class ContractsService {
       }
     }
 
-    // Kiểm tra thời hạn hợp đồng hợp lệ
     const start = new Date(input.startDate)
     const end = new Date(input.endDate)
     if (end <= start) {
       violations.push('Ngày kết thúc hợp đồng phải sau ngày bắt đầu')
     }
 
-    // Nếu có vi phạm, từ chối tạo hợp đồng
     if (violations.length > 0) {
       throw new BadRequestException({
         message: 'Hợp đồng vi phạm quy định pháp luật',
@@ -165,11 +206,20 @@ export class ContractsService {
       throw new BadRequestException('Hợp đồng không ở trạng thái chờ ký')
     }
 
-    // Cập nhật chữ ký
+    // Bước 1: Xác minh KYC của người ký trước khi chấp nhận chữ ký
+    const userId = role === 'tenant' ? contract.tenantId : contract.landlordId
+    const kyc = await this.kycService.findByUserId(userId)
+    if (!kyc || kyc.status !== 'verified') {
+      throw new BadRequestException(
+        `Người ký (${role}) chưa hoàn tất xác minh KYC hoặc hồ sơ chưa được phê duyệt`
+      )
+    }
+
+    // Bước 2: Cập nhật chữ ký
     if (role === 'tenant') contract.signedByTenant = true
     if (role === 'landlord') contract.signedByLandlord = true
 
-    // Nếu cả hai đã ký → kích hoạt hợp đồng
+    // Bước 3: Nếu cả hai đã ký → kích hoạt hợp đồng & neo hash lên blockchain
     if (contract.signedByTenant && contract.signedByLandlord) {
       contract.status = 'active'
 
@@ -183,33 +233,10 @@ export class ContractsService {
       }
       contract.appliedPolicies = snapshot
 
-      // Tạo mã băm SHA-256 nội dung hợp đồng (bao gồm thông tin danh tính số & tài sản để đảm bảo tính pháp lý bất biến)
-      const hashPayload = JSON.stringify({
-        contractCode: contract.contractCode,
-        propertyId: contract.propertyId,
-        propertyTitle: contract.propertyTitle,
-        propertyAddress: contract.propertyAddress,
-        propertyArea: contract.propertyArea,
-        landlordId: contract.landlordId,
-        landlordName: contract.landlordName,
-        landlordCccd: contract.landlordCccd,
-        tenantId: contract.tenantId,
-        tenantName: contract.tenantName,
-        tenantCccd: contract.tenantCccd,
-        monthlyRent: contract.monthlyRent,
-        deposit: contract.deposit,
-        latePenaltyRate: contract.latePenaltyRate,
-        terminationNoticeDays: contract.terminationNoticeDays,
-        startDate: contract.startDate,
-        endDate: contract.endDate,
-        appliedPolicies: snapshot,
-      })
-      contract.contractHash = crypto
-        .createHash('sha256')
-        .update(hashPayload)
-        .digest('hex')
+      // Tạo mã băm SHA-256 bất biến của nội dung hợp đồng (PII + điều khoản + chính sách pháp luật áp dụng)
+      contract.contractHash = this.buildContractHash(contract, snapshot)
 
-      // Đẩy lên Hyperledger Fabric blockchain
+      // Đẩy hash lên Hyperledger Fabric (chỉ neo hash — PII không lên ledger)
       const txResult = await this.fabricService.submitTransaction(
         'createContract',
         [
@@ -248,16 +275,18 @@ export class ContractsService {
   // ── Lấy danh sách hợp đồng theo người dùng ──
 
   async findByUser(userId: string): Promise<Contract[]> {
-    const asLandlord = await this.contractRepository.find({
-      where: { landlordId: userId },
-      order: { createdAt: 'DESC' },
-    })
-    const asTenant = await this.contractRepository.find({
-      where: { tenantId: userId },
-      order: { createdAt: 'DESC' },
-    })
+    const [asLandlord, asTenant] = await Promise.all([
+      this.contractRepository.find({
+        where: { landlordId: userId },
+        order: { createdAt: 'DESC' },
+      }),
+      this.contractRepository.find({
+        where: { tenantId: userId },
+        order: { createdAt: 'DESC' },
+      }),
+    ])
 
-    // Gộp và loại bỏ trùng lặp
+    // Gộp và loại bỏ trùng lặp (một user có thể vừa là chủ nhà vừa là khách thuê)
     const map = new Map<string, Contract>()
     for (const c of [...asLandlord, ...asTenant]) {
       map.set(c._id.toHexString(), c)
@@ -265,47 +294,57 @@ export class ContractsService {
     return Array.from(map.values())
   }
 
-  // ── Xác minh tính toàn vẹn hợp đồng với blockchain ──
+  // ── Xác minh tính toàn vẹn hợp đồng — so sánh với Hyperledger Fabric ──
 
+  /**
+   * Xác minh tính toàn vẹn hợp đồng qua 2 lớp:
+   *
+   * 1. Tính lại hash từ dữ liệu MongoDB hiện tại → so với hash lưu trong MongoDB.
+   * 2. Gọi chaincode.verifyContract() trên Hyperledger Fabric → hash trên ledger (bất biến).
+   *
+   * isValid = TRUE chỉ khi cả 2 lớp đều khớp.
+   * Nếu MongoDB bị tamper nhưng ledger không đổi được → isValid = FALSE.
+   */
   async verifyIntegrity(contractId: string): Promise<{
     isValid: boolean
     currentHash: string
     storedHash: string | null
     blockchainAddress: string | null
+    onChain: ChainVerifyResult | null
   }> {
     const contract = await this.findOne(contractId)
 
-    // Tính lại hash từ dữ liệu hiện tại
-    const hashPayload = JSON.stringify({
-      contractCode: contract.contractCode,
-      propertyId: contract.propertyId,
-      propertyTitle: contract.propertyTitle,
-      propertyAddress: contract.propertyAddress,
-      propertyArea: contract.propertyArea,
-      landlordId: contract.landlordId,
-      landlordName: contract.landlordName,
-      landlordCccd: contract.landlordCccd,
-      tenantId: contract.tenantId,
-      tenantName: contract.tenantName,
-      tenantCccd: contract.tenantCccd,
-      monthlyRent: contract.monthlyRent,
-      deposit: contract.deposit,
-      latePenaltyRate: contract.latePenaltyRate,
-      terminationNoticeDays: contract.terminationNoticeDays,
-      startDate: contract.startDate,
-      endDate: contract.endDate,
-      appliedPolicies: contract.appliedPolicies,
-    })
-    const currentHash = crypto
-      .createHash('sha256')
-      .update(hashPayload)
-      .digest('hex')
+    // Lớp 1: Tính lại hash từ dữ liệu MongoDB
+    const currentHash = this.buildContractHash(
+      contract,
+      contract.appliedPolicies ?? {}
+    )
+    const mongoMatch = currentHash === contract.contractHash
+
+    // Lớp 2: Đối chiếu với hash bất biến trên Hyperledger Fabric
+    let onChain: ChainVerifyResult | null = null
+    if (contract.blockchainAddress) {
+      try {
+        onChain = (await this.fabricService.evaluateTransaction(
+          'verifyContract',
+          [contractId, currentHash]
+        )) as ChainVerifyResult
+      } catch (error) {
+        const errMsg = error instanceof Error ? error.message : String(error)
+        this.logger.warn(
+          `Không thể truy vấn Fabric để xác minh hợp đồng ${contractId}: ${errMsg}`
+        )
+      }
+    }
+
+    const chainMatch = onChain !== null ? onChain.valid : true
 
     return {
-      isValid: currentHash === contract.contractHash,
+      isValid: mongoMatch && chainMatch,
       currentHash,
       storedHash: contract.contractHash,
       blockchainAddress: contract.blockchainAddress,
+      onChain,
     }
   }
 
@@ -331,7 +370,7 @@ export class ContractsService {
       userId = role === 'tenant' ? contract.tenantId : contract.landlordId
     } catch {
       this.logger.warn(
-        `Contract ${contractId} not found. Falling back to looking up KYC record by contractId as userId.`
+        `Contract ${contractId} not found. Falling back to contractId as userId.`
       )
       userId = contractId
     }
