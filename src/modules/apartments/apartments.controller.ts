@@ -22,6 +22,7 @@ import { ApartmentFilterDto } from './dto/apartment-filter.dto'
 import { CreateApartmentDto } from './dto/create-apartment.dto'
 import { RejectApartmentDto } from './dto/reject-apartment.dto'
 import { UpdateApartmentPriceDto } from './dto/update-apartment-price.dto'
+import { UpdateApartmentMediaDto } from './dto/update-apartment-media.dto'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { RolesGuard } from '../../common/guards/roles.guard'
 import { Roles } from '../../common/decorators/roles.decorator'
@@ -236,6 +237,17 @@ export class ApartmentsController {
       status,
       isVerified
     )
+    return ApartmentResponseMapper.toWebJson(updated)
+  }
+
+  @Patch(':id/media')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('staff', 'admin')
+  async updateMedia(
+    @Param('id') id: string,
+    @Body() dto: UpdateApartmentMediaDto
+  ): Promise<WebApartmentResponse> {
+    const updated = await this.apartmentsService.updateMedia(id, dto)
     return ApartmentResponseMapper.toWebJson(updated)
   }
 
