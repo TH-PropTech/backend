@@ -14,6 +14,7 @@ import { Apartment } from './schemas/apartment.schema'
 import { User } from '../users/schemas/user.schema'
 import { ApartmentFilterDto } from './dto/apartment-filter.dto'
 import { CreateApartmentDto } from './dto/create-apartment.dto'
+import { UpdateApartmentMediaDto } from './dto/update-apartment-media.dto'
 import { NotificationsService } from '../notifications/notifications.service'
 import { ProjectsService } from '../projects/projects.service'
 import { BuildingsService } from '../buildings/buildings.service'
@@ -516,6 +517,29 @@ export class ApartmentsService
       newValue: String(saved.priceMonthly),
     })
     return saved
+  }
+
+  async updateMedia(
+    id: string,
+    dto: UpdateApartmentMediaDto
+  ): Promise<Apartment> {
+    if (dto.gallery === undefined && dto.images360 === undefined) {
+      throw new BadRequestException(
+        'Cần cung cấp danh sách ảnh thường hoặc ảnh 360 độ'
+      )
+    }
+
+    const apartment = await this.apartmentRepository.findOne({
+      where: { _id: new ObjectId(id) },
+    })
+    if (!apartment) {
+      throw new NotFoundException(`Không tìm thấy căn hộ với ID: ${id}`)
+    }
+
+    if (dto.gallery !== undefined) apartment.gallery = dto.gallery
+    if (dto.images360 !== undefined) apartment.images360 = dto.images360
+
+    return this.apartmentRepository.save(apartment)
   }
 
   // ── Tạo bài đăng căn hộ mới ──

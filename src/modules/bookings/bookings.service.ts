@@ -367,10 +367,18 @@ export class BookingsService {
     const allRecords = await this.bookingRepository.find(options)
 
     // Lấy thông tin user (landlord + tenant) tương ứng
+    const isValidObjectId = (id: string): boolean => {
+      try {
+        return Boolean(id && /^[a-f\d]{24}$/i.test(id))
+      } catch {
+        return false
+      }
+    }
+
     const userIds = [
       ...allRecords.map(r => r.landlordId),
       ...allRecords.map(r => r.tenantId),
-    ].filter(Boolean)
+    ].filter(id => Boolean(id) && isValidObjectId(id))
 
     const users =
       userIds.length > 0

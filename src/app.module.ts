@@ -40,6 +40,7 @@ import { AreaProfilesModule } from './modules/area-profiles/area-profiles.module
 import { RentalApplicationsModule } from './modules/rental-applications/rental-applications.module'
 import { ConditionAnalysisModule } from './modules/condition-analysis/condition-analysis.module'
 import { LocationRiskModule } from './modules/location-risk/location-risk.module'
+import { OperationsModule } from './modules/operations/operations.module'
 
 @Module({
   imports: [
@@ -104,6 +105,7 @@ import { LocationRiskModule } from './modules/location-risk/location-risk.module
     RentalApplicationsModule,
     ConditionAnalysisModule,
     LocationRiskModule,
+    OperationsModule,
   ],
 })
 export class AppModule {}
