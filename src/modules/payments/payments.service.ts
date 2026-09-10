@@ -1,0 +1,230 @@
+import {
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+  Optional,
+} from '@nestjs/common'
+import { InjectRepository } from '@nestjs/typeorm'
+import { ObjectId } from 'mongodb'
+import { createHash } from 'node:crypto'
+import { Repository } from 'typeorm'
+import { Contract } from '../contracts/schemas/contract.schema'
+import { LedgerOutboxService } from '../fabric/ledger-outbox.service'
+import { NotificationsService } from '../notifications/notifications.service'
+import { generatePaymentSchedule } from './payment-schedule.util'
+import { reminderDateKey, vietnamDateKey } from './payment-reminder.util'
+import { Payment } from './schemas/payment.schema'
+
+@Injectable()
+export class PaymentsService {
+  constructor(
+    @InjectRepository(Payment)
+    private readonly paymentRepository: Repository<Payment>,
+    @InjectRepository(Contract)
+    private readonly contractRepository: Repository<Contract>,
+    private readonly notificationsService?: NotificationsService,
+    @Optional() private readonly ledgerOutboxService?: LedgerOutboxService
+  ) {}
+
+  async generateSchedule(contract: Contract): Promise<Payment[]> {
+    const contractId = contract._id.toString()
+    const existing = await this.paymentRepository.find({
+      where: { contractId, type: 'rent' },
+    })
+    const existingPeriods = new Set(
+      existing.map(payment => payment.periodKey).filter(Boolean)
+    )
+    const durationMonths =
+      contract.durationMonths ?? this.calculateDurationMonths(contract)
+    const schedule = generatePaymentSchedule({
+      contractId,
+      startDate: contract.startDate,
+      durationMonths,
+      monthlyRent: contract.monthlyRent,
+      paymentDay: contract.paymentDay,
+    })
+
+    const newPayments: Payment[] = []
+    for (const item of schedule) {
+      if (existingPeriods.has(item.periodKey)) continue
+      const payment = this.paymentRepository.create({
+        contractId: item.contractId,
+        tenantId: contract.tenantId,
+        landlordId: contract.landlordId,
+        amount: item.amount,
+        description: `Rent ${item.periodKey}`,
+        dueDate: item.dueDate,
+        paidAt: null,
+        status: item.status,
+        txHash: null,
+        type: 'rent',
+        month: item.dueDate.getUTCMonth() + 1,
+        year: item.dueDate.getUTCFullYear(),
+        periodKey: item.periodKey,
+        ledgerStatus: 'not-required',
+      })
+      newPayments.push(await this.paymentRepository.save(payment))
+    }
+    return [...existing, ...newPayments]
+  }
+
+  async getByContract(
+    contractId: string,
+    actorId: string,
+    isStaff: boolean
+  ): Promise<Payment[]> {
+    const contract = await this.findContract(contractId)
+    if (
+      !isStaff &&
+      contract.tenantId !== actorId &&
+      contract.landlordId !== actorId
+    ) {
+      throw new ForbiddenException('PAYMENT_ACCESS_DENIED')
+    }
+    return this.paymentRepository.find({
+      where: { contractId, type: 'rent' },
+      order: { dueDate: 'ASC' },
+    })
+  }
+
+  async confirmPayment(
+    paymentId: string,
+    actorId: string,
+    isStaff: boolean
+  ): Promise<Payment> {
+    if (!ObjectId.isValid(paymentId)) {
+      throw new NotFoundException('PAYMENT_NOT_FOUND')
+    }
+    const payment = await this.paymentRepository.findOne({
+      where: { _id: new ObjectId(paymentId) },
+    })
+    if (!payment) throw new NotFoundException('PAYMENT_NOT_FOUND')
+    if (!isStaff && payment.tenantId !== actorId) {
+      throw new ForbiddenException('PAYMENT_ACCESS_DENIED')
+    }
+    if (payment.status === 'paid') return payment
+
+    payment.status = 'paid'
+    payment.paidAt = new Date()
+    payment.confirmedBy = actorId
+    payment.paymentHash = this.buildPaymentHash(payment)
+    payment.ledgerStatus = 'pending'
+    const saved = await this.paymentRepository.save(payment)
+    if (this.ledgerOutboxService) {
+      await this.ledgerOutboxService.enqueue({
+        aggregateType: 'payment',
+        aggregateId: payment._id.toHexString(),
+        eventType: 'payment.paid',
+        action: 'recordPayment',
+        args: [
+          payment._id.toHexString(),
+          payment.contractId,
+          payment.amount.toString(),
+          payment.paymentHash,
+        ],
+        metadata: {
+          paymentId: payment._id.toHexString(),
+          contractId: payment.contractId,
+          details: { confirmedBy: actorId },
+        },
+      })
+    }
+    return saved
+  }
+
+  async getOverdue(): Promise<Payment[]> {
+    return this.paymentRepository.find({
+      where: { status: 'overdue' },
+      order: { dueDate: 'ASC' },
+    })
+  }
+
+  async markOverdue(now = new Date()): Promise<number> {
+    const result = await this.processReminders(now)
+    return result.overdue
+  }
+
+  async processReminders(
+    now = new Date()
+  ): Promise<{ overdue: number; reminders: number }> {
+    const todayKey = vietnamDateKey(now)
+    const payments = await this.paymentRepository.find({
+      where: { status: 'unpaid' },
+    })
+    let overdue = 0
+    let reminders = 0
+
+    for (const payment of payments) {
+      const dueDateKey = vietnamDateKey(payment.dueDate)
+      const shouldMarkOverdue = dueDateKey < todayKey
+      const reminderKey = reminderDateKey(payment.dueDate)
+      const shouldRemind =
+        reminderKey === todayKey && payment.reminderSentForDate !== reminderKey
+
+      if (!shouldMarkOverdue && !shouldRemind) continue
+      if (shouldRemind) {
+        if (!this.notificationsService) continue
+        await this.notificationsService.createNotification(
+          payment.tenantId,
+          'Rent payment reminder',
+          `Rent invoice ${payment.periodKey ?? payment._id.toString()} is due on ${dueDateKey}.`,
+          'PAYMENT_REMINDER',
+          {
+            paymentId: payment._id.toString(),
+            contractId: payment.contractId,
+            dueDate: dueDateKey,
+            reminderDate: reminderKey,
+          }
+        )
+        payment.reminderSentForDate = reminderKey
+        payment.reminderSentAt = now
+        reminders += 1
+      }
+      if (shouldMarkOverdue) {
+        payment.status = 'overdue'
+        overdue += 1
+      }
+      await this.paymentRepository.save(payment)
+    }
+
+    return { overdue, reminders }
+  }
+
+  private async findContract(contractId: string): Promise<Contract> {
+    if (!ObjectId.isValid(contractId)) {
+      throw new NotFoundException('CONTRACT_NOT_FOUND')
+    }
+    const contract = await this.contractRepository.findOne({
+      where: { _id: new ObjectId(contractId) },
+    })
+    if (!contract) throw new NotFoundException('CONTRACT_NOT_FOUND')
+    return contract
+  }
+
+  private calculateDurationMonths(contract: Contract): number {
+    const start = contract.startDate
+    const end = contract.endDate
+    return Math.max(
+      1,
+      (end.getUTCFullYear() - start.getUTCFullYear()) * 12 +
+        end.getUTCMonth() -
+        start.getUTCMonth()
+    )
+  }
+
+  private buildPaymentHash(payment: Payment): string {
+    return createHash('sha256')
+      .update(
+        JSON.stringify({
+          version: 1,
+          paymentId: payment._id.toHexString(),
+          contractId: payment.contractId,
+          amount: payment.amount,
+          dueDate: payment.dueDate.toISOString(),
+          paidAt: payment.paidAt?.toISOString() ?? null,
+          confirmedBy: payment.confirmedBy ?? null,
+        })
+      )
+      .digest('hex')
+  }
+}

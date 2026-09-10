@@ -14,6 +14,18 @@ import {
 
 export class CreateRentalApplicationDto {
   @ApiProperty() @IsString() @IsNotEmpty() apartmentId!: string
+  @ApiPropertyOptional({ description: 'Approved rental package identifier' })
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  packageId?: string
+
+  @ApiPropertyOptional({ description: 'Package version observed by tenant' })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  packageVersion?: number
+
   @ApiProperty({ minimum: 1, maximum: 20 })
   @Type(() => Number)
   @IsInt()

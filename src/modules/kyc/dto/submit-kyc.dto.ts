@@ -1,32 +1,11 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
-import {
-  IsString,
-  IsNotEmpty,
-  IsOptional,
-  IsBoolean,
-  IsNumber,
-} from 'class-validator'
+import { IsString, IsNotEmpty, IsOptional } from 'class-validator'
 
 export class SubmitKycDto {
   @ApiProperty({ description: 'Số CCCD/CMND' })
   @IsString()
   @IsNotEmpty()
   idCardNumber!: string
-
-  @ApiProperty({ description: 'URL hoặc base64 ảnh mặt trước CCCD' })
-  @IsString()
-  @IsNotEmpty()
-  frontCardUrl!: string
-
-  @ApiProperty({ description: 'URL hoặc base64 ảnh mặt sau CCCD' })
-  @IsString()
-  @IsNotEmpty()
-  backCardUrl!: string
-
-  @ApiProperty({ description: 'URL hoặc base64 ảnh selfie' })
-  @IsString()
-  @IsNotEmpty()
-  selfieUrl!: string
 
   @ApiPropertyOptional({ description: 'Họ tên trích xuất từ OCR' })
   @IsOptional()
@@ -67,24 +46,4 @@ export class SubmitKycDto {
   @IsOptional()
   @IsString()
   placeOfIssue?: string
-
-  @ApiPropertyOptional({ description: 'Kết quả so khớp khuôn mặt' })
-  @IsOptional()
-  @IsBoolean()
-  faceMatchResult?: boolean
-
-  @ApiPropertyOptional({ description: 'Kết quả Liveness Detection' })
-  @IsOptional()
-  @IsBoolean()
-  livenessResult?: boolean
-
-  @ApiPropertyOptional({ description: 'Điểm anti-spoofing' })
-  @IsOptional()
-  @IsNumber()
-  spoofScore?: number
-
-  @ApiPropertyOptional({ description: 'Tỷ lệ khớp OCR' })
-  @IsOptional()
-  @IsNumber()
-  ocrMatchRate?: number
 }

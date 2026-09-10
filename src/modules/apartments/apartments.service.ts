@@ -4,6 +4,7 @@ import {
   NotFoundException,
   ForbiddenException,
   BadRequestException,
+  ConflictException,
   OnApplicationBootstrap,
   OnModuleDestroy,
 } from '@nestjs/common'
@@ -13,7 +14,14 @@ import { ObjectId } from 'mongodb'
 import { Apartment } from './schemas/apartment.schema'
 import { User } from '../users/schemas/user.schema'
 import { ApartmentFilterDto } from './dto/apartment-filter.dto'
-import { CreateApartmentDto } from './dto/create-apartment.dto'
+import {
+  CreateApartmentDto,
+  UpdateRentalPackagesDto,
+} from './dto/create-apartment.dto'
+import {
+  validateRentalPackages,
+  type RentalPackageInput,
+} from './rental-package.util'
 import { UpdateApartmentMediaDto } from './dto/update-apartment-media.dto'
 import { NotificationsService } from '../notifications/notifications.service'
 import { ProjectsService } from '../projects/projects.service'
@@ -43,6 +51,41 @@ interface ApartmentMongoQuery {
   isVerified?: boolean
   amenities?: { $all: string[] }
   [key: string]: unknown
+}
+
+function toRentalPackageInputs(
+  packages: CreateApartmentDto['rentalPackages']
+): RentalPackageInput[] {
+  if (!packages) return []
+
+  return packages.map(packageItem => {
+    const policy = packageItem.depositPolicy
+    let depositPolicy: RentalPackageInput['depositPolicy']
+    if (policy.type === 'MONTHS_OF_RENT') {
+      if (policy.months === undefined) {
+        throw new BadRequestException(
+          'INVALID_RENTAL_PACKAGE: deposit policy value is required'
+        )
+      }
+      depositPolicy = { type: policy.type, months: policy.months }
+    } else {
+      if (policy.amount === undefined) {
+        throw new BadRequestException(
+          'INVALID_RENTAL_PACKAGE: deposit policy value is required'
+        )
+      }
+      depositPolicy = { type: policy.type, amount: policy.amount }
+    }
+
+    return {
+      packageId: packageItem.packageId,
+      version: packageItem.version,
+      durationMonths: packageItem.durationMonths,
+      monthlyRent: packageItem.monthlyRent,
+      depositPolicy,
+      status: packageItem.status ?? 'active',
+    }
+  })
 }
 
 function normalizeCity(city?: string): string {
@@ -519,6 +562,44 @@ export class ApartmentsService
     return saved
   }
 
+  async updateRentalPackages(
+    id: string,
+    dto: UpdateRentalPackagesDto,
+    actorId: string,
+    isStaff: boolean
+  ): Promise<Apartment> {
+    if (!ObjectId.isValid(id))
+      throw new NotFoundException('APARTMENT_NOT_FOUND')
+    const apartment = await this.apartmentRepository.findOne({
+      where: { _id: new ObjectId(id) },
+    })
+    if (!apartment) throw new NotFoundException('APARTMENT_NOT_FOUND')
+    if (!isStaff && apartment.landlordId !== actorId) {
+      throw new ForbiddenException('APARTMENT_PACKAGE_ACCESS_DENIED')
+    }
+    if ((apartment.pricingRevision ?? 0) !== dto.expectedRevision) {
+      throw new ConflictException('APARTMENT_PACKAGE_REVISION_STALE')
+    }
+
+    const pricing = validateRentalPackages(
+      toRentalPackageInputs(dto.rentalPackages)
+    )
+    apartment.pricingMode = pricing.pricingMode
+    apartment.pricingRevision = (apartment.pricingRevision ?? 0) + 1
+    apartment.rentalPackages = pricing.packages
+    if (pricing.representativeMonthlyRent !== null) {
+      apartment.priceMonthly = pricing.representativeMonthlyRent
+    }
+    if (!isStaff) {
+      apartment.status = 'updating'
+      apartment.isVerified = false
+      apartment.approvedAt = null
+      apartment.approvedBy = null
+      apartment.submittedAt = new Date()
+    }
+    return this.apartmentRepository.save(apartment)
+  }
+
   async updateMedia(
     id: string,
     dto: UpdateApartmentMediaDto
@@ -549,6 +630,10 @@ export class ApartmentsService
   ): Promise<Apartment> {
     this.logger.log(
       `Creating apartment: ${dto.title} by landlord: ${landlordId}`
+    )
+
+    const pricing = validateRentalPackages(
+      toRentalPackageInputs(dto.rentalPackages)
     )
 
     // Auto find-or-create Project nếu có tên nhưng không có ID
@@ -595,7 +680,10 @@ export class ApartmentsService
       ward: dto.ward,
       street: dto.street,
       address: dto.address,
-      priceMonthly: dto.priceMonthly,
+      priceMonthly: pricing.representativeMonthlyRent ?? dto.priceMonthly,
+      pricingMode: pricing.pricingMode,
+      pricingRevision: pricing.pricingMode === 'packages' ? 1 : 0,
+      rentalPackages: pricing.packages,
       area: dto.area,
       bedrooms: dto.bedrooms,
       bathrooms: dto.bathrooms,
@@ -631,6 +719,10 @@ export class ApartmentsService
     })
     if (!apartment) {
       throw new NotFoundException(`Không tìm thấy căn hộ với ID: ${id}`)
+    }
+
+    if (apartment.pricingMode === 'packages') {
+      validateRentalPackages(apartment.rentalPackages ?? [])
     }
 
     apartment.status = 'available'
@@ -716,6 +808,10 @@ export class ApartmentsService
       throw new BadRequestException('Chỉ có thể nộp lại bài đăng bị từ chối')
     }
 
+    const pricing = validateRentalPackages(
+      toRentalPackageInputs(dto.rentalPackages)
+    )
+
     // Cập nhật thông tin mới
     Object.assign(apartment, {
       title: dto.title,
@@ -731,7 +827,10 @@ export class ApartmentsService
       ward: dto.ward,
       street: dto.street,
       address: dto.address,
-      priceMonthly: dto.priceMonthly,
+      priceMonthly: pricing.representativeMonthlyRent ?? dto.priceMonthly,
+      pricingMode: pricing.pricingMode,
+      pricingRevision: (apartment.pricingRevision ?? 0) + 1,
+      rentalPackages: pricing.packages,
       area: dto.area,
       bedrooms: dto.bedrooms,
       bathrooms: dto.bathrooms,

@@ -9,6 +9,7 @@ import { InjectRepository } from '@nestjs/typeorm'
 import { ObjectId } from 'mongodb'
 import { Repository } from 'typeorm'
 import { ApartmentsService } from '../apartments/apartments.service'
+import type { RentalPackageRecord } from '../apartments/rental-package.util'
 import { CreateRentalApplicationDto } from './dto/create-rental-application.dto'
 import { RentalApplicationQueryDto } from './dto/rental-application-query.dto'
 import { RespondRentalApplicationDto } from './dto/respond-rental-application.dto'
@@ -47,14 +48,20 @@ export class RentalApplicationsService {
     })
     if (duplicate)
       throw new ConflictException('A pending application already exists')
+
+    const selectedPackage = this.resolveSelectedPackage(apartment, dto)
     return this.repository.save(
       this.repository.create({
         tenantId,
         apartmentId: dto.apartmentId,
         landlordId: apartment.landlordId,
+        packageId: selectedPackage?.packageId ?? null,
+        packageVersion: selectedPackage?.version ?? null,
+        packageSnapshot: selectedPackage ?? null,
         occupants: dto.occupants,
         moveInDate,
-        leaseDurationMonths: dto.leaseDurationMonths,
+        leaseDurationMonths:
+          selectedPackage?.durationMonths ?? dto.leaseDurationMonths,
         occupation: dto.occupation,
         hasPets: dto.hasPets,
         notes: dto.notes ?? null,
@@ -64,6 +71,25 @@ export class RentalApplicationsService {
         actorTimestamp: null,
       })
     )
+  }
+
+  private resolveSelectedPackage(
+    apartment: Awaited<ReturnType<ApartmentsService['findOne']>>,
+    dto: CreateRentalApplicationDto
+  ): RentalPackageRecord | null {
+    if (apartment.pricingMode !== 'packages') return null
+    if (!dto.packageId || dto.packageVersion === undefined) {
+      throw new BadRequestException('RENTAL_PACKAGE_REQUIRED')
+    }
+
+    const selectedPackage = (apartment.rentalPackages ?? []).find(
+      packageItem =>
+        packageItem.packageId === dto.packageId &&
+        packageItem.version === dto.packageVersion &&
+        packageItem.status === 'active'
+    )
+    if (!selectedPackage) throw new ConflictException('PACKAGE_STALE')
+    return selectedPackage
   }
 
   async getMine(

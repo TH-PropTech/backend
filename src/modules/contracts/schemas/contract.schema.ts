@@ -6,6 +6,17 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
 } from 'typeorm'
+import type { RentalPackageSnapshot } from '../../apartments/rental-package.util'
+
+export type ContractSignature = {
+  signerId: string
+  role: 'tenant' | 'landlord'
+  signedAt: Date
+  contentHash: string
+  biometricGrantId: string
+  otpSessionId: string
+  deviceId?: string | null
+}
 
 @Entity('contracts')
 export class Contract {
@@ -73,6 +84,9 @@ export class Contract {
   @Column()
   endDate!: Date
 
+  @Column({ nullable: true })
+  durationMonths?: number | null
+
   // ── Tài chính ──
 
   @Column()
@@ -96,8 +110,19 @@ export class Contract {
 
   // ── Trạng thái ký kết ──
 
-  @Column({ type: 'string', default: 'awaiting-signature' })
-  status!: 'awaiting-signature' | 'active' | 'terminated'
+  @Column({ type: 'string', default: 'draft' })
+  status?:
+    | 'draft'
+    | 'deposit-pending'
+    | 'deposit-paid'
+    | 'awaiting-signature'
+    | 'active'
+    | 'terminated'
+    | 'cancelled'
+    | 'completed'
+
+  @Column({ nullable: true })
+  legacyFlow?: boolean | null
 
   @Column({ default: false })
   signedByTenant!: boolean
@@ -123,6 +148,80 @@ export class Contract {
    */
   @Column({ nullable: true })
   appliedPolicies!: Record<string, string> | null
+
+  @Column({ nullable: true })
+  rentalApplicationId?: string | null
+
+  @Column({ nullable: true })
+  depositAgreementId?: string | null
+
+  @Column({ nullable: true })
+  depositId?: string | null
+
+  @Column({ nullable: true })
+  depositPaidAt?: Date | null
+
+  @Column({ nullable: true })
+  depositTxHash?: string | null
+
+  @Column({ nullable: true })
+  depositAgreementCode?: string | null
+
+  @Column({ nullable: true })
+  terminatedAt?: Date | null
+
+  @Column({ nullable: true })
+  terminationReason?: string | null
+
+  @Column({ nullable: true })
+  terminationReasonCode?: string | null
+
+  @Column({ nullable: true })
+  terminationIdempotencyKey?: string | null
+
+  @Column({ nullable: true })
+  terminatedBy?: string | null
+
+  @Column({ nullable: true })
+  terminationTxHash?: string | null
+
+  @Column({ nullable: true })
+  packageSnapshot?: RentalPackageSnapshot | null
+
+  @Column({ nullable: true })
+  contentRevision?: number | null
+
+  @Column({ nullable: true })
+  editorContent?: Record<string, unknown> | null
+
+  @Column({ nullable: true })
+  contentLockedHash?: string | null
+
+  @Column({ nullable: true })
+  contentLockedAt?: Date | null
+
+  @Column({ nullable: true })
+  hashSchemaVersion?: number | null
+
+  @Column({ nullable: true })
+  activationKey?: string | null
+
+  @Column({ nullable: true })
+  tenantSignature?: ContractSignature | null
+
+  @Column({ nullable: true })
+  landlordSignature?: ContractSignature | null
+
+  @Column({ type: 'string', default: 'POC_ECONSENT' })
+  executionMethod?: 'WET_INK' | 'QUALIFIED_DIGITAL_SIGNATURE' | 'POC_ECONSENT'
+
+  @Column({ type: 'string', default: 'not-requested' })
+  notarizationStatus?:
+    | 'not-requested'
+    | 'pending'
+    | 'notarized'
+    | 'authenticated'
+    | 'rejected'
 
   // ── Timestamps ──
 

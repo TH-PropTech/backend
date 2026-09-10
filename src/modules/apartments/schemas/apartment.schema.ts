@@ -6,6 +6,7 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
 } from 'typeorm'
+import type { RentalPackageRecord } from '../rental-package.util'
 
 @Entity('apartments')
 export class Apartment {
@@ -53,6 +54,18 @@ export class Apartment {
 
   @Column()
   priceMonthly!: number
+
+  @Column({ type: 'string', default: 'legacy' })
+  pricingMode?: 'packages' | 'legacy'
+
+  @Column({ nullable: true })
+  legacyFlow?: boolean | null
+
+  @Column({ default: 0 })
+  pricingRevision?: number
+
+  @Column('array')
+  rentalPackages?: RentalPackageRecord[]
 
   @Column()
   area!: number

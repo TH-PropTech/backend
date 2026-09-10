@@ -15,6 +15,7 @@ import { ApartmentsModule } from './modules/apartments/apartments.module'
 import { BookingsModule } from './modules/bookings/bookings.module'
 import { ContractsModule } from './modules/contracts/contracts.module'
 import { PaymentsModule } from './modules/payments/payments.module'
+import { MockBankModule } from './modules/mock-bank/mock-bank.module'
 import { MaintenanceModule } from './modules/maintenance/maintenance.module'
 import { CommunityModule } from './modules/community/community.module'
 import { NotificationsModule } from './modules/notifications/notifications.module'
@@ -80,6 +81,7 @@ import { OperationsModule } from './modules/operations/operations.module'
     BookingsModule,
     ContractsModule,
     PaymentsModule,
+    MockBankModule,
     MaintenanceModule,
     CommunityModule,
     NotificationsModule,
