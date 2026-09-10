@@ -2,17 +2,34 @@ import {
   Injectable,
   Logger,
   BadRequestException,
+  ConflictException,
+  ForbiddenException,
   NotFoundException,
+  Optional,
 } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 import { ObjectId } from 'mongodb'
 import * as crypto from 'crypto'
 import { Contract } from './schemas/contract.schema'
+import { SigningGrant } from './schemas/signing-grant.schema'
+import {
+  consumeSigningGrant,
+  createSigningGrant,
+  hashGrantId,
+} from './signing-grant.util'
 import { PoliciesService } from '../policies/policies.service'
 import { FabricService } from '../fabric/fabric.service'
 import { KycService } from '../kyc/kyc.service'
 import { EkycProxyService } from '../kyc/ekyc-proxy.service'
+import { KycMediaService } from '../kyc/kyc-media.service'
+import {
+  canonicalizeTipTapContent,
+  sanitizeTipTapContent,
+} from './legal/tiptap-content'
+import { Apartment } from '../apartments/schemas/apartment.schema'
+import { LedgerOutboxService } from '../fabric/ledger-outbox.service'
+import { PaymentsService } from '../payments/payments.service'
 
 // ── Interfaces ──
 
@@ -58,10 +75,17 @@ export class ContractsService {
   constructor(
     @InjectRepository(Contract)
     private readonly contractRepository: Repository<Contract>,
+    @InjectRepository(SigningGrant)
+    private readonly signingGrantRepository: Repository<SigningGrant>,
+    @InjectRepository(Apartment)
+    private readonly apartmentRepository: Repository<Apartment>,
     private readonly policiesService: PoliciesService,
     private readonly fabricService: FabricService,
+    private readonly ledgerOutboxService: LedgerOutboxService,
     private readonly kycService: KycService,
-    private readonly ekycProxyService: EkycProxyService
+    private readonly ekycProxyService: EkycProxyService,
+    private readonly kycMediaService: KycMediaService,
+    @Optional() private readonly paymentsService?: PaymentsService
   ) {}
 
   // ── Private helpers ──
@@ -192,6 +216,279 @@ export class ContractsService {
 
   // ── Ký hợp đồng — snapshot chính sách & đẩy lên blockchain ──
 
+  async signContractForUser(
+    contractId: string,
+    userId: string,
+    signingGrantId: string
+  ): Promise<Contract> {
+    const contract = await this.findOne(contractId)
+    const role =
+      contract.tenantId === userId
+        ? 'tenant'
+        : contract.landlordId === userId
+          ? 'landlord'
+          : null
+    if (!role) throw new ForbiddenException('CONTRACT_SIGN_ACCESS_DENIED')
+    if (!contract.contentLockedHash) {
+      throw new BadRequestException('CONTRACT_CONTENT_NOT_LOCKED')
+    }
+    const grant = await this.signingGrantRepository.findOne({
+      where: { tokenHash: hashGrantId(signingGrantId) },
+    })
+    if (!grant) throw new BadRequestException('SIGNING_GRANT_INVALID')
+
+    const consumed = consumeSigningGrant(
+      grant,
+      signingGrantId,
+      {
+        userId,
+        role,
+        contractId,
+        contentLockedHash: contract.contentLockedHash,
+        biometricGrantId: grant.biometricGrantId,
+        otpSessionId: grant.otpSessionId,
+      },
+      new Date()
+    )
+    grant.consumedAt = consumed.consumedAt
+    await this.signingGrantRepository.save(grant)
+    return this.signContract(contractId, role)
+  }
+
+  async saveContractContent(
+    contractId: string,
+    actorId: string,
+    content: unknown,
+    expectedRevision: number,
+    isStaff: boolean
+  ): Promise<Contract> {
+    const contract = await this.findOne(contractId)
+    if (!isStaff && contract.landlordId !== actorId) {
+      throw new ForbiddenException('CONTRACT_CONTENT_ACCESS_DENIED')
+    }
+    if (
+      ['active', 'terminated', 'completed', 'cancelled'].includes(
+        contract.status ?? ''
+      )
+    ) {
+      throw new ConflictException('CONTRACT_CONTENT_STATE_CLOSED')
+    }
+    if (contract.contentLockedAt || contract.contentLockedHash) {
+      throw new BadRequestException('CONTRACT_CONTENT_LOCKED')
+    }
+    const currentRevision = contract.contentRevision ?? 0
+    if (expectedRevision !== currentRevision) {
+      throw new ConflictException('CONTRACT_CONTENT_REVISION_STALE')
+    }
+    const sanitized = sanitizeTipTapContent(content)
+    contract.editorContent = sanitized
+    contract.contentRevision = currentRevision + 1
+    contract.contentLockedHash = null
+    contract.contentLockedAt = null
+    contract.hashSchemaVersion = 1
+    return this.contractRepository.save(contract)
+  }
+
+  async lockContractContent(
+    contractId: string,
+    actorId: string,
+    expectedRevision: number,
+    isStaff: boolean
+  ): Promise<Contract> {
+    if (!isStaff)
+      throw new ForbiddenException('CONTRACT_CONTENT_LOCK_ACCESS_DENIED')
+    const contract = await this.findOne(contractId)
+    if (contract.contentLockedAt || contract.contentLockedHash) {
+      return contract
+    }
+    if (
+      ['active', 'terminated', 'completed', 'cancelled'].includes(
+        contract.status ?? ''
+      )
+    ) {
+      throw new ConflictException('CONTRACT_CONTENT_STATE_CLOSED')
+    }
+    if ((contract.contentRevision ?? 0) !== expectedRevision) {
+      throw new ConflictException('CONTRACT_CONTENT_REVISION_STALE')
+    }
+    if (!contract.editorContent) {
+      throw new BadRequestException('CONTRACT_CONTENT_REQUIRED')
+    }
+    sanitizeTipTapContent(contract.editorContent)
+    contract.contentLockedHash = this.buildLockedContentHash(contract)
+    contract.contentLockedAt = new Date()
+    contract.hashSchemaVersion = 1
+    contract.contentRevision = (contract.contentRevision ?? 0) + 1
+    contract.status = 'awaiting-signature'
+    return this.contractRepository.save(contract)
+  }
+
+  async terminateContract(
+    contractId: string,
+    actorId: string,
+    reasonCode: string,
+    reason: string,
+    idempotencyKey: string
+  ): Promise<Contract> {
+    const contract = await this.findOne(contractId)
+    const normalizedKey = idempotencyKey.trim()
+    const normalizedReasonCode = reasonCode.trim().toUpperCase()
+    const normalizedReason = reason.trim()
+
+    if (!normalizedKey || !normalizedReasonCode || !normalizedReason) {
+      throw new BadRequestException('TERMINATION_FIELDS_REQUIRED')
+    }
+
+    if (contract.status === 'terminated') {
+      if (contract.terminationIdempotencyKey !== normalizedKey) {
+        throw new ConflictException('CONTRACT_ALREADY_TERMINATED')
+      }
+      await this.enqueueTerminationLedgerEvent(contract, actorId)
+      return contract
+    }
+    if (contract.status !== 'active') {
+      throw new ConflictException('CONTRACT_TERMINATION_REQUIRES_ACTIVE')
+    }
+
+    if (!ObjectId.isValid(contract.propertyId)) {
+      throw new BadRequestException('CONTRACT_PROPERTY_ID_INVALID')
+    }
+    const apartment = await this.apartmentRepository.findOne({
+      where: { _id: new ObjectId(contract.propertyId) },
+    })
+    if (!apartment) {
+      throw new NotFoundException('CONTRACT_PROPERTY_NOT_FOUND')
+    }
+
+    const terminatedAt = new Date()
+    const reasonHash = crypto
+      .createHash('sha256')
+      .update(
+        JSON.stringify({
+          reasonCode: normalizedReasonCode,
+          reason: normalizedReason,
+        })
+      )
+      .digest('hex')
+
+    contract.status = 'terminated'
+    contract.terminatedAt = terminatedAt
+    contract.terminationReason = normalizedReason
+    contract.terminationReasonCode = normalizedReasonCode
+    contract.terminationIdempotencyKey = normalizedKey
+    contract.terminatedBy = actorId
+    contract.terminationTxHash = null
+
+    apartment.status = 'available'
+    apartment.isVerified = true
+    await this.contractRepository.save(contract)
+    await this.apartmentRepository.save(apartment)
+    await this.enqueueTerminationLedgerEvent(contract, actorId, {
+      reasonCode: normalizedReasonCode,
+      reasonHash,
+      terminatedAt,
+    })
+    return contract
+  }
+
+  private async enqueueTerminationLedgerEvent(
+    contract: Contract,
+    actorId: string,
+    payload?: { reasonCode: string; reasonHash: string; terminatedAt: Date }
+  ): Promise<void> {
+    const reasonCode = payload?.reasonCode ?? contract.terminationReasonCode
+    const reasonHash =
+      payload?.reasonHash ??
+      (contract.terminationReasonCode && contract.terminationReason
+        ? crypto
+            .createHash('sha256')
+            .update(
+              JSON.stringify({
+                reasonCode: contract.terminationReasonCode,
+                reason: contract.terminationReason,
+              })
+            )
+            .digest('hex')
+        : null)
+    const terminatedAt = payload?.terminatedAt ?? contract.terminatedAt
+    if (!reasonCode || !reasonHash || !terminatedAt) {
+      throw new BadRequestException('TERMINATION_LEDGER_PAYLOAD_INVALID')
+    }
+
+    await this.ledgerOutboxService.enqueue({
+      aggregateType: 'contract',
+      aggregateId: contract._id.toHexString(),
+      eventType: 'contract.terminated',
+      action: 'terminateContract',
+      args: [
+        contract._id.toHexString(),
+        reasonCode,
+        reasonHash,
+        terminatedAt.toISOString(),
+      ],
+      metadata: {
+        contractId: contract._id.toHexString(),
+        details: {
+          actorId,
+          terminationIdempotencyKey: contract.terminationIdempotencyKey,
+        },
+      },
+    })
+  }
+
+  async issueSigningGrant(
+    contractId: string,
+    userId: string,
+    biometricGrantId: string,
+    otpSessionId: string
+  ): Promise<{ grantId: string; expiresAt: Date }> {
+    const contract = await this.findOne(contractId)
+    const role =
+      contract.tenantId === userId
+        ? 'tenant'
+        : contract.landlordId === userId
+          ? 'landlord'
+          : null
+    if (!role) throw new ForbiddenException('CONTRACT_SIGN_ACCESS_DENIED')
+    if (!contract.contentLockedHash) {
+      throw new BadRequestException('CONTRACT_CONTENT_NOT_LOCKED')
+    }
+    const created = createSigningGrant(
+      {
+        userId,
+        role,
+        contractId,
+        contentLockedHash: contract.contentLockedHash,
+        biometricGrantId,
+        otpSessionId,
+      },
+      new Date(),
+      5 * 60 * 1000
+    )
+    const record = this.signingGrantRepository.create({
+      ...created.record,
+      tokenHash: created.record.tokenHash,
+    })
+    await this.signingGrantRepository.save(record)
+    return { grantId: created.grantId, expiresAt: created.record.expiresAt }
+  }
+
+  async verifySignerForUser(
+    contractId: string,
+    userId: string,
+    selfie: Express.Multer.File
+  ): Promise<Awaited<ReturnType<ContractsService['verifySigner']>>> {
+    const contract = await this.findOne(contractId)
+    const role =
+      contract.tenantId === userId
+        ? 'tenant'
+        : contract.landlordId === userId
+          ? 'landlord'
+          : null
+    if (!role) throw new ForbiddenException('CONTRACT_SIGN_ACCESS_DENIED')
+    return this.verifySigner(contractId, role, selfie)
+  }
+
   async signContract(
     contractId: string,
     role: 'tenant' | 'landlord'
@@ -237,9 +534,12 @@ export class ContractsService {
       contract.contractHash = this.buildContractHash(contract, snapshot)
 
       // Đẩy hash lên Hyperledger Fabric (chỉ neo hash — PII không lên ledger)
-      const txResult = await this.fabricService.submitTransaction(
-        'createContract',
-        [
+      await this.ledgerOutboxService.enqueue({
+        aggregateType: 'contract',
+        aggregateId: contractId,
+        eventType: 'contract.activated',
+        action: 'createContract',
+        args: [
           contractId,
           contract.contractCode,
           contract.tenantId,
@@ -247,22 +547,33 @@ export class ContractsService {
           contract.contractHash,
           contract.monthlyRent.toString(),
           contract.startDate.toISOString(),
+          contract.depositId ?? '',
+          contract.depositTxHash ?? '',
         ],
-        { contractId }
-      )
-
-      contract.blockchainAddress = txResult.txHash
+        metadata: {
+          contractId,
+          details: { contractHash: contract.contractHash },
+        },
+      })
+      contract.blockchainAddress = null
       this.logger.log(
-        `Contract ${contract.contractCode} activated & recorded on blockchain: ${txResult.txHash}`
+        `Contract ${contract.contractCode} activated; ledger synchronization queued`
       )
     }
 
-    return this.contractRepository.save(contract)
+    const saved = await this.contractRepository.save(contract)
+    if (saved.status === 'active' && this.paymentsService) {
+      await this.paymentsService.generateSchedule(saved)
+    }
+    return saved
   }
 
   // ── Lấy chi tiết hợp đồng ──
 
   async findOne(contractId: string): Promise<Contract> {
+    if (!ObjectId.isValid(contractId)) {
+      throw new NotFoundException('CONTRACT_NOT_FOUND')
+    }
     const contract = await this.contractRepository.findOne({
       where: { _id: new ObjectId(contractId) },
     })
@@ -270,6 +581,49 @@ export class ContractsService {
       throw new NotFoundException('Không tìm thấy hợp đồng')
     }
     return contract
+  }
+
+  async findOneForUser(
+    contractId: string,
+    actorId: string,
+    isStaff: boolean
+  ): Promise<Contract> {
+    const contract = await this.findOne(contractId)
+    if (
+      !isStaff &&
+      contract.tenantId !== actorId &&
+      contract.landlordId !== actorId
+    ) {
+      throw new ForbiddenException('CONTRACT_ACCESS_DENIED')
+    }
+    return contract
+  }
+
+  private buildLockedContentHash(contract: Contract): string {
+    const canonicalPayload = JSON.stringify({
+      hashSchemaVersion: 1,
+      editorContent: canonicalizeTipTapContent(contract.editorContent),
+      packageSnapshot: contract.packageSnapshot ?? null,
+      parties: {
+        tenantId: contract.tenantId,
+        landlordId: contract.landlordId,
+      },
+      property: {
+        propertyId: contract.propertyId,
+        propertyTitle: contract.propertyTitle,
+        propertyAddress: contract.propertyAddress,
+      },
+      money: {
+        monthlyRent: contract.monthlyRent,
+        deposit: contract.deposit,
+      },
+      dates: {
+        startDate: contract.startDate.toISOString(),
+        endDate: contract.endDate.toISOString(),
+      },
+      appliedPolicies: contract.appliedPolicies ?? {},
+    })
+    return crypto.createHash('sha256').update(canonicalPayload).digest('hex')
   }
 
   // ── Lấy danh sách hợp đồng theo người dùng ──
@@ -348,6 +702,15 @@ export class ContractsService {
     }
   }
 
+  async verifyIntegrityForUser(
+    contractId: string,
+    actorId: string,
+    isStaff: boolean
+  ): Promise<Awaited<ReturnType<ContractsService['verifyIntegrity']>>> {
+    await this.findOneForUser(contractId, actorId, isStaff)
+    return this.verifyIntegrity(contractId)
+  }
+
   // ── Xác thực khuôn mặt người ký hợp đồng ──
 
   async verifySigner(
@@ -358,7 +721,7 @@ export class ContractsService {
     verified: boolean
     faceMatch: boolean
     liveness: boolean
-    spoofScore: number
+    spoofScore: number | null
   }> {
     this.logger.log(
       `Verifying signer identity for contract ${contractId}, role: ${role}`
@@ -394,19 +757,20 @@ export class ContractsService {
       )
     }
 
-    const verificationResult = await this.ekycProxyService.verifySigner(
+    const frontCard = await this.kycMediaService.asMulterFile(
+      kycRecord.frontCardUrl,
+      'frontID'
+    )
+    const verificationResult = await this.ekycProxyService.verifyFace(
       selfie,
-      kycRecord.frontCardUrl
+      frontCard
     )
 
-    const isMatch = verificationResult.results?.face_matching === true
-    const isLive = verificationResult.results?.liveness === true
-
     return {
-      verified: isMatch && isLive,
-      faceMatch: isMatch,
-      liveness: isLive,
-      spoofScore: verificationResult.results?.spoof_score ?? 0,
+      verified: verificationResult.verified,
+      faceMatch: verificationResult.faceMatch,
+      liveness: verificationResult.liveness,
+      spoofScore: verificationResult.realConfidence,
     }
   }
 }

@@ -1,5 +1,16 @@
 import { Apartment } from '../schemas/apartment.schema'
 import { User } from '../../users/schemas/user.schema'
+import type { RentalPackageSnapshot } from '../rental-package.util'
+
+export interface RentalPackageResponse {
+  packageId: string
+  version: number
+  durationMonths: 1 | 3 | 6 | 12
+  monthlyRent: number
+  depositPolicy: RentalPackageSnapshot['depositPolicy']
+  resolvedDepositAmount: number
+  status: 'active' | 'inactive'
+}
 
 export interface WebApartmentResponse {
   id: string
@@ -42,6 +53,9 @@ export interface WebApartmentResponse {
   approvedBy?: string | null
   expiresAt?: Date | null
   rejectedReason?: string | null
+  pricingMode: 'packages' | 'legacy'
+  pricingRevision: number
+  rentalPackages: RentalPackageResponse[]
   landlord?: {
     id: string
     fullName: string
@@ -88,6 +102,9 @@ export interface MobileApartmentResponse {
   approvedBy?: string | null
   expiresAt?: Date | null
   rejectedReason?: string | null
+  pricingMode: 'packages' | 'legacy'
+  pricingRevision: number
+  rentalPackages: RentalPackageResponse[]
   landlord?: {
     id: string
     fullName: string
@@ -99,6 +116,20 @@ export interface MobileApartmentResponse {
 }
 
 export class ApartmentResponseMapper {
+  private static mapRentalPackages(
+    apartment: Apartment
+  ): RentalPackageResponse[] {
+    return (apartment.rentalPackages ?? []).map(rentalPackage => ({
+      packageId: rentalPackage.packageId,
+      version: rentalPackage.version,
+      durationMonths: rentalPackage.durationMonths,
+      monthlyRent: rentalPackage.monthlyRent,
+      depositPolicy: rentalPackage.depositPolicy,
+      resolvedDepositAmount: rentalPackage.resolvedDepositAmount,
+      status: rentalPackage.status,
+    }))
+  }
+
   // Map to Next.js Web Frontend (ApartmentItem type)
   static toWebJson(
     apartment: Apartment & { landlord?: User | null }
@@ -178,6 +209,9 @@ export class ApartmentResponseMapper {
       approvedBy: apartment.approvedBy ?? null,
       expiresAt: apartment.expiresAt ?? null,
       rejectedReason: apartment.rejectedReason ?? null,
+      pricingMode: apartment.pricingMode ?? 'legacy',
+      pricingRevision: apartment.pricingRevision ?? 0,
+      rentalPackages: ApartmentResponseMapper.mapRentalPackages(apartment),
       landlord: apartment.landlord
         ? {
             id: apartment.landlord._id.toString(),
@@ -236,6 +270,9 @@ export class ApartmentResponseMapper {
       approvedBy: apartment.approvedBy ?? null,
       expiresAt: apartment.expiresAt ?? null,
       rejectedReason: apartment.rejectedReason ?? null,
+      pricingMode: apartment.pricingMode ?? 'legacy',
+      pricingRevision: apartment.pricingRevision ?? 0,
+      rentalPackages: ApartmentResponseMapper.mapRentalPackages(apartment),
       landlord: apartment.landlord
         ? {
             id: apartment.landlord._id.toString(),

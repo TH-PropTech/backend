@@ -5,9 +5,18 @@ import {
   Column,
   CreateDateColumn,
   UpdateDateColumn,
+  Index,
 } from 'typeorm'
 
+export type PaymentType = 'deposit' | 'rent' | 'penalty'
+export type PaymentLedgerStatus =
+  | 'not-required'
+  | 'pending'
+  | 'confirmed'
+  | 'failed'
+
 @Entity('payments')
+@Index(['contractId', 'type', 'periodKey'], { unique: true })
 export class Payment {
   @ObjectIdColumn()
   _id!: ObjectId
@@ -38,6 +47,39 @@ export class Payment {
 
   @Column({ nullable: true })
   txHash!: string | null
+
+  @Column({ type: 'string', default: 'rent' })
+  type?: PaymentType
+
+  @Column({ nullable: true })
+  month?: number | null
+
+  @Column({ nullable: true })
+  year?: number | null
+
+  @Column({ nullable: true })
+  paymentHash?: string | null
+
+  @Column({ nullable: true })
+  txRef?: string | null
+
+  @Column({ nullable: true })
+  confirmedBy?: string | null
+
+  @Column({ nullable: true })
+  note?: string | null
+
+  @Column({ type: 'string', default: 'not-required' })
+  ledgerStatus?: PaymentLedgerStatus
+
+  @Column({ nullable: true })
+  periodKey?: string | null
+
+  @Column({ nullable: true })
+  reminderSentForDate?: string | null
+
+  @Column({ nullable: true })
+  reminderSentAt?: Date | null
 
   @CreateDateColumn()
   createdAt!: Date

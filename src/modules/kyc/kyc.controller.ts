@@ -6,24 +6,24 @@ import {
   Body,
   Query,
   UseGuards,
-  Request,
   Post,
   UseInterceptors,
   UploadedFile,
   UploadedFiles,
   BadRequestException,
+  Res,
 } from '@nestjs/common'
-import { ApiTags } from '@nestjs/swagger'
+import { ApiBearerAuth, ApiConsumes, ApiTags } from '@nestjs/swagger'
 import {
   FileInterceptor,
   FileFieldsInterceptor,
 } from '@nestjs/platform-express'
-import { KycService, KycListResult } from './kyc.service'
+import { KycService, KycListResult, KycSelfResult } from './kyc.service'
 import {
   EkycProxyService,
-  EkycOcrFrontResponse,
-  EkycOcrBackResponse,
-  EkycVerificationResponse,
+  EkycBiometricResult,
+  EkycOcrBackResult,
+  EkycOcrFrontResult,
 } from './ekyc-proxy.service'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { RolesGuard } from '../../common/guards/roles.guard'
@@ -31,16 +31,21 @@ import { Roles } from '../../common/decorators/roles.decorator'
 import { KycQueryDto } from './dto/kyc-query.dto'
 import { ReviewKycDto } from './dto/review-kyc.dto'
 import { SubmitKycDto } from './dto/submit-kyc.dto'
-import { UserPayload } from '../auth/interfaces/auth.interface'
 import { KycRecord } from './schemas/kyc-record.schema'
+import { CurrentUser } from '../../common/decorators/current-user.decorator'
+import type { Response } from 'express'
+import { BiometricGrantService } from './biometric-grant.service'
+import { KYC_IMAGE_MAX_BYTES, validateKycImage } from './kyc-image.util'
 
 @ApiTags('kyc')
+@ApiBearerAuth()
 @Controller('kyc')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class KycController {
   constructor(
     private readonly kycService: KycService,
-    private readonly ekycProxyService: EkycProxyService
+    private readonly ekycProxyService: EkycProxyService,
+    private readonly biometricGrantService: BiometricGrantService
   ) {}
 
   /**
@@ -48,11 +53,15 @@ export class KycController {
    * Nhận ảnh mặt trước CCCD từ client, proxy sang eKYC Python OCR, trả về kết quả
    */
   @Post('ocr-front')
-  @UseInterceptors(FileInterceptor('frontID'))
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(
+    FileInterceptor('frontID', { limits: { fileSize: KYC_IMAGE_MAX_BYTES } })
+  )
   async ocrFront(
-    @UploadedFile() file: Express.Multer.File
-  ): Promise<EkycOcrFrontResponse> {
+    @UploadedFile() file?: Express.Multer.File
+  ): Promise<EkycOcrFrontResult> {
     if (!file) throw new BadRequestException('Thiếu file frontID')
+    validateKycImage(file)
     return this.ekycProxyService.ocrFront(file)
   }
 
@@ -61,11 +70,15 @@ export class KycController {
    * Nhận ảnh mặt sau CCCD từ client, proxy sang eKYC Python OCR, trả về kết quả
    */
   @Post('ocr-back')
-  @UseInterceptors(FileInterceptor('backID'))
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(
+    FileInterceptor('backID', { limits: { fileSize: KYC_IMAGE_MAX_BYTES } })
+  )
   async ocrBack(
-    @UploadedFile() file: Express.Multer.File
-  ): Promise<EkycOcrBackResponse> {
+    @UploadedFile() file?: Express.Multer.File
+  ): Promise<EkycOcrBackResult> {
     if (!file) throw new BadRequestException('Thiếu file backID')
+    validateKycImage(file)
     return this.ekycProxyService.ocrBack(file)
   }
 
@@ -74,26 +87,34 @@ export class KycController {
    * Nhận ảnh selfie + mặt trước CCCD, proxy sang eKYC Python Liveness + Face Matching
    */
   @Post('verify-face')
+  @ApiConsumes('multipart/form-data')
   @UseInterceptors(
-    FileFieldsInterceptor([
-      { name: 'portraitImages', maxCount: 1 },
-      { name: 'frontID', maxCount: 1 },
-    ])
+    FileFieldsInterceptor(
+      [
+        { name: 'portraitImages', maxCount: 1 },
+        { name: 'frontID', maxCount: 1 },
+      ],
+      { limits: { fileSize: KYC_IMAGE_MAX_BYTES, files: 2 } }
+    )
   )
   async verifyFace(
+    @CurrentUser('id') userId: string,
     @UploadedFiles()
     files: {
       portraitImages?: Express.Multer.File[]
       frontID?: Express.Multer.File[]
     }
-  ): Promise<EkycVerificationResponse> {
+  ): Promise<EkycBiometricResult> {
     const selfie = files.portraitImages?.[0]
     const frontCard = files.frontID?.[0]
     if (!selfie)
       throw new BadRequestException('Thiếu file selfie (portraitImages)')
     if (!frontCard) throw new BadRequestException('Thiếu file frontID')
-
-    return this.ekycProxyService.verifyFace(selfie, frontCard)
+    validateKycImage(selfie)
+    validateKycImage(frontCard)
+    const result = await this.ekycProxyService.verifyFace(selfie, frontCard)
+    this.biometricGrantService.issue(userId, result)
+    return result
   }
 
   /**
@@ -101,13 +122,36 @@ export class KycController {
    * Người dùng nộp hồ sơ KYC (lưu DB)
    */
   @Post('submit')
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(
+    FileFieldsInterceptor(
+      [
+        { name: 'frontCard', maxCount: 1 },
+        { name: 'backCard', maxCount: 1 },
+        { name: 'selfie', maxCount: 1 },
+      ],
+      { limits: { fileSize: KYC_IMAGE_MAX_BYTES, files: 3 } }
+    )
+  )
   async submitKyc(
     @Body() dto: SubmitKycDto,
-    @Request() req: { user: UserPayload }
+    @UploadedFiles()
+    files: {
+      frontCard?: Express.Multer.File[]
+      backCard?: Express.Multer.File[]
+      selfie?: Express.Multer.File[]
+    },
+    @CurrentUser('id') userId: string
   ): Promise<KycRecord> {
-    const userId = req.user._id
     if (!userId) throw new BadRequestException('Không thể xác thực người dùng')
-    return this.kycService.submitKyc(userId, dto)
+    const frontCard = requireImage(files.frontCard?.[0], 'frontCard')
+    const backCard = requireImage(files.backCard?.[0], 'backCard')
+    const selfie = requireImage(files.selfie?.[0], 'selfie')
+    return this.kycService.submitKyc(userId, dto, {
+      frontCard,
+      backCard,
+      selfie,
+    })
   }
 
   /**
@@ -137,6 +181,28 @@ export class KycController {
     return this.kycService.countByStatus()
   }
 
+  @Get('me')
+  async findMine(
+    @CurrentUser('id') userId: string
+  ): Promise<KycSelfResult | null> {
+    return this.kycService.findMine(userId)
+  }
+
+  @Get(':id/media/:field')
+  async getMedia(
+    @Param('id') id: string,
+    @Param('field') rawField: string,
+    @CurrentUser('id') userId: string,
+    @CurrentUser('roles') roles: string[] | undefined,
+    @Res() response: Response
+  ): Promise<void> {
+    const field = parseMediaField(rawField)
+    const media = await this.kycService.readMedia(id, field, userId, roles)
+    response.setHeader('Content-Type', media.mimetype)
+    response.setHeader('Cache-Control', 'private, no-store')
+    response.send(media.buffer)
+  }
+
   /**
    * GET /api/v1/kyc/:id
    * Staff/Admin: Xem chi tiết 1 hồ sơ KYC
@@ -156,10 +222,10 @@ export class KycController {
   async review(
     @Param('id') id: string,
     @Body() dto: ReviewKycDto,
-    @Request() req: { user: UserPayload }
+    @CurrentUser('id') reviewedBy: string
   ): Promise<KycRecord> {
-    const reviewedBy = req.user._id
-    if (!reviewedBy) throw new Error('Không thể xác thực người dùng')
+    if (!reviewedBy)
+      throw new BadRequestException('Không thể xác thực người dùng')
 
     return this.kycService.review(
       id,
@@ -168,4 +234,20 @@ export class KycController {
       dto.rejectedReason
     )
   }
+}
+
+function requireImage(
+  file: Express.Multer.File | undefined,
+  fieldName: string
+): Express.Multer.File {
+  if (!file) throw new BadRequestException(`Thiếu file ${fieldName}`)
+  validateKycImage(file)
+  return file
+}
+
+function parseMediaField(field: string): 'front-card' | 'back-card' | 'selfie' {
+  if (field === 'front-card' || field === 'back-card' || field === 'selfie') {
+    return field
+  }
+  throw new BadRequestException('Loại ảnh KYC không hợp lệ')
 }

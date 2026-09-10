@@ -116,6 +116,39 @@ describe('RentalApplicationsService', () => {
     ).rejects.toThrow(ConflictException)
   })
 
+  it('rejects a stale package version before creating an application', async () => {
+    apartments.findOne.mockResolvedValue({
+      landlordId: 'landlord-1',
+      pricingMode: 'packages',
+      rentalPackages: [
+        {
+          packageId: 'pkg-12',
+          version: 2,
+          durationMonths: 12,
+          monthlyRent: 12_000_000,
+          depositPolicy: { type: 'MONTHS_OF_RENT', months: 2 },
+          resolvedDepositAmount: 24_000_000,
+          status: 'active',
+        },
+      ],
+    })
+    repository.findOne.mockResolvedValue(null)
+
+    await expect(
+      service.create('tenant-1', {
+        apartmentId: 'apartment-1',
+        packageId: 'pkg-12',
+        packageVersion: 1,
+        occupants: 1,
+        moveInDate: '2030-01-01',
+        leaseDurationMonths: 6,
+        occupation: 'Student',
+        hasPets: false,
+      })
+    ).rejects.toThrow('PACKAGE_STALE')
+    expect(repository.save).not.toHaveBeenCalled()
+  })
+
   it('lists only records scoped to the actor', async () => {
     repository.find.mockResolvedValue([application()])
     await service.getMine('tenant-1', { page: 1, limit: 20 })

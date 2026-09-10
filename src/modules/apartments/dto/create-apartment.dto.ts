@@ -5,8 +5,55 @@ import {
   IsOptional,
   IsNumber,
   IsArray,
+  IsIn,
+  IsInt,
+  IsObject,
+  Min,
+  ValidateNested,
 } from 'class-validator'
 import { Type } from 'class-transformer'
+
+class RentalPackageDepositPolicyDto {
+  @IsIn(['MONTHS_OF_RENT', 'FIXED_AMOUNT'])
+  type!: 'MONTHS_OF_RENT' | 'FIXED_AMOUNT'
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  months?: number
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  amount?: number
+}
+
+export class RentalPackageDto {
+  @IsString()
+  @IsNotEmpty()
+  packageId!: string
+
+  @IsInt()
+  @Min(1)
+  version!: number
+
+  @IsInt()
+  @IsIn([1, 3, 6, 12])
+  durationMonths!: 1 | 3 | 6 | 12
+
+  @IsInt()
+  @Min(1)
+  monthlyRent!: number
+
+  @IsObject()
+  @ValidateNested()
+  @Type(() => RentalPackageDepositPolicyDto)
+  depositPolicy!: RentalPackageDepositPolicyDto
+
+  @IsIn(['active', 'inactive'])
+  @IsOptional()
+  status?: 'active' | 'inactive'
+}
 
 export class CreateApartmentDto {
   @ApiProperty({ description: 'Tiêu đề tin đăng' })
@@ -78,6 +125,13 @@ export class CreateApartmentDto {
   @Type(() => Number)
   @IsNumber()
   priceMonthly!: number
+
+  @ApiPropertyOptional({ type: [RentalPackageDto] })
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => RentalPackageDto)
+  @IsOptional()
+  rentalPackages?: RentalPackageDto[]
 
   @ApiProperty({ description: 'Diện tích (m²)' })
   @Type(() => Number)
@@ -151,4 +205,15 @@ export class CreateApartmentDto {
   @IsString({ each: true })
   @IsOptional()
   amenities?: string[]
+}
+
+export class UpdateRentalPackagesDto {
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => RentalPackageDto)
+  rentalPackages!: RentalPackageDto[]
+
+  @IsInt()
+  @Min(0)
+  expectedRevision!: number
 }

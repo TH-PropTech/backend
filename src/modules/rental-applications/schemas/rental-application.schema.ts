@@ -6,6 +6,7 @@ import {
   ObjectIdColumn,
   UpdateDateColumn,
 } from 'typeorm'
+import type { RentalPackageSnapshot } from '../../apartments/rental-package.util'
 
 export type RentalApplicationStatus = 'pending' | 'accepted' | 'rejected'
 
@@ -15,6 +16,10 @@ export class RentalApplication {
   @Column() tenantId!: string
   @Column() apartmentId!: string
   @Column() landlordId!: string
+  @Column({ nullable: true }) packageId?: string | null
+  @Column({ nullable: true }) packageVersion?: number | null
+  @Column({ nullable: true }) packageSnapshot?: RentalPackageSnapshot | null
+  @Column({ nullable: true }) contractId?: string | null
   @Column() occupants!: number
   @Column() moveInDate!: Date
   @Column() leaseDurationMonths!: number

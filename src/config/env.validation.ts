@@ -13,4 +13,30 @@ export const envValidationSchema = Joi.object({
   REDIS_URL: Joi.string().default('redis://localhost:6379'),
   GROQ_API_KEY: Joi.string().allow('').optional(),
   RECOMMENDATION_API_URL: Joi.string().allow('').optional(),
+  EKYC_SERVICE_URL: Joi.string()
+    .uri({ scheme: ['http', 'https'] })
+    .required(),
+  EKYC_REQUEST_TIMEOUT_MS: Joi.number()
+    .integer()
+    .min(1000)
+    .max(120000)
+    .default(60000),
+  KYC_MEDIA_ENCRYPTION_KEY: Joi.string().hex().length(64).when('NODE_ENV', {
+    is: 'production',
+    then: Joi.required(),
+    otherwise: Joi.optional(),
+  }),
+  KYC_PRIVATE_MEDIA_DIR: Joi.string().default('.data/kyc'),
+  RENTAL_FLOW_V4_ENABLED: Joi.boolean().default(false),
+  PAYMENT_PROVIDER: Joi.string()
+    .valid('mock-bank', 'vnpay', 'momo', 'sepay', 'techcombank')
+    .default('mock-bank'),
+  MOCK_BANK_BASE_URL: Joi.string().uri().default('http://localhost:3001'),
+  MOCK_BANK_SECRET: Joi.string()
+    .min(32)
+    .when('RENTAL_FLOW_V4_ENABLED', {
+      is: true,
+      then: Joi.required(),
+      otherwise: Joi.optional().allow(''),
+    }),
 })

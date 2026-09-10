@@ -19,7 +19,10 @@ import {
   MobileApartmentResponse,
 } from './mappers/apartment-response.mapper'
 import { ApartmentFilterDto } from './dto/apartment-filter.dto'
-import { CreateApartmentDto } from './dto/create-apartment.dto'
+import {
+  CreateApartmentDto,
+  UpdateRentalPackagesDto,
+} from './dto/create-apartment.dto'
 import { RejectApartmentDto } from './dto/reject-apartment.dto'
 import { UpdateApartmentPriceDto } from './dto/update-apartment-price.dto'
 import { UpdateApartmentMediaDto } from './dto/update-apartment-media.dto'
@@ -27,6 +30,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { RolesGuard } from '../../common/guards/roles.guard'
 import { Roles } from '../../common/decorators/roles.decorator'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
+import type { UserPayload } from '../auth/interfaces/auth.interface'
 import { FilesInterceptor } from '@nestjs/platform-express'
 import { diskStorage } from 'multer'
 import { extname } from 'path'
@@ -219,6 +223,26 @@ export class ApartmentsController {
       id,
       dto.priceMonthly,
       landlordId
+    )
+    return ApartmentResponseMapper.toWebJson(updated)
+  }
+
+  @Patch(':id/packages')
+  @Post(':id/rental-packages')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('landlord', 'staff', 'admin')
+  async updateRentalPackages(
+    @Param('id') id: string,
+    @Body() dto: UpdateRentalPackagesDto,
+    @CurrentUser() user: UserPayload
+  ): Promise<WebApartmentResponse> {
+    const isStaff =
+      user.roles?.some(role => ['staff', 'admin'].includes(role)) ?? false
+    const updated = await this.apartmentsService.updateRentalPackages(
+      id,
+      dto,
+      user._id ?? '',
+      isStaff
     )
     return ApartmentResponseMapper.toWebJson(updated)
   }

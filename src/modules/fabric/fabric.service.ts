@@ -34,6 +34,7 @@ export class FabricService implements OnModuleInit, OnModuleDestroy {
   private gateway: Gateway | null = null
   private grpcClient: grpc.Client | null = null
   private isSimulationMode = true
+  private readonly simulationState = new Map<string, Record<string, unknown>>()
 
   private mspId = ''
   private channelName = ''
@@ -166,14 +167,22 @@ export class FabricService implements OnModuleInit, OnModuleDestroy {
       paymentId?: string | undefined
       details?: Record<string, unknown> | undefined
     } = {}
-  ): Promise<{ txHash: string; blockNumber: number; success: boolean }> {
+  ): Promise<{
+    txHash: string
+    blockNumber: number
+    success: boolean
+    networkMode: 'simulation' | 'fabric'
+  }> {
     this.logger.log(
       `[submitTransaction] Action: ${action}, Args: ${JSON.stringify(args)}`
     )
 
     if (this.isSimulationMode) {
-      const txHash = '0x' + crypto.randomBytes(32).toString('hex')
-      const blockNumber = Math.floor(Math.random() * 100000) + 100
+      const txHash = `sim_${crypto
+        .createHash('sha256')
+        .update(`${action}:${JSON.stringify(args)}`)
+        .digest('hex')}`
+      const blockNumber = 0
 
       // Write off-chain BlockchainLog to MongoDB
       const log = new BlockchainLog()
@@ -183,10 +192,21 @@ export class FabricService implements OnModuleInit, OnModuleDestroy {
       log.txHash = txHash
       log.blockNumber = blockNumber
       log.network = 'Simulation (Offline)'
+      log.networkMode = 'simulation'
+      log.status = 'confirmed'
+      log.eventType = action
       log.details = metadata.details ?? {}
       await this.logRepository.save(log)
 
-      return { txHash, blockNumber, success: true }
+      this.simulationState.set(`${action}:${args[0] ?? ''}`, {
+        action,
+        args,
+        txHash,
+        networkMode: 'simulation',
+        status: 'confirmed',
+      })
+
+      return { txHash, blockNumber, success: true, networkMode: 'simulation' }
     }
 
     try {
@@ -221,6 +241,9 @@ export class FabricService implements OnModuleInit, OnModuleDestroy {
       log.txHash = txHash
       log.blockNumber = blockNumber
       log.network = `Fabric Network (${this.channelName})`
+      log.networkMode = 'fabric'
+      log.status = 'confirmed'
+      log.eventType = action
 
       const mergedDetails: Record<string, unknown> = {}
       if (metadata.details) {
@@ -231,7 +254,7 @@ export class FabricService implements OnModuleInit, OnModuleDestroy {
 
       await this.logRepository.save(log)
 
-      return { txHash, blockNumber, success: true }
+      return { txHash, blockNumber, success: true, networkMode: 'fabric' }
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error)
       this.logger.error(`Error submitting Fabric transaction: ${errMsg}`)
@@ -248,10 +271,15 @@ export class FabricService implements OnModuleInit, OnModuleDestroy {
     )
 
     if (this.isSimulationMode) {
-      this.logger.log(
-        '[evaluateTransaction] Running in Simulation Mode, returning mocked empty result'
+      const state = this.simulationState.get(`${action}:${args[0] ?? ''}`)
+      return (
+        state ?? {
+          action,
+          args,
+          networkMode: 'simulation',
+          status: 'not-found',
+        }
       )
-      return { message: 'Simulation mode data', action, args }
     }
 
     try {

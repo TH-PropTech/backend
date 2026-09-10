@@ -1,254 +1,248 @@
-import { Injectable, Logger } from '@nestjs/common'
+import {
+  BadGatewayException,
+  GatewayTimeoutException,
+  Injectable,
+  Logger,
+} from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 
-export interface EkycOcrFrontResponse {
-  result: {
-    idNumber: string
-    fullName: string
-    dob: string
-    gender: string
-    nationality: string
-    birthplace: string
-    address: string
+export interface EkycOcrFrontResult {
+  idNumber: string
+  fullName: string
+  dob: string
+  gender: string
+  nationality: string
+  birthplace?: string
+  address?: string
+}
+
+export interface EkycOcrBackResult {
+  success: boolean
+  version?: string
+  data?: {
+    address?: string
+    issueDate?: string
+    expiryDate?: string
+    placeOfBirth?: string
   }
 }
 
-export interface EkycOcrBackResponse {
-  result: {
-    success: boolean
-    version?: string
-    data?: {
-      address: string
-      issue_date: string
-      expiry_date: string
-      place_of_birth: string
-    }
-  }
-}
-
-export interface EkycVerificationResults {
+export interface EkycBiometricResult {
+  verified: boolean
+  faceMatch: boolean
   liveness: boolean
-  face_matching: boolean
-  spoof_score: number
-  motion_variance?: number
-  frames_processed?: number
+  realConfidence: number | null
+  motionVariance?: number
+  framesProcessed?: number
 }
 
-export interface EkycVerificationResponse {
-  results: EkycVerificationResults
-}
+type JsonRecord = Record<string, unknown>
 
 @Injectable()
 export class EkycProxyService {
   private readonly logger = new Logger(EkycProxyService.name)
   private readonly baseUrl: string
+  private readonly requestTimeoutMs: number
 
   constructor(private readonly configService: ConfigService) {
-    this.baseUrl =
-      this.configService.get<string>('EKYC_SERVICE_URL') ||
-      'http://localhost:8000'
+    this.baseUrl = this.configService
+      .getOrThrow<string>('ekyc.serviceUrl')
+      .replace(/\/$/, '')
+    this.requestTimeoutMs =
+      this.configService.get<number>('ekyc.requestTimeoutMs') ?? 60000
+    this.logger.log(
+      `EkycProxyService initialized with baseUrl: ${this.baseUrl}`
+    )
   }
 
-  async ocrFront(file: Express.Multer.File): Promise<EkycOcrFrontResponse> {
-    this.logger.log(`Proxying front ID OCR to eKYC service at ${this.baseUrl}`)
-    const formData = new FormData()
-    const blob = new Blob([new Uint8Array(file.buffer)], {
-      type: file.mimetype,
-    })
-    formData.append('frontID', blob, file.originalname)
-
-    try {
-      const response = await fetch(`${this.baseUrl}/api/ekyc/frontID`, {
-        method: 'POST',
-        body: formData,
-      })
-
-      if (!response.ok) {
-        const errorText = await response.text()
-        throw new Error(
-          `eKYC Front OCR Service returned status ${response.status}: ${errorText}`
-        )
-      }
-
-      return (await response.json()) as EkycOcrFrontResponse
-    } catch (error) {
-      this.logger.error(
-        `Failed to connect to eKYC Front OCR Service: ${error instanceof Error ? error.message : String(error)}`
-      )
-      // Fallback for development if service is offline
-      return {
-        result: {
-          idNumber: '038096001234',
-          fullName: 'NGUYỄN VĂN A',
-          dob: '15/08/1996',
-          gender: 'Nam',
-          nationality: 'Việt Nam',
-          birthplace: 'Hải Phòng',
-          address: '720A Điện Biên Phủ, Phường 22, Bình Thạnh, TP.HCM',
-        },
-      }
-    }
+  async ocrFront(file: Express.Multer.File): Promise<EkycOcrFrontResult> {
+    const payload = await this.postForm(
+      '/api/ekyc/frontID',
+      createFormData('frontID', file)
+    )
+    return parseOcrFront(payload)
   }
 
-  async ocrBack(file: Express.Multer.File): Promise<EkycOcrBackResponse> {
-    this.logger.log(`Proxying back ID OCR to eKYC service at ${this.baseUrl}`)
-    const formData = new FormData()
-    const blob = new Blob([new Uint8Array(file.buffer)], {
-      type: file.mimetype,
-    })
-    formData.append('backID', blob, file.originalname)
-
-    try {
-      const response = await fetch(`${this.baseUrl}/api/ekyc/backID`, {
-        method: 'POST',
-        body: formData,
-      })
-
-      if (!response.ok) {
-        const errorText = await response.text()
-        throw new Error(
-          `eKYC Back OCR Service returned status ${response.status}: ${errorText}`
-        )
-      }
-
-      return (await response.json()) as EkycOcrBackResponse
-    } catch (error) {
-      this.logger.error(
-        `Failed to connect to eKYC Back OCR Service: ${error instanceof Error ? error.message : String(error)}`
-      )
-      // Fallback for development if service is offline
-      return {
-        result: {
-          success: true,
-          version: 'new',
-          data: {
-            address: '720A Điện Biên Phủ, Phường 22, Bình Thạnh, TP.HCM',
-            issue_date: '20/03/2021',
-            expiry_date: '15/08/2036',
-            place_of_birth: 'CỤC CSQLHC VỀ TTXH',
-          },
-        },
-      }
-    }
+  async ocrBack(file: Express.Multer.File): Promise<EkycOcrBackResult> {
+    const payload = await this.postForm(
+      '/api/ekyc/backID',
+      createFormData('backID', file)
+    )
+    return parseOcrBack(payload)
   }
 
   async verifyFace(
     selfie: Express.Multer.File,
     frontCard: Express.Multer.File
-  ): Promise<EkycVerificationResponse> {
-    this.logger.log(
-      `Proxying face match + liveness verification to eKYC service at ${this.baseUrl}`
-    )
+  ): Promise<EkycBiometricResult> {
     const formData = new FormData()
-
-    const selfieBlob = new Blob([new Uint8Array(selfie.buffer)], {
-      type: selfie.mimetype,
-    })
-    formData.append('portraitImages', selfieBlob, selfie.originalname)
-
-    const frontBlob = new Blob([new Uint8Array(frontCard.buffer)], {
-      type: frontCard.mimetype,
-    })
-    formData.append('frontID', frontBlob, frontCard.originalname)
-
-    try {
-      const response = await fetch(`${this.baseUrl}/api/ekyc/liveness`, {
-        method: 'POST',
-        body: formData,
-      })
-
-      if (!response.ok) {
-        const errorText = await response.text()
-        throw new Error(
-          `eKYC Liveness Service returned status ${response.status}: ${errorText}`
-        )
-      }
-
-      return (await response.json()) as EkycVerificationResponse
-    } catch (error) {
-      this.logger.error(
-        `Failed to connect to eKYC Liveness Service: ${error instanceof Error ? error.message : String(error)}`
-      )
-      // Fallback for development if service is offline
-      return {
-        results: {
-          liveness: true,
-          face_matching: true,
-          spoof_score: 0.95,
-          motion_variance: 0.05,
-          frames_processed: 1,
-        },
-      }
-    }
+    appendFile(formData, 'portraitImages', selfie)
+    appendFile(formData, 'frontID', frontCard)
+    const payload = await this.postForm('/api/ekyc/liveness', formData)
+    return parseBiometric(payload)
   }
 
-  async verifySigner(
-    selfie: Express.Multer.File,
-    storedFrontCardUrlOrBase64: string
-  ): Promise<EkycVerificationResponse> {
-    this.logger.log(
-      `Verifying contract signer identity against stored KYC card at ${this.baseUrl}`
-    )
-    const formData = new FormData()
+  private async postForm(path: string, formData: FormData): Promise<unknown> {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), this.requestTimeoutMs)
+    const targetUrl = `${this.baseUrl}${path}`
 
-    const selfieBlob = new Blob([new Uint8Array(selfie.buffer)], {
-      type: selfie.mimetype,
-    })
-    formData.append('portraitImages', selfieBlob, selfie.originalname)
-
-    // Convert stored CCCD to a Blob if it is base64, or fetch if it is an external URL
-    let frontBlob: Blob
-    if (storedFrontCardUrlOrBase64.startsWith('data:')) {
-      const base64Data = storedFrontCardUrlOrBase64.split(',')[1] || ''
-      const buffer = Buffer.from(base64Data, 'base64')
-      frontBlob = new Blob([new Uint8Array(buffer)], { type: 'image/jpeg' })
-    } else {
-      // It is a URL - we can fetch it, or fallback. If we cannot fetch it, handle it gracefully
-      try {
-        const fetchRes = await fetch(storedFrontCardUrlOrBase64)
-        const arrayBuffer = await fetchRes.arrayBuffer()
-        frontBlob = new Blob([new Uint8Array(arrayBuffer)], {
-          type: 'image/jpeg',
-        })
-      } catch {
+    try {
+      this.logger.log(`Proxying eKYC request to: ${targetUrl}`)
+      const response = await fetch(targetUrl, {
+        method: 'POST',
+        body: formData,
+        signal: controller.signal,
+      })
+      if (!response.ok) {
+        const errorBody = await response.text().catch(() => '')
         this.logger.warn(
-          `Could not fetch stored front card URL: ${storedFrontCardUrlOrBase64}. Using empty/default front card.`
+          `eKYC upstream (${targetUrl}) returned HTTP ${response.status}: ${errorBody}`
         )
-        frontBlob = new Blob([new Uint8Array(Buffer.alloc(0))], {
-          type: 'image/jpeg',
-        })
+        throw new BadGatewayException('Dịch vụ eKYC tạm thời không khả dụng')
       }
-    }
-
-    formData.append('frontID', frontBlob, 'front_card.jpg')
-
-    try {
-      const response = await fetch(`${this.baseUrl}/api/ekyc/liveness`, {
-        method: 'POST',
-        body: formData,
-      })
-
-      if (!response.ok) {
-        const errorText = await response.text()
-        throw new Error(
-          `eKYC Liveness Service returned status ${response.status}: ${errorText}`
-        )
-      }
-
-      return (await response.json()) as EkycVerificationResponse
+      return await response.json()
     } catch (error) {
-      this.logger.error(
-        `Failed to connect to eKYC Liveness Service for contract verification: ${error instanceof Error ? error.message : String(error)}`
-      )
-      return {
-        results: {
-          liveness: true,
-          face_matching: true,
-          spoof_score: 0.95,
-          motion_variance: 0.05,
-          frames_processed: 1,
-        },
+      if (error instanceof BadGatewayException) throw error
+      if (isAbortError(error)) {
+        this.logger.error(
+          `eKYC request to ${targetUrl} timed out after ${this.requestTimeoutMs}ms`
+        )
+        throw new GatewayTimeoutException('Dịch vụ eKYC phản hồi quá thời gian')
       }
+      this.logger.error(`eKYC upstream request to ${targetUrl} failed:`, error)
+      throw new BadGatewayException('Dịch vụ eKYC tạm thời không khả dụng')
+    } finally {
+      clearTimeout(timeout)
     }
   }
+}
+
+function createFormData(
+  fieldName: string,
+  file: Express.Multer.File
+): FormData {
+  const formData = new FormData()
+  appendFile(formData, fieldName, file)
+  return formData
+}
+
+function appendFile(
+  formData: FormData,
+  fieldName: string,
+  file: Express.Multer.File
+): void {
+  const blob = new Blob([new Uint8Array(file.buffer)], { type: file.mimetype })
+  formData.append(fieldName, blob, file.originalname)
+}
+
+function parseOcrFront(payload: unknown): EkycOcrFrontResult {
+  const result = readRecord(readRecord(payload, 'payload').result, 'result')
+  return {
+    idNumber: readString(result.idNumber, 'idNumber'),
+    fullName: readString(result.fullName, 'fullName'),
+    dob: readString(result.dob, 'dob'),
+    gender: readString(result.gender, 'gender'),
+    nationality: readString(result.nationality, 'nationality'),
+    ...optionalString(result, 'birthplace'),
+    ...optionalString(result, 'address'),
+  }
+}
+
+function parseOcrBack(payload: unknown): EkycOcrBackResult {
+  const result = readRecord(readRecord(payload, 'payload').result, 'result')
+  const data = isRecord(result.data) ? result.data : undefined
+  const normalizedData = data
+    ? {
+        ...renameOptionalString(data, 'address', 'address'),
+        ...renameOptionalString(data, 'issue_date', 'issueDate'),
+        ...renameOptionalString(data, 'init_date', 'issueDate'),
+        ...renameOptionalString(data, 'expiry_date', 'expiryDate'),
+        ...renameOptionalString(data, 'place_of_birth', 'placeOfBirth'),
+      }
+    : undefined
+  return {
+    success: readBoolean(result.success, 'success'),
+    ...optionalString(result, 'version'),
+    ...(normalizedData ? { data: normalizedData } : {}),
+  }
+}
+
+function parseBiometric(payload: unknown): EkycBiometricResult {
+  const results = readRecord(readRecord(payload, 'payload').results, 'results')
+  const faceMatch = readBoolean(results.face_matching, 'face_matching')
+  const liveness = readBoolean(results.liveness, 'liveness')
+  return {
+    verified: faceMatch && liveness && results.success !== false,
+    faceMatch,
+    liveness,
+    realConfidence: readOptionalNumber(results.spoof_score),
+    ...optionalNumber(results, 'motion_variance', 'motionVariance'),
+    ...optionalNumber(results, 'frames_processed', 'framesProcessed'),
+  }
+}
+
+function readRecord(value: unknown, field: string): JsonRecord {
+  if (!isRecord(value)) throw invalidContract(field)
+  return value
+}
+
+function isRecord(value: unknown): value is JsonRecord {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function readString(value: unknown, field: string): string {
+  if (typeof value !== 'string' || value.trim() === '')
+    throw invalidContract(field)
+  return value
+}
+
+function readBoolean(value: unknown, field: string): boolean {
+  if (typeof value !== 'boolean') throw invalidContract(field)
+  return value
+}
+
+function readOptionalNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function optionalString(
+  record: JsonRecord,
+  field: string
+): Record<string, string> {
+  const value = record[field]
+  return typeof value === 'string' ? { [field]: value } : {}
+}
+
+function renameOptionalString(
+  record: JsonRecord,
+  source: string,
+  target: string
+): Record<string, string> {
+  const value = record[source]
+  return typeof value === 'string' ? { [target]: value } : {}
+}
+
+function optionalNumber(
+  record: JsonRecord,
+  source: string,
+  target: string
+): Record<string, number> {
+  const value = record[source]
+  return typeof value === 'number' && Number.isFinite(value)
+    ? { [target]: value }
+    : {}
+}
+
+function invalidContract(field: string): BadGatewayException {
+  return new BadGatewayException(`Phản hồi eKYC không hợp lệ: ${field}`)
+}
+
+function isAbortError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'name' in error &&
+    error.name === 'AbortError'
+  )
 }
