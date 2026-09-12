@@ -99,6 +99,44 @@ describe('ContractsService.signContractForUser', () => {
   })
 })
 
+describe('ContractsService public-service checklist', () => {
+  it('scopes the checklist to an authorized participant and never completes the external procedure', async () => {
+    const service = Object.create(
+      ContractsService.prototype
+    ) as ContractsService
+    const findOneForUser = jest
+      .spyOn(service, 'findOneForUser')
+      .mockResolvedValue({
+        executionMethod: 'POC_ECONSENT',
+        notarizationStatus: 'not-requested',
+        contentLockedHash: 'a'.repeat(64),
+        signedByTenant: true,
+        signedByLandlord: true,
+      } as never)
+
+    const result = await service.getPublicServiceChecklistForUser(
+      'contract-id',
+      'tenant-id',
+      false,
+      'permanent-residence'
+    )
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        purpose: 'permanent-residence',
+        executionMethod: 'POC_ECONSENT',
+        notarizationStatus: 'not-requested',
+      })
+    )
+    expect(result.externalProcedureCompleted).toBe(false)
+    expect(findOneForUser).toHaveBeenCalledWith(
+      'contract-id',
+      'tenant-id',
+      false
+    )
+  })
+})
+
 describe('ContractsService contract content', () => {
   function createContentService(): {
     service: ContractsService

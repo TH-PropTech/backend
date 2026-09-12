@@ -31,6 +31,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { ContractsService } from './contracts.service'
 import { Contract } from './schemas/contract.schema'
 import { ContractArtifactService } from './contract-artifact.service'
+import type { PublicServiceChecklist } from './legal/public-service-checklist'
 
 // ── DTOs ──
 
@@ -177,6 +178,23 @@ export class ContractsController {
   @Roles('admin', 'staff')
   async create(@Body() dto: CreateContractDto): Promise<Contract> {
     return this.contractsService.createContract(dto)
+  }
+
+  @Get(':id/public-service-checklist')
+  @Roles('admin', 'staff', 'landlord', 'tenant')
+  async publicServiceChecklist(
+    @Param('id') id: string,
+    @Query('purpose') purpose: string | undefined,
+    @CurrentUser() user: UserPayload
+  ): Promise<PublicServiceChecklist> {
+    const isStaff =
+      user.roles?.some(role => ['staff', 'admin'].includes(role)) ?? false
+    return this.contractsService.getPublicServiceChecklistForUser(
+      id,
+      user._id ?? '',
+      isStaff,
+      purpose
+    )
   }
 
   /** Lấy chi tiết một hợp đồng — Admin, Nhân viên, Chủ nhà, Khách thuê */

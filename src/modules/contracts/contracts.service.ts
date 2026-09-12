@@ -27,6 +27,11 @@ import {
   canonicalizeTipTapContent,
   sanitizeTipTapContent,
 } from './legal/tiptap-content'
+import {
+  buildPublicServiceChecklist,
+  parsePublicServiceChecklistPurpose,
+  type PublicServiceChecklist,
+} from './legal/public-service-checklist'
 import { Apartment } from '../apartments/schemas/apartment.schema'
 import { LedgerOutboxService } from '../fabric/ledger-outbox.service'
 import { PaymentsService } from '../payments/payments.service'
@@ -597,6 +602,26 @@ export class ContractsService {
       throw new ForbiddenException('CONTRACT_ACCESS_DENIED')
     }
     return contract
+  }
+
+  async getPublicServiceChecklistForUser(
+    contractId: string,
+    actorId: string,
+    isStaff: boolean,
+    purpose: unknown
+  ): Promise<PublicServiceChecklist> {
+    try {
+      parsePublicServiceChecklistPurpose(purpose)
+    } catch (error) {
+      const code =
+        error instanceof Error
+          ? error.message
+          : 'PUBLIC_SERVICE_PURPOSE_UNSUPPORTED'
+      throw new BadRequestException(code)
+    }
+
+    const contract = await this.findOneForUser(contractId, actorId, isStaff)
+    return buildPublicServiceChecklist(contract)
   }
 
   private buildLockedContentHash(contract: Contract): string {

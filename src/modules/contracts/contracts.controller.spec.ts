@@ -12,6 +12,7 @@ describe('ContractsController', () => {
     lockContractContent: jest.fn(),
     terminateContract: jest.fn(),
     findOneForUser: jest.fn(),
+    getPublicServiceChecklistForUser: jest.fn(),
     findByUser: jest.fn(),
     verifyIntegrityForUser: jest.fn(),
   }
@@ -56,6 +57,29 @@ describe('ContractsController', () => {
       'contract-1',
       'tenant-1',
       false
+    )
+  })
+
+  it('passes the requested public-service purpose and JWT scope', async () => {
+    service.getPublicServiceChecklistForUser.mockResolvedValue({
+      purpose: 'permanent-residence',
+      externalProcedureCompleted: false,
+    })
+
+    await controller.publicServiceChecklist(
+      'contract-1',
+      'permanent-residence',
+      {
+        _id: 'tenant-1',
+        roles: ['tenant'],
+      }
+    )
+
+    expect(service.getPublicServiceChecklistForUser).toHaveBeenCalledWith(
+      'contract-1',
+      'tenant-1',
+      false,
+      'permanent-residence'
     )
   })
 
