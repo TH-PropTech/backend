@@ -9,7 +9,7 @@ import {
   OnModuleDestroy,
 } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
-import { Repository } from 'typeorm'
+import { IsNull, Repository } from 'typeorm'
 import { ObjectId } from 'mongodb'
 import { Apartment } from './schemas/apartment.schema'
 import { User } from '../users/schemas/user.schema'
@@ -485,6 +485,31 @@ export class ApartmentsService
         `ID căn hộ không hợp lệ hoặc không tìm thấy: ${id}`
       )
     }
+  }
+
+  async reserveRentalApplication(
+    apartmentId: string,
+    applicationId: string
+  ): Promise<boolean> {
+    if (!ObjectId.isValid(apartmentId)) {
+      throw new NotFoundException('RENTAL_PROPERTY_NOT_FOUND')
+    }
+
+    const result = await this.apartmentRepository.update(
+      {
+        _id: new ObjectId(apartmentId),
+        status: 'available',
+        rentalReservation: IsNull(),
+      },
+      {
+        rentalReservation: {
+          applicationId,
+          reservedAt: new Date(),
+          mode: 'application-accepted',
+        },
+      }
+    )
+    return result.affected === 1
   }
 
   // ── Lấy danh sách căn hộ của một chủ nhà ──

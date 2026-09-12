@@ -39,6 +39,43 @@ describe('DepositAgreementsService', () => {
     linkedLeaseContractHash: null,
   })
 
+  it('creates one deterministic draft from an application snapshot and reuses it', async () => {
+    const repository = {
+      findOne: jest
+        .fn()
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({ agreementCode: 'DPA-app-1' }),
+      create: jest.fn((value: unknown) => value),
+      save: jest.fn((value: unknown) => Promise.resolve(value)),
+    }
+    const service = new DepositAgreementsService(repository as never)
+    const input = {
+      applicationId: 'app-1',
+      tenantId: 'tenant-1',
+      landlordId: 'landlord-1',
+      packageSnapshot: {
+        packageId: 'pkg-12',
+        version: 2,
+        durationMonths: 12 as const,
+        monthlyRent: 12_000_000,
+        depositPolicy: { type: 'MONTHS_OF_RENT' as const, months: 2 },
+        resolvedDepositAmount: 24_000_000,
+        currency: 'VND' as const,
+      },
+    }
+    const created = await service.createFromApplicationSnapshot(input)
+    const reused = await service.createFromApplicationSnapshot(input)
+    expect(created).toEqual(
+      expect.objectContaining({
+        agreementCode: 'DPA-app-1',
+        amount: 24_000_000,
+        status: 'draft',
+      })
+    )
+    expect(reused).toEqual({ agreementCode: 'DPA-app-1' })
+    expect(repository.save).toHaveBeenCalledTimes(1)
+  })
+
   function createService(agreement: TestAgreement = baseAgreement()): {
     service: DepositAgreementsService
     repository: { findOne: jest.Mock; save: jest.Mock }

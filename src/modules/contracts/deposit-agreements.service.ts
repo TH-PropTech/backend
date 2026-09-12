@@ -6,7 +6,9 @@ import {
 } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { ObjectId } from 'mongodb'
+import { createHash } from 'node:crypto'
 import { Repository } from 'typeorm'
+import type { RentalPackageSnapshot } from '../apartments/rental-package.util'
 import { validateDepositConsent } from './deposit-consent.util'
 import { DepositAgreement } from './schemas/deposit-agreement.schema'
 
@@ -16,6 +18,56 @@ export class DepositAgreementsService {
     @InjectRepository(DepositAgreement)
     private readonly repository: Repository<DepositAgreement>
   ) {}
+
+  async createFromApplicationSnapshot(input: {
+    applicationId: string
+    tenantId: string
+    landlordId: string
+    packageSnapshot: RentalPackageSnapshot
+  }): Promise<DepositAgreement> {
+    const existing = await this.repository.findOne({
+      where: { applicationId: input.applicationId },
+    })
+    if (existing) return existing
+
+    const agreementCode = `DPA-${input.applicationId}`
+    const contentHash = createHash('sha256')
+      .update(
+        JSON.stringify({
+          agreementCode,
+          applicationId: input.applicationId,
+          packageSnapshot: input.packageSnapshot,
+          purpose: 'SECURE_CONCLUSION_THEN_PERFORMANCE',
+          templateVersion: 'deposit-v1',
+        })
+      )
+      .digest('hex')
+    const agreement = this.repository.create({
+      agreementCode,
+      applicationId: input.applicationId,
+      tenantId: input.tenantId,
+      landlordId: input.landlordId,
+      packageSnapshot: input.packageSnapshot,
+      purpose: 'SECURE_CONCLUSION_THEN_PERFORMANCE',
+      dispositionPolicySnapshot: {
+        version: 'deposit-disposition-v1',
+        note: 'Internal platform template; disposition requires approved policy.',
+      },
+      amount: input.packageSnapshot.resolvedDepositAmount,
+      templateVersion: 'deposit-v1',
+      contentRevision: 1,
+      contentHash,
+      status: 'draft',
+      tenantConsent: null,
+      paidAt: null,
+      paymentAttemptId: null,
+      depositHash: null,
+      manualConfirmation: null,
+      linkedLeaseContractId: null,
+      linkedLeaseContractHash: null,
+    })
+    return this.repository.save(agreement)
+  }
 
   async getAgreement(
     id: string,

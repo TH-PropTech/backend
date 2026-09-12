@@ -20,6 +20,7 @@ import { Roles } from '../../common/decorators/roles.decorator'
 import { RolesGuard } from '../../common/guards/roles.guard'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { CreateRentalApplicationDto } from './dto/create-rental-application.dto'
+import type { RentalApplicationContext } from './dto/rental-application-context.dto'
 import { RentalApplicationQueryDto } from './dto/rental-application-query.dto'
 import { RespondRentalApplicationDto } from './dto/respond-rental-application.dto'
 import { RentalApplication } from './schemas/rental-application.schema'
@@ -34,6 +35,17 @@ import {
 @Controller('rental-applications')
 export class RentalApplicationsController {
   constructor(private readonly service: RentalApplicationsService) {}
+
+  /** GET /api/v1/rental-applications/context/:apartmentId — Tenant review context */
+  @Get('context/:apartmentId')
+  @Roles('tenant')
+  @ApiOkResponse()
+  context(
+    @Param('apartmentId') apartmentId: string,
+    @CurrentUser('id') tenantId: string
+  ): Promise<RentalApplicationContext> {
+    return this.service.getContext(tenantId, apartmentId)
+  }
 
   /** POST /api/v1/rental-applications — Tenant submits an application [uc_customer_contract] */
   @Post()

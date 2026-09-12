@@ -12,6 +12,51 @@ import { ObjectId } from 'mongodb'
 import { ContractsService } from './contracts.service'
 import type { Contract } from './schemas/contract.schema'
 
+describe('ContractsService application draft factory', () => {
+  it('creates a non-active draft from the immutable package snapshot and reuses it', async () => {
+    const repository = {
+      findOne: jest
+        .fn()
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({ contractCode: 'HD-APP-app-1' }),
+      save: jest.fn((value: unknown) => Promise.resolve(value)),
+    }
+    const service = Object.create(
+      ContractsService.prototype
+    ) as ContractsService
+    Reflect.set(service, 'contractRepository', repository)
+    const input = {
+      rentalApplicationId: 'app-1',
+      depositAgreementId: 'dpa-1',
+      propertyId: 'apt-1',
+      propertyTitle: 'Sunrise',
+      propertyAddress: '1 Example',
+      propertyArea: 68,
+      propertyFurniture: null,
+      landlordId: 'landlord-1',
+      tenantId: 'tenant-1',
+      moveInDate: new Date('2030-01-01'),
+      packageSnapshot: {
+        packageId: 'pkg-12',
+        version: 2,
+        durationMonths: 12 as const,
+        monthlyRent: 12_000_000,
+        depositPolicy: { type: 'MONTHS_OF_RENT' as const, months: 2 },
+        resolvedDepositAmount: 24_000_000,
+        currency: 'VND' as const,
+      },
+    }
+    const created = await service.createDraftFromApplication(input)
+    const reused = await service.createDraftFromApplication(input)
+    expect(created.status).toBe('draft')
+    expect(created.legacyFlow).toBe(false)
+    expect(created.deposit).toBe(24_000_000)
+    expect(created.rentalApplicationId).toBe('app-1')
+    expect(reused.contractCode).toBe('HD-APP-app-1')
+    expect(repository.save).toHaveBeenCalledTimes(1)
+  })
+})
+
 function createService(options?: { kycStatus?: string }): {
   service: ContractsService
   kycService: { findByUserId: jest.Mock }
