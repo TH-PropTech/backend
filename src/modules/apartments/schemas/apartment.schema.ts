@@ -137,6 +137,13 @@ export class Apartment {
   @Column({ nullable: true })
   expiresAt?: Date | null
 
+  @Column({ type: 'json', nullable: true, default: null })
+  rentalReservation?: {
+    applicationId: string
+    reservedAt: Date
+    mode: 'application-accepted' | 'deposit-paid'
+  } | null
+
   @Column({ default: '', nullable: true })
   rejectedReason?: string | null
 

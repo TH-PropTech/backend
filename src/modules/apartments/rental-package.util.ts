@@ -22,6 +22,8 @@ export type RentalPackageSnapshot = {
   monthlyRent: number
   depositPolicy: DepositPolicyInput
   resolvedDepositAmount: number
+  currency?: 'VND'
+  capturedAt?: Date
 }
 
 export type RentalPackageRecord = RentalPackageSnapshot & {

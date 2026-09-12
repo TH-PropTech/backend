@@ -35,6 +35,7 @@ import {
 import { Apartment } from '../apartments/schemas/apartment.schema'
 import { LedgerOutboxService } from '../fabric/ledger-outbox.service'
 import { PaymentsService } from '../payments/payments.service'
+import type { RentalPackageSnapshot } from '../apartments/rental-package.util'
 
 // ── Interfaces ──
 
@@ -60,6 +61,20 @@ interface CreateContractInput {
   paymentDay: number
   latePenaltyRate: number
   terminationNoticeDays: number
+}
+
+export interface CreateContractFromApplicationInput {
+  rentalApplicationId: string
+  depositAgreementId: string
+  propertyId: string
+  propertyTitle: string
+  propertyAddress: string | null
+  propertyArea: number | null
+  propertyFurniture: string | null
+  landlordId: string
+  tenantId: string
+  moveInDate: Date
+  packageSnapshot: RentalPackageSnapshot
 }
 
 /** Kết quả từ chaincode verifyContract */
@@ -124,6 +139,68 @@ export class ContractsService {
       appliedPolicies: policies,
     })
     return crypto.createHash('sha256').update(payload).digest('hex')
+  }
+
+  // ── Tạo draft từ application snapshot — không mở payment/signing ──
+
+  async createDraftFromApplication(
+    input: CreateContractFromApplicationInput
+  ): Promise<Contract> {
+    const existing = await this.contractRepository.findOne({
+      where: { rentalApplicationId: input.rentalApplicationId },
+    })
+    if (existing) return existing
+
+    const startDate = new Date(input.moveInDate)
+    const endDate = new Date(startDate)
+    endDate.setMonth(endDate.getMonth() + input.packageSnapshot.durationMonths)
+    const contract = new Contract()
+    contract.contractCode = `HD-APP-${input.rentalApplicationId}`
+    contract.propertyId = input.propertyId
+    contract.propertyTitle = input.propertyTitle
+    contract.propertyAddress = input.propertyAddress
+    contract.propertyArea = input.propertyArea
+    contract.propertyFurniture = input.propertyFurniture
+    contract.propertyValue = 0
+    contract.landlordId = input.landlordId
+    contract.landlordName = null
+    contract.landlordCccd = null
+    contract.landlordAddress = null
+    contract.tenantId = input.tenantId
+    contract.tenantName = null
+    contract.tenantCccd = null
+    contract.tenantAddress = null
+    contract.startDate = startDate
+    contract.endDate = endDate
+    contract.durationMonths = input.packageSnapshot.durationMonths
+    contract.monthlyRent = input.packageSnapshot.monthlyRent
+    contract.deposit = input.packageSnapshot.resolvedDepositAmount
+    contract.paymentDay = 1
+    contract.latePenaltyRate = 0
+    contract.terminationNoticeDays = 30
+    contract.status = 'draft'
+    contract.legacyFlow = false
+    contract.signedByTenant = false
+    contract.signedByLandlord = false
+    contract.contractHash = null
+    contract.blockchainAddress = null
+    contract.appliedPolicies = null
+    contract.rentalApplicationId = input.rentalApplicationId
+    contract.depositAgreementId = input.depositAgreementId
+    contract.depositId = null
+    contract.depositPaidAt = null
+    contract.depositTxHash = null
+    contract.depositAgreementCode = null
+    contract.packageSnapshot = input.packageSnapshot
+    contract.contentRevision = 0
+    contract.editorContent = null
+    contract.contentLockedHash = null
+    contract.contentLockedAt = null
+    contract.hashSchemaVersion = 1
+    contract.activationKey = null
+    contract.tenantSignature = null
+    contract.landlordSignature = null
+    return this.contractRepository.save(contract)
   }
 
   // ── Tạo hợp đồng mới — validate theo chính sách pháp luật ──
