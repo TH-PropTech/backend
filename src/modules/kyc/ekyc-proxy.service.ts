@@ -137,7 +137,7 @@ function appendFile(
 }
 
 function parseOcrFront(payload: unknown): EkycOcrFrontResult {
-  const result = readRecord(readRecord(payload, 'payload').result, 'result')
+  const result = getRootRecord(payload, 'result')
   return {
     idNumber: readString(result.idNumber, 'idNumber'),
     fullName: readString(result.fullName, 'fullName'),
@@ -150,7 +150,7 @@ function parseOcrFront(payload: unknown): EkycOcrFrontResult {
 }
 
 function parseOcrBack(payload: unknown): EkycOcrBackResult {
-  const result = readRecord(readRecord(payload, 'payload').result, 'result')
+  const result = getRootRecord(payload, 'result')
   const data = isRecord(result.data) ? result.data : undefined
   const normalizedData = data
     ? {
@@ -169,7 +169,7 @@ function parseOcrBack(payload: unknown): EkycOcrBackResult {
 }
 
 function parseBiometric(payload: unknown): EkycBiometricResult {
-  const results = readRecord(readRecord(payload, 'payload').results, 'results')
+  const results = getRootRecord(payload, 'results')
   const faceMatch = readBoolean(results.face_matching, 'face_matching')
   const liveness = readBoolean(results.liveness, 'liveness')
   return {
@@ -180,6 +180,12 @@ function parseBiometric(payload: unknown): EkycBiometricResult {
     ...optionalNumber(results, 'motion_variance', 'motionVariance'),
     ...optionalNumber(results, 'frames_processed', 'framesProcessed'),
   }
+}
+
+function getRootRecord(payload: unknown, key: string): JsonRecord {
+  const root = isRecord(payload) ? payload : {}
+  const container = isRecord(root.payload) ? root.payload : root
+  return readRecord(container[key], key)
 }
 
 function readRecord(value: unknown, field: string): JsonRecord {
