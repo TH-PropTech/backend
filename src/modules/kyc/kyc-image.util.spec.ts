@@ -52,6 +52,28 @@ describe('validateKycImage', () => {
     expect(file.mimetype).toBe('image/png')
   })
 
+  it('accepts and normalizes WebP images', () => {
+    const webpBuffer = Buffer.concat([
+      Buffer.from('RIFF', 'ascii'),
+      Buffer.alloc(4),
+      Buffer.from('WEBP', 'ascii'),
+    ])
+    const file = createFile(webpBuffer, 'image/jpeg')
+
+    validateKycImage(file)
+
+    expect(file.mimetype).toBe('image/webp')
+  })
+
+  it('accepts and normalizes BMP images', () => {
+    const bmpBuffer = Buffer.from([0x42, 0x4d, 0x00, 0x00])
+    const file = createFile(bmpBuffer, 'image/jpeg')
+
+    validateKycImage(file)
+
+    expect(file.mimetype).toBe('image/bmp')
+  })
+
   it('rejects an empty image', () => {
     const file = createFile(Buffer.alloc(0), 'image/jpeg')
 
