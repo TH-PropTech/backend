@@ -26,6 +26,7 @@ export const configuration = (): {
   }
   ekyc: {
     serviceUrl: string
+    faceServiceUrl: string
     requestTimeoutMs: number
   }
   kyc: {
@@ -64,6 +65,8 @@ export const configuration = (): {
   },
   ekyc: {
     serviceUrl: process.env.EKYC_SERVICE_URL ?? '',
+    faceServiceUrl:
+      process.env.THEKYC_SERVICE_URL ?? process.env.EKYC_SERVICE_URL ?? '',
     requestTimeoutMs: Number(process.env.EKYC_REQUEST_TIMEOUT_MS ?? 60000),
   },
   kyc: {

@@ -30,6 +30,8 @@ describe('KycController eKYC boundaries', () => {
     ocrFront: jest.fn(),
     ocrBack: jest.fn(),
     verifyFace: jest.fn(),
+    verifyFaceMatch: jest.fn(),
+    detectOrientation: jest.fn(),
   }
   let grants: BiometricGrantService
   let controller: KycController
@@ -78,6 +80,54 @@ describe('KycController eKYC boundaries', () => {
       })
     ).resolves.toEqual(result)
     expect(grants.consume('user-1')).toEqual(result)
+  })
+
+  it('proxies a valid face orientation request', async () => {
+    const result = {
+      success: true,
+      orientation: 'center',
+      expected: 'center',
+    }
+    proxy.detectOrientation.mockResolvedValue(result)
+
+    await expect(
+      controller.faceOrientation(createImage('frame'), 'center')
+    ).resolves.toEqual(result)
+    expect(proxy.detectOrientation).toHaveBeenCalledWith(
+      expect.objectContaining({ fieldname: 'frame' }),
+      'center'
+    )
+  })
+
+  it('rejects unsupported orientation before proxying', async () => {
+    await expect(
+      controller.faceOrientation(createImage('frame'), 'up')
+    ).rejects.toBeInstanceOf(BadRequestException)
+    expect(proxy.detectOrientation).not.toHaveBeenCalled()
+  })
+
+  it('proxies up to seven portrait images to face matching', async () => {
+    const result = {
+      verified: true,
+      faceMatch: true,
+      verificationMode: 'face-match-only' as const,
+    }
+    proxy.verifyFaceMatch.mockResolvedValue(result)
+    const portraits = [
+      createImage('portraitImages'),
+      createImage('portraitImages'),
+    ]
+
+    await expect(
+      controller.faceMatch({
+        portraitImages: portraits,
+        frontID: [createImage('frontID')],
+      })
+    ).resolves.toEqual(result)
+    expect(proxy.verifyFaceMatch).toHaveBeenCalledWith(
+      portraits,
+      expect.objectContaining({ fieldname: 'frontID' })
+    )
   })
 
   it('returns only the current user KYC status', async () => {

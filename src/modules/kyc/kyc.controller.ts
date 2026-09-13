@@ -22,6 +22,8 @@ import { KycService, KycListResult, KycSelfResult } from './kyc.service'
 import {
   EkycProxyService,
   EkycBiometricResult,
+  EkycFaceMatchResult,
+  EkycFaceOrientationResult,
   EkycOcrBackResult,
   EkycOcrFrontResult,
 } from './ekyc-proxy.service'
@@ -82,6 +84,53 @@ export class KycController {
     return this.ekycProxyService.ocrBack(file)
   }
 
+  @Post('face-orientation')
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(
+    FileInterceptor('frame', { limits: { fileSize: KYC_IMAGE_MAX_BYTES } })
+  )
+  async faceOrientation(
+    @UploadedFile() file: Express.Multer.File | undefined,
+    @Body('expected') expected?: string
+  ): Promise<EkycFaceOrientationResult> {
+    if (!file) throw new BadRequestException('Thiếu file frame')
+    if (!expected || !['center', 'left', 'right'].includes(expected)) {
+      throw new BadRequestException('Tham số expected không hợp lệ')
+    }
+    validateKycImage(file)
+    return this.ekycProxyService.detectOrientation(file, expected)
+  }
+
+  @Post('face-match')
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(
+    FileFieldsInterceptor(
+      [
+        { name: 'portraitImages', maxCount: 7 },
+        { name: 'frontID', maxCount: 1 },
+      ],
+      { limits: { fileSize: KYC_IMAGE_MAX_BYTES, files: 8 } }
+    )
+  )
+  async faceMatch(
+    @UploadedFiles()
+    files: {
+      portraitImages?: Express.Multer.File[]
+      frontID?: Express.Multer.File[]
+    }
+  ): Promise<EkycFaceMatchResult> {
+    const portraits = files?.portraitImages ?? []
+    const frontCard = files?.frontID?.[0]
+    if (portraits.length < 1)
+      throw new BadRequestException('Thiếu file portraitImages')
+    if (portraits.length > 7)
+      throw new BadRequestException('Tối đa 7 ảnh portraitImages')
+    if (!frontCard) throw new BadRequestException('Thiếu file frontID')
+    portraits.forEach(validateKycImage)
+    validateKycImage(frontCard)
+    return this.ekycProxyService.verifyFaceMatch(portraits, frontCard)
+  }
+
   /**
    * POST /api/v1/kyc/verify-face
    * Nhận ảnh selfie + mặt trước CCCD, proxy sang eKYC Python Liveness + Face Matching
@@ -106,11 +155,14 @@ export class KycController {
     }
   ): Promise<EkycBiometricResult> {
     const selfie = files.portraitImages?.[0]
+    const portraits = selfie ? [selfie] : []
     const frontCard = files.frontID?.[0]
     if (!selfie)
       throw new BadRequestException('Thiếu file selfie (portraitImages)')
     if (!frontCard) throw new BadRequestException('Thiếu file frontID')
-    validateKycImage(selfie)
+    if (portraits.length > 7)
+      throw new BadRequestException('Tối đa 7 ảnh selfie (portraitImages)')
+    portraits.forEach(validateKycImage)
     validateKycImage(frontCard)
     const result = await this.ekycProxyService.verifyFace(selfie, frontCard)
     this.biometricGrantService.issue(userId, result)
