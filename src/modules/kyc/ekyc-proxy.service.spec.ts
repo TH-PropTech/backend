@@ -32,10 +32,13 @@ function jsonResponse(body: unknown, status = 200): Response {
   } as unknown as Response
 }
 
-function createService(): EkycProxyService {
+function createService(faceServiceUrl?: string): EkycProxyService {
   const configService = {
     getOrThrow: jest.fn().mockReturnValue(SERVICE_URL),
-    get: jest.fn().mockReturnValue(60000),
+    get: jest.fn((key: string) => {
+      if (key === 'ekyc.faceServiceUrl') return faceServiceUrl
+      return 60000
+    }),
   } as unknown as ConfigService
 
   return new EkycProxyService(configService)
@@ -80,6 +83,26 @@ describe('EkycProxyService', () => {
     )
   })
 
+  it('normalizes a front OCR response wrapped by an API envelope', async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        payload: {
+          result: {
+            idNumber: '079123456789',
+            fullName: 'NGUYEN VAN A',
+            dob: '01/01/2000',
+            gender: 'Nam',
+            nationality: 'Viet Nam',
+          },
+        },
+      })
+    )
+
+    const result = await createService().ocrFront(createFile())
+
+    expect(result.idNumber).toBe('079123456789')
+  })
+
   it('normalizes a valid biometric response without inventing an OCR score', async () => {
     fetchMock.mockResolvedValue(
       jsonResponse({
@@ -105,6 +128,85 @@ describe('EkycProxyService', () => {
       framesProcessed: 1,
     })
     expect(result).not.toHaveProperty('ocrMatchRate')
+  })
+
+  it('proxies face matching to the standalone face endpoint', async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({ results: { success: true, face_matching: true } })
+    )
+
+    const result = await createService().verifyFaceMatch(
+      [createFile('portrait-1.jpg'), createFile('portrait-2.jpg')],
+      createFile('front.jpg')
+    )
+
+    expect(result).toEqual({
+      verified: true,
+      faceMatch: true,
+      verificationMode: 'face-match-only',
+    })
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${SERVICE_URL}/api/ekyc-process`,
+      expect.objectContaining({ method: 'POST' })
+    )
+  })
+
+  it('uses the dedicated face service URL when configured', async () => {
+    const faceServiceUrl = 'https://thekyc.example.com/'
+    fetchMock.mockResolvedValue(
+      jsonResponse({ results: { success: true, face_matching: false } })
+    )
+
+    await createService(faceServiceUrl).verifyFaceMatch(
+      [createFile('portrait.jpg')],
+      createFile('front.jpg')
+    )
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://thekyc.example.com/api/ekyc-process',
+      expect.objectContaining({ method: 'POST' })
+    )
+  })
+
+  it('proxies orientation and parses its source-compatible result', async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        success: true,
+        orientation: 'center',
+        expected: 'center',
+        message: 'ok',
+      })
+    )
+
+    const result = await createService().detectOrientation(
+      createFile('frame.jpg'),
+      'center'
+    )
+
+    expect(result.orientation).toBe('center')
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${SERVICE_URL}/api/ekyc/detection`,
+      expect.objectContaining({ method: 'POST' })
+    )
+  })
+
+  it('preserves a no-face orientation result without treating it as a bad contract', async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        success: false,
+        orientation: null,
+        expected: 'center',
+        error: 'No face detected',
+      })
+    )
+
+    await expect(
+      createService().detectOrientation(createFile('frame.jpg'), 'center')
+    ).resolves.toMatchObject({
+      success: false,
+      orientation: null,
+      expected: 'center',
+    })
   })
 
   it('fails closed when upstream returns a non-success status', async () => {

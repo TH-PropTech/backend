@@ -36,18 +36,41 @@ export interface EkycBiometricResult {
   framesProcessed?: number
 }
 
+export interface EkycFaceMatchResult {
+  verified: boolean
+  faceMatch: boolean
+  verificationMode: 'face-match-only'
+}
+
+export interface EkycFaceOrientationResult {
+  success: boolean
+  orientation: string | null
+  expected: string
+  detected_raw?: string
+  message?: string
+}
+
 type JsonRecord = Record<string, unknown>
 
 @Injectable()
 export class EkycProxyService {
   private readonly logger = new Logger(EkycProxyService.name)
   private readonly baseUrl: string
+  private readonly faceBaseUrl: string
   private readonly requestTimeoutMs: number
 
   constructor(private readonly configService: ConfigService) {
     this.baseUrl = this.configService
       .getOrThrow<string>('ekyc.serviceUrl')
       .replace(/\/$/, '')
+    const configuredFaceUrl = this.configService.get<string>(
+      'ekyc.faceServiceUrl'
+    )
+    this.faceBaseUrl = (
+      typeof configuredFaceUrl === 'string' && configuredFaceUrl
+        ? configuredFaceUrl
+        : this.baseUrl
+    ).replace(/\/$/, '')
     this.requestTimeoutMs =
       this.configService.get<number>('ekyc.requestTimeoutMs') ?? 60000
     this.logger.log(
@@ -82,10 +105,45 @@ export class EkycProxyService {
     return parseBiometric(payload)
   }
 
-  private async postForm(path: string, formData: FormData): Promise<unknown> {
+  async verifyFaceMatch(
+    portraits: readonly Express.Multer.File[],
+    frontCard: Express.Multer.File
+  ): Promise<EkycFaceMatchResult> {
+    const formData = new FormData()
+    portraits.forEach(portrait =>
+      appendFile(formData, 'portraitImages', portrait)
+    )
+    appendFile(formData, 'frontID', frontCard)
+    const payload = await this.postForm(
+      '/api/ekyc-process',
+      formData,
+      this.faceBaseUrl
+    )
+    return parseFaceMatch(payload)
+  }
+
+  async detectOrientation(
+    frame: Express.Multer.File,
+    expected: string
+  ): Promise<EkycFaceOrientationResult> {
+    const formData = createFormData('frame', frame)
+    formData.append('expected', expected)
+    const payload = await this.postForm(
+      '/api/ekyc/detection',
+      formData,
+      this.faceBaseUrl
+    )
+    return parseOrientation(payload)
+  }
+
+  private async postForm(
+    path: string,
+    formData: FormData,
+    baseUrl = this.baseUrl
+  ): Promise<unknown> {
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), this.requestTimeoutMs)
-    const targetUrl = `${this.baseUrl}${path}`
+    const targetUrl = `${baseUrl}${path}`
 
     try {
       this.logger.log(`Proxying eKYC request to: ${targetUrl}`)
@@ -137,7 +195,7 @@ function appendFile(
 }
 
 function parseOcrFront(payload: unknown): EkycOcrFrontResult {
-  const result = readRecord(readRecord(payload, 'payload').result, 'result')
+  const result = getRootRecord(payload, 'result')
   return {
     idNumber: readString(result.idNumber, 'idNumber'),
     fullName: readString(result.fullName, 'fullName'),
@@ -150,7 +208,7 @@ function parseOcrFront(payload: unknown): EkycOcrFrontResult {
 }
 
 function parseOcrBack(payload: unknown): EkycOcrBackResult {
-  const result = readRecord(readRecord(payload, 'payload').result, 'result')
+  const result = getRootRecord(payload, 'result')
   const data = isRecord(result.data) ? result.data : undefined
   const normalizedData = data
     ? {
@@ -169,7 +227,7 @@ function parseOcrBack(payload: unknown): EkycOcrBackResult {
 }
 
 function parseBiometric(payload: unknown): EkycBiometricResult {
-  const results = readRecord(readRecord(payload, 'payload').results, 'results')
+  const results = getRootRecord(payload, 'results')
   const faceMatch = readBoolean(results.face_matching, 'face_matching')
   const liveness = readBoolean(results.liveness, 'liveness')
   return {
@@ -180,6 +238,36 @@ function parseBiometric(payload: unknown): EkycBiometricResult {
     ...optionalNumber(results, 'motion_variance', 'motionVariance'),
     ...optionalNumber(results, 'frames_processed', 'framesProcessed'),
   }
+}
+
+function parseFaceMatch(payload: unknown): EkycFaceMatchResult {
+  const results = getRootRecord(payload, 'results')
+  const faceMatch = readBoolean(results.face_matching, 'face_matching')
+  return {
+    verified: faceMatch && results.success !== false,
+    faceMatch,
+    verificationMode: 'face-match-only',
+  }
+}
+
+function parseOrientation(payload: unknown): EkycFaceOrientationResult {
+  const result = isRecord(payload) ? payload : {}
+  return {
+    success: readBoolean(result.success, 'success'),
+    orientation:
+      result.orientation === null
+        ? null
+        : readString(result.orientation, 'orientation'),
+    expected: readString(result.expected, 'expected'),
+    ...optionalString(result, 'detected_raw'),
+    ...optionalString(result, 'message'),
+  }
+}
+
+function getRootRecord(payload: unknown, key: string): JsonRecord {
+  const root = isRecord(payload) ? payload : {}
+  const container = isRecord(root.payload) ? root.payload : root
+  return readRecord(container[key], key)
 }
 
 function readRecord(value: unknown, field: string): JsonRecord {
