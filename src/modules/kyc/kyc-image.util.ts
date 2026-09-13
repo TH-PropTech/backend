@@ -14,17 +14,21 @@ export function validateKycImage(file: Express.Multer.File): void {
   if (file.buffer.length > KYC_IMAGE_MAX_BYTES) {
     throw new BadRequestException('Ảnh KYC không được vượt quá 5 MiB')
   }
-  if (!hasExpectedSignature(file)) {
+  const detectedMimeType = detectImageMimeType(file.buffer)
+  if (!detectedMimeType) {
     throw new BadRequestException('Ảnh KYC phải là JPEG hoặc PNG hợp lệ')
   }
+  file.mimetype = detectedMimeType
 }
 
-function hasExpectedSignature(file: Express.Multer.File): boolean {
-  if (file.mimetype === 'image/jpeg') {
-    return file.buffer.subarray(0, JPEG_SIGNATURE.length).equals(JPEG_SIGNATURE)
+function detectImageMimeType(
+  buffer: Buffer
+): 'image/jpeg' | 'image/png' | null {
+  if (buffer.subarray(0, JPEG_SIGNATURE.length).equals(JPEG_SIGNATURE)) {
+    return 'image/jpeg'
   }
-  if (file.mimetype === 'image/png') {
-    return file.buffer.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE)
+  if (buffer.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE)) {
+    return 'image/png'
   }
-  return false
+  return null
 }

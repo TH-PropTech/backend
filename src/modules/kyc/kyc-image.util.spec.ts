@@ -33,13 +33,32 @@ describe('validateKycImage', () => {
     expect(() => validateKycImage(file)).not.toThrow()
   })
 
+  it('normalizes a mislabeled JPEG from its binary signature', () => {
+    const file = createFile(Buffer.from([0xff, 0xd8, 0xff, 0xe0]), 'image/png')
+
+    validateKycImage(file)
+
+    expect(file.mimetype).toBe('image/jpeg')
+  })
+
+  it('normalizes a mislabeled PNG from its binary signature', () => {
+    const file = createFile(
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      'image/jpeg'
+    )
+
+    validateKycImage(file)
+
+    expect(file.mimetype).toBe('image/png')
+  })
+
   it('rejects an empty image', () => {
     const file = createFile(Buffer.alloc(0), 'image/jpeg')
 
     expect(() => validateKycImage(file)).toThrow(BadRequestException)
   })
 
-  it('rejects bytes that do not match the declared MIME type', () => {
+  it('rejects bytes without a supported image signature', () => {
     const file = createFile(Buffer.from('not an image'), 'image/jpeg')
 
     expect(() => validateKycImage(file)).toThrow(BadRequestException)
