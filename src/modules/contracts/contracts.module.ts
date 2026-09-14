@@ -13,6 +13,9 @@ import { DepositAgreementsController } from './deposit-agreements.controller'
 import { DepositAgreementsService } from './deposit-agreements.service'
 import { PaymentsModule } from '../payments/payments.module'
 import { ContractArtifactService } from './contract-artifact.service'
+import { ContractDocumentProjector } from './legal/contract-document.projector'
+import { ContractViewService } from './contract-view.service'
+import { SmartOtpModule } from '../smart-otp/smart-otp.module'
 
 @Module({
   imports: [
@@ -26,17 +29,22 @@ import { ContractArtifactService } from './contract-artifact.service'
     FabricModule,
     KycModule,
     PaymentsModule,
+    SmartOtpModule,
   ],
   controllers: [ContractsController, DepositAgreementsController],
   providers: [
     ContractsService,
     DepositAgreementsService,
     ContractArtifactService,
+    ContractDocumentProjector,
+    ContractViewService,
   ],
   exports: [
     ContractsService,
     DepositAgreementsService,
     ContractArtifactService,
+    ContractDocumentProjector,
+    ContractViewService,
   ],
 })
 export class ContractsModule {}

@@ -2,6 +2,9 @@ import { BadRequestException } from '@nestjs/common'
 import { ContractsController } from './contracts.controller'
 import type { ContractsService } from './contracts.service'
 import type { ContractArtifactService } from './contract-artifact.service'
+import type { ContractViewService } from './contract-view.service'
+import type { LedgerAuditQueryService } from '../fabric/ledger-audit-query.service'
+import type { SmartOtpService } from '../smart-otp/services/smart-otp.service'
 
 describe('ContractsController', () => {
   const service = {
@@ -11,6 +14,7 @@ describe('ContractsController', () => {
     saveContractContent: jest.fn(),
     lockContractContent: jest.fn(),
     terminateContract: jest.fn(),
+    findOne: jest.fn(),
     findOneForUser: jest.fn(),
     getPublicServiceChecklistForUser: jest.fn(),
     findByUser: jest.fn(),
@@ -19,9 +23,22 @@ describe('ContractsController', () => {
   const artifactService = {
     generateDocument: jest.fn(),
   }
+  const contractViewService = {
+    getForActor: jest.fn(),
+  }
+  const ledgerAuditQueryService = {
+    getContractEvents: jest.fn(),
+  }
+  const smartOtpService = {
+    initiateOtpSession: jest.fn(),
+    verifyOtpSignature: jest.fn(),
+  }
   const controller = new ContractsController(
     service as unknown as ContractsService,
-    artifactService as unknown as ContractArtifactService
+    artifactService as unknown as ContractArtifactService,
+    contractViewService as unknown as ContractViewService,
+    ledgerAuditQueryService as unknown as LedgerAuditQueryService,
+    smartOtpService as unknown as SmartOtpService
   )
 
   beforeEach(() => jest.clearAllMocks())
@@ -172,5 +189,90 @@ describe('ContractsController', () => {
       false,
       'docx'
     )
+  })
+
+  it('delegates contract view to ContractViewService', async () => {
+    contractViewService.getForActor.mockResolvedValue({
+      contract: { code: 'HD-001' },
+    })
+    const result = await controller.getContractView('contract-1', {
+      _id: 'tenant-1',
+      roles: ['tenant'],
+    })
+    expect(contractViewService.getForActor).toHaveBeenCalledWith(
+      'contract-1',
+      'tenant-1',
+      false
+    )
+    expect(result.contract.code).toBe('HD-001')
+  })
+
+  it('verifies actor access before returning contract audit events', async () => {
+    service.findOneForUser.mockResolvedValue({ _id: 'contract-1' })
+    ledgerAuditQueryService.getContractEvents.mockResolvedValue([
+      { eventType: 'contract.activated', txId: 'tx-1' },
+    ])
+    const result = await controller.getContractAuditEvents('contract-1', {
+      _id: 'tenant-1',
+      roles: ['tenant'],
+    })
+    expect(service.findOneForUser).toHaveBeenCalledWith(
+      'contract-1',
+      'tenant-1',
+      false
+    )
+    expect(ledgerAuditQueryService.getContractEvents).toHaveBeenCalledWith(
+      'contract-1'
+    )
+    expect(result).toHaveLength(1)
+  })
+
+  it('initiates Smart OTP challenge for locked contract', async () => {
+    service.findOne.mockResolvedValue({
+      _id: 'contract-1',
+      tenantId: 'tenant-1',
+      landlordId: 'landlord-1',
+      contentLockedHash: 'hash-abc',
+    })
+    smartOtpService.initiateOtpSession.mockResolvedValue({
+      sessionId: 'sess-1',
+      challenge: 'chal-1',
+      expiredAt: new Date(),
+    })
+
+    const result = await controller.initiateSigningOtp(
+      'contract-1',
+      'tenant-1',
+      'web-device-1'
+    )
+    expect(smartOtpService.initiateOtpSession).toHaveBeenCalledWith(
+      'tenant-1',
+      'web-device-1',
+      'CONTRACT_SIGN',
+      {
+        contractId: 'contract-1',
+        signerRole: 'tenant',
+        contentLockedHash: 'hash-abc',
+      }
+    )
+    expect(result.sessionId).toBe('sess-1')
+  })
+
+  it('verifies Smart OTP signature', async () => {
+    smartOtpService.verifyOtpSignature.mockResolvedValue({
+      success: true,
+      message: 'OTP verified',
+    })
+    const result = await controller.verifySigningOtp('contract-1', 'tenant-1', {
+      sessionId: 'sess-1',
+      otpCode: '123456',
+    })
+    expect(smartOtpService.verifyOtpSignature).toHaveBeenCalledWith(
+      'tenant-1',
+      'sess-1',
+      '123456',
+      'WEB_SIMULATED_SIG'
+    )
+    expect(result.success).toBe(true)
   })
 })

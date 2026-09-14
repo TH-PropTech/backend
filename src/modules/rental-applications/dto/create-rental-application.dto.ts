@@ -52,4 +52,30 @@ export class CreateRentalApplicationDto {
   @ArrayNotEmpty()
   @ArrayMaxSize(10)
   acknowledgedDisclosureIds!: string[]
+
+  @ApiPropertyOptional({
+    description: 'Terms of service version observed by tenant',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  acceptedTermsVersion?: number
+
+  @ApiPropertyOptional({ description: 'SHA-256 hash of accepted terms' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  acceptedTermsHash?: string
+
+  @ApiPropertyOptional({ description: 'Observed Flow Profile Version' })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  flowProfileVersion?: number
+
+  @ApiPropertyOptional({ description: 'Observed Flow Profile Hash (SHA-256)' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  flowProfileHash?: string
 }

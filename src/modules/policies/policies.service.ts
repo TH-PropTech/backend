@@ -3,10 +3,13 @@ import {
   Logger,
   OnApplicationBootstrap,
   NotFoundException,
+  BadRequestException,
 } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 import { Policy } from './schemas/policy.schema'
+import { POLICY_DEFINITIONS, validatePolicyValue } from './policy-definitions'
+import type { PublicPolicyItem } from './dto/update-policy.dto'
 
 @Injectable()
 export class PoliciesService implements OnApplicationBootstrap {
@@ -241,7 +244,35 @@ export class PoliciesService implements OnApplicationBootstrap {
   }
 
   /**
-   * Get all active policies
+   * Get all active public policies with clean projection (for /terms public display)
+   */
+  async findPublicPolicies(): Promise<PublicPolicyItem[]> {
+    const all = await this.policyRepository.find({
+      where: { status: 'active' },
+    })
+
+    return all
+      .filter(p => POLICY_DEFINITIONS[p.key]?.isPublic ?? true)
+      .map(p => ({
+        key: p.key,
+        value: p.value,
+        description: p.description,
+        ...(p.unit ? { unit: p.unit } : {}),
+        ...(p.legalReference ? { legalReference: p.legalReference } : {}),
+      }))
+  }
+
+  /**
+   * Get all policies for admin management view
+   */
+  async findAdminPolicies(): Promise<Policy[]> {
+    return this.policyRepository.find({
+      order: { key: 'ASC' },
+    })
+  }
+
+  /**
+   * Get all active policies (legacy compatibility)
    */
   async findAll(): Promise<Policy[]> {
     return this.policyRepository.find()
@@ -271,15 +302,38 @@ export class PoliciesService implements OnApplicationBootstrap {
   }
 
   /**
-   * Update policy value (typically for Admins)
+   * Update policy value with validation (typically for Admins)
    */
   async update(
     key: string,
     value: string,
     updatedBy?: string
   ): Promise<Policy> {
+    try {
+      validatePolicyValue(key, value)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      throw new BadRequestException(msg)
+    }
+
     const policy = await this.findOne(key)
     policy.value = value
+    if (updatedBy) {
+      policy.updatedBy = updatedBy
+    }
+    return this.policyRepository.save(policy)
+  }
+
+  /**
+   * Update policy status (active / inactive)
+   */
+  async updateStatus(
+    key: string,
+    status: 'active' | 'inactive',
+    updatedBy?: string
+  ): Promise<Policy> {
+    const policy = await this.findOne(key)
+    policy.status = status
     if (updatedBy) {
       policy.updatedBy = updatedBy
     }

@@ -1,12 +1,16 @@
-import { Controller, Post, Body } from '@nestjs/common'
-import { IsString, IsEnum } from 'class-validator'
+import { Controller, Post, Body, UseGuards } from '@nestjs/common'
+import { ApiTags, ApiBearerAuth } from '@nestjs/swagger'
+import { IsString, IsEnum, IsOptional } from 'class-validator'
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
+import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { SmartOtpService } from './services/smart-otp.service'
 import { OtpActionType } from './enums/otp-action-type.enum'
 import { DeviceBinding } from './schemas/device-binding.schema'
 
 export class BindDeviceDto {
   @IsString()
-  userId!: string
+  @IsOptional()
+  userId?: string
 
   @IsString()
   deviceId!: string
@@ -20,7 +24,8 @@ export class BindDeviceDto {
 
 export class InitiateOtpDto {
   @IsString()
-  userId!: string
+  @IsOptional()
+  userId?: string
 
   @IsString()
   deviceId!: string
@@ -31,7 +36,8 @@ export class InitiateOtpDto {
 
 export class VerifyOtpDto {
   @IsString()
-  userId!: string
+  @IsOptional()
+  userId?: string
 
   @IsString()
   sessionId!: string
@@ -43,14 +49,21 @@ export class VerifyOtpDto {
   signature!: string
 }
 
+@ApiTags('smart-otp')
+@ApiBearerAuth()
+@UseGuards(JwtAuthGuard)
 @Controller('smart-otp')
 export class SmartOtpController {
   constructor(private readonly smartOtpService: SmartOtpService) {}
 
   @Post('bind')
-  async bindDevice(@Body() dto: BindDeviceDto): Promise<DeviceBinding> {
+  async bindDevice(
+    @Body() dto: BindDeviceDto,
+    @CurrentUser('id') currentUserId?: string
+  ): Promise<DeviceBinding> {
+    const userId = currentUserId || dto.userId || ''
     return this.smartOtpService.registerDevice(
-      dto.userId,
+      userId,
       dto.deviceId,
       dto.deviceName,
       dto.publicKey
@@ -59,10 +72,17 @@ export class SmartOtpController {
 
   @Post('initiate')
   async initiateOtp(
-    @Body() dto: InitiateOtpDto
-  ): Promise<{ sessionId: string; challenge: string; expiredAt: Date }> {
+    @Body() dto: InitiateOtpDto,
+    @CurrentUser('id') currentUserId?: string
+  ): Promise<{
+    sessionId: string
+    challenge: string
+    expiredAt: Date
+    otpCode?: string
+  }> {
+    const userId = currentUserId || dto.userId || ''
     return this.smartOtpService.initiateOtpSession(
-      dto.userId,
+      userId,
       dto.deviceId,
       dto.action
     )
@@ -70,10 +90,12 @@ export class SmartOtpController {
 
   @Post('verify')
   async verifyOtp(
-    @Body() dto: VerifyOtpDto
+    @Body() dto: VerifyOtpDto,
+    @CurrentUser('id') currentUserId?: string
   ): Promise<{ success: boolean; message: string }> {
+    const userId = currentUserId || dto.userId || ''
     return this.smartOtpService.verifyOtpSignature(
-      dto.userId,
+      userId,
       dto.sessionId,
       dto.otpCode,
       dto.signature

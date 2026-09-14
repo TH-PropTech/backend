@@ -100,6 +100,88 @@ describe('RentalApplicationsService review-to-contract flow', () => {
     expect(context).not.toHaveProperty('walletBalance')
   })
 
+  it('offers a server-derived package for an available legacy listing', async () => {
+    apartments.findOne.mockResolvedValue({
+      _id: new ObjectId(),
+      title: 'Legacy Apartment',
+      address: '2 Example Street',
+      area: 72,
+      status: 'available',
+      isVerified: true,
+      landlordId: 'landlord-1',
+      priceMonthly: 15_000_000,
+      pricingMode: 'legacy',
+      pricingRevision: 0,
+      rentalPackages: [],
+      rentalReservation: null,
+    })
+
+    const context = await service.getContext('tenant-1', 'apartment-legacy')
+
+    expect(context.eligible).toBe(true)
+    expect(context.reasonCode).toBeNull()
+    expect(context.packages).toEqual([
+      expect.objectContaining({
+        packageId: 'compatibility-12m',
+        version: 1,
+        durationMonths: 12,
+        monthlyRent: 15_000_000,
+        depositPolicy: { type: 'MONTHS_OF_RENT', months: 1 },
+        resolvedDepositAmount: 15_000_000,
+        currency: 'VND',
+        status: 'active',
+      }),
+    ])
+  })
+
+  it('keeps a reserved listing closed even when its public status is available', async () => {
+    apartments.findOne.mockResolvedValue({
+      _id: new ObjectId(),
+      title: 'Reserved Apartment',
+      address: '3 Example Street',
+      area: 60,
+      status: 'available',
+      landlordId: 'landlord-1',
+      priceMonthly: 10_000_000,
+      pricingMode: 'legacy',
+      rentalPackages: [],
+      rentalReservation: {
+        applicationId: 'accepted-application',
+        reservedAt: new Date(),
+        mode: 'rental-application',
+      },
+    })
+
+    const context = await service.getContext('tenant-1', 'apartment-reserved')
+
+    expect(context.eligible).toBe(false)
+    expect(context.reasonCode).toBe('LISTING_UNAVAILABLE')
+    expect(context.packages).toEqual([])
+  })
+
+  it('does not invent commercial terms when a legacy price is invalid', async () => {
+    apartments.findOne.mockResolvedValue({
+      _id: new ObjectId(),
+      title: 'Invalid Legacy Apartment',
+      address: '4 Example Street',
+      area: 60,
+      status: 'available',
+      landlordId: 'landlord-1',
+      priceMonthly: 0,
+      pricingMode: 'legacy',
+      rentalPackages: [],
+      rentalReservation: null,
+    })
+
+    const context = await service.getContext(
+      'tenant-1',
+      'apartment-invalid-price'
+    )
+
+    expect(context.eligible).toBe(false)
+    expect(context.reasonCode).toBe('NO_ACTIVE_PACKAGE')
+  })
+
   it('creates a pending application from package and disclosure snapshots', async () => {
     apartments.findOne.mockResolvedValue({
       _id: new ObjectId(),
@@ -158,6 +240,59 @@ describe('RentalApplicationsService review-to-contract flow', () => {
     )
     expect(result.reviewSnapshot).toEqual(
       expect.objectContaining({ disclosureVersion: 'rental-review-v1' })
+    )
+  })
+
+  it('creates an application from the server-derived legacy package snapshot', async () => {
+    apartments.findOne.mockResolvedValue({
+      _id: new ObjectId(),
+      title: 'Legacy Apartment',
+      address: '2 Example Street',
+      area: 72,
+      status: 'available',
+      landlordId: 'landlord-1',
+      priceMonthly: 15_000_000,
+      pricingMode: 'legacy',
+      pricingRevision: 0,
+      rentalPackages: [],
+      rentalReservation: null,
+    })
+    repository.findOne.mockResolvedValue(null)
+    repository.create.mockImplementation(
+      (value: unknown) => value as RentalApplication
+    )
+    repository.save.mockImplementation((value: unknown) =>
+      Promise.resolve(value as RentalApplication)
+    )
+
+    const result = await service.create('tenant-1', {
+      apartmentId: 'apartment-legacy',
+      packageId: 'compatibility-12m',
+      packageVersion: 1,
+      occupants: 1,
+      moveInDate: '2030-01-01',
+      occupation: 'Engineer',
+      hasPets: false,
+      disclosureVersion: 'rental-review-v1',
+      acknowledgedDisclosureIds: [
+        'listing-terms',
+        'pre-contract-request',
+        'future-payment-and-signing',
+      ],
+    })
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        packageId: 'compatibility-12m',
+        packageVersion: 1,
+        leaseDurationMonths: 12,
+      })
+    )
+    expect(result.packageSnapshot).toEqual(
+      expect.objectContaining({
+        monthlyRent: 15_000_000,
+        resolvedDepositAmount: 15_000_000,
+      })
     )
   })
 

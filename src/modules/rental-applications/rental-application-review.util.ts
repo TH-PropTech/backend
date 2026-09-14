@@ -40,6 +40,21 @@ export interface RentalApplicationReviewSnapshot {
   acknowledgedDisclosureIds: string[]
   acknowledgedAt: Date
   reviewHash: string
+  termsRef?:
+    | {
+        key: string
+        version: number
+        contentHash: string
+      }
+    | undefined
+  termsAcceptedAt?: Date | undefined
+  flowProfileRef?:
+    | {
+        profileId: string
+        version: number
+        hash: string
+      }
+    | undefined
 }
 
 export function buildRentalDisclosureHash(): string {
@@ -59,6 +74,20 @@ export function buildRentalReviewHash(input: {
   disclosureVersion: string
   disclosureHash: string
   acknowledgedDisclosureIds: string[]
+  termsRef?:
+    | {
+        key: string
+        version: number
+        contentHash: string
+      }
+    | undefined
+  flowProfileRef?:
+    | {
+        profileId: string
+        version: number
+        hash: string
+      }
+    | undefined
 }): string {
   return createHash('sha256')
     .update(
@@ -76,6 +105,10 @@ export function buildRentalReviewHash(input: {
         disclosureVersion: input.disclosureVersion,
         disclosureHash: input.disclosureHash,
         acknowledgedDisclosureIds: [...input.acknowledgedDisclosureIds].sort(),
+        ...(input.termsRef ? { termsRef: input.termsRef } : {}),
+        ...(input.flowProfileRef
+          ? { flowProfileRef: input.flowProfileRef }
+          : {}),
       })
     )
     .digest('hex')

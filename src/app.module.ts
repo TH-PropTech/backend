@@ -27,6 +27,7 @@ import { SmartOtpModule } from './modules/smart-otp/smart-otp.module'
 import { TwoFactorModule } from './modules/two-factor/two-factor.module'
 import { FabricModule } from './modules/fabric/fabric.module'
 import { PoliciesModule } from './modules/policies/policies.module'
+import { LegalTermsModule } from './modules/legal-terms/legal-terms.module'
 import { AiConsultationModule } from './modules/ai-consultation/ai-consultation.module'
 import { RedisModule } from './modules/redis/redis.module'
 import { RecommendationsModule } from './modules/recommendations/recommendations.module'
@@ -42,6 +43,7 @@ import { RentalApplicationsModule } from './modules/rental-applications/rental-a
 import { ConditionAnalysisModule } from './modules/condition-analysis/condition-analysis.module'
 import { LocationRiskModule } from './modules/location-risk/location-risk.module'
 import { OperationsModule } from './modules/operations/operations.module'
+import { RentalFlowConfigModule } from './modules/rental-flow-config/rental-flow-config.module'
 
 @Module({
   imports: [
@@ -93,6 +95,7 @@ import { OperationsModule } from './modules/operations/operations.module'
     TwoFactorModule,
     FabricModule,
     PoliciesModule,
+    LegalTermsModule,
     AiConsultationModule,
     RedisModule,
     RecommendationsModule,
@@ -108,6 +111,7 @@ import { OperationsModule } from './modules/operations/operations.module'
     ConditionAnalysisModule,
     LocationRiskModule,
     OperationsModule,
+    RentalFlowConfigModule,
   ],
 })
 export class AppModule {}
