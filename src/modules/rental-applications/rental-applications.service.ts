@@ -16,6 +16,8 @@ import type { RentalPackageRecord } from '../apartments/rental-package.util'
 import { ContractsService } from '../contracts/contracts.service'
 import { DepositAgreementsService } from '../contracts/deposit-agreements.service'
 import { NotificationsService } from '../notifications/notifications.service'
+import { LegalTermsService } from '../legal-terms/legal-terms.service'
+import { RentalFlowConfigResolver } from '../rental-flow-config/rental-flow-config-resolver.service'
 import { CreateRentalApplicationDto } from './dto/create-rental-application.dto'
 import type { RentalApplicationContext } from './dto/rental-application-context.dto'
 import { RentalApplicationQueryDto } from './dto/rental-application-query.dto'
@@ -38,6 +40,9 @@ export interface RentalApplicationListResult {
   totalPages: number
 }
 
+const COMPATIBILITY_PACKAGE_ID = 'compatibility-12m'
+const COMPATIBILITY_PACKAGE_VERSION = 1
+
 @Injectable()
 export class RentalApplicationsService {
   private readonly logger = new Logger(RentalApplicationsService.name)
@@ -50,7 +55,9 @@ export class RentalApplicationsService {
     @Optional()
     private readonly depositAgreementsService?: DepositAgreementsService,
     @Optional() private readonly contractsService?: ContractsService,
-    @Optional() private readonly notificationsService?: NotificationsService
+    @Optional() private readonly notificationsService?: NotificationsService,
+    @Optional() private readonly legalTermsService?: LegalTermsService,
+    @Optional() private readonly flowConfigResolver?: RentalFlowConfigResolver
   ) {}
 
   async getContext(
@@ -59,6 +66,22 @@ export class RentalApplicationsService {
   ): Promise<RentalApplicationContext> {
     const apartment = await this.apartmentsService.findOne(apartmentId)
     const listing = this.toListingSnapshot(apartment)
+    let terms: RentalApplicationContext['terms'] = null
+    if (this.legalTermsService) {
+      try {
+        const currentTerms =
+          await this.legalTermsService.getCurrentPublishedTerms()
+        terms = {
+          key: currentTerms.key,
+          version: currentTerms.version,
+          hash: currentTerms.contentHash,
+          url: '/terms',
+        }
+      } catch {
+        terms = null
+      }
+    }
+
     const base = {
       enabled: this.isFlowEnabled(),
       eligible: false,
@@ -75,6 +98,7 @@ export class RentalApplicationsService {
         hash: buildRentalDisclosureHash(),
         items: RENTAL_REVIEW_DISCLOSURES,
       },
+      terms,
     }
 
     if (!base.enabled) {
@@ -90,17 +114,37 @@ export class RentalApplicationsService {
     ) {
       return { ...base, reasonCode: 'LISTING_UNAVAILABLE' }
     }
-    if (apartment.pricingMode !== 'packages') {
-      return { ...base, reasonCode: 'LEGACY_PRICING' }
-    }
-
-    const packages = (apartment.rentalPackages ?? [])
-      .filter(packageItem => packageItem.status === 'active')
-      .map(packageItem => ({ ...packageItem, currency: 'VND' as const }))
+    const packages = this.getOfferedPackages(apartment).map(packageItem => ({
+      ...packageItem,
+      currency: 'VND' as const,
+    }))
     if (packages.length === 0) {
       return { ...base, reasonCode: 'NO_ACTIVE_PACKAGE' }
     }
-    return { ...base, eligible: true, packages, reasonCode: null }
+
+    let flowProfile: RentalApplicationContext['flowProfile'] = null
+    if (this.flowConfigResolver) {
+      try {
+        const resolved = await this.flowConfigResolver.resolveProfile({
+          durationMonths: packages[0]?.durationMonths,
+          packageId: packages[0]?.packageId,
+        })
+        flowProfile = {
+          profileId: resolved.profileId,
+          name: resolved.name,
+          version: resolved.version,
+          hash: resolved.hash,
+          precedence: resolved.precedence,
+          steps: resolved.steps,
+        }
+      } catch (err) {
+        this.logger.warn(
+          `Failed to resolve flow profile in getContext: ${String(err)}`
+        )
+      }
+    }
+
+    return { ...base, eligible: true, packages, reasonCode: null, flowProfile }
   }
 
   async create(
@@ -147,6 +191,65 @@ export class RentalApplicationsService {
       currency: 'VND',
       capturedAt,
     }
+
+    let termsRef:
+      | { key: string; version: number; contentHash: string }
+      | undefined = undefined
+    let termsAcceptedAt: Date | undefined = undefined
+
+    if (this.legalTermsService) {
+      try {
+        const currentTerms =
+          await this.legalTermsService.getCurrentPublishedTerms()
+        if (currentTerms) {
+          if (
+            dto.acceptedTermsVersion !== currentTerms.version ||
+            dto.acceptedTermsHash !== currentTerms.contentHash
+          ) {
+            throw new ConflictException('TERMS_STALE')
+          }
+          termsRef = {
+            key: currentTerms.key,
+            version: currentTerms.version,
+            contentHash: currentTerms.contentHash,
+          }
+          termsAcceptedAt = capturedAt
+        }
+      } catch (err) {
+        if (err instanceof ConflictException) throw err
+      }
+    }
+
+    let flowProfileRef:
+      | { profileId: string; version: number; hash: string }
+      | undefined = undefined
+    if (this.flowConfigResolver) {
+      try {
+        const resolved = await this.flowConfigResolver.resolveProfile({
+          durationMonths: selectedPackage.durationMonths,
+          packageId: selectedPackage.packageId,
+        })
+        if (
+          (dto.flowProfileVersion !== undefined &&
+            dto.flowProfileVersion !== resolved.version) ||
+          (dto.flowProfileHash !== undefined &&
+            dto.flowProfileHash !== resolved.hash)
+        ) {
+          throw new ConflictException('FLOW_CONFIG_STALE')
+        }
+        flowProfileRef = {
+          profileId: resolved.profileId,
+          version: resolved.version,
+          hash: resolved.hash,
+        }
+      } catch (err) {
+        if (err instanceof ConflictException) throw err
+        this.logger.warn(
+          `Failed to resolve flow profile in create: ${String(err)}`
+        )
+      }
+    }
+
     const reviewSnapshot = {
       disclosureVersion: dto.disclosureVersion,
       disclosureHash,
@@ -158,7 +261,11 @@ export class RentalApplicationsService {
         disclosureVersion: dto.disclosureVersion,
         disclosureHash,
         acknowledgedDisclosureIds: dto.acknowledgedDisclosureIds,
+        ...(termsRef ? { termsRef } : {}),
+        ...(flowProfileRef ? { flowProfileRef } : {}),
       }),
+      ...(termsRef ? { termsRef, termsAcceptedAt } : {}),
+      ...(flowProfileRef ? { flowProfileRef } : {}),
     }
 
     return this.repository.save(
@@ -321,6 +428,9 @@ export class RentalApplicationsService {
         tenantId: application.tenantId,
         moveInDate: application.moveInDate,
         packageSnapshot: application.packageSnapshot,
+        applicationReviewHash: application.reviewSnapshot?.reviewHash ?? null,
+        termsRef: application.reviewSnapshot?.termsRef ?? null,
+        flowProfileRef: application.reviewSnapshot?.flowProfileRef ?? null,
       })
       application.depositAgreementId = depositAgreement._id.toHexString()
       application.contractId = contract._id.toHexString()
@@ -358,17 +468,42 @@ export class RentalApplicationsService {
     apartment: Awaited<ReturnType<ApartmentsService['findOne']>>,
     dto: CreateRentalApplicationDto
   ): RentalPackageRecord {
-    if (apartment.pricingMode !== 'packages') {
-      throw new ConflictException('LEGACY_PRICING')
-    }
-    const selectedPackage = (apartment.rentalPackages ?? []).find(
+    const selectedPackage = this.getOfferedPackages(apartment).find(
       packageItem =>
         packageItem.packageId === dto.packageId &&
-        packageItem.version === dto.packageVersion &&
-        packageItem.status === 'active'
+        packageItem.version === dto.packageVersion
     )
     if (!selectedPackage) throw new ConflictException('PACKAGE_STALE')
     return selectedPackage
+  }
+
+  /** [PROP-321] [uc_customer_contract] Keeps available legacy listings rentable. */
+  private getOfferedPackages(
+    apartment: Awaited<ReturnType<ApartmentsService['findOne']>>
+  ): RentalPackageRecord[] {
+    const configuredPackages = (apartment.rentalPackages ?? []).filter(
+      packageItem => packageItem.status === 'active'
+    )
+    if (configuredPackages.length > 0) return configuredPackages
+
+    if (
+      !Number.isInteger(apartment.priceMonthly) ||
+      apartment.priceMonthly <= 0
+    ) {
+      return []
+    }
+
+    return [
+      {
+        packageId: COMPATIBILITY_PACKAGE_ID,
+        version: COMPATIBILITY_PACKAGE_VERSION,
+        durationMonths: 12,
+        monthlyRent: apartment.priceMonthly,
+        depositPolicy: { type: 'MONTHS_OF_RENT', months: 1 },
+        resolvedDepositAmount: apartment.priceMonthly,
+        status: 'active',
+      },
+    ]
   }
 
   private async list(

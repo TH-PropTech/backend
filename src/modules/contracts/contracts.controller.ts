@@ -10,6 +10,7 @@ import {
   UseInterceptors,
   UploadedFile,
   BadRequestException,
+  ForbiddenException,
 } from '@nestjs/common'
 import { ApiTags, ApiBearerAuth, ApiProduces } from '@nestjs/swagger'
 import { FileInterceptor } from '@nestjs/platform-express'
@@ -32,6 +33,12 @@ import { ContractsService } from './contracts.service'
 import { Contract } from './schemas/contract.schema'
 import { ContractArtifactService } from './contract-artifact.service'
 import type { PublicServiceChecklist } from './legal/public-service-checklist'
+import { ContractViewService } from './contract-view.service'
+import { LedgerAuditQueryService } from '../fabric/ledger-audit-query.service'
+import { SmartOtpService } from '../smart-otp/services/smart-otp.service'
+import { OtpActionType } from '../smart-otp/enums/otp-action-type.enum'
+import type { ContractViewDto } from './dto/contract-view.dto'
+import type { ContractAuditEventDto } from './dto/contract-audit-event.dto'
 
 // ── DTOs ──
 
@@ -170,8 +177,90 @@ export class TerminateContractDto {
 export class ContractsController {
   constructor(
     private readonly contractsService: ContractsService,
-    private readonly artifactService: ContractArtifactService
+    private readonly artifactService: ContractArtifactService,
+    private readonly contractViewService: ContractViewService,
+    private readonly ledgerAuditQueryService: LedgerAuditQueryService,
+    private readonly smartOtpService: SmartOtpService
   ) {}
+
+  /** Lấy chi tiết hợp đồng phong phú cho Contract Workspace */
+  @Get(':id/view')
+  @Roles('admin', 'staff', 'landlord', 'tenant')
+  async getContractView(
+    @Param('id') id: string,
+    @CurrentUser() user: UserPayload
+  ): Promise<ContractViewDto> {
+    const isStaff =
+      user.roles?.some(role => ['staff', 'admin'].includes(role)) ?? false
+    return this.contractViewService.getForActor(id, user._id ?? '', isStaff)
+  }
+
+  /** Lấy lịch sử sự kiện sổ cái và outbox cho hợp đồng */
+  @Get(':id/audit-events')
+  @Roles('admin', 'staff', 'landlord', 'tenant')
+  async getContractAuditEvents(
+    @Param('id') id: string,
+    @CurrentUser() user: UserPayload
+  ): Promise<ContractAuditEventDto[]> {
+    const isStaff =
+      user.roles?.some(role => ['staff', 'admin'].includes(role)) ?? false
+    await this.contractsService.findOneForUser(id, user._id ?? '', isStaff)
+    return this.ledgerAuditQueryService.getContractEvents(id)
+  }
+
+  /** Khởi tạo Smart OTP challenge cho ký hợp đồng */
+  @Post(':id/otp-challenge')
+  @Roles('landlord', 'tenant')
+  async initiateSigningOtp(
+    @Param('id') id: string,
+    @CurrentUser('id') userId: string,
+    @Body('deviceId') deviceId?: string
+  ): Promise<{
+    sessionId: string
+    challenge: string
+    expiredAt: Date
+    otpCode?: string
+  }> {
+    const contract = await this.contractsService.findOne(id)
+    const role =
+      contract.tenantId === userId
+        ? 'tenant'
+        : contract.landlordId === userId
+          ? 'landlord'
+          : null
+    if (!role) throw new ForbiddenException('CONTRACT_SIGN_ACCESS_DENIED')
+    if (!contract.contentLockedHash) {
+      throw new BadRequestException('CONTRACT_CONTENT_NOT_LOCKED')
+    }
+
+    const resolvedDeviceId = deviceId || `WEB_BROWSER_${userId}`
+    return this.smartOtpService.initiateOtpSession(
+      userId,
+      resolvedDeviceId,
+      OtpActionType.CONTRACT_SIGN,
+      {
+        contractId: id,
+        signerRole: role,
+        contentLockedHash: contract.contentLockedHash,
+      }
+    )
+  }
+
+  /** Xác thực Smart OTP signature */
+  @Post(':id/verify-otp')
+  @Roles('landlord', 'tenant')
+  async verifySigningOtp(
+    @Param('id') _id: string,
+    @CurrentUser('id') userId: string,
+    @Body() body: { sessionId: string; otpCode: string; signature?: string }
+  ): Promise<{ success: boolean; message: string }> {
+    return this.smartOtpService.verifyOtpSignature(
+      userId,
+      body.sessionId,
+      body.otpCode,
+      body.signature || 'WEB_SIMULATED_SIG'
+    )
+  }
 
   /** Tạo hợp đồng nháp — chỉ Admin và Nhân viên */
   @Post()
@@ -361,5 +450,29 @@ export class ContractsController {
   }> {
     if (!file) throw new BadRequestException('Thiếu file selfie')
     return this.contractsService.verifySignerForUser(id, userId, file)
+  }
+
+  /** Đồng bộ cấu hình quy trình thuê mới cho hợp đồng nháp */
+  @Post(':id/reconcile-flow-profile')
+  @Roles('admin', 'staff', 'landlord', 'tenant')
+  async reconcileFlowProfile(
+    @Param('id') id: string,
+    @CurrentUser() user: UserPayload,
+    @Body()
+    body: {
+      flowProfileRef: { profileId: string; version: number; hash: string }
+    }
+  ): Promise<Contract> {
+    if (!body?.flowProfileRef?.profileId || !body?.flowProfileRef?.hash) {
+      throw new BadRequestException('flowProfileRef hợp lệ là bắt buộc.')
+    }
+    const isStaff =
+      user.roles?.some(role => ['staff', 'admin'].includes(role)) ?? false
+    return this.contractsService.reconcileFlowProfile(
+      id,
+      user._id ?? '',
+      isStaff,
+      body.flowProfileRef
+    )
   }
 }

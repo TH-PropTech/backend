@@ -21,7 +21,13 @@ export class OtpSessionService {
     userId: string,
     deviceId: string,
     action: OtpActionType,
-    otpCode: string
+    otpCode: string,
+    context?: {
+      contractId?: string
+      signerRole?: string
+      contentLockedHash?: string
+      contextHash?: string
+    }
   ): Promise<TransactionOtp> {
     const challenge = crypto.randomBytes(16).toString('hex')
     const expiredAt = new Date(Date.now() + 5 * 60 * 1000) // Hết hạn trong 5 phút
@@ -36,6 +42,11 @@ export class OtpSessionService {
       attempts: 0,
       maxAttempts: 3,
       expiredAt,
+      contractId: context?.contractId ?? null,
+      signerRole: context?.signerRole ?? null,
+      contentLockedHash: context?.contentLockedHash ?? null,
+      contextHash: context?.contextHash ?? null,
+      consumedAt: null,
     })
 
     return this.transactionOtpRepository.save(session)
@@ -80,7 +91,12 @@ export class OtpSessionService {
   async consumeVerifiedSession(
     userId: string,
     sessionId: string,
-    expectedAction: OtpActionType
+    expectedAction: OtpActionType,
+    expectedContext?: {
+      contractId?: string
+      signerRole?: string
+      contentLockedHash?: string
+    }
   ): Promise<{ valid: boolean; message?: string }> {
     const session = await this.getSession(sessionId)
 
@@ -97,6 +113,34 @@ export class OtpSessionService {
 
     if (session.action !== expectedAction) {
       return { valid: false, message: 'Loại phiên xác thực không phù hợp' }
+    }
+
+    if (expectedContext) {
+      if (
+        expectedContext.contractId &&
+        session.contractId !== expectedContext.contractId
+      ) {
+        return { valid: false, message: 'Mã hợp đồng không khớp với phiên OTP' }
+      }
+      if (
+        expectedContext.signerRole &&
+        session.signerRole !== expectedContext.signerRole
+      ) {
+        return {
+          valid: false,
+          message: 'Vai trò người ký không khớp với phiên OTP',
+        }
+      }
+      if (
+        expectedContext.contentLockedHash &&
+        session.contentLockedHash !== expectedContext.contentLockedHash
+      ) {
+        return {
+          valid: false,
+          message:
+            'Mã băm nội dung hợp đồng đã thay đổi, vui lòng xác thực lại',
+        }
+      }
     }
 
     if (session.status === OtpSessionStatus.CONSUMED) {
@@ -118,6 +162,7 @@ export class OtpSessionService {
 
     // Đánh dấu đã sử dụng
     session.status = OtpSessionStatus.CONSUMED
+    session.consumedAt = new Date()
     await this.transactionOtpRepository.save(session)
 
     return { valid: true }

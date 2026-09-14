@@ -48,6 +48,21 @@ export class TransactionOtp {
   @Column()
   expiredAt!: Date
 
+  @Column({ nullable: true })
+  contractId?: string | null
+
+  @Column({ nullable: true })
+  signerRole?: string | null
+
+  @Column({ nullable: true })
+  contentLockedHash?: string | null
+
+  @Column({ nullable: true })
+  contextHash?: string | null
+
+  @Column({ nullable: true })
+  consumedAt?: Date | null
+
   @CreateDateColumn()
   createdAt!: Date
 

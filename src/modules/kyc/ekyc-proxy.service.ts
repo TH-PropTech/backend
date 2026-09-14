@@ -228,10 +228,21 @@ function parseOcrBack(payload: unknown): EkycOcrBackResult {
 
 function parseBiometric(payload: unknown): EkycBiometricResult {
   const results = getRootRecord(payload, 'results')
-  const faceMatch = readBoolean(results.face_matching, 'face_matching')
-  const liveness = readBoolean(results.liveness, 'liveness')
+  const isSuccess = results.success !== false
+  const faceMatch =
+    typeof results.face_matching === 'boolean'
+      ? results.face_matching
+      : isSuccess
+        ? readBoolean(results.face_matching, 'face_matching')
+        : false
+  const liveness =
+    typeof results.liveness === 'boolean'
+      ? results.liveness
+      : isSuccess
+        ? readBoolean(results.liveness, 'liveness')
+        : false
   return {
-    verified: faceMatch && liveness && results.success !== false,
+    verified: faceMatch && liveness && isSuccess,
     faceMatch,
     liveness,
     realConfidence: readOptionalNumber(results.spoof_score),
@@ -242,9 +253,15 @@ function parseBiometric(payload: unknown): EkycBiometricResult {
 
 function parseFaceMatch(payload: unknown): EkycFaceMatchResult {
   const results = getRootRecord(payload, 'results')
-  const faceMatch = readBoolean(results.face_matching, 'face_matching')
+  const isSuccess = results.success !== false
+  const faceMatch =
+    typeof results.face_matching === 'boolean'
+      ? results.face_matching
+      : isSuccess
+        ? readBoolean(results.face_matching, 'face_matching')
+        : false
   return {
-    verified: faceMatch && results.success !== false,
+    verified: faceMatch && isSuccess,
     faceMatch,
     verificationMode: 'face-match-only',
   }

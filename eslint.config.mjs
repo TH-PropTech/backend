@@ -8,6 +8,7 @@ export default tseslint.config(
     ignores: [
       'dist/**',
       'coverage/**',
+      'scripts/**',
       'commitlint.config.cjs',
       'eslint.config.mjs',
       'jest.config.cjs',

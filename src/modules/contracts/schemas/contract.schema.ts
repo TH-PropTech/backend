@@ -189,6 +189,26 @@ export class Contract {
   packageSnapshot?: RentalPackageSnapshot | null
 
   @Column({ nullable: true })
+  applicationReviewHash?: string | null
+
+  @Column({ nullable: true })
+  termsRef?: {
+    key: string
+    version: number
+    contentHash: string
+  } | null
+
+  @Column({ nullable: true })
+  flowProfileRef?: {
+    profileId: string
+    version: number
+    hash: string
+  } | null
+
+  @Column({ nullable: true })
+  configStatus?: 'CURRENT' | 'CONFIG_OUTDATED' | null
+
+  @Column({ nullable: true })
   contentRevision?: number | null
 
   @Column({ nullable: true })

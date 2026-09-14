@@ -7,6 +7,7 @@ import {
 import { ObjectId } from 'mongodb'
 import type { Repository } from 'typeorm'
 import type { ApartmentsService } from '../apartments/apartments.service'
+import type { LegalTermsService } from '../legal-terms/legal-terms.service'
 import type { CreateRentalApplicationDto } from './dto/create-rental-application.dto'
 import type { RentalApplication } from './schemas/rental-application.schema'
 import { RentalApplicationsService } from './rental-applications.service'
@@ -233,5 +234,80 @@ describe('RentalApplicationsService', () => {
       })
     ).rejects.toThrow(NotFoundException)
     expect(repository.findOne).not.toHaveBeenCalled()
+  })
+
+  it('rejects application creation with 409 TERMS_STALE when terms version or hash does not match published terms', async () => {
+    apartments.findOne.mockResolvedValue(apartment)
+    repository.findOne.mockResolvedValue(null)
+
+    const legalTermsMock = {
+      getCurrentPublishedTerms: jest.fn().mockResolvedValue({
+        key: 'rental-service-terms',
+        version: 2,
+        contentHash: 'valid-hash-v2',
+      }),
+    }
+
+    const serviceWithTerms = new RentalApplicationsService(
+      repository as unknown as Repository<RentalApplication>,
+      apartments as unknown as ApartmentsService,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      legalTermsMock as unknown as LegalTermsService
+    )
+
+    await expect(
+      serviceWithTerms.create(
+        'tenant-1',
+        input({
+          acceptedTermsVersion: 1, // Stale version!
+          acceptedTermsHash: 'old-hash',
+        })
+      )
+    ).rejects.toThrow(ConflictException)
+  })
+
+  it('records termsRef in reviewSnapshot when valid terms are accepted', async () => {
+    apartments.findOne.mockResolvedValue(apartment)
+    repository.findOne.mockResolvedValue(null)
+    repository.create.mockImplementation(
+      (value: unknown) => value as RentalApplication
+    )
+    repository.save.mockImplementation(value => Promise.resolve(value))
+
+    const legalTermsMock = {
+      getCurrentPublishedTerms: jest.fn().mockResolvedValue({
+        key: 'rental-service-terms',
+        version: 1,
+        contentHash: 'hash-v1',
+      }),
+    }
+
+    const serviceWithTerms = new RentalApplicationsService(
+      repository as unknown as Repository<RentalApplication>,
+      apartments as unknown as ApartmentsService,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      legalTermsMock as unknown as LegalTermsService
+    )
+
+    const result = await serviceWithTerms.create(
+      'tenant-1',
+      input({
+        acceptedTermsVersion: 1,
+        acceptedTermsHash: 'hash-v1',
+      })
+    )
+
+    expect(result.reviewSnapshot?.termsRef).toEqual({
+      key: 'rental-service-terms',
+      version: 1,
+      contentHash: 'hash-v1',
+    })
+    expect(result.reviewSnapshot?.reviewHash).toBeDefined()
   })
 })

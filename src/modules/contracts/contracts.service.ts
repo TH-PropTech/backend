@@ -36,6 +36,8 @@ import { Apartment } from '../apartments/schemas/apartment.schema'
 import { LedgerOutboxService } from '../fabric/ledger-outbox.service'
 import { PaymentsService } from '../payments/payments.service'
 import type { RentalPackageSnapshot } from '../apartments/rental-package.util'
+import { BiometricEvidenceService } from '../kyc/biometric-evidence.service'
+import { SmartOtpService } from '../smart-otp/services/smart-otp.service'
 
 // ── Interfaces ──
 
@@ -75,6 +77,17 @@ export interface CreateContractFromApplicationInput {
   tenantId: string
   moveInDate: Date
   packageSnapshot: RentalPackageSnapshot
+  applicationReviewHash?: string | null
+  termsRef?: {
+    key: string
+    version: number
+    contentHash: string
+  } | null
+  flowProfileRef?: {
+    profileId: string
+    version: number
+    hash: string
+  } | null
 }
 
 /** Kết quả từ chaincode verifyContract */
@@ -105,7 +118,10 @@ export class ContractsService {
     private readonly kycService: KycService,
     private readonly ekycProxyService: EkycProxyService,
     private readonly kycMediaService: KycMediaService,
-    @Optional() private readonly paymentsService?: PaymentsService
+    @Optional() private readonly paymentsService?: PaymentsService,
+    @Optional()
+    private readonly biometricEvidenceService?: BiometricEvidenceService,
+    @Optional() private readonly smartOtpService?: SmartOtpService
   ) {}
 
   // ── Private helpers ──
@@ -192,6 +208,10 @@ export class ContractsService {
     contract.depositTxHash = null
     contract.depositAgreementCode = null
     contract.packageSnapshot = input.packageSnapshot
+    contract.applicationReviewHash = input.applicationReviewHash ?? null
+    contract.termsRef = input.termsRef ?? null
+    contract.flowProfileRef = input.flowProfileRef ?? null
+    contract.configStatus = 'CURRENT'
     contract.contentRevision = 0
     contract.editorContent = null
     contract.contentLockedHash = null
@@ -405,6 +425,33 @@ export class ContractsService {
     return this.contractRepository.save(contract)
   }
 
+  async reconcileFlowProfile(
+    contractId: string,
+    actorId: string,
+    isStaff: boolean,
+    targetFlowProfileRef: { profileId: string; version: number; hash: string }
+  ): Promise<Contract> {
+    const contract = await this.findOneForUser(contractId, actorId, isStaff)
+    if (contract.status !== 'draft') {
+      throw new ConflictException('ONLY_DRAFT_CONTRACTS_CAN_BE_RECONCILED')
+    }
+    if (contract.signedByTenant || contract.signedByLandlord) {
+      throw new ConflictException(
+        'PARTIALLY_OR_FULLY_SIGNED_CONTRACTS_CANNOT_BE_RECONCILED'
+      )
+    }
+    if (contract.contentLockedAt || contract.contentLockedHash) {
+      throw new ConflictException(
+        'LOCKED_CONTRACT_CONTENT_CANNOT_BE_RECONCILED'
+      )
+    }
+
+    contract.flowProfileRef = targetFlowProfileRef
+    contract.configStatus = 'CURRENT'
+    contract.contentRevision = (contract.contentRevision ?? 0) + 1
+    return this.contractRepository.save(contract)
+  }
+
   async terminateContract(
     contractId: string,
     actorId: string,
@@ -535,6 +582,39 @@ export class ContractsService {
     if (!contract.contentLockedHash) {
       throw new BadRequestException('CONTRACT_CONTENT_NOT_LOCKED')
     }
+
+    if (this.biometricEvidenceService) {
+      const bioResult = await this.biometricEvidenceService.consumeEvidence(
+        biometricGrantId,
+        {
+          userId,
+          role,
+          contractId,
+          contentLockedHash: contract.contentLockedHash,
+        }
+      )
+      if (!bioResult.valid) {
+        throw new BadRequestException(
+          bioResult.message || 'BIOMETRIC_EVIDENCE_INVALID'
+        )
+      }
+    }
+
+    if (this.smartOtpService) {
+      const otpResult = await this.smartOtpService.consumeContractOtp(
+        otpSessionId,
+        userId,
+        contractId,
+        role,
+        contract.contentLockedHash
+      )
+      if (!otpResult.valid) {
+        throw new BadRequestException(
+          otpResult.message || 'OTP_SESSION_INVALID'
+        )
+      }
+    }
+
     const created = createSigningGrant(
       {
         userId,
@@ -559,7 +639,13 @@ export class ContractsService {
     contractId: string,
     userId: string,
     selfie: Express.Multer.File
-  ): Promise<Awaited<ReturnType<ContractsService['verifySigner']>>> {
+  ): Promise<{
+    verified: boolean
+    faceMatch: boolean
+    liveness: boolean
+    spoofScore: number | null
+    biometricEvidenceId?: string
+  }> {
     const contract = await this.findOne(contractId)
     const role =
       contract.tenantId === userId
@@ -568,7 +654,20 @@ export class ContractsService {
           ? 'landlord'
           : null
     if (!role) throw new ForbiddenException('CONTRACT_SIGN_ACCESS_DENIED')
-    return this.verifySigner(contractId, role, selfie)
+    const result = await this.verifySigner(contractId, role, selfie)
+    if (result.verified && this.biometricEvidenceService) {
+      const evidence = await this.biometricEvidenceService.issueEvidence({
+        userId,
+        contractId,
+        role,
+        contentLockedHash: contract.contentLockedHash ?? '',
+      })
+      return {
+        ...result,
+        biometricEvidenceId: evidence.evidenceId,
+      }
+    }
+    return result
   }
 
   async signContract(
@@ -724,6 +823,8 @@ export class ContractsService {
         endDate: contract.endDate.toISOString(),
       },
       appliedPolicies: contract.appliedPolicies ?? {},
+      applicationReviewHash: contract.applicationReviewHash ?? null,
+      termsRef: contract.termsRef ?? null,
     })
     return crypto.createHash('sha256').update(canonicalPayload).digest('hex')
   }

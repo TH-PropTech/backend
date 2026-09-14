@@ -28,4 +28,18 @@ export interface RentalApplicationContext {
       required: boolean
     }>
   }
+  terms?: {
+    key: string
+    version: number
+    hash: string
+    url: string
+  } | null
+  flowProfile?: {
+    profileId: string
+    name: string
+    version: number
+    hash: string
+    precedence: string
+    steps: unknown
+  } | null
 }
