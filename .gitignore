@@ -6,3 +6,6 @@ coverage
 !.env.example
 *.tsbuildinfo
 CHANGELOG.md
+.data
+*.log
+.codex*
