@@ -73,6 +73,12 @@ export class Payment {
   ledgerStatus?: PaymentLedgerStatus
 
   @Column({ nullable: true })
+  ledgerNetworkMode?: 'simulation' | 'fabric' | null
+
+  @Column({ nullable: true })
+  ledgerRecordedAt?: Date | null
+
+  @Column({ nullable: true })
   periodKey?: string | null
 
   @Column({ nullable: true })

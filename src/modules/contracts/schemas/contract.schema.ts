@@ -165,6 +165,18 @@ export class Contract {
   depositTxHash?: string | null
 
   @Column({ nullable: true })
+  depositHash?: string | null
+
+  @Column({ nullable: true })
+  ledgerStatus?: string | null
+
+  @Column({ nullable: true })
+  ledgerNetworkMode?: string | null
+
+  @Column({ nullable: true })
+  ledgerRecordedAt?: Date | null
+
+  @Column({ nullable: true })
   depositAgreementCode?: string | null
 
   @Column({ nullable: true })

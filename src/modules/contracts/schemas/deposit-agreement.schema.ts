@@ -73,6 +73,15 @@ export class DepositAgreement {
   depositHash!: string | null
 
   @Column({ nullable: true })
+  ledgerStatus?: string | null
+
+  @Column({ nullable: true })
+  depositLedgerTxId?: string | null
+
+  @Column({ nullable: true })
+  ledgerRecordedAt?: Date | null
+
+  @Column({ nullable: true })
   manualConfirmation!: {
     confirmedBy: string
     confirmedAt: Date

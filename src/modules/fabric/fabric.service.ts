@@ -28,17 +28,39 @@ const utf8Decoder = new TextDecoder()
  */
 const FABRIC_HEALTHCHECK_FN = 'getAllContracts'
 
+export type FabricMode = 'simulation' | 'fabric'
+export type FabricConnectionState = 'disabled' | 'connected' | 'unavailable'
+
+export interface FabricStatus {
+  mode: FabricMode
+  connectionState: FabricConnectionState
+  ready: boolean
+  channel?: string | undefined
+  chaincode?: string | undefined
+  lastCheckedAt: string
+  errorCode?: string | null
+}
+
 @Injectable()
 export class FabricService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(FabricService.name)
   private gateway: Gateway | null = null
   private grpcClient: grpc.Client | null = null
-  private isSimulationMode = true
+  private mode: FabricMode = 'simulation'
+  private connectionState: FabricConnectionState = 'disabled'
+  private ready = false
+  private errorCode: string | null = null
+  private lastCheckedAt: string = new Date().toISOString()
   private readonly simulationState = new Map<string, Record<string, unknown>>()
 
   private mspId = ''
   private channelName = ''
   private chaincodeName = ''
+  private certPath = ''
+  private keyPath = ''
+  private tlsCertPath = ''
+  private peerEndpoint = ''
+  private peerHostAlias = ''
 
   constructor(
     @InjectRepository(BlockchainLog)
@@ -48,13 +70,36 @@ export class FabricService implements OnModuleInit, OnModuleDestroy {
 
   async onModuleInit(): Promise<void> {
     const enabled = this.configService.get<string>('FABRIC_ENABLED') === 'true'
+    this.mode = enabled ? 'fabric' : 'simulation'
+    this.lastCheckedAt = new Date().toISOString()
+
     if (!enabled) {
+      this.connectionState = 'disabled'
+      this.ready = true
+      this.errorCode = null
       this.logger.warn(
         'Fabric integration is disabled. Running in Simulation Mode.'
       )
       return
     }
 
+    await this.initFabric()
+  }
+
+  onModuleDestroy(): void {
+    try {
+      this.gateway?.close?.()
+      this.grpcClient?.close?.()
+    } catch {
+      // ignore cleanup errors
+    }
+    this.gateway = null
+    this.grpcClient = null
+    this.logger.log('Fabric Gateway disconnected')
+  }
+
+  private async initFabric(): Promise<void> {
+    this.lastCheckedAt = new Date().toISOString()
     try {
       this.mspId = this.configService.getOrThrow<string>('FABRIC_MSP_ID')
       this.channelName = this.configService.getOrThrow<string>(
@@ -63,58 +108,86 @@ export class FabricService implements OnModuleInit, OnModuleDestroy {
       this.chaincodeName = this.configService.getOrThrow<string>(
         'FABRIC_CHAINCODE_NAME'
       )
-
-      const certPath = this.configService.getOrThrow<string>('FABRIC_CERT_PATH')
-      const keyPath = this.configService.getOrThrow<string>('FABRIC_KEY_PATH')
-      const tlsCertPath = this.configService.getOrThrow<string>(
+      this.certPath = this.configService.getOrThrow<string>('FABRIC_CERT_PATH')
+      this.keyPath = this.configService.getOrThrow<string>('FABRIC_KEY_PATH')
+      this.tlsCertPath = this.configService.getOrThrow<string>(
         'FABRIC_TLS_CERT_PATH'
       )
-      const peerEndpoint = this.configService.getOrThrow<string>(
+      this.peerEndpoint = this.configService.getOrThrow<string>(
         'FABRIC_PEER_ENDPOINT'
       )
-      const peerHostAlias = this.configService.getOrThrow<string>(
+      this.peerHostAlias = this.configService.getOrThrow<string>(
         'FABRIC_PEER_HOST_ALIAS'
       )
+    } catch {
+      this.connectionState = 'unavailable'
+      this.ready = false
+      this.errorCode = 'FABRIC_CONFIG_MISSING'
+      this.logger.error('Fabric configuration is incomplete')
+      return
+    }
 
-      // 1. Tạo gRPC client với TLS credentials (bắt buộc — Fabric test network luôn bật TLS)
-      const tlsRootCert = fs.readFileSync(path.resolve(tlsCertPath))
+    try {
+      // 1. Tạo gRPC client với TLS credentials
+      let tlsRootCert: Buffer
+      try {
+        tlsRootCert = fs.readFileSync(path.resolve(this.tlsCertPath))
+      } catch {
+        this.connectionState = 'unavailable'
+        this.ready = false
+        this.errorCode = 'FABRIC_TLS_INVALID'
+        return
+      }
+
       const tlsCredentials = grpc.credentials.createSsl(tlsRootCert)
-
-      // Override hostname để khớp SAN (Subject Alternative Name) trong chứng chỉ TLS của peer
-      this.grpcClient = new grpc.Client(peerEndpoint, tlsCredentials, {
-        'grpc.ssl_target_name_override': peerHostAlias,
+      this.grpcClient = new grpc.Client(this.peerEndpoint, tlsCredentials, {
+        'grpc.ssl_target_name_override': this.peerHostAlias,
       })
 
       // 2. Thiết lập Identity (X.509 certificate)
-      const certificate = fs.readFileSync(path.resolve(certPath))
+      let certificate: Buffer
+      try {
+        certificate = fs.readFileSync(path.resolve(this.certPath))
+      } catch {
+        this.connectionState = 'unavailable'
+        this.ready = false
+        this.errorCode = 'FABRIC_TLS_INVALID'
+        return
+      }
       const identity: Identity = { mspId: this.mspId, credentials: certificate }
 
       // 3. Thiết lập Signer (Private key)
-      const resolvedKeyPath = path.resolve(keyPath)
+      const resolvedKeyPath = path.resolve(this.keyPath)
       let privateKeyPem: Buffer
 
       if (
         fs.existsSync(resolvedKeyPath) &&
         fs.statSync(resolvedKeyPath).isDirectory()
       ) {
-        // keyPath là thư mục (keystore/) — tìm file *_sk
         const keyFiles = fs.readdirSync(resolvedKeyPath)
-        const skFile = keyFiles.find(f => f.endsWith('_sk'))
+        const skFile = keyFiles.find(
+          f => f.endsWith('_sk') || f.endsWith('.pem')
+        )
         if (!skFile) {
-          throw new Error(
-            `Không tìm thấy file private key (*_sk) trong: ${keyPath}`
-          )
+          this.connectionState = 'unavailable'
+          this.ready = false
+          this.errorCode = 'FABRIC_TLS_INVALID'
+          return
         }
         privateKeyPem = fs.readFileSync(path.join(resolvedKeyPath, skFile))
-      } else {
-        // keyPath trỏ trực tiếp tới file key
+      } else if (fs.existsSync(resolvedKeyPath)) {
         privateKeyPem = fs.readFileSync(resolvedKeyPath)
+      } else {
+        this.connectionState = 'unavailable'
+        this.ready = false
+        this.errorCode = 'FABRIC_TLS_INVALID'
+        return
       }
 
       const privateKey = crypto.createPrivateKey(privateKeyPem)
       const signer: Signer = signers.newPrivateKeySigner(privateKey)
 
-      // 4. Kết nối Gateway (theo chuẩn @hyperledger/fabric-gateway — Fabric v2.4+)
+      // 4. Kết nối Gateway
       this.gateway = connect({
         client: this.grpcClient,
         identity,
@@ -124,36 +197,41 @@ export class FabricService implements OnModuleInit, OnModuleDestroy {
         commitStatusOptions: () => ({ deadline: Date.now() + 60000 }),
       })
 
-      // 5. Health check thật.
-      // `new grpc.Client()` và `connect()` đều lazy — không mở kết nối mạng nào.
-      // Nếu bỏ qua bước này, service sẽ log "connected" kể cả khi peer đã chết,
-      // và lỗi chỉ nổ ra lúc người dùng kích hoạt hợp đồng.
+      // 5. Health check thật qua query read-only
       const network = this.gateway.getNetwork(this.channelName)
       const contract = network.getContract(this.chaincodeName)
       await contract.evaluateTransaction(FABRIC_HEALTHCHECK_FN)
 
-      this.isSimulationMode = false
+      this.connectionState = 'connected'
+      this.ready = true
+      this.errorCode = null
       this.logger.log(
         `Successfully connected to Hyperledger Fabric — channel: ${this.channelName}, chaincode: ${this.chaincodeName}`
       )
     } catch (error) {
-      const errMsg = error instanceof Error ? error.message : String(error)
-      this.logger.error(
-        `Failed to initialize Fabric connection: ${errMsg}. Falling back to Simulation Mode.`
-      )
-      // Dọn gateway/gRPC client nửa vời để không rò socket khi health check trượt.
-      this.gateway?.close()
-      this.grpcClient?.close()
+      const rawMsg = error instanceof Error ? error.message : String(error)
+      try {
+        this.gateway?.close?.()
+        this.grpcClient?.close?.()
+      } catch {
+        // ignore cleanup errors
+      }
       this.gateway = null
       this.grpcClient = null
-      this.isSimulationMode = true
-    }
-  }
 
-  onModuleDestroy(): void {
-    this.gateway?.close()
-    this.grpcClient?.close()
-    this.logger.log('Fabric Gateway disconnected')
+      this.connectionState = 'unavailable'
+      this.ready = false
+
+      if (rawMsg.includes('chaincode') || rawMsg.includes('not found')) {
+        this.errorCode = 'FABRIC_CHAINCODE_INCOMPATIBLE'
+      } else {
+        this.errorCode = 'FABRIC_TUNNEL_UNREACHABLE'
+      }
+
+      this.logger.error(
+        `Failed to initialize Fabric connection: ${this.errorCode}. Connection state: unavailable.`
+      )
+    }
   }
 
   /**
@@ -169,7 +247,7 @@ export class FabricService implements OnModuleInit, OnModuleDestroy {
     } = {}
   ): Promise<{
     txHash: string
-    blockNumber: number
+    blockNumber: number | null
     success: boolean
     networkMode: 'simulation' | 'fabric'
   }> {
@@ -177,12 +255,11 @@ export class FabricService implements OnModuleInit, OnModuleDestroy {
       `[submitTransaction] Action: ${action}, Args: ${JSON.stringify(args)}`
     )
 
-    if (this.isSimulationMode) {
+    if (this.mode === 'simulation') {
       const txHash = `sim_${crypto
         .createHash('sha256')
         .update(`${action}:${JSON.stringify(args)}`)
         .digest('hex')}`
-      const blockNumber = 0
 
       // Write off-chain BlockchainLog to MongoDB
       const log = new BlockchainLog()
@@ -190,7 +267,7 @@ export class FabricService implements OnModuleInit, OnModuleDestroy {
       log.contractId = metadata.contractId ?? null
       log.paymentId = metadata.paymentId ?? null
       log.txHash = txHash
-      log.blockNumber = blockNumber
+      log.blockNumber = null
       log.network = 'Simulation (Offline)'
       log.networkMode = 'simulation'
       log.status = 'confirmed'
@@ -206,13 +283,21 @@ export class FabricService implements OnModuleInit, OnModuleDestroy {
         status: 'confirmed',
       })
 
-      return { txHash, blockNumber, success: true, networkMode: 'simulation' }
+      return {
+        txHash,
+        blockNumber: null,
+        success: true,
+        networkMode: 'simulation',
+      }
+    }
+
+    if (this.connectionState !== 'connected' || !this.gateway) {
+      throw new Error(
+        `FABRIC_GATEWAY_UNAVAILABLE: Gateway connection is ${this.connectionState}`
+      )
     }
 
     try {
-      if (!this.gateway) {
-        throw new Error('Gateway not initialized')
-      }
       const network = this.gateway.getNetwork(this.channelName)
       const contract = network.getContract(this.chaincodeName)
 
@@ -227,11 +312,16 @@ export class FabricService implements OnModuleInit, OnModuleDestroy {
       const txHash =
         typeof result.txId === 'string'
           ? result.txId
-          : crypto.randomBytes(32).toString('hex')
+          : typeof result.txHash === 'string'
+            ? result.txHash
+            : null
+
+      if (!txHash) {
+        throw new Error('Fabric commit did not yield an authentic txId')
+      }
+
       const blockNumber =
-        typeof result.blockNumber === 'number'
-          ? result.blockNumber
-          : Number(result.blockNumber) || 1
+        typeof result.blockNumber === 'number' ? result.blockNumber : null
 
       // Log to MongoDB
       const log = new BlockchainLog()
@@ -270,7 +360,7 @@ export class FabricService implements OnModuleInit, OnModuleDestroy {
       `[evaluateTransaction] Action: ${action}, Args: ${JSON.stringify(args)}`
     )
 
-    if (this.isSimulationMode) {
+    if (this.mode === 'simulation') {
       const state = this.simulationState.get(`${action}:${args[0] ?? ''}`)
       return (
         state ?? {
@@ -282,10 +372,13 @@ export class FabricService implements OnModuleInit, OnModuleDestroy {
       )
     }
 
+    if (this.connectionState !== 'connected' || !this.gateway) {
+      throw new Error(
+        `FABRIC_GATEWAY_UNAVAILABLE: Gateway connection is ${this.connectionState}`
+      )
+    }
+
     try {
-      if (!this.gateway) {
-        throw new Error('Gateway not initialized')
-      }
       const network = this.gateway.getNetwork(this.channelName)
       const contract = network.getContract(this.chaincodeName)
 
@@ -300,17 +393,17 @@ export class FabricService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Get status of the blockchain service
+   * Get truthful status of the blockchain service
    */
-  getStatus(): {
-    mode: 'simulation' | 'fabric'
-    channel?: string | undefined
-    chaincode?: string | undefined
-  } {
+  getStatus(): FabricStatus {
     return {
-      mode: this.isSimulationMode ? 'simulation' : 'fabric',
+      mode: this.mode,
+      connectionState: this.connectionState,
+      ready: this.ready,
       channel: this.channelName || undefined,
       chaincode: this.chaincodeName || undefined,
+      lastCheckedAt: this.lastCheckedAt,
+      errorCode: this.errorCode,
     }
   }
 }

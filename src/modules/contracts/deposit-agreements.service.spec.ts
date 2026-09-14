@@ -7,6 +7,9 @@ describe('DepositAgreementsService', () => {
   const agreementId = new ObjectId().toString()
   type TestAgreement = {
     _id: ObjectId
+    agreementCode?: string
+    applicationId?: string
+    amount?: number
     tenantId: string
     landlordId: string
     status: DepositAgreementStatus
@@ -15,6 +18,8 @@ describe('DepositAgreementsService', () => {
     tenantConsent: { consentedAt: Date; contentHash: string } | null
     paymentAttemptId: string | null
     paidAt: Date | null
+    depositHash?: string | null
+    ledgerStatus?: string | null
     manualConfirmation: {
       confirmedBy: string
       confirmedAt: Date
@@ -26,6 +31,9 @@ describe('DepositAgreementsService', () => {
 
   const baseAgreement = (): TestAgreement => ({
     _id: new ObjectId(agreementId),
+    agreementCode: 'DPA-app-1',
+    applicationId: 'app-1',
+    amount: 24_000_000,
     tenantId: 'tenant-1',
     landlordId: 'landlord-1',
     status: 'draft',
@@ -34,6 +42,8 @@ describe('DepositAgreementsService', () => {
     tenantConsent: null,
     paymentAttemptId: null,
     paidAt: null,
+    depositHash: null,
+    ledgerStatus: null,
     manualConfirmation: null,
     linkedLeaseContractId: null,
     linkedLeaseContractHash: null,
@@ -76,10 +86,14 @@ describe('DepositAgreementsService', () => {
     expect(repository.save).toHaveBeenCalledTimes(1)
   })
 
-  function createService(agreement: TestAgreement = baseAgreement()): {
+  function createService(
+    agreement: TestAgreement = baseAgreement(),
+    mockOutbox?: { enqueue: jest.Mock }
+  ): {
     service: DepositAgreementsService
     repository: { findOne: jest.Mock; save: jest.Mock }
     agreement: TestAgreement
+    outboxService: { enqueue: jest.Mock }
   } {
     const repository = {
       findOne: jest.fn().mockResolvedValue(agreement),
@@ -87,10 +101,15 @@ describe('DepositAgreementsService', () => {
         (value: unknown): Promise<unknown> => Promise.resolve(value)
       ),
     }
+    const outbox = mockOutbox ?? { enqueue: jest.fn().mockResolvedValue({}) }
     return {
-      service: new DepositAgreementsService(repository as never),
+      service: new DepositAgreementsService(
+        repository as never,
+        outbox as never
+      ),
       repository,
       agreement,
+      outboxService: outbox,
     }
   }
 
@@ -120,7 +139,7 @@ describe('DepositAgreementsService', () => {
     ).rejects.toBeInstanceOf(ConflictException)
   })
 
-  it('records payment exactly once and rejects a different replay attempt', async () => {
+  it('records payment exactly once, computes canonical depositHash, enqueues outbox, and rejects conflict replay', async () => {
     const context = createService({
       ...baseAgreement(),
       status: 'payment-pending',
@@ -131,6 +150,16 @@ describe('DepositAgreementsService', () => {
     )
     expect(first.status).toBe('paid')
     expect(first.paymentAttemptId).toBe('attempt-1')
+    expect(first.depositHash).toHaveLength(64)
+    expect(first.ledgerStatus).toBe('pending')
+    expect(context.outboxService.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        aggregateType: 'deposit',
+        aggregateId: agreementId,
+        eventType: 'deposit.paid',
+        action: 'recordDeposit',
+      })
+    )
 
     context.agreement.status = 'paid'
     context.agreement.paymentAttemptId = 'attempt-1'
@@ -144,7 +173,7 @@ describe('DepositAgreementsService', () => {
     ).rejects.toThrow('DEPOSIT_PAYMENT_CONFLICT')
   })
 
-  it('allows staff manual confirmation but does not overwrite a paid agreement', async () => {
+  it('allows staff manual confirmation, computes canonical depositHash, enqueues outbox, and does not overwrite a paid agreement', async () => {
     const context = createService({ ...baseAgreement(), status: 'accepted' })
     const confirmed = await context.service.confirmDepositReceived(
       agreementId,
@@ -152,7 +181,16 @@ describe('DepositAgreementsService', () => {
       'cash receipt #1'
     )
     expect(confirmed.status).toBe('paid')
+    expect(confirmed.depositHash).toHaveLength(64)
+    expect(confirmed.ledgerStatus).toBe('pending')
     expect(confirmed.manualConfirmation?.confirmedBy).toBe('staff-1')
+    expect(context.outboxService.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        aggregateType: 'deposit',
+        aggregateId: agreementId,
+        action: 'recordDeposit',
+      })
+    )
 
     context.agreement.status = 'paid'
     const replay = await context.service.confirmDepositReceived(

@@ -3,6 +3,7 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { ObjectId } from 'mongodb'
@@ -11,12 +12,15 @@ import { Repository } from 'typeorm'
 import type { RentalPackageSnapshot } from '../apartments/rental-package.util'
 import { validateDepositConsent } from './deposit-consent.util'
 import { DepositAgreement } from './schemas/deposit-agreement.schema'
+import { LedgerOutboxService } from '../fabric/ledger-outbox.service'
 
 @Injectable()
 export class DepositAgreementsService {
   constructor(
     @InjectRepository(DepositAgreement)
-    private readonly repository: Repository<DepositAgreement>
+    private readonly repository: Repository<DepositAgreement>,
+    @Optional()
+    private readonly ledgerOutboxService?: LedgerOutboxService
   ) {}
 
   async createFromApplicationSnapshot(input: {
@@ -152,8 +156,11 @@ export class DepositAgreementsService {
     agreement.status = 'paid'
     agreement.paidAt = new Date()
     agreement.paymentAttemptId = paymentAttemptId
-    agreement.depositHash = depositHash ?? null
-    return this.repository.save(agreement)
+    agreement.depositHash = depositHash || this.calculateDepositHash(agreement)
+    agreement.ledgerStatus = 'pending'
+    const saved = await this.repository.save(agreement)
+    await this.enqueueDepositLedgerEvent(saved)
+    return saved
   }
 
   async confirmDepositReceived(
@@ -168,12 +175,58 @@ export class DepositAgreementsService {
     }
     agreement.status = 'paid'
     agreement.paidAt = new Date()
+    agreement.depositHash = this.calculateDepositHash(agreement)
+    agreement.ledgerStatus = 'pending'
     agreement.manualConfirmation = {
       confirmedBy: staffId,
       confirmedAt: new Date(),
       note,
     }
-    return this.repository.save(agreement)
+    const saved = await this.repository.save(agreement)
+    await this.enqueueDepositLedgerEvent(saved)
+    return saved
+  }
+
+  private calculateDepositHash(agreement: DepositAgreement): string {
+    return createHash('sha256')
+      .update(
+        JSON.stringify({
+          agreementId: agreement._id.toString(),
+          agreementCode: agreement.agreementCode,
+          applicationId: agreement.applicationId,
+          tenantId: agreement.tenantId,
+          landlordId: agreement.landlordId,
+          amount: agreement.amount,
+          currency: 'VND',
+        })
+      )
+      .digest('hex')
+  }
+
+  private async enqueueDepositLedgerEvent(
+    agreement: DepositAgreement
+  ): Promise<void> {
+    if (!this.ledgerOutboxService || !agreement.depositHash) return
+
+    await this.ledgerOutboxService.enqueue({
+      aggregateType: 'deposit',
+      aggregateId: agreement._id.toString(),
+      eventType: 'deposit.paid',
+      action: 'recordDeposit',
+      args: [
+        agreement._id.toString(),
+        agreement._id.toString(),
+        agreement.linkedLeaseContractId ?? agreement.applicationId ?? 'none',
+        (agreement.amount ?? 0).toString(),
+        agreement.depositHash,
+      ],
+
+      metadata: {
+        agreementId: agreement._id.toString(),
+        applicationId: agreement.applicationId,
+        contractId: agreement.linkedLeaseContractId ?? undefined,
+      },
+    })
   }
 
   async linkToLease(

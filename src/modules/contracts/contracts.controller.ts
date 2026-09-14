@@ -419,7 +419,8 @@ export class ContractsController {
     @Param('id') id: string,
     @CurrentUser() user: UserPayload
   ): Promise<{
-    isValid: boolean
+    isValid: boolean | null
+    verificationStatus: 'valid' | 'invalid' | 'not-recorded' | 'unavailable'
     currentHash: string
     storedHash: string | null
     blockchainAddress: string | null

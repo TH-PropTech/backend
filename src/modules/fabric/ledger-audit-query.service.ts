@@ -75,11 +75,11 @@ export class LedgerAuditQueryService {
         actorRole: 'system',
         networkMode: log.networkMode || 'simulation',
         txHash: log.txHash || null,
-        blockNumber: isSim
-          ? null
-          : log.blockNumber > 0
-            ? log.blockNumber
-            : null,
+        blockNumber:
+          isSim || log.blockNumber == null || log.blockNumber <= 0
+            ? null
+            : log.blockNumber,
+
         retryable: log.status === 'failed',
         displayCode: `LOG_${(log.status || 'CONFIRMED').toUpperCase()}`,
         description: this.getLogDescription(log),

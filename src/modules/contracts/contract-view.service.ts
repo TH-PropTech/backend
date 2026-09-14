@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   ForbiddenException,
+  Optional,
 } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
@@ -10,6 +11,7 @@ import { Contract } from './schemas/contract.schema'
 import { DepositAgreement } from './schemas/deposit-agreement.schema'
 import { KycService } from '../kyc/kyc.service'
 import { LedgerAuditQueryService } from '../fabric/ledger-audit-query.service'
+import { FabricService } from '../fabric/fabric.service'
 import { ContractDocumentProjector } from './legal/contract-document.projector'
 import {
   ContractViewDto,
@@ -27,7 +29,8 @@ export class ContractViewService {
     @InjectRepository(DepositAgreement)
     private readonly depositAgreementRepository: Repository<DepositAgreement>,
     private readonly kycService: KycService,
-    private readonly ledgerAuditQueryService: LedgerAuditQueryService
+    private readonly ledgerAuditQueryService: LedgerAuditQueryService,
+    @Optional() private readonly fabricService?: FabricService
   ) {}
 
   /**
@@ -200,28 +203,60 @@ export class ContractViewService {
       await this.ledgerAuditQueryService.getContractEvents(contractId)
     const latestLedgerEvent = auditEvents.find(e => e.category === 'ledger')
 
+    const currentMode: 'simulation' | 'fabric' =
+      contract.ledgerNetworkMode === 'fabric' ||
+      latestLedgerEvent?.networkMode === 'fabric' ||
+      this.fabricService?.getStatus().mode === 'fabric'
+        ? 'fabric'
+        : 'simulation'
+
     let ledgerStatus: ContractLedgerSummaryDto['status'] = 'not-requested'
-    if (contract.status === 'active' || contract.blockchainAddress) {
-      ledgerStatus = 'confirmed-simulation'
+
+    if (contract.ledgerStatus === 'confirmed') {
+      ledgerStatus =
+        currentMode === 'simulation'
+          ? 'confirmed-simulation'
+          : 'confirmed-fabric'
+    } else if (contract.ledgerStatus === 'pending') {
+      ledgerStatus = 'pending'
+    } else if (contract.ledgerStatus === 'processing') {
+      ledgerStatus = 'processing'
+    } else if (contract.ledgerStatus === 'failed') {
+      ledgerStatus = latestLedgerEvent?.retryable
+        ? 'failed-retryable'
+        : 'failed-terminal'
     } else if (latestLedgerEvent) {
       if (latestLedgerEvent.status === 'pending') ledgerStatus = 'pending'
       else if (latestLedgerEvent.status === 'processing')
         ledgerStatus = 'processing'
-      else if (latestLedgerEvent.status === 'confirmed')
-        ledgerStatus = 'confirmed-simulation'
-      else if (latestLedgerEvent.status === 'failed')
-        ledgerStatus = 'failed-retryable'
+      else if (latestLedgerEvent.status === 'confirmed') {
+        ledgerStatus =
+          currentMode === 'simulation'
+            ? 'confirmed-simulation'
+            : 'confirmed-fabric'
+      } else if (latestLedgerEvent.status === 'failed') {
+        ledgerStatus = latestLedgerEvent.retryable
+          ? 'failed-retryable'
+          : 'failed-terminal'
+      }
+    } else if (contract.blockchainAddress) {
+      ledgerStatus =
+        currentMode === 'simulation'
+          ? 'confirmed-simulation'
+          : 'confirmed-fabric'
     }
 
     const ledger: ContractLedgerSummaryDto = {
-      networkMode: 'simulation',
+      networkMode: currentMode,
       status: ledgerStatus,
       txHash: contract.blockchainAddress || latestLedgerEvent?.txHash || null,
-      blockNumber: null, // Simulation luôn là null cho UI proof
-      verifiedAt: contract.contentLockedAt
-        ? contract.contentLockedAt.toISOString()
-        : null,
-      onChainValid: contract.status === 'active' ? true : null,
+      blockNumber: latestLedgerEvent?.blockNumber ?? null,
+      verifiedAt: contract.ledgerRecordedAt
+        ? contract.ledgerRecordedAt.toISOString()
+        : contract.contentLockedAt
+          ? contract.contentLockedAt.toISOString()
+          : null,
+      onChainValid: null,
     }
 
     // 6. Hoàn thiện ContractViewDto
