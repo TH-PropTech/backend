@@ -23,6 +23,8 @@ interface CreateBookingDraftArgs {
   apartmentId: string
   visitAt: string
   method?: 'onsite' | 'video'
+  tenantName?: string
+  tenantPhone?: string
 }
 
 @Injectable()
@@ -136,17 +138,6 @@ export class AiChatsService {
       this.logger.warn(`Lỗi tra cứu apartmentId từ session metadata: ${errMsg}`)
     }
 
-    // 5. Fallback lấy căn hộ đang hoạt động (available) gần nhất trong Database
-    try {
-      const available = await this.apartmentsService.findAll()
-      const firstAvail = available?.[0]
-      if (firstAvail && firstAvail._id) {
-        return firstAvail._id.toString()
-      }
-    } catch {
-      // Ignore
-    }
-
     return null
   }
 
@@ -251,6 +242,7 @@ export class AiChatsService {
     let loopLimit = 3
     let metadata: ChatMessage['metadata'] = undefined
     let disableTools = false
+    let lastBookingSuccessContent = ''
 
     // 4. Handle Tool Calls if LLM requests them
     while (
@@ -387,6 +379,8 @@ export class AiChatsService {
         const inputApartmentId = args.apartmentId
         const visitAt = args.visitAt
         const method = args.method || 'onsite'
+        const tenantName = args.tenantName
+        const tenantPhone = args.tenantPhone
 
         const resolvedApartmentId = await this.resolveApartmentId(
           sessionKey,
@@ -403,6 +397,8 @@ export class AiChatsService {
                 apartmentId: resolvedApartmentId,
                 visitAt,
                 method,
+                tenantName: tenantName ?? null,
+                tenantPhone: tenantPhone ?? null,
                 note: 'Tạo tự động qua trợ lý ảo AI',
               }
             )
@@ -410,7 +406,11 @@ export class AiChatsService {
             const formattedVisitAt = booking.visitAt
               ? new Date(booking.visitAt).toLocaleString('vi-VN')
               : 'unknown'
-            toolResultContent = `Đặt lịch hẹn xem nhà nháp thành công! Chi tiết lịch hẹn:\n- ID lịch: ${bookingId}\n- Tên căn hộ: ${booking.apartmentTitle}\n- Thời gian: ${formattedVisitAt}\n- Trạng thái: ${booking.status}`
+            const contactInfo = booking.tenantPhone
+              ? `\n- Khách đặt: ${booking.tenantName || 'Khách vãng lai'} (${booking.tenantPhone})`
+              : ''
+            toolResultContent = `Đặt lịch hẹn xem nhà nháp thành công! Chi tiết lịch hẹn:\n- ID lịch: ${bookingId}\n- Tên căn hộ: ${booking.apartmentTitle}\n- Thời gian: ${formattedVisitAt}\n- Hình thức: ${booking.method === 'video' ? 'Video Call' : 'Xem trực tiếp'}${contactInfo}\n- Trạng thái: ${booking.status}`
+            lastBookingSuccessContent = toolResultContent
           } catch (e) {
             const errMsg = e instanceof Error ? e.message : 'Unknown error'
             this.logger.error('Failed to create booking draft via tool:', e)
@@ -429,7 +429,7 @@ export class AiChatsService {
         )
 
         if (!resolvedApartmentId) {
-          toolResultContent = `Không tìm thấy thông tin căn hộ để mở thẻ đặt lịch. Bạn vui lòng giới thiệu danh sách căn hộ cho khách hàng chọn trước.`
+          toolResultContent = `Chưa xác định được căn hộ cần đặt lịch xem. Hãy phản hồi lịch sự hỏi người dùng muốn đặt lịch xem căn hộ nào (hỏi khu vực, số phòng ngủ, mức giá) hoặc gợi ý tìm kiếm căn hộ trước.`
         } else {
           try {
             const apt =
@@ -507,6 +507,19 @@ export class AiChatsService {
         finalAnswer.toLowerCase().includes('bạn sẽ xem căn hộ')
       if (isFalseClaim || !finalAnswer.trim()) {
         finalAnswer = `Dưới đây là thẻ lên lịch xem căn hộ "${title}". Bạn vui lòng lựa chọn ngày và giờ xem phòng phù hợp ở khung bên dưới nhé:`
+      }
+    }
+
+    // Guardrail Sanitizer: Nếu vừa thực thi tool create_booking_draft thành công,
+    // nhưng câu thoại do LLM trả về bị rỗng hoặc là câu báo lỗi mặc định ("Xin lỗi...")
+    if (lastBookingSuccessContent) {
+      const isFallbackError =
+        finalAnswer === 'Xin lỗi, tôi không thể xử lý yêu cầu của bạn.' ||
+        !finalAnswer.trim() ||
+        finalAnswer.toLowerCase().includes('không thể xử lý') ||
+        finalAnswer.toLowerCase().includes('xin lỗi')
+      if (isFallbackError) {
+        finalAnswer = `${lastBookingSuccessContent}\n\nChủ nhà sẽ chủ động liên hệ với bạn để xác nhận lịch hẹn trước khi đến xem phòng.`
       }
     }
 

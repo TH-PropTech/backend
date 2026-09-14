@@ -41,6 +41,35 @@ export class BookingsService {
   ) {}
 
   /**
+   * Phân tích an toàn chuỗi ngày tháng hẹn xem nhà (hỗ trợ ISO 8601, DD/MM/YYYY HH:mm, DD-MM-YYYY).
+   */
+  public parseVisitAt(visitAtStr: string): Date {
+    if (!visitAtStr) return new Date()
+    const trimmed = visitAtStr.trim()
+    // Pattern 1: DD/MM/YYYY HH:mm or DD-MM-YYYY HH:mm:ss
+    const dmyMatch = trimmed.match(
+      /^(\d{1,2})[/-](\d{1,2})[/-](\d{4})(?:[T\s]+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/
+    )
+    if (dmyMatch) {
+      const day = Number(dmyMatch[1])
+      const month = Number(dmyMatch[2]) - 1
+      const year = Number(dmyMatch[3])
+      const hour = dmyMatch[4] ? Number(dmyMatch[4]) : 9
+      const minute = dmyMatch[5] ? Number(dmyMatch[5]) : 0
+      const second = dmyMatch[6] ? Number(dmyMatch[6]) : 0
+      return new Date(year, month, day, hour, minute, second)
+    }
+
+    // Pattern 2: Standard Date parsing (ISO 8601 or YYYY-MM-DD)
+    const parsed = new Date(trimmed)
+    if (!isNaN(parsed.getTime())) {
+      return parsed
+    }
+
+    return new Date()
+  }
+
+  /**
    * Tenant tạo yêu cầu đặt lịch xem nhà.
    * Tự động resolve landlordId từ apartment.
    */
@@ -104,6 +133,8 @@ export class BookingsService {
       }
     }
 
+    const visitDate = this.parseVisitAt(dto.visitAt)
+
     const booking = this.bookingRepository.create({
       apartmentId: dto.apartmentId,
       apartmentTitle: apartment.title,
@@ -111,7 +142,7 @@ export class BookingsService {
       tenantId: tenantId || 'anonymous',
       tenantName,
       tenantPhone,
-      visitAt: new Date(dto.visitAt),
+      visitAt: visitDate,
       method: dto.method,
       note: dto.note ?? null,
       status: 'pending',
@@ -126,10 +157,11 @@ export class BookingsService {
 
     // Gửi thông báo đến chủ nhà
     try {
+      const phoneInfo = tenantPhone ? ` (SĐT: ${tenantPhone})` : ''
       await this.notificationsService.createNotification(
         apartment.landlordId,
         'Yêu cầu đặt lịch hẹn mới',
-        `Khách thuê ${tenantName ?? 'Ẩn danh'} muốn đặt lịch xem căn hộ "${apartment.title}" vào lúc ${new Date(dto.visitAt).toLocaleString('vi-VN')}.`,
+        `Khách thuê ${tenantName ?? 'Ẩn danh'}${phoneInfo} muốn đặt lịch xem căn hộ "${apartment.title}" vào lúc ${visitDate.toLocaleString('vi-VN')}.`,
         'BOOKING',
         { bookingId: String(saved._id), apartmentId: dto.apartmentId }
       )
