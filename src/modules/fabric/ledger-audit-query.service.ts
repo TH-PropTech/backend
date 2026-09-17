@@ -1,4 +1,5 @@
-import { Injectable } from '@nestjs/common'
+import { Injectable, Optional } from '@nestjs/common'
+import { ConfigService } from '@nestjs/config'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 import { BlockchainLog } from './schemas/blockchain-log.schema'
@@ -11,7 +12,8 @@ export class LedgerAuditQueryService {
     @InjectRepository(BlockchainLog)
     private readonly logRepository: Repository<BlockchainLog>,
     @InjectRepository(LedgerOutbox)
-    private readonly outboxRepository: Repository<LedgerOutbox>
+    private readonly outboxRepository: Repository<LedgerOutbox>,
+    @Optional() private readonly configService?: ConfigService
   ) {}
 
   /**
@@ -35,7 +37,11 @@ export class LedgerAuditQueryService {
 
     // 1. Map từ Ledger Outbox (Trạng thái đẩy sổ cái)
     for (const outbox of outboxList) {
-      const isSimulation = true // Theo cấu hình mặc định development
+      const networkMode: 'simulation' | 'fabric' =
+        outbox.networkMode ??
+        (this.configService?.get<string>('FABRIC_ENABLED') === 'true'
+          ? 'fabric'
+          : 'simulation')
       events.push({
         id: `outbox-${outbox._id.toString()}`,
         category: 'ledger',
@@ -45,10 +51,15 @@ export class LedgerAuditQueryService {
           ? outbox.updatedAt.toISOString()
           : outbox.createdAt.toISOString(),
         actorRole: 'system',
-        networkMode: isSimulation ? 'simulation' : 'fabric',
+        networkMode,
         txHash: outbox.txHash ?? null,
-        // Simulation không hiển thị block number như bằng chứng thật
-        blockNumber: isSimulation ? null : 1,
+        // Chỉ hiển thị số khối nếu là Fabric thật và có số khối hợp lệ > 0
+        blockNumber:
+          networkMode === 'fabric' &&
+          outbox.blockNumber != null &&
+          outbox.blockNumber > 0
+            ? outbox.blockNumber
+            : null,
         retryable: outbox.status === 'failed',
         displayCode: `LEDGER_${outbox.status.toUpperCase()}`,
         description: this.getOutboxDescription(outbox),
@@ -75,11 +86,11 @@ export class LedgerAuditQueryService {
         actorRole: 'system',
         networkMode: log.networkMode || 'simulation',
         txHash: log.txHash || null,
-        blockNumber: isSim
-          ? null
-          : log.blockNumber > 0
-            ? log.blockNumber
-            : null,
+        blockNumber:
+          isSim || log.blockNumber == null || log.blockNumber <= 0
+            ? null
+            : log.blockNumber,
+
         retryable: log.status === 'failed',
         displayCode: `LOG_${(log.status || 'CONFIRMED').toUpperCase()}`,
         description: this.getLogDescription(log),

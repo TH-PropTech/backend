@@ -141,6 +141,33 @@ describe('RentalApplicationsService', () => {
     )
   })
 
+  it('projects a ready contract handoff only after accepted provisioning completes', async () => {
+    const ready = application({
+      status: 'accepted',
+      provisioningStatus: 'ready',
+      contractId: '507f1f77bcf86cd799439011',
+    })
+    repository.findOne.mockResolvedValue(ready)
+
+    const result = await service.getOne(ready._id.toHexString(), 'tenant-1')
+
+    expect(result.contractHandoff).toEqual({
+      state: 'ready',
+      contractId: '507f1f77bcf86cd799439011',
+      href: '/contracts/507f1f77bcf86cd799439011',
+      reasonCode: null,
+    })
+  })
+
+  it('does not expose a contract handoff to an unrelated actor', async () => {
+    const pending = application()
+    repository.findOne.mockResolvedValue(pending)
+
+    await expect(
+      service.getOne(pending._id.toHexString(), 'outsider')
+    ).rejects.toThrow('APPLICATION_ACCESS_DENIED')
+  })
+
   it('rejects past move-in dates and applying to own listing', async () => {
     apartments.findOne.mockResolvedValue(apartment)
     await expect(

@@ -39,6 +39,8 @@ import { SmartOtpService } from '../smart-otp/services/smart-otp.service'
 import { OtpActionType } from '../smart-otp/enums/otp-action-type.enum'
 import type { ContractViewDto } from './dto/contract-view.dto'
 import type { ContractAuditEventDto } from './dto/contract-audit-event.dto'
+import { SmartCaSigningService } from './smartca/smartca-signing.service'
+import type { SmartCaSigningSession } from './smartca/smartca-signing-session.schema'
 
 // ── DTOs ──
 
@@ -180,7 +182,8 @@ export class ContractsController {
     private readonly artifactService: ContractArtifactService,
     private readonly contractViewService: ContractViewService,
     private readonly ledgerAuditQueryService: LedgerAuditQueryService,
-    private readonly smartOtpService: SmartOtpService
+    private readonly smartOtpService: SmartOtpService,
+    private readonly smartCaSigningService: SmartCaSigningService
   ) {}
 
   /** Lấy chi tiết hợp đồng phong phú cho Contract Workspace */
@@ -319,6 +322,51 @@ export class ContractsController {
     )
   }
 
+  @Post(':id/smartca/signing-sessions')
+  @Roles('landlord', 'tenant')
+  async createSmartCaSigningSession(
+    @Param('id') id: string,
+    @CurrentUser('id') signerId: string
+  ): Promise<SmartCaSigningSession> {
+    return this.smartCaSigningService.createSession(id, signerId)
+  }
+
+  @Get(':id/smartca/signing-sessions/:sessionId')
+  @Roles('admin', 'staff', 'landlord', 'tenant')
+  async getSmartCaSigningSession(
+    @Param('id') id: string,
+    @Param('sessionId') sessionId: string,
+    @CurrentUser() user: UserPayload
+  ): Promise<SmartCaSigningSession> {
+    const isStaff =
+      user.roles?.some(role => ['staff', 'admin'].includes(role)) ?? false
+    return this.smartCaSigningService.getSession(
+      id,
+      sessionId,
+      user._id ?? '',
+      isStaff
+    )
+  }
+
+  @Post('smartca/callback')
+  async smartCaCallback(
+    @Body()
+    body: {
+      transactionId: string
+      status: 'signed' | 'rejected'
+      certificateSerial?: string
+    }
+  ): Promise<SmartCaSigningSession> {
+    if (!body?.transactionId || !body.status) {
+      throw new BadRequestException('SMARTCA_CALLBACK_INVALID')
+    }
+    return this.smartCaSigningService.reconcile(
+      body.transactionId,
+      body.status,
+      body.certificateSerial
+    )
+  }
+
   /** Lấy danh sách hợp đồng theo userId — Admin, Nhân viên, Chủ nhà, Khách thuê */
   @Get()
   @Roles('admin', 'staff', 'landlord', 'tenant')
@@ -419,7 +467,8 @@ export class ContractsController {
     @Param('id') id: string,
     @CurrentUser() user: UserPayload
   ): Promise<{
-    isValid: boolean
+    isValid: boolean | null
+    verificationStatus: 'valid' | 'invalid' | 'not-recorded' | 'unavailable'
     currentHash: string
     storedHash: string | null
     blockchainAddress: string | null

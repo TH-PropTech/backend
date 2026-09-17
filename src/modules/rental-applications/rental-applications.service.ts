@@ -30,7 +30,10 @@ import {
   RENTAL_REVIEW_DISCLOSURE_VERSION,
   type RentalApplicationListingSnapshot,
 } from './rental-application-review.util'
-import { RentalApplication } from './schemas/rental-application.schema'
+import {
+  ContractHandoff,
+  RentalApplication,
+} from './schemas/rental-application.schema'
 
 export interface RentalApplicationListResult {
   items: RentalApplication[]
@@ -316,6 +319,38 @@ export class RentalApplicationsService {
     return this.list({ landlordId }, query)
   }
 
+  async getOne(
+    id: string,
+    actorId: string,
+    isStaff = false
+  ): Promise<RentalApplication> {
+    const application = await this.findOrThrow(id)
+    if (
+      !isStaff &&
+      application.tenantId !== actorId &&
+      application.landlordId !== actorId
+    ) {
+      throw new ForbiddenException('APPLICATION_ACCESS_DENIED')
+    }
+    return this.withContractHandoff(application)
+  }
+
+  async retryProvisioning(
+    id: string,
+    actorId: string
+  ): Promise<RentalApplication> {
+    const application = await this.findOrThrow(id)
+    if (application.status !== 'accepted') {
+      throw new ConflictException('APPLICATION_NOT_ACCEPTED')
+    }
+    if (application.provisioningStatus === 'ready') {
+      return this.withContractHandoff(application)
+    }
+    this.logger.log(`Retrying rental provisioning ${id} by staff ${actorId}`)
+    const result = await this.provisionAcceptedApplication(application)
+    return this.withContractHandoff(result)
+  }
+
   async respond(
     id: string,
     landlordId: string,
@@ -412,6 +447,7 @@ export class RentalApplicationsService {
       const depositAgreement =
         await this.depositAgreementsService.createFromApplicationSnapshot({
           applicationId: application._id.toHexString(),
+          propertyId: application.apartmentId,
           tenantId: application.tenantId,
           landlordId: application.landlordId,
           packageSnapshot: application.packageSnapshot,
@@ -519,7 +555,9 @@ export class RentalApplicationsService {
       : records
     const start = (query.page - 1) * query.limit
     return {
-      items: filtered.slice(start, start + query.limit),
+      items: filtered
+        .slice(start, start + query.limit)
+        .map(application => this.withContractHandoff(application)),
       total: filtered.length,
       page: query.page,
       limit: query.limit,
@@ -538,6 +576,48 @@ export class RentalApplicationsService {
       throw new NotFoundException('Rental application not found')
     }
     return application
+  }
+
+  private withContractHandoff(
+    application: RentalApplication
+  ): RentalApplication {
+    const handoff: ContractHandoff =
+      application.status === 'rejected'
+        ? {
+            state: 'rejected',
+            contractId: null,
+            href: null,
+            reasonCode: application.reasonCode,
+          }
+        : application.status === 'pending'
+          ? {
+              state: 'pending',
+              contractId: null,
+              href: null,
+              reasonCode: null,
+            }
+          : application.provisioningStatus === 'ready' && application.contractId
+            ? {
+                state: 'ready',
+                contractId: application.contractId,
+                href: `/contracts/${application.contractId}`,
+                reasonCode: null,
+              }
+            : application.provisioningStatus === 'failed'
+              ? {
+                  state: 'failed',
+                  contractId: application.contractId ?? null,
+                  href: null,
+                  reasonCode:
+                    application.provisioningErrorCode ?? 'PROVISIONING_FAILED',
+                }
+              : {
+                  state: 'provisioning',
+                  contractId: application.contractId ?? null,
+                  href: null,
+                  reasonCode: null,
+                }
+    return Object.assign(application, { contractHandoff: handoff })
   }
 
   private toListingSnapshot(

@@ -14,6 +14,13 @@ import type {
 
 export type RentalApplicationStatus = 'pending' | 'accepted' | 'rejected'
 
+export type ContractHandoff = {
+  state: 'pending' | 'provisioning' | 'ready' | 'failed' | 'rejected'
+  contractId: string | null
+  href: string | null
+  reasonCode: string | null
+}
+
 @Entity('rental_applications')
 export class RentalApplication {
   @ObjectIdColumn() _id!: ObjectId
@@ -50,4 +57,7 @@ export class RentalApplication {
   @Column({ nullable: true }) actorTimestamp!: Date | null
   @CreateDateColumn() createdAt!: Date
   @UpdateDateColumn() updatedAt!: Date
+
+  /** Response-only projection; never persisted as application input. */
+  contractHandoff?: ContractHandoff
 }

@@ -42,4 +42,45 @@ export const envValidationSchema = Joi.object({
       then: Joi.required(),
       otherwise: Joi.optional().allow(''),
     }),
+  FABRIC_ENABLED: Joi.boolean().default(false),
+  FABRIC_MSP_ID: Joi.string().when('FABRIC_ENABLED', {
+    is: true,
+    then: Joi.required(),
+    otherwise: Joi.optional().allow(''),
+  }),
+  FABRIC_CHANNEL_NAME: Joi.string().when('FABRIC_ENABLED', {
+    is: true,
+    then: Joi.required(),
+    otherwise: Joi.optional().allow(''),
+  }),
+  FABRIC_CHAINCODE_NAME: Joi.string().when('FABRIC_ENABLED', {
+    is: true,
+    then: Joi.required(),
+    otherwise: Joi.optional().allow(''),
+  }),
+  FABRIC_PEER_ENDPOINT: Joi.string().when('FABRIC_ENABLED', {
+    is: true,
+    then: Joi.required(),
+    otherwise: Joi.optional().allow(''),
+  }),
+  FABRIC_PEER_HOST_ALIAS: Joi.string().when('FABRIC_ENABLED', {
+    is: true,
+    then: Joi.required(),
+    otherwise: Joi.optional().allow(''),
+  }),
+  FABRIC_CERT_PATH: Joi.string().when('FABRIC_ENABLED', {
+    is: true,
+    then: Joi.required(),
+    otherwise: Joi.optional().allow(''),
+  }),
+  FABRIC_KEY_PATH: Joi.string().when('FABRIC_ENABLED', {
+    is: true,
+    then: Joi.required(),
+    otherwise: Joi.optional().allow(''),
+  }),
+  FABRIC_TLS_CERT_PATH: Joi.string().when('FABRIC_ENABLED', {
+    is: true,
+    then: Joi.required(),
+    otherwise: Joi.optional().allow(''),
+  }),
 })

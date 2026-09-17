@@ -163,12 +163,12 @@ describe('ContractsService public-service checklist', () => {
       'contract-id',
       'tenant-id',
       false,
-      'permanent-residence'
+      'temporary-residence'
     )
 
     expect(result).toEqual(
       expect.objectContaining({
-        purpose: 'permanent-residence',
+        purpose: 'temporary-residence',
         executionMethod: 'POC_ECONSENT',
         notarizationStatus: 'not-requested',
       })
@@ -483,9 +483,11 @@ describe('ContractsService activation', () => {
       contractHash: null,
       blockchainAddress: null,
       appliedPolicies: null,
+      depositAgreementId: '507f1f77bcf86cd799439099',
       depositId: null,
       depositTxHash: null,
     } as unknown as Contract
+
     const contractRepository = {
       findOne: jest.fn().mockResolvedValue(contract),
       save: jest.fn(
@@ -507,6 +509,19 @@ describe('ContractsService activation', () => {
       findByUserId: jest.fn().mockResolvedValue({ status: 'verified' }),
     })
     Reflect.set(service, 'ledgerOutboxService', ledgerOutboxService)
+    const depositAgreementRepository = {
+      findOne: jest.fn().mockResolvedValue({
+        _id: new ObjectId('507f1f77bcf86cd799439099'),
+        status: 'paid',
+        depositHash: 'd'.repeat(64),
+      }),
+      save: jest.fn((value: unknown) => Promise.resolve(value)),
+    }
+    Reflect.set(
+      service,
+      'depositAgreementRepository',
+      depositAgreementRepository
+    )
     Reflect.set(service, 'paymentsService', paymentsService)
     Reflect.set(service, 'logger', { log: jest.fn() })
 
@@ -516,13 +531,151 @@ describe('ContractsService activation', () => {
     )
 
     expect(result.status).toBe('active')
+    expect(result.ledgerStatus).toBe('pending')
+    expect(result.depositHash).toBe('d'.repeat(64))
     expect(ledgerOutboxService.enqueue).toHaveBeenCalledWith(
       expect.objectContaining({
         eventType: 'contract.activated',
         action: 'createContract',
+        dependencyKey: 'deposit:507f1f77bcf86cd799439099:deposit.paid',
       })
     )
     expect(paymentsService.generateSchedule).toHaveBeenCalledWith(contract)
+  })
+
+  it('rejects contract activation if positive deposit is not paid', async () => {
+    const contract = {
+      _id: new ObjectId('507f1f77bcf86cd799439011'),
+      deposit: 20_000_000,
+      status: 'awaiting-signature' as const,
+      signedByTenant: true,
+      signedByLandlord: false,
+      tenantId: 'tenant-1',
+      landlordId: 'landlord-1',
+    } as unknown as Contract
+    const contractRepository = {
+      findOne: jest.fn().mockResolvedValue(contract),
+    }
+    const depositAgreementRepository = {
+      findOne: jest.fn().mockResolvedValue({
+        status: 'pending',
+      }),
+    }
+    const service = Object.create(
+      ContractsService.prototype
+    ) as ContractsService
+    Reflect.set(service, 'contractRepository', contractRepository)
+    Reflect.set(
+      service,
+      'depositAgreementRepository',
+      depositAgreementRepository
+    )
+    Reflect.set(service, 'kycService', {
+      findByUserId: jest.fn().mockResolvedValue({ status: 'verified' }),
+    })
+
+    await expect(
+      service.signContract(contract._id.toHexString(), 'landlord')
+    ).rejects.toThrow(
+      'Hợp đồng yêu cầu tiền cọc đã thanh toán trước khi có hiệu lực'
+    )
+  })
+})
+
+describe('ContractsService verifyIntegrity 4-state', () => {
+  it('returns invalid with isValid=false when mongo hash does not match computed hash', async () => {
+    const contract = {
+      _id: new ObjectId('507f1f77bcf86cd799439011'),
+      contractHash: 'different-from-computed',
+      blockchainAddress: 'tx-123',
+      ledgerStatus: 'confirmed',
+      appliedPolicies: {},
+    } as unknown as Contract
+    const service = Object.create(
+      ContractsService.prototype
+    ) as ContractsService
+    jest.spyOn(service, 'findOne').mockResolvedValue(contract)
+    Reflect.set(service, 'buildContractHash', () => 'computed-hash-123')
+
+    const result = await service.verifyIntegrity(contract._id.toHexString())
+    expect(result.verificationStatus).toBe('invalid')
+    expect(result.isValid).toBe(false)
+  })
+
+  it('returns not-recorded with isValid=null when contract has no blockchain confirmation', async () => {
+    const contract = {
+      _id: new ObjectId('507f1f77bcf86cd799439011'),
+      contractHash: 'matching-hash',
+      blockchainAddress: null,
+      ledgerStatus: 'pending',
+      appliedPolicies: {},
+    } as unknown as Contract
+    const service = Object.create(
+      ContractsService.prototype
+    ) as ContractsService
+    jest.spyOn(service, 'findOne').mockResolvedValue(contract)
+    Reflect.set(service, 'buildContractHash', () => 'matching-hash')
+
+    const result = await service.verifyIntegrity(contract._id.toHexString())
+    expect(result.verificationStatus).toBe('not-recorded')
+    expect(result.isValid).toBeNull()
+  })
+
+  it('returns valid with isValid=true when on-chain verifyContract passes', async () => {
+    const contract = {
+      _id: new ObjectId('507f1f77bcf86cd799439011'),
+      contractHash: 'matching-hash',
+      blockchainAddress: 'tx-on-chain-123',
+      ledgerStatus: 'confirmed',
+      appliedPolicies: {},
+    } as unknown as Contract
+    const fabricService = {
+      evaluateTransaction: jest.fn().mockResolvedValue({
+        valid: true,
+        reason: 'MATCH',
+        txId: 'tx-on-chain-123',
+      }),
+    }
+    const service = Object.create(
+      ContractsService.prototype
+    ) as ContractsService
+    jest.spyOn(service, 'findOne').mockResolvedValue(contract)
+    Reflect.set(service, 'buildContractHash', () => 'matching-hash')
+    Reflect.set(service, 'fabricService', fabricService)
+
+    const result = await service.verifyIntegrity(contract._id.toHexString())
+    expect(result.verificationStatus).toBe('valid')
+    expect(result.isValid).toBe(true)
+    expect(fabricService.evaluateTransaction).toHaveBeenCalledWith(
+      'verifyContract',
+      [contract._id.toHexString(), 'matching-hash']
+    )
+  })
+
+  it('returns unavailable with isValid=null when Fabric query throws network error', async () => {
+    const contract = {
+      _id: new ObjectId('507f1f77bcf86cd799439011'),
+      contractHash: 'matching-hash',
+      blockchainAddress: 'tx-on-chain-123',
+      ledgerStatus: 'confirmed',
+      appliedPolicies: {},
+    } as unknown as Contract
+    const fabricService = {
+      evaluateTransaction: jest
+        .fn()
+        .mockRejectedValue(new Error('peer unreachable')),
+    }
+    const service = Object.create(
+      ContractsService.prototype
+    ) as ContractsService
+    jest.spyOn(service, 'findOne').mockResolvedValue(contract)
+    Reflect.set(service, 'buildContractHash', () => 'matching-hash')
+    Reflect.set(service, 'fabricService', fabricService)
+    Reflect.set(service, 'logger', { warn: jest.fn() })
+
+    const result = await service.verifyIntegrity(contract._id.toHexString())
+    expect(result.verificationStatus).toBe('unavailable')
+    expect(result.isValid).toBeNull()
   })
 })
 

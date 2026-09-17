@@ -122,7 +122,8 @@ export const DEFAULT_FLOW_PROFILE_STEPS: FlowProfileSteps = {
       {
         id: 'residence-dvc',
         title: '3. Quy định Đăng ký Tạm trú & Thủ tục Dịch vụ công',
-        lawReference: 'Luật Cư trú 2020 & Dịch vụ công trực tuyến mã số 6007',
+        lawReference:
+          'Luật Cư trú 2020 & Dịch vụ công trực tuyến mã số 1.004194',
         summary:
           'Hệ thống hỗ trợ trích xuất hợp đồng số để hoàn tất thủ tục đăng ký tạm trú trực tuyến.',
         details: [
@@ -159,7 +160,7 @@ export const DEFAULT_FLOW_PROFILE_STEPS: FlowProfileSteps = {
       {
         step: 4,
         title: 'Đăng ký tạm trú trực tuyến',
-        desc: 'Sử dụng hợp đồng số đã kích hoạt để đăng ký tạm trú theo thủ tục Dịch vụ công 6007.',
+        desc: 'Sử dụng hợp đồng số đã kích hoạt để đăng ký tạm trú theo thủ tục Dịch vụ công 1.004194.',
       },
     ],
     decree96ReferenceVisible: true,

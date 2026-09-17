@@ -1,6 +1,7 @@
 import { ObjectId } from 'mongodb'
 import { migrateApartmentRentalPackages } from './000-apartment-rental-packages'
 import { migrateContractStatus } from './001-contract-status-expand'
+import { migrateLedgerRuntime } from './002-ledger-runtime'
 import { MigrationRunner } from './migration.runner'
 
 describe('PROP-321 migrations', () => {
@@ -96,5 +97,119 @@ describe('PROP-321 migrations', () => {
     await expect(runner.run({ dryRun: true })).resolves.toHaveLength(1)
     expect(run).toHaveBeenCalledWith({ dryRun: true })
     expect(checkpointStore.markCompleted).not.toHaveBeenCalled()
+  })
+
+  it('dry-runs ledger runtime migration without writing and applies null defaults idempotently', async () => {
+    const rawOutbox = {
+      _id: new ObjectId(),
+      aggregateType: 'contract',
+      aggregateId: 'c-1',
+      eventType: 'contract.activated',
+      dependencyKey: undefined,
+      claimToken: undefined,
+      claimedAt: undefined,
+      leaseExpiresAt: undefined,
+      confirmedAt: undefined,
+      networkMode: undefined,
+      blockNumber: undefined,
+      errorCode: undefined,
+    }
+    const rawContract = {
+      _id: new ObjectId(),
+      depositHash: undefined,
+      ledgerStatus: undefined,
+      ledgerNetworkMode: undefined,
+      ledgerRecordedAt: undefined,
+    }
+    const rawDeposit = {
+      _id: new ObjectId(),
+      depositHash: undefined,
+      ledgerStatus: undefined,
+      depositLedgerTxId: undefined,
+      ledgerRecordedAt: undefined,
+    }
+
+    const outboxRepo = {
+      find: jest.fn().mockImplementation(() => [{ ...rawOutbox }]),
+      save: jest.fn().mockImplementation(doc => Promise.resolve(doc)),
+    }
+    const contractRepo = {
+      find: jest.fn().mockImplementation(() => [{ ...rawContract }]),
+      save: jest.fn().mockImplementation(doc => Promise.resolve(doc)),
+    }
+    const depositRepo = {
+      find: jest.fn().mockImplementation(() => [{ ...rawDeposit }]),
+      save: jest.fn().mockImplementation(doc => Promise.resolve(doc)),
+    }
+
+    const repos = { outboxRepo, contractRepo, depositRepo }
+
+    // 1. Dry-run
+    const dryReport = await migrateLedgerRuntime(repos, { dryRun: true })
+    expect(dryReport).toMatchObject({
+      scanned: 3,
+      updated: 3,
+      skipped: 0,
+      dryRun: true,
+    })
+    expect(outboxRepo.save).not.toHaveBeenCalled()
+    expect(contractRepo.save).not.toHaveBeenCalled()
+    expect(depositRepo.save).not.toHaveBeenCalled()
+
+    // 2. Real run
+    const applyReport = await migrateLedgerRuntime(repos, { dryRun: false })
+    expect(applyReport).toMatchObject({
+      scanned: 3,
+      updated: 3,
+      skipped: 0,
+      dryRun: false,
+    })
+    expect(outboxRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({ dependencyKey: null })
+    )
+    expect(contractRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({ depositHash: null })
+    )
+    expect(depositRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({ depositHash: null })
+    )
+
+    // 3. Idempotent rerun
+    const migratedOutbox = {
+      ...rawOutbox,
+      dependencyKey: null,
+      claimToken: null,
+      claimedAt: null,
+      leaseExpiresAt: null,
+      confirmedAt: null,
+      networkMode: null,
+      blockNumber: null,
+      errorCode: null,
+    }
+    const migratedContract = {
+      ...rawContract,
+      depositHash: null,
+      ledgerStatus: null,
+      ledgerNetworkMode: null,
+      ledgerRecordedAt: null,
+    }
+    const migratedDeposit = {
+      ...rawDeposit,
+      depositHash: null,
+      ledgerStatus: null,
+      depositLedgerTxId: null,
+      ledgerRecordedAt: null,
+    }
+
+    outboxRepo.find.mockImplementation(() => [migratedOutbox])
+    contractRepo.find.mockImplementation(() => [migratedContract])
+    depositRepo.find.mockImplementation(() => [migratedDeposit])
+
+    const rerunReport = await migrateLedgerRuntime(repos, { dryRun: false })
+    expect(rerunReport).toMatchObject({
+      scanned: 3,
+      updated: 0,
+      skipped: 3,
+    })
   })
 })

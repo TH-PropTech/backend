@@ -38,8 +38,8 @@ export class BlockchainLog {
   @Column()
   txHash!: string
 
-  @Column()
-  blockNumber!: number
+  @Column({ nullable: true, type: 'int' })
+  blockNumber!: number | null
 
   @Column()
   network!: string

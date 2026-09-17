@@ -81,6 +81,30 @@ export class RentalApplicationsController {
     return this.service.getReceived(landlordId, query)
   }
 
+  @Get(':id')
+  @Roles('tenant', 'landlord', 'staff', 'admin')
+  @ApiOkResponse({ type: RentalApplication })
+  getOne(
+    @Param('id') id: string,
+    @CurrentUser('id') actorId: string,
+    @CurrentUser() user: { roles?: string[] }
+  ): Promise<RentalApplication> {
+    const isStaff =
+      user.roles?.some(role => ['staff', 'admin'].includes(role)) ?? false
+    return this.service.getOne(id, actorId, isStaff)
+  }
+
+  @Post(':id/retry-provisioning')
+  @Roles('staff', 'admin')
+  @ApiOperation({ summary: 'Retry failed accepted-application provisioning' })
+  @ApiOkResponse({ type: RentalApplication })
+  retryProvisioning(
+    @Param('id') id: string,
+    @CurrentUser('id') actorId: string
+  ): Promise<RentalApplication> {
+    return this.service.retryProvisioning(id, actorId)
+  }
+
   /** PATCH /api/v1/rental-applications/:id/respond — Landlord decision [uc_staff_contract] */
   @Patch(':id/respond')
   @Roles('landlord')

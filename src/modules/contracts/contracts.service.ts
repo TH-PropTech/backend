@@ -13,6 +13,7 @@ import { ObjectId } from 'mongodb'
 import * as crypto from 'crypto'
 import { Contract } from './schemas/contract.schema'
 import { SigningGrant } from './schemas/signing-grant.schema'
+import { DepositAgreement } from './schemas/deposit-agreement.schema'
 import {
   consumeSigningGrant,
   createSigningGrant,
@@ -110,8 +111,11 @@ export class ContractsService {
     private readonly contractRepository: Repository<Contract>,
     @InjectRepository(SigningGrant)
     private readonly signingGrantRepository: Repository<SigningGrant>,
+    @InjectRepository(DepositAgreement)
+    private readonly depositAgreementRepository: Repository<DepositAgreement>,
     @InjectRepository(Apartment)
     private readonly apartmentRepository: Repository<Apartment>,
+
     private readonly policiesService: PoliciesService,
     private readonly fabricService: FabricService,
     private readonly ledgerOutboxService: LedgerOutboxService,
@@ -510,6 +514,12 @@ export class ContractsService {
 
     apartment.status = 'available'
     apartment.isVerified = true
+    if (
+      apartment.rentalReservation?.applicationId ===
+      contract.rentalApplicationId
+    ) {
+      apartment.rentalReservation = null
+    }
     await this.contractRepository.save(contract)
     await this.apartmentRepository.save(apartment)
     await this.enqueueTerminationLedgerEvent(contract, actorId, {
@@ -699,7 +709,78 @@ export class ContractsService {
 
     // Bước 3: Nếu cả hai đã ký → kích hoạt hợp đồng & neo hash lên blockchain
     if (contract.signedByTenant && contract.signedByLandlord) {
+      let depositIdToUse: string | null = null
+      let depositHashToUse: string | null = null
+      let dependencyKey: string | null = null
+
+      if (contract.deposit && contract.deposit > 0) {
+        let depositAgreement: DepositAgreement | null = null
+        if (
+          contract.depositAgreementId &&
+          ObjectId.isValid(contract.depositAgreementId)
+        ) {
+          depositAgreement = await this.depositAgreementRepository.findOne({
+            where: { _id: new ObjectId(contract.depositAgreementId) },
+          })
+        }
+        if (!depositAgreement && contract.rentalApplicationId) {
+          depositAgreement = await this.depositAgreementRepository.findOne({
+            where: { applicationId: contract.rentalApplicationId },
+          })
+        }
+
+        if (
+          !depositAgreement ||
+          (depositAgreement.status !== 'paid' &&
+            depositAgreement.status !== 'applied-to-lease-security')
+        ) {
+          throw new BadRequestException(
+            'Hợp đồng yêu cầu tiền cọc đã thanh toán trước khi có hiệu lực'
+          )
+        }
+
+        if (!depositAgreement.depositHash) {
+          throw new BadRequestException(
+            'Biên lai tiền cọc chưa có mã băm hợp lệ'
+          )
+        }
+
+        depositIdToUse = depositAgreement._id.toString()
+        depositHashToUse = depositAgreement.depositHash
+        dependencyKey = `deposit:${depositIdToUse}:deposit.paid`
+
+        contract.depositId = depositIdToUse
+        contract.depositHash = depositHashToUse
+
+        if (depositAgreement.status === 'paid') {
+          depositAgreement.status = 'applied-to-lease-security'
+          depositAgreement.linkedLeaseContractId = contractId
+          await this.depositAgreementRepository.save(depositAgreement)
+        }
+      } else {
+        contract.depositHash = null
+      }
+
       contract.status = 'active'
+      contract.ledgerStatus = 'pending'
+
+      if (
+        contract.rentalApplicationId &&
+        ObjectId.isValid(contract.propertyId)
+      ) {
+        const apartment = await this.apartmentRepository.findOne({
+          where: { _id: new ObjectId(contract.propertyId) },
+        })
+        const reservation = apartment?.rentalReservation
+        if (
+          apartment &&
+          reservation?.applicationId === contract.rentalApplicationId
+        ) {
+          reservation.contractId = contractId
+          reservation.leaseActivatedAt = new Date()
+          await this.apartmentRepository.save(apartment)
+        }
+      }
 
       // Snapshot toàn bộ chính sách pháp luật tại thời điểm ký
       const allPolicies = await this.policiesService.findAll()
@@ -714,23 +795,27 @@ export class ContractsService {
       // Tạo mã băm SHA-256 bất biến của nội dung hợp đồng (PII + điều khoản + chính sách pháp luật áp dụng)
       contract.contractHash = this.buildContractHash(contract, snapshot)
 
-      // Đẩy hash lên Hyperledger Fabric (chỉ neo hash — PII không lên ledger)
+      // Đẩy hash lên Hyperledger Fabric
+      const contractArgs = [
+        contractId,
+        contract.contractCode,
+        contract.tenantId,
+        contract.landlordId,
+        contract.contractHash,
+        contract.monthlyRent.toString(),
+        contract.startDate.toISOString(),
+      ]
+      if (depositIdToUse && depositHashToUse) {
+        contractArgs.push(depositIdToUse, depositHashToUse)
+      }
+
       await this.ledgerOutboxService.enqueue({
         aggregateType: 'contract',
         aggregateId: contractId,
         eventType: 'contract.activated',
         action: 'createContract',
-        args: [
-          contractId,
-          contract.contractCode,
-          contract.tenantId,
-          contract.landlordId,
-          contract.contractHash,
-          contract.monthlyRent.toString(),
-          contract.startDate.toISOString(),
-          contract.depositId ?? '',
-          contract.depositTxHash ?? '',
-        ],
+        args: contractArgs,
+        dependencyKey,
         metadata: {
           contractId,
           details: { contractHash: contract.contractHash },
@@ -743,6 +828,7 @@ export class ContractsService {
     }
 
     const saved = await this.contractRepository.save(contract)
+
     if (saved.status === 'active' && this.paymentsService) {
       await this.paymentsService.generateSchedule(saved)
     }
@@ -854,16 +940,12 @@ export class ContractsService {
   // ── Xác minh tính toàn vẹn hợp đồng — so sánh với Hyperledger Fabric ──
 
   /**
-   * Xác minh tính toàn vẹn hợp đồng qua 2 lớp:
-   *
-   * 1. Tính lại hash từ dữ liệu MongoDB hiện tại → so với hash lưu trong MongoDB.
-   * 2. Gọi chaincode.verifyContract() trên Hyperledger Fabric → hash trên ledger (bất biến).
-   *
-   * isValid = TRUE chỉ khi cả 2 lớp đều khớp.
-   * Nếu MongoDB bị tamper nhưng ledger không đổi được → isValid = FALSE.
+   * Xác minh tính toàn vẹn hợp đồng qua 4 trạng thái trung thực:
+   * 'valid' | 'invalid' | 'not-recorded' | 'unavailable'
    */
   async verifyIntegrity(contractId: string): Promise<{
-    isValid: boolean
+    isValid: boolean | null
+    verificationStatus: 'valid' | 'invalid' | 'not-recorded' | 'unavailable'
     currentHash: string
     storedHash: string | null
     blockchainAddress: string | null
@@ -878,26 +960,53 @@ export class ContractsService {
     )
     const mongoMatch = currentHash === contract.contractHash
 
-    // Lớp 2: Đối chiếu với hash bất biến trên Hyperledger Fabric
     let onChain: ChainVerifyResult | null = null
-    if (contract.blockchainAddress) {
+    let verificationStatus:
+      | 'valid'
+      | 'invalid'
+      | 'not-recorded'
+      | 'unavailable' = 'not-recorded'
+    let isValid: boolean | null = null
+
+    if (!mongoMatch) {
+      verificationStatus = 'invalid'
+      isValid = false
+    } else if (
+      !contract.blockchainAddress ||
+      contract.ledgerStatus !== 'confirmed'
+    ) {
+      verificationStatus = 'not-recorded'
+      isValid = null
+    } else {
       try {
-        onChain = (await this.fabricService.evaluateTransaction(
+        const raw = await this.fabricService.evaluateTransaction(
           'verifyContract',
           [contractId, currentHash]
-        )) as ChainVerifyResult
+        )
+        onChain = (
+          typeof raw === 'string' ? JSON.parse(raw) : raw
+        ) as ChainVerifyResult
+
+        if (onChain && onChain.valid === true) {
+          verificationStatus = 'valid'
+          isValid = true
+        } else {
+          verificationStatus = 'invalid'
+          isValid = false
+        }
       } catch (error) {
         const errMsg = error instanceof Error ? error.message : String(error)
         this.logger.warn(
           `Không thể truy vấn Fabric để xác minh hợp đồng ${contractId}: ${errMsg}`
         )
+        verificationStatus = 'unavailable'
+        isValid = null
       }
     }
 
-    const chainMatch = onChain !== null ? onChain.valid : true
-
     return {
-      isValid: mongoMatch && chainMatch,
+      isValid,
+      verificationStatus,
       currentHash,
       storedHash: contract.contractHash,
       blockchainAddress: contract.blockchainAddress,

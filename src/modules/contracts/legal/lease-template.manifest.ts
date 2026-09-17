@@ -17,6 +17,32 @@ export type LeaseDocumentManifest = {
   annexes: string[]
 }
 
+export type LeaseTemplateProfile = {
+  id: 'VN_RE_BUSINESS_ND96_APPENDIX_II' | 'VN_INDIVIDUAL_RESIDENTIAL_LEASE'
+  legalProfile: LegalProfile
+  citationIds: readonly string[]
+  referenceOnly: boolean
+}
+
+/** Reviewed seed profiles; individual leases use Appendix II as a reference only. */
+export const LEASE_TEMPLATE_PROFILES: readonly LeaseTemplateProfile[] = [
+  {
+    id: 'VN_RE_BUSINESS_ND96_APPENDIX_II',
+    legalProfile: 'REAL_ESTATE_BUSINESS_STANDARD',
+    citationIds: ['DECREE_96_2024_APPENDIX_II_RESIDENTIAL_LEASE'],
+    referenceOnly: false,
+  },
+  {
+    id: 'VN_INDIVIDUAL_RESIDENTIAL_LEASE',
+    legalProfile: 'PRIVATE_CIVIL_APARTMENT_LEASE',
+    citationIds: [
+      'DECREE_96_2024_APPENDIX_II_RESIDENTIAL_LEASE',
+      'HOUSING_LAW_2023_ART_163_164',
+    ],
+    referenceOnly: true,
+  },
+]
+
 export type LegalValidationResult = {
   valid: boolean
   errors: string[]

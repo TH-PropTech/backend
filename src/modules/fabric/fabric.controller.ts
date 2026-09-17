@@ -4,6 +4,7 @@ import {
   Post,
   Body,
   Query,
+  Param,
   UseGuards,
   BadRequestException,
 } from '@nestjs/common'
@@ -14,8 +15,12 @@ import { IsString, IsArray, IsOptional } from 'class-validator'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { RolesGuard } from '../../common/guards/roles.guard'
 import { Roles } from '../../common/decorators/roles.decorator'
+import { CurrentUser } from '../../common/decorators/current-user.decorator'
+import type { UserPayload } from '../auth/interfaces/auth.interface'
 import { FabricService } from './fabric.service'
 import { BlockchainLog } from './schemas/blockchain-log.schema'
+import { LedgerOutboxService } from './ledger-outbox.service'
+import { LedgerOutbox } from './schemas/ledger-outbox.schema'
 
 // ── DTOs ──
 
@@ -45,6 +50,16 @@ export class QueryTxDto {
   args!: string[]
 }
 
+export class FabricStatusResponseDto {
+  mode!: 'simulation' | 'fabric'
+  connectionState!: 'disabled' | 'connected' | 'unavailable'
+  ready!: boolean
+  channel?: string | undefined
+  chaincode?: string | undefined
+  lastCheckedAt!: string
+  errorCode?: string | null
+}
+
 // ── Controller ──
 
 @ApiTags('fabric')
@@ -54,6 +69,7 @@ export class QueryTxDto {
 export class FabricController {
   constructor(
     private readonly fabricService: FabricService,
+    private readonly ledgerOutboxService: LedgerOutboxService,
     @InjectRepository(BlockchainLog)
     private readonly logRepository: Repository<BlockchainLog>
   ) {}
@@ -61,20 +77,34 @@ export class FabricController {
   /** Trạng thái kết nối Hyperledger Fabric — Admin, Nhân viên */
   @Get('status')
   @Roles('admin', 'staff')
-  getStatus(): {
-    mode: 'simulation' | 'fabric'
-    channel?: string | undefined
-    chaincode?: string | undefined
-  } {
+  getStatus(): FabricStatusResponseDto {
     return this.fabricService.getStatus()
+  }
+
+  /** Retry terminal failed outbox event — Admin, Nhân viên */
+  @Post('outbox/:id/retry')
+  @Roles('admin', 'staff')
+  async retryOutboxEvent(
+    @Param('id') id: string,
+    @CurrentUser() user: UserPayload
+  ): Promise<LedgerOutbox> {
+    const role = user?.roles?.includes('admin')
+      ? 'admin'
+      : user?.roles?.includes('staff')
+        ? 'staff'
+        : 'unknown'
+    return this.ledgerOutboxService.retryTerminal(id, role)
   }
 
   /** Submit transaction lên blockchain — chỉ Admin */
   @Post('submit')
   @Roles('admin')
-  async submitTx(
-    @Body() dto: SubmitTxDto
-  ): Promise<{ txHash: string; blockNumber: number; success: boolean }> {
+  async submitTx(@Body() dto: SubmitTxDto): Promise<{
+    txHash: string
+    blockNumber: number | null
+    success: boolean
+    networkMode: 'simulation' | 'fabric'
+  }> {
     try {
       return await this.fabricService.submitTransaction(dto.action, dto.args, {
         contractId: dto.contractId,
@@ -98,9 +128,9 @@ export class FabricController {
     }
   }
 
-  /** Xem lịch sử log giao dịch blockchain — Admin, Nhân viên, Chủ nhà, Khách thuê */
+  /** Xem lịch sử log giao dịch blockchain — Admin, Nhân viên */
   @Get('logs')
-  @Roles('admin', 'staff', 'landlord', 'tenant')
+  @Roles('admin', 'staff')
   async getLogs(
     @Query('contractId') contractId?: string,
     @Query('paymentId') paymentId?: string

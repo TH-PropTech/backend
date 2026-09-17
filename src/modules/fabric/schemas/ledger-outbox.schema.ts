@@ -16,6 +16,7 @@ export type LedgerOutboxStatus =
 
 @Entity('ledger_outbox')
 @Index(['aggregateType', 'aggregateId', 'eventType'], { unique: true })
+@Index(['status', 'nextRetryAt', 'leaseExpiresAt'])
 export class LedgerOutbox {
   @ObjectIdColumn()
   _id!: ObjectId
@@ -53,6 +54,30 @@ export class LedgerOutbox {
 
   @Column({ nullable: true })
   txHash!: string | null
+
+  @Column({ nullable: true })
+  dependencyKey?: string | null
+
+  @Column({ nullable: true })
+  claimToken?: string | null
+
+  @Column({ nullable: true })
+  claimedAt?: Date | null
+
+  @Column({ nullable: true })
+  leaseExpiresAt?: Date | null
+
+  @Column({ nullable: true })
+  confirmedAt?: Date | null
+
+  @Column({ nullable: true })
+  networkMode?: 'simulation' | 'fabric' | null
+
+  @Column({ nullable: true, type: 'int' })
+  blockNumber?: number | null
+
+  @Column({ nullable: true })
+  errorCode?: string | null
 
   @CreateDateColumn()
   createdAt!: Date

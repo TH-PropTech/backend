@@ -39,6 +39,17 @@ export const configuration = (): {
     mockBankBaseUrl: string
     mockBankSecret: string
   }
+  fabric: {
+    enabled: boolean
+    mspId: string
+    channelName: string
+    chaincodeName: string
+    peerEndpoint: string
+    peerHostAlias: string
+    certPath: string
+    keyPath: string
+    tlsCertPath: string
+  }
 } => ({
   app: {
     env: (process.env.NODE_ENV ?? 'local') as AppEnvironment,
@@ -83,6 +94,18 @@ export const configuration = (): {
       | 'techcombank',
     mockBankBaseUrl: process.env.MOCK_BANK_BASE_URL ?? 'http://localhost:3001',
     mockBankSecret: process.env.MOCK_BANK_SECRET ?? '',
+  },
+  fabric: {
+    enabled: process.env.FABRIC_ENABLED === 'true',
+    mspId: process.env.FABRIC_MSP_ID ?? 'Org1MSP',
+    channelName: process.env.FABRIC_CHANNEL_NAME ?? 'proptech-channel',
+    chaincodeName: process.env.FABRIC_CHAINCODE_NAME ?? 'proptech',
+    peerEndpoint: process.env.FABRIC_PEER_ENDPOINT ?? 'localhost:7051',
+    peerHostAlias:
+      process.env.FABRIC_PEER_HOST_ALIAS ?? 'peer0.org1.example.com',
+    certPath: process.env.FABRIC_CERT_PATH ?? '',
+    keyPath: process.env.FABRIC_KEY_PATH ?? '',
+    tlsCertPath: process.env.FABRIC_TLS_CERT_PATH ?? '',
   },
 })
 

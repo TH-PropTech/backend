@@ -142,6 +142,10 @@ export class Apartment {
     applicationId: string
     reservedAt: Date
     mode: 'application-accepted' | 'deposit-paid'
+    depositAgreementId?: string | null
+    contractId?: string | null
+    depositPaidAt?: Date | null
+    leaseActivatedAt?: Date | null
   } | null
 
   @Column({ default: '', nullable: true })

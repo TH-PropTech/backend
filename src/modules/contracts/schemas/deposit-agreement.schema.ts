@@ -27,6 +27,9 @@ export class DepositAgreement {
   @Column({ unique: true })
   applicationId!: string
 
+  @Column({ nullable: true })
+  propertyId?: string | null
+
   @Column()
   tenantId!: string
 
@@ -71,6 +74,15 @@ export class DepositAgreement {
 
   @Column({ nullable: true })
   depositHash!: string | null
+
+  @Column({ nullable: true })
+  ledgerStatus?: string | null
+
+  @Column({ nullable: true })
+  depositLedgerTxId?: string | null
+
+  @Column({ nullable: true })
+  ledgerRecordedAt?: Date | null
 
   @Column({ nullable: true })
   manualConfirmation!: {
