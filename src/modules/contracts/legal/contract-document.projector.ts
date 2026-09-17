@@ -151,7 +151,7 @@ export class ContractDocumentProjector {
       {
         number: 11,
         title: 'Điều 11. Hiệu lực hợp đồng và cam kết của các bên',
-        content: `Hợp đồng này có hiệu lực kể từ thời điểm cả hai bên hoàn tất xác nhận điện tử (PoC E-Consent) và được ghi nhận trên hệ thống. Dữ liệu mã băm toàn vẹn nội dung hợp đồng được neo lưu trữ trên sổ cái Blockchain Hyperledger Fabric. Hai bên cam kết tự nguyện, hiểu rõ các quyền và nghĩa vụ theo quy định của Bộ luật Dân sự 2015 và Luật Nhà ở 2023.`,
+        content: `Hợp đồng này có hiệu lực kể từ thời điểm cả hai bên hoàn tất phương thức ký được ghi nhận trong hồ sơ hợp đồng. Trường hợp sử dụng VNPT SmartCA, mỗi chữ ký phải gắn với chứng thư số và đúng mã băm của bản PDF canonical; xác nhận eKYC/OTP chỉ là bước xác thực hỗ trợ, không thay thế chữ ký số. Dữ liệu mã băm toàn vẹn nội dung hợp đồng được neo lưu trữ trên sổ cái Blockchain Hyperledger Fabric khi giao dịch ledger được xác nhận. Hai bên cam kết tự nguyện, hiểu rõ các quyền và nghĩa vụ theo quy định của Bộ luật Dân sự 2015 và Luật Nhà ở 2023.`,
         protected: true,
       },
       {

@@ -16,6 +16,9 @@ export type ContractSignature = {
   biometricGrantId: string
   otpSessionId: string
   deviceId?: string | null
+  provider?: 'smartca' | 'platform-consent'
+  providerTransactionId?: string | null
+  certificateSerial?: string | null
 }
 
 @Entity('contracts')
@@ -245,7 +248,11 @@ export class Contract {
   landlordSignature?: ContractSignature | null
 
   @Column({ type: 'string', default: 'POC_ECONSENT' })
-  executionMethod?: 'WET_INK' | 'QUALIFIED_DIGITAL_SIGNATURE' | 'POC_ECONSENT'
+  executionMethod?:
+    | 'WET_INK'
+    | 'QUALIFIED_DIGITAL_SIGNATURE'
+    | 'SMARTCA'
+    | 'POC_ECONSENT'
 
   @Column({ type: 'string', default: 'not-requested' })
   notarizationStatus?:

@@ -512,6 +512,76 @@ export class ApartmentsService
     return result.affected === 1
   }
 
+  async markRentalDepositPaid(
+    apartmentId: string,
+    applicationId: string,
+    depositAgreementId: string
+  ): Promise<boolean> {
+    if (!ObjectId.isValid(apartmentId)) return false
+    const apartment = await this.apartmentRepository.findOne({
+      where: { _id: new ObjectId(apartmentId) },
+    })
+    const reservation = apartment?.rentalReservation
+    if (
+      !apartment ||
+      !reservation ||
+      reservation.applicationId !== applicationId
+    ) {
+      return false
+    }
+    if (
+      reservation.mode === 'deposit-paid' &&
+      reservation.depositAgreementId === depositAgreementId
+    ) {
+      return true
+    }
+    reservation.mode = 'deposit-paid'
+    reservation.depositAgreementId = depositAgreementId
+    reservation.depositPaidAt = new Date()
+    await this.apartmentRepository.save(apartment)
+    return true
+  }
+
+  async markRentalLeaseActive(
+    apartmentId: string,
+    applicationId: string,
+    contractId: string
+  ): Promise<boolean> {
+    if (!ObjectId.isValid(apartmentId)) return false
+    const apartment = await this.apartmentRepository.findOne({
+      where: { _id: new ObjectId(apartmentId) },
+    })
+    const reservation = apartment?.rentalReservation
+    if (
+      !apartment ||
+      !reservation ||
+      reservation.applicationId !== applicationId
+    ) {
+      return false
+    }
+    if (reservation.contractId === contractId) return true
+    reservation.contractId = contractId
+    reservation.leaseActivatedAt = new Date()
+    await this.apartmentRepository.save(apartment)
+    return true
+  }
+
+  async releaseRentalReservation(
+    apartmentId: string,
+    applicationId: string
+  ): Promise<boolean> {
+    if (!ObjectId.isValid(apartmentId)) return false
+    const apartment = await this.apartmentRepository.findOne({
+      where: { _id: new ObjectId(apartmentId) },
+    })
+    if (apartment?.rentalReservation?.applicationId !== applicationId) {
+      return false
+    }
+    apartment.rentalReservation = null
+    await this.apartmentRepository.save(apartment)
+    return true
+  }
+
   // ── Lấy danh sách căn hộ của một chủ nhà ──
   async findByLandlord(landlordId: string): Promise<Apartment[]> {
     this.logger.log(`Fetching apartments for landlord: ${landlordId}`)

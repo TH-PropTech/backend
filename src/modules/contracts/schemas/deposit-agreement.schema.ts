@@ -27,6 +27,9 @@ export class DepositAgreement {
   @Column({ unique: true })
   applicationId!: string
 
+  @Column({ nullable: true })
+  propertyId?: string | null
+
   @Column()
   tenantId!: string
 

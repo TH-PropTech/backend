@@ -514,6 +514,12 @@ export class ContractsService {
 
     apartment.status = 'available'
     apartment.isVerified = true
+    if (
+      apartment.rentalReservation?.applicationId ===
+      contract.rentalApplicationId
+    ) {
+      apartment.rentalReservation = null
+    }
     await this.contractRepository.save(contract)
     await this.apartmentRepository.save(apartment)
     await this.enqueueTerminationLedgerEvent(contract, actorId, {
@@ -757,6 +763,24 @@ export class ContractsService {
 
       contract.status = 'active'
       contract.ledgerStatus = 'pending'
+
+      if (
+        contract.rentalApplicationId &&
+        ObjectId.isValid(contract.propertyId)
+      ) {
+        const apartment = await this.apartmentRepository.findOne({
+          where: { _id: new ObjectId(contract.propertyId) },
+        })
+        const reservation = apartment?.rentalReservation
+        if (
+          apartment &&
+          reservation?.applicationId === contract.rentalApplicationId
+        ) {
+          reservation.contractId = contractId
+          reservation.leaseActivatedAt = new Date()
+          await this.apartmentRepository.save(apartment)
+        }
+      }
 
       // Snapshot toàn bộ chính sách pháp luật tại thời điểm ký
       const allPolicies = await this.policiesService.findAll()

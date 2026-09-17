@@ -12,13 +12,13 @@ describe('public service checklist', () => {
     signedByLandlord: true,
   }
 
-  it('returns a truthful permanent-residence checklist for POC e-consent', () => {
+  it('returns a truthful temporary-residence checklist for POC e-consent', () => {
     const result = buildPublicServiceChecklist(contract)
 
-    expect(result.purpose).toBe('permanent-residence')
+    expect(result.purpose).toBe('temporary-residence')
     expect(result.externalProcedureCompleted).toBe(false)
     expect(result.officialSourceUrl).toBe(
-      'https://thutuc.dichvucong.gov.vn/p/home/dvc-tthc-thu-tuc-hanh-chinh-chi-tiet.html?ma_thu_tuc=6007'
+      'https://thutuc.dichvucong.gov.vn/p/home/dvc-chi-tiet-thu-tuc-hanh-chinh.html?ma_thu_tuc=1.004194'
     )
     expect(result.disclaimer).toContain('POC_ECONSENT')
     expect(result.items).toEqual(

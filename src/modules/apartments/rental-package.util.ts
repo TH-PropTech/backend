@@ -1,6 +1,15 @@
-export const SUPPORTED_RENTAL_DURATIONS = [1, 3, 6, 12] as const
+/** Durations allowed when creating or revising a listing package. */
+export const SUPPORTED_RENTAL_DURATIONS = [3, 6, 12, 24] as const
 
-export type RentalDurationMonths = (typeof SUPPORTED_RENTAL_DURATIONS)[number]
+/** One-month packages are retained only for historical read compatibility. */
+export const LEGACY_RENTAL_DURATIONS = [1] as const
+
+export type RentalDurationMonths =
+  | (typeof LEGACY_RENTAL_DURATIONS)[number]
+  | (typeof SUPPORTED_RENTAL_DURATIONS)[number]
+
+export type AuthorableRentalDuration =
+  (typeof SUPPORTED_RENTAL_DURATIONS)[number]
 
 export type DepositPolicyInput =
   | { type: 'MONTHS_OF_RENT'; months: number }
@@ -36,7 +45,9 @@ export type RentalPackageValidationResult = {
   packages: RentalPackageRecord[]
 }
 
-function isSupportedDuration(value: number): value is RentalDurationMonths {
+function isAuthorableDuration(
+  value: number
+): value is AuthorableRentalDuration {
   return (SUPPORTED_RENTAL_DURATIONS as readonly number[]).includes(value)
 }
 
@@ -88,7 +99,7 @@ export function validateRentalPackages(
       packageItem.packageId.trim() === '' ||
       !Number.isInteger(packageItem.version) ||
       packageItem.version < 1 ||
-      !isSupportedDuration(packageItem.durationMonths) ||
+      !isAuthorableDuration(packageItem.durationMonths) ||
       !isPositiveInteger(packageItem.monthlyRent)
     ) {
       throw new Error('INVALID_RENTAL_PACKAGE: invalid package fields')

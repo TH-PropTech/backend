@@ -246,8 +246,15 @@ export class ContractViewService {
           : 'confirmed-fabric'
     }
 
+    const fabricStatus = this.fabricService?.getStatus()
+    const connectionState: 'disabled' | 'connected' | 'unavailable' =
+      currentMode === 'simulation'
+        ? 'connected'
+        : (fabricStatus?.connectionState ?? 'unavailable')
+
     const ledger: ContractLedgerSummaryDto = {
       networkMode: currentMode,
+      connectionState,
       status: ledgerStatus,
       txHash: contract.blockchainAddress || latestLedgerEvent?.txHash || null,
       blockNumber: latestLedgerEvent?.blockNumber ?? null,
@@ -314,6 +321,19 @@ export class ContractViewService {
         artifactReasonCode: !contract.contentLockedHash
           ? 'CONTENT_NOT_LOCKED'
           : null,
+        canEditContent:
+          isStaff &&
+          !contract.contentLockedHash &&
+          ['draft', 'deposit-pending', 'deposit-paid'].includes(
+            contract.status ?? ''
+          ),
+        canLockContent:
+          isStaff &&
+          !contract.contentLockedHash &&
+          Boolean(contract.editorContent) &&
+          ['draft', 'deposit-pending', 'deposit-paid'].includes(
+            contract.status ?? ''
+          ),
       },
       ledger,
     }

@@ -38,8 +38,8 @@ export class RentalPackageDto {
   version!: number
 
   @IsInt()
-  @IsIn([1, 3, 6, 12])
-  durationMonths!: 1 | 3 | 6 | 12
+  @IsIn([3, 6, 12, 24])
+  durationMonths!: 3 | 6 | 12 | 24
 
   @IsInt()
   @Min(1)

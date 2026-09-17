@@ -7,6 +7,7 @@ import { resolveLegalProfile } from './legal-profile.resolver'
 import {
   validateDocumentManifest,
   LEASE_ARTICLE_NUMBERS,
+  LEASE_TEMPLATE_PROFILES,
 } from './lease-template.manifest'
 import { validateDepositDisposition } from './deposit-disposition.validator'
 
@@ -56,6 +57,26 @@ describe('contract legal boundaries', () => {
     )
     expect(() => getActiveLegalBasis(['unknown'])).toThrow(
       'LEGAL_BASIS_NOT_ACTIVE'
+    )
+    expect(
+      getActiveLegalBasis(['DECREE_96_2024_APPENDIX_II_RESIDENTIAL_LEASE'])
+    ).toHaveLength(1)
+  })
+
+  it('seeds distinct business and individual lease profiles with reference semantics', () => {
+    expect(LEASE_TEMPLATE_PROFILES).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'VN_RE_BUSINESS_ND96_APPENDIX_II',
+          legalProfile: 'REAL_ESTATE_BUSINESS_STANDARD',
+          referenceOnly: false,
+        }),
+        expect.objectContaining({
+          id: 'VN_INDIVIDUAL_RESIDENTIAL_LEASE',
+          legalProfile: 'PRIVATE_CIVIL_APARTMENT_LEASE',
+          referenceOnly: true,
+        }),
+      ])
     )
   })
 

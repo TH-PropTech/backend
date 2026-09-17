@@ -10,6 +10,7 @@ describe('LedgerOutboxService', () => {
     find: jest.Mock
     create: jest.Mock
     save: jest.Mock
+    update?: jest.Mock
   }
   let fabricService: {
     submitTransaction: jest.Mock
@@ -119,6 +120,44 @@ describe('LedgerOutboxService', () => {
       expect(claimed?.claimToken).toBeDefined()
       expect(claimed?.leaseExpiresAt?.getTime()).toBeGreaterThan(Date.now())
       expect(repository.save).toHaveBeenCalled()
+    })
+
+    it('proves exactly one worker wins in a two-worker concurrent claim race (atomic compare-and-set)', async () => {
+      const pendingEvent = {
+        _id: new ObjectId(),
+        status: 'pending',
+        nextRetryAt: new Date(Date.now() - 1000),
+        dependencyKey: null,
+      } as LedgerOutbox
+
+      repository.find.mockResolvedValue([pendingEvent])
+
+      let updateCalls = 0
+      repository.update = jest
+        .fn()
+        .mockImplementation((): Promise<{ affected: number }> => {
+          updateCalls += 1
+          if (updateCalls === 1) {
+            return Promise.resolve({ affected: 1 })
+          }
+          return Promise.resolve({ affected: 0 })
+        })
+
+      const worker1 = service
+      const worker2 = new LedgerOutboxService(
+        repository as never,
+        fabricService as never,
+        projectionService as never
+      )
+
+      const [claim1, claim2] = await Promise.all([
+        worker1.claimNext(30000),
+        worker2.claimNext(30000),
+      ])
+
+      const winners = [claim1, claim2].filter(Boolean)
+      expect(winners).toHaveLength(1)
+      expect(repository.update).toHaveBeenCalledTimes(2)
     })
 
     it('defers claiming when dependencyKey prerequisite is not confirmed, without incrementing attempts', async () => {

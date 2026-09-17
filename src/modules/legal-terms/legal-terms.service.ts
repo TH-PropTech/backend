@@ -50,7 +50,8 @@ const DEFAULT_RENTAL_TERMS_FIXTURE = {
     },
     {
       id: 'sec-public-service-guide',
-      heading: '5. Hướng dẫn thủ tục cư trú dịch vụ công (TTHC 6007)',
+      heading:
+        '5. Hướng dẫn đăng ký tạm trú trên Cổng Dịch vụ công (TTHC 1.004194)',
       body: 'Sau khi hợp đồng thuê có hiệu lực, khách thuê có thể sử dụng bản sao hợp đồng đã khóa nội dung cùng chứng cứ ký điện tử trên hệ thống để thực hiện thủ tục Đăng ký tạm trú / Thường trú trực tuyến trên Cổng Dịch vụ công Quốc gia hoặc ứng dụng VNeID theo quy định của Luật Cư trú.',
       order: 5,
     },

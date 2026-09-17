@@ -102,6 +102,7 @@ export class LedgerProjectionService {
       this.logger.error(
         `Failed to project ledger confirmation for aggregate [${event.aggregateId}]: ${errMsg}`
       )
+      throw error
     }
   }
 }

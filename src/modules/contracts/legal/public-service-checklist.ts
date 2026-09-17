@@ -1,11 +1,17 @@
-export const PUBLIC_SERVICE_PURPOSE = 'permanent-residence' as const
+export const PUBLIC_SERVICE_PURPOSE = 'temporary-residence' as const
 export const PUBLIC_SERVICE_OFFICIAL_SOURCE_URL =
-  'https://thutuc.dichvucong.gov.vn/p/home/dvc-tthc-thu-tuc-hanh-chinh-chi-tiet.html?ma_thu_tuc=6007'
+  'https://thutuc.dichvucong.gov.vn/p/home/dvc-chi-tiet-thu-tuc-hanh-chinh.html?ma_thu_tuc=1.004194'
 
-export type PublicServiceChecklistPurpose = typeof PUBLIC_SERVICE_PURPOSE
+export type PublicServiceChecklistPurpose =
+  | typeof PUBLIC_SERVICE_PURPOSE
+  | 'permanent-residence'
 
 type ChecklistContract = {
-  executionMethod?: 'WET_INK' | 'QUALIFIED_DIGITAL_SIGNATURE' | 'POC_ECONSENT'
+  executionMethod?:
+    | 'WET_INK'
+    | 'QUALIFIED_DIGITAL_SIGNATURE'
+    | 'SMARTCA'
+    | 'POC_ECONSENT'
   notarizationStatus?:
     | 'not-requested'
     | 'pending'
@@ -42,7 +48,7 @@ export function parsePublicServiceChecklistPurpose(
   if (typeof value !== 'string' || value.trim().length === 0) {
     throw new Error('PUBLIC_SERVICE_PURPOSE_REQUIRED')
   }
-  if (value !== PUBLIC_SERVICE_PURPOSE) {
+  if (value !== PUBLIC_SERVICE_PURPOSE && value !== 'permanent-residence') {
     throw new Error('PUBLIC_SERVICE_PURPOSE_UNSUPPORTED')
   }
   return PUBLIC_SERVICE_PURPOSE

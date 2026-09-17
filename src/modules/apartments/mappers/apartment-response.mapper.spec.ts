@@ -105,5 +105,55 @@ describe('ApartmentResponseMapper rental pricing', () => {
     expect(response.pricingMode).toBe('legacy')
     expect(response.pricingRevision).toBe(0)
     expect(response.rentalPackages).toEqual([])
+    expect(response.rentalAvailabilityStatus).toBe('available')
+    expect(response.rentalAvailabilityLabel).toBe('Đang trống')
+  })
+
+  it('projects reservation and deposit tags without changing listing moderation status', () => {
+    const apartment = {
+      _id: new ObjectId('507f1f77bcf86cd799439013'),
+      title: 'Reserved apartment',
+      category: 'apartment',
+      buildingId: null,
+      buildingName: null,
+      projectId: null,
+      projectName: null,
+      description: '',
+      location: '',
+      city: '',
+      district: '',
+      ward: '',
+      street: '',
+      address: '',
+      priceMonthly: 5000000,
+      area: 30,
+      bedrooms: 1,
+      bathrooms: 1,
+      direction: '',
+      balconyDirection: '',
+      furniture: '',
+      moveInTime: '',
+      electricity: '',
+      water: '',
+      internet: '',
+      gallery: [],
+      images360: [],
+      vrUrl: '',
+      amenities: [],
+      status: 'available' as const,
+      isVerified: true,
+      landlordId: 'landlord-1',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      rentalReservation: {
+        applicationId: 'app-1',
+        reservedAt: new Date(),
+        mode: 'deposit-paid' as const,
+      },
+    }
+    const response = ApartmentResponseMapper.toWebJson(apartment)
+    expect(response.status).toBe('available')
+    expect(response.rentalAvailabilityStatus).toBe('deposit-paid')
+    expect(response.rentalAvailabilityLabel).toBe('Đã đặt cọc')
   })
 })

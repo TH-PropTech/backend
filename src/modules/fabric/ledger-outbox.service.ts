@@ -95,14 +95,34 @@ export class LedgerOutboxService {
         event.leaseExpiresAt &&
         event.leaseExpiresAt.getTime() <= now.getTime()
       ) {
-        event.status = 'pending'
-        event.claimToken = null
-        event.leaseExpiresAt = null
-        await this.repository.save(event)
-        count += 1
-        this.logger.warn(
-          `Recovered stuck outbox event [${event._id?.toString()}] back to pending`
-        )
+        if (typeof this.repository.update === 'function') {
+          const result = await this.repository.update(
+            {
+              _id: event._id,
+              status: 'processing',
+            },
+            {
+              status: 'pending',
+              claimToken: null,
+              leaseExpiresAt: null,
+            }
+          )
+          if (result && result.affected === 1) {
+            count += 1
+            this.logger.warn(
+              `Recovered stuck outbox event [${event._id?.toString()}] back to pending`
+            )
+          }
+        } else {
+          event.status = 'pending'
+          event.claimToken = null
+          event.leaseExpiresAt = null
+          await this.repository.save(event)
+          count += 1
+          this.logger.warn(
+            `Recovered stuck outbox event [${event._id?.toString()}] back to pending`
+          )
+        }
       }
     }
     return count
@@ -137,9 +157,37 @@ export class LedgerOutboxService {
       }
 
       // Claim compare-and-set
-      candidate.claimToken = randomUUID()
+      const claimToken = randomUUID()
+      const leaseExpiresAt = new Date(now.getTime() + leaseDurationMs)
+
+      if (typeof this.repository.update === 'function') {
+        const result = await this.repository.update(
+          {
+            _id: candidate._id,
+            status: 'pending',
+          },
+          {
+            status: 'processing',
+            claimToken,
+            claimedAt: now,
+            leaseExpiresAt,
+          }
+        )
+
+        if (result && result.affected === 1) {
+          candidate.claimToken = claimToken
+          candidate.claimedAt = now
+          candidate.leaseExpiresAt = leaseExpiresAt
+          candidate.status = 'processing'
+          return candidate
+        }
+        // Another worker won the claim race for this candidate; try next
+        continue
+      }
+
+      candidate.claimToken = claimToken
       candidate.claimedAt = now
-      candidate.leaseExpiresAt = new Date(now.getTime() + leaseDurationMs)
+      candidate.leaseExpiresAt = leaseExpiresAt
       candidate.status = 'processing'
       return this.repository.save(candidate)
     }
@@ -210,6 +258,22 @@ export class LedgerOutboxService {
       return false
     }
 
+    // Project kết quả về read models (Contract / Deposit / Payment)
+    try {
+      await this.projectionService.projectResult(event, result)
+    } catch (projErr) {
+      const errMsg =
+        projErr instanceof Error ? projErr.message : String(projErr)
+      this.logger.error(
+        `Projection failed for event [${id.toString()}]: ${errMsg}. Retaining retry state for reconciliation.`
+      )
+      event.lastError = `Projection error: ${errMsg}`
+      event.errorCode = 'PROJECTION_FAILED'
+      event.nextRetryAt = new Date(Date.now() + 5000)
+      await this.repository.save(event)
+      return false
+    }
+
     event.status = 'confirmed'
     event.txHash = result.txHash
     event.blockNumber = result.blockNumber ?? null
@@ -220,9 +284,6 @@ export class LedgerOutboxService {
     event.errorCode = null
 
     await this.repository.save(event)
-
-    // Project kết quả về read models (Contract / Deposit / Payment)
-    await this.projectionService.projectResult(event, result)
 
     return true
   }

@@ -16,6 +16,9 @@ import { ContractArtifactService } from './contract-artifact.service'
 import { ContractDocumentProjector } from './legal/contract-document.projector'
 import { ContractViewService } from './contract-view.service'
 import { SmartOtpModule } from '../smart-otp/smart-otp.module'
+import { SmartCaSigningSession } from './smartca/smartca-signing-session.schema'
+import { SmartCaProvider } from './smartca/smartca.provider'
+import { SmartCaSigningService } from './smartca/smartca-signing.service'
 
 @Module({
   imports: [
@@ -24,6 +27,7 @@ import { SmartOtpModule } from '../smart-otp/smart-otp.module'
       SigningGrant,
       DepositAgreement,
       Apartment,
+      SmartCaSigningSession,
     ]),
     PoliciesModule,
     FabricModule,
@@ -38,6 +42,8 @@ import { SmartOtpModule } from '../smart-otp/smart-otp.module'
     ContractArtifactService,
     ContractDocumentProjector,
     ContractViewService,
+    SmartCaProvider,
+    SmartCaSigningService,
   ],
   exports: [
     ContractsService,
@@ -45,6 +51,7 @@ import { SmartOtpModule } from '../smart-otp/smart-otp.module'
     ContractArtifactService,
     ContractDocumentProjector,
     ContractViewService,
+    SmartCaSigningService,
   ],
 })
 export class ContractsModule {}

@@ -260,5 +260,47 @@ describe('ContractViewService', () => {
     expect(view.ledger.status).toBe('pending')
     expect(view.ledger.txHash).toBeNull()
     expect(view.ledger.onChainValid).toBeNull()
+    expect(view.ledger.connectionState).toBeDefined()
+  })
+
+  it('exposes canEditContent=true and canLockContent=true for staff on unlocked draft contracts', async () => {
+    const draftContract = {
+      ...mockContract,
+      status: 'draft',
+      contentLockedHash: null,
+      contentLockedAt: null,
+      editorContent: { type: 'doc', content: [{ type: 'paragraph' }] },
+    }
+    contractRepo.findOne.mockResolvedValue(draftContract as Contract)
+    kycService.findByUserId.mockResolvedValue({
+      status: 'verified',
+      idCardNumber: '079123456789',
+    } as KycRecord)
+
+    const view = await service.getForActor(
+      validContractId,
+      'staff-admin-id',
+      true
+    )
+
+    expect(view.actions.canEditContent).toBe(true)
+    expect(view.actions.canLockContent).toBe(true)
+  })
+
+  it('denies canEditContent and canLockContent for participant tenant', async () => {
+    contractRepo.findOne.mockResolvedValue(mockContract as Contract)
+    kycService.findByUserId.mockResolvedValue({
+      status: 'verified',
+      idCardNumber: '079123456789',
+    } as KycRecord)
+
+    const view = await service.getForActor(
+      validContractId,
+      'user-tenant-1',
+      false
+    )
+
+    expect(view.actions.canEditContent).toBe(false)
+    expect(view.actions.canLockContent).toBe(false)
   })
 })

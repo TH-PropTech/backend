@@ -10,6 +10,7 @@ import { ObjectId } from 'mongodb'
 import { createHash } from 'node:crypto'
 import { Repository } from 'typeorm'
 import type { RentalPackageSnapshot } from '../apartments/rental-package.util'
+import { Apartment } from '../apartments/schemas/apartment.schema'
 import { validateDepositConsent } from './deposit-consent.util'
 import { DepositAgreement } from './schemas/deposit-agreement.schema'
 import { LedgerOutboxService } from '../fabric/ledger-outbox.service'
@@ -20,11 +21,15 @@ export class DepositAgreementsService {
     @InjectRepository(DepositAgreement)
     private readonly repository: Repository<DepositAgreement>,
     @Optional()
-    private readonly ledgerOutboxService?: LedgerOutboxService
+    private readonly ledgerOutboxService?: LedgerOutboxService,
+    @Optional()
+    @InjectRepository(Apartment)
+    private readonly apartmentRepository?: Repository<Apartment>
   ) {}
 
   async createFromApplicationSnapshot(input: {
     applicationId: string
+    propertyId?: string
     tenantId: string
     landlordId: string
     packageSnapshot: RentalPackageSnapshot
@@ -49,6 +54,7 @@ export class DepositAgreementsService {
     const agreement = this.repository.create({
       agreementCode,
       applicationId: input.applicationId,
+      propertyId: input.propertyId ?? null,
       tenantId: input.tenantId,
       landlordId: input.landlordId,
       packageSnapshot: input.packageSnapshot,
@@ -160,6 +166,7 @@ export class DepositAgreementsService {
     agreement.ledgerStatus = 'pending'
     const saved = await this.repository.save(agreement)
     await this.enqueueDepositLedgerEvent(saved)
+    await this.projectApartmentDepositPaid(saved)
     return saved
   }
 
@@ -184,7 +191,28 @@ export class DepositAgreementsService {
     }
     const saved = await this.repository.save(agreement)
     await this.enqueueDepositLedgerEvent(saved)
+    await this.projectApartmentDepositPaid(saved)
     return saved
+  }
+
+  private async projectApartmentDepositPaid(
+    agreement: DepositAgreement
+  ): Promise<void> {
+    if (!this.apartmentRepository || !agreement.propertyId) return
+    const apartment = await this.apartmentRepository.findOne({
+      where: { _id: new ObjectId(agreement.propertyId) },
+    })
+    const reservation = apartment?.rentalReservation
+    if (
+      !apartment ||
+      !reservation ||
+      reservation.applicationId !== agreement.applicationId
+    )
+      return
+    reservation.mode = 'deposit-paid'
+    reservation.depositAgreementId = agreement._id.toHexString()
+    reservation.depositPaidAt = agreement.paidAt
+    await this.apartmentRepository.save(apartment)
   }
 
   private calculateDepositHash(agreement: DepositAgreement): string {

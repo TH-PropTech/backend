@@ -245,5 +245,80 @@ describe('FabricService', () => {
       expect(status.ready).toBe(false)
       expect(status.errorCode).toBe('FABRIC_CONFIG_MISSING')
     })
+
+    it('successfully reconnects when peer/tunnel becomes reachable without service restart', async () => {
+      setupValidConfig()
+      // Initial startup fails
+      mockConnect.mockImplementationOnce(() => {
+        throw new Error('Connection refused 127.0.0.1:7051')
+      })
+
+      const service = new FabricService(
+        logRepository as never,
+        configService as never
+      )
+      await service.onModuleInit()
+      expect(service.getStatus().connectionState).toBe('unavailable')
+
+      // Peer becomes healthy
+      const mockContract = {
+        evaluateTransaction: jest.fn().mockResolvedValue(Buffer.from('[]')),
+      }
+      const mockNetwork = {
+        getContract: jest.fn(() => mockContract),
+      }
+      const mockGateway = {
+        getNetwork: jest.fn(() => mockNetwork),
+        close: jest.fn(),
+      }
+      mockConnect.mockReturnValueOnce(mockGateway)
+
+      // Reset cooldown and attempt reconnect
+      service['lastReconnectAttempt'] = 0
+
+      const reconnected = await service.tryReconnect()
+      expect(reconnected).toBe(true)
+      expect(service.getStatus().connectionState).toBe('connected')
+      expect(service.getStatus().ready).toBe(true)
+    })
+
+    it('performs single-flight reconnect so concurrent attempts share one promise', async () => {
+      setupValidConfig()
+      mockConnect.mockImplementationOnce(() => {
+        throw new Error('Connection refused 127.0.0.1:7051')
+      })
+
+      const service = new FabricService(
+        logRepository as never,
+        configService as never
+      )
+      await service.onModuleInit()
+
+      // Reset cooldown and attempt reconnect
+      service['lastReconnectAttempt'] = 0
+
+      const mockContract = {
+        evaluateTransaction: jest.fn().mockResolvedValue(Buffer.from('[]')),
+      }
+      const mockNetwork = {
+        getContract: jest.fn(() => mockContract),
+      }
+      const mockGateway = {
+        getNetwork: jest.fn(() => mockNetwork),
+        close: jest.fn(),
+      }
+      mockConnect.mockReturnValue(mockGateway)
+
+      // Call tryReconnect concurrently
+      const [res1, res2] = await Promise.all([
+        service.tryReconnect(),
+        service.tryReconnect(),
+      ])
+
+      expect(res1).toBe(true)
+      expect(res2).toBe(true)
+      // mockConnect was called on init (1) + only once during concurrent reconnect (2)
+      expect(mockConnect).toHaveBeenCalledTimes(2)
+    })
   })
 })

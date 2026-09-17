@@ -5,6 +5,7 @@ import type { ContractArtifactService } from './contract-artifact.service'
 import type { ContractViewService } from './contract-view.service'
 import type { LedgerAuditQueryService } from '../fabric/ledger-audit-query.service'
 import type { SmartOtpService } from '../smart-otp/services/smart-otp.service'
+import type { SmartCaSigningService } from './smartca/smartca-signing.service'
 
 describe('ContractsController', () => {
   const service = {
@@ -33,12 +34,17 @@ describe('ContractsController', () => {
     initiateOtpSession: jest.fn(),
     verifyOtpSignature: jest.fn(),
   }
+  const smartCaSigningService = {
+    createSession: jest.fn(),
+    getSession: jest.fn(),
+  }
   const controller = new ContractsController(
     service as unknown as ContractsService,
     artifactService as unknown as ContractArtifactService,
     contractViewService as unknown as ContractViewService,
     ledgerAuditQueryService as unknown as LedgerAuditQueryService,
-    smartOtpService as unknown as SmartOtpService
+    smartOtpService as unknown as SmartOtpService,
+    smartCaSigningService as unknown as SmartCaSigningService
   )
 
   beforeEach(() => jest.clearAllMocks())
@@ -79,13 +85,13 @@ describe('ContractsController', () => {
 
   it('passes the requested public-service purpose and JWT scope', async () => {
     service.getPublicServiceChecklistForUser.mockResolvedValue({
-      purpose: 'permanent-residence',
+      purpose: 'temporary-residence',
       externalProcedureCompleted: false,
     })
 
     await controller.publicServiceChecklist(
       'contract-1',
-      'permanent-residence',
+      'temporary-residence',
       {
         _id: 'tenant-1',
         roles: ['tenant'],
@@ -96,7 +102,7 @@ describe('ContractsController', () => {
       'contract-1',
       'tenant-1',
       false,
-      'permanent-residence'
+      'temporary-residence'
     )
   })
 

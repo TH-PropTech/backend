@@ -188,11 +188,20 @@ export class ContractActionsViewDto {
 
   @ApiProperty({ nullable: true })
   artifactReasonCode!: string | null
+
+  @ApiProperty({ default: false })
+  canEditContent!: boolean
+
+  @ApiProperty({ default: false })
+  canLockContent!: boolean
 }
 
 export class ContractLedgerSummaryDto {
   @ApiProperty({ enum: ['simulation', 'fabric'] })
   networkMode!: 'simulation' | 'fabric'
+
+  @ApiProperty({ enum: ['disabled', 'connected', 'unavailable'] })
+  connectionState!: 'disabled' | 'connected' | 'unavailable'
 
   @ApiProperty({
     enum: [

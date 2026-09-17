@@ -62,6 +62,10 @@ export class FabricService implements OnModuleInit, OnModuleDestroy {
   private peerEndpoint = ''
   private peerHostAlias = ''
 
+  private reconnectingPromise: Promise<boolean> | null = null
+  private lastReconnectAttempt = 0
+  private readonly RECONNECT_COOLDOWN_MS = 5000
+
   constructor(
     @InjectRepository(BlockchainLog)
     private readonly logRepository: Repository<BlockchainLog>,
@@ -235,6 +239,41 @@ export class FabricService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * Tự động thử kết nối lại Fabric Gateway khi tunnel/peer phục hồi.
+   * Sử dụng single-flight pattern và bounded cooldown để an toàn với concurrent requests.
+   */
+  async tryReconnect(): Promise<boolean> {
+    if (this.mode !== 'fabric') {
+      return false
+    }
+    if (this.connectionState === 'connected' && this.gateway) {
+      return true
+    }
+
+    if (this.reconnectingPromise) {
+      return this.reconnectingPromise
+    }
+
+    const now = Date.now()
+    if (now - this.lastReconnectAttempt < this.RECONNECT_COOLDOWN_MS) {
+      return false
+    }
+
+    this.lastReconnectAttempt = now
+    this.reconnectingPromise = (async (): Promise<boolean> => {
+      try {
+        this.logger.log('Attempting to reconnect Fabric Gateway...')
+        await this.initFabric()
+        return this.connectionState === 'connected'
+      } finally {
+        this.reconnectingPromise = null
+      }
+    })()
+
+    return this.reconnectingPromise
+  }
+
+  /**
    * Submit transaction to the blockchain (writes data)
    */
   async submitTransaction(
@@ -251,8 +290,9 @@ export class FabricService implements OnModuleInit, OnModuleDestroy {
     success: boolean
     networkMode: 'simulation' | 'fabric'
   }> {
+    // Redaction: Only log action and aggregate identifier, never raw args/PII/secrets
     this.logger.log(
-      `[submitTransaction] Action: ${action}, Args: ${JSON.stringify(args)}`
+      `[submitTransaction] Action: ${action}, Aggregate: ${metadata.contractId || metadata.paymentId || 'none'}`
     )
 
     if (this.mode === 'simulation') {
@@ -289,6 +329,10 @@ export class FabricService implements OnModuleInit, OnModuleDestroy {
         success: true,
         networkMode: 'simulation',
       }
+    }
+
+    if (this.connectionState !== 'connected' || !this.gateway) {
+      await this.tryReconnect()
     }
 
     if (this.connectionState !== 'connected' || !this.gateway) {
@@ -356,9 +400,8 @@ export class FabricService implements OnModuleInit, OnModuleDestroy {
    * Evaluate transaction (queries data, does not write)
    */
   async evaluateTransaction(action: string, args: string[]): Promise<unknown> {
-    this.logger.log(
-      `[evaluateTransaction] Action: ${action}, Args: ${JSON.stringify(args)}`
-    )
+    // Redaction: Log action only without sensitive args
+    this.logger.log(`[evaluateTransaction] Action: ${action}`)
 
     if (this.mode === 'simulation') {
       const state = this.simulationState.get(`${action}:${args[0] ?? ''}`)
@@ -370,6 +413,10 @@ export class FabricService implements OnModuleInit, OnModuleDestroy {
           status: 'not-found',
         }
       )
+    }
+
+    if (this.connectionState !== 'connected' || !this.gateway) {
+      await this.tryReconnect()
     }
 
     if (this.connectionState !== 'connected' || !this.gateway) {

@@ -163,12 +163,12 @@ describe('ContractsService public-service checklist', () => {
       'contract-id',
       'tenant-id',
       false,
-      'permanent-residence'
+      'temporary-residence'
     )
 
     expect(result).toEqual(
       expect.objectContaining({
-        purpose: 'permanent-residence',
+        purpose: 'temporary-residence',
         executionMethod: 'POC_ECONSENT',
         notarizationStatus: 'not-requested',
       })

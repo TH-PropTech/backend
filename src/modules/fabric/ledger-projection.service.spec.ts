@@ -148,4 +148,24 @@ describe('LedgerProjectionService', () => {
     ).resolves.not.toThrow()
     expect(contractRepo.save).not.toHaveBeenCalled()
   })
+
+  it('throws error when repository save fails so outbox can retain retryable state', async () => {
+    const contractId = new ObjectId()
+    contractRepo.findOne.mockResolvedValue({ _id: contractId })
+    contractRepo.save.mockRejectedValue(new Error('Mongo network timeout'))
+
+    const event = {
+      _id: new ObjectId(),
+      aggregateType: 'contract',
+      aggregateId: contractId.toHexString(),
+      eventType: 'contract.activated',
+    } as LedgerOutbox
+
+    await expect(
+      service.projectResult(event, {
+        txHash: 'fabric-tx-fail',
+        networkMode: 'fabric',
+      })
+    ).rejects.toThrow('Mongo network timeout')
+  })
 })

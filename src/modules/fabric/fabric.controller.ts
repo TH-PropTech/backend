@@ -128,9 +128,9 @@ export class FabricController {
     }
   }
 
-  /** Xem lịch sử log giao dịch blockchain — Admin, Nhân viên, Chủ nhà, Khách thuê */
+  /** Xem lịch sử log giao dịch blockchain — Admin, Nhân viên */
   @Get('logs')
-  @Roles('admin', 'staff', 'landlord', 'tenant')
+  @Roles('admin', 'staff')
   async getLogs(
     @Query('contractId') contractId?: string,
     @Query('paymentId') paymentId?: string

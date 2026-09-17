@@ -5,7 +5,7 @@ import type { RentalPackageSnapshot } from '../rental-package.util'
 export interface RentalPackageResponse {
   packageId: string
   version: number
-  durationMonths: 1 | 3 | 6 | 12
+  durationMonths: 1 | 3 | 6 | 12 | 24
   monthlyRent: number
   depositPolicy: RentalPackageSnapshot['depositPolicy']
   resolvedDepositAmount: number
@@ -56,6 +56,8 @@ export interface WebApartmentResponse {
   pricingMode: 'packages' | 'legacy'
   pricingRevision: number
   rentalPackages: RentalPackageResponse[]
+  rentalAvailabilityStatus: 'available' | 'reserved' | 'deposit-paid' | 'rented'
+  rentalAvailabilityLabel: string
   landlord?: {
     id: string
     fullName: string
@@ -105,6 +107,8 @@ export interface MobileApartmentResponse {
   pricingMode: 'packages' | 'legacy'
   pricingRevision: number
   rentalPackages: RentalPackageResponse[]
+  rentalAvailabilityStatus: 'available' | 'reserved' | 'deposit-paid' | 'rented'
+  rentalAvailabilityLabel: string
   landlord?: {
     id: string
     fullName: string
@@ -130,6 +134,23 @@ export class ApartmentResponseMapper {
     }))
   }
 
+  private static mapRentalAvailability(apartment: Apartment): {
+    status: 'available' | 'reserved' | 'deposit-paid' | 'rented'
+    label: string
+  } {
+    const reservation = apartment.rentalReservation
+    if (reservation?.contractId) {
+      return { status: 'rented', label: 'Đang cho thuê' }
+    }
+    if (reservation?.mode === 'deposit-paid') {
+      return { status: 'deposit-paid', label: 'Đã đặt cọc' }
+    }
+    if (reservation?.applicationId) {
+      return { status: 'reserved', label: 'Có người giữ chỗ' }
+    }
+    return { status: 'available', label: 'Đang trống' }
+  }
+
   // Map to Next.js Web Frontend (ApartmentItem type)
   static toWebJson(
     apartment: Apartment & { landlord?: User | null }
@@ -138,14 +159,16 @@ export class ApartmentResponseMapper {
       apartment.priceMonthly >= 1000000
         ? apartment.priceMonthly / 1000000
         : apartment.priceMonthly
+    const rentalAvailability =
+      ApartmentResponseMapper.mapRentalAvailability(apartment)
 
     let tag = 'pending'
     let tagText = 'Chờ duyệt'
 
     switch (apartment.status) {
       case 'available':
-        tag = 'empty'
-        tagText = 'Đang trống'
+        tag = rentalAvailability.status
+        tagText = rentalAvailability.label
         break
       case 'rejected':
         tag = 'rejected'
@@ -212,6 +235,8 @@ export class ApartmentResponseMapper {
       pricingMode: apartment.pricingMode ?? 'legacy',
       pricingRevision: apartment.pricingRevision ?? 0,
       rentalPackages: ApartmentResponseMapper.mapRentalPackages(apartment),
+      rentalAvailabilityStatus: rentalAvailability.status,
+      rentalAvailabilityLabel: rentalAvailability.label,
       landlord: apartment.landlord
         ? {
             id: apartment.landlord._id.toString(),
@@ -233,7 +258,8 @@ export class ApartmentResponseMapper {
       apartment.priceMonthly >= 1000000
         ? apartment.priceMonthly / 1000000
         : apartment.priceMonthly
-
+    const rentalAvailability =
+      ApartmentResponseMapper.mapRentalAvailability(apartment)
     return {
       id: apartment._id.toString(),
       title: apartment.title,
@@ -273,6 +299,8 @@ export class ApartmentResponseMapper {
       pricingMode: apartment.pricingMode ?? 'legacy',
       pricingRevision: apartment.pricingRevision ?? 0,
       rentalPackages: ApartmentResponseMapper.mapRentalPackages(apartment),
+      rentalAvailabilityStatus: rentalAvailability.status,
+      rentalAvailabilityLabel: rentalAvailability.label,
       landlord: apartment.landlord
         ? {
             id: apartment.landlord._id.toString(),

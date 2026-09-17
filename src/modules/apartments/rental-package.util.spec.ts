@@ -55,4 +55,26 @@ describe('rental package rules', () => {
       packages: [],
     })
   })
+
+  it('allows 24-month authoring and rejects new one-month packages', () => {
+    expect(
+      validateRentalPackages([
+        {
+          ...validPackages[0]!,
+          packageId: 'pkg-24',
+          durationMonths: 24,
+        },
+      ]).packages[0]?.durationMonths
+    ).toBe(24)
+
+    expect(() =>
+      validateRentalPackages([
+        {
+          ...validPackages[0]!,
+          packageId: 'pkg-legacy-1',
+          durationMonths: 1,
+        },
+      ])
+    ).toThrow('INVALID_RENTAL_PACKAGE')
+  })
 })
