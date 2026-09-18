@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import type { RentalPackageRecord } from '../apartments/rental-package.util'
+import type { RentalExecutionPolicyRef } from '../rental-flow-config/rental-execution-policy.util'
 
 export const RENTAL_REVIEW_DISCLOSURE_VERSION = 'rental-review-v1'
 
@@ -55,6 +56,7 @@ export interface RentalApplicationReviewSnapshot {
         hash: string
       }
     | undefined
+  executionPolicySnapshot?: RentalExecutionPolicyRef | undefined
 }
 
 export function buildRentalDisclosureHash(): string {
@@ -88,6 +90,7 @@ export function buildRentalReviewHash(input: {
         hash: string
       }
     | undefined
+  executionPolicySnapshot?: RentalExecutionPolicyRef | undefined
 }): string {
   return createHash('sha256')
     .update(
@@ -108,6 +111,9 @@ export function buildRentalReviewHash(input: {
         ...(input.termsRef ? { termsRef: input.termsRef } : {}),
         ...(input.flowProfileRef
           ? { flowProfileRef: input.flowProfileRef }
+          : {}),
+        ...(input.executionPolicySnapshot
+          ? { executionPolicySnapshot: input.executionPolicySnapshot }
           : {}),
       })
     )

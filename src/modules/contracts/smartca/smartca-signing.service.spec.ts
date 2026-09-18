@@ -1,6 +1,7 @@
 import { ConflictException, ForbiddenException } from '@nestjs/common'
 import { ObjectId } from 'mongodb'
 import { SmartCaSigningService } from './smartca-signing.service'
+import type { RentalExecutionPolicyRef } from '../../rental-flow-config/rental-execution-policy.util'
 
 describe('SmartCaSigningService', () => {
   const contractId = new ObjectId().toHexString()
@@ -10,6 +11,9 @@ describe('SmartCaSigningService', () => {
     landlordId: 'landlord-1',
     status: 'awaiting-signature',
     contentLockedHash: 'a'.repeat(64),
+    deposit: 0,
+    depositPaidAt: null,
+    executionPolicySnapshot: null as RentalExecutionPolicyRef | null,
   }
   function context(contractValue = contract): {
     service: SmartCaSigningService
@@ -70,5 +74,43 @@ describe('SmartCaSigningService', () => {
     await expect(
       notReady.service.createSession(contractId, 'tenant-1')
     ).rejects.toBeInstanceOf(ConflictException)
+  })
+
+  it('rejects SmartCA before deposit for the deposit-first policy', async () => {
+    const { service, provider } = context({
+      ...contract,
+      deposit: 10_000,
+      depositPaidAt: null,
+      executionPolicySnapshot: {
+        policyId: 'deposit-first',
+        version: 1,
+        strategy: 'DEPOSIT_FIRST',
+        contentHash: 'policy-hash',
+      },
+    })
+
+    await expect(service.createSession(contractId, 'tenant-1')).rejects.toThrow(
+      'EXECUTION_POLICY_DEPOSIT_REQUIRED_BEFORE_SIGNING'
+    )
+    expect(provider.requestSignature).not.toHaveBeenCalled()
+  })
+
+  it('allows SmartCA before deposit for the sign-first policy', async () => {
+    const { service, provider } = context({
+      ...contract,
+      deposit: 10_000,
+      depositPaidAt: null,
+      executionPolicySnapshot: {
+        policyId: 'sign-first',
+        version: 1,
+        strategy: 'SIGN_FIRST',
+        contentHash: 'policy-hash',
+      },
+    })
+
+    await expect(
+      service.createSession(contractId, 'tenant-1')
+    ).resolves.toEqual(expect.objectContaining({ signerId: 'tenant-1' }))
+    expect(provider.requestSignature).toHaveBeenCalledTimes(1)
   })
 })

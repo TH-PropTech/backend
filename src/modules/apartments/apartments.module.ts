@@ -9,6 +9,7 @@ import { ProjectsModule } from '../projects/projects.module'
 import { BuildingsModule } from '../buildings/buildings.module'
 import { SavedSearchesModule } from '../saved-searches/saved-searches.module'
 import { ListingQualityService } from './listing-quality.service'
+import { RentalFlowConfigModule } from '../rental-flow-config/rental-flow-config.module'
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { ListingQualityService } from './listing-quality.service'
     ProjectsModule,
     BuildingsModule,
     SavedSearchesModule,
+    RentalFlowConfigModule,
   ],
   providers: [ApartmentsService, ListingQualityService],
   controllers: [ApartmentsController],

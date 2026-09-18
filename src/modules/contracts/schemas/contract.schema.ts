@@ -7,6 +7,7 @@ import {
   UpdateDateColumn,
 } from 'typeorm'
 import type { RentalPackageSnapshot } from '../../apartments/rental-package.util'
+import type { RentalExecutionPolicyRef } from '../../rental-flow-config/rental-execution-policy.util'
 
 export type ContractSignature = {
   signerId: string
@@ -119,6 +120,7 @@ export class Contract {
     | 'deposit-pending'
     | 'deposit-paid'
     | 'awaiting-signature'
+    | 'fully-signed-pending-deposit'
     | 'active'
     | 'terminated'
     | 'cancelled'
@@ -202,6 +204,9 @@ export class Contract {
 
   @Column({ nullable: true })
   packageSnapshot?: RentalPackageSnapshot | null
+
+  @Column({ nullable: true })
+  executionPolicySnapshot?: RentalExecutionPolicyRef | null
 
   @Column({ nullable: true })
   applicationReviewHash?: string | null

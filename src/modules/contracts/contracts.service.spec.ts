@@ -580,6 +580,56 @@ describe('ContractsService activation', () => {
       'Hợp đồng yêu cầu tiền cọc đã thanh toán trước khi có hiệu lực'
     )
   })
+
+  it('persists fully-signed-pending-deposit for the sign-first policy', async () => {
+    const contract = {
+      _id: new ObjectId('507f1f77bcf86cd799439011'),
+      deposit: 20_000_000,
+      depositPaidAt: null,
+      status: 'awaiting-signature' as const,
+      signedByTenant: true,
+      signedByLandlord: false,
+      tenantId: 'tenant-1',
+      landlordId: 'landlord-1',
+      executionPolicySnapshot: {
+        policyId: 'sign-first',
+        version: 1,
+        strategy: 'SIGN_FIRST' as const,
+        contentHash: 'policy-hash',
+      },
+    } as unknown as Contract
+    const contractRepository = {
+      findOne: jest.fn().mockResolvedValue(contract),
+      save: jest.fn(
+        (value: Contract): Promise<Contract> => Promise.resolve(value)
+      ),
+    }
+    const depositAgreementRepository = {
+      findOne: jest.fn().mockResolvedValue({ status: 'pending' }),
+    }
+    const service = Object.create(
+      ContractsService.prototype
+    ) as ContractsService
+    Reflect.set(service, 'contractRepository', contractRepository)
+    Reflect.set(
+      service,
+      'depositAgreementRepository',
+      depositAgreementRepository
+    )
+    Reflect.set(service, 'kycService', {
+      findByUserId: jest.fn().mockResolvedValue({ status: 'verified' }),
+    })
+
+    const result = await service.signContract(
+      contract._id.toHexString(),
+      'landlord'
+    )
+
+    expect(result.status).toBe('fully-signed-pending-deposit')
+    expect(result.signedByTenant).toBe(true)
+    expect(result.signedByLandlord).toBe(true)
+    expect(contractRepository.save).toHaveBeenCalledWith(contract)
+  })
 })
 
 describe('ContractsService verifyIntegrity 4-state', () => {

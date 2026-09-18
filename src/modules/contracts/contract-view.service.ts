@@ -19,6 +19,7 @@ import {
   ContractDepositViewDto,
   SigningEligibilityDto,
   ContractLedgerSummaryDto,
+  ContractExecutionPolicyViewDto,
 } from './dto/contract-view.dto'
 
 @Injectable()
@@ -184,6 +185,25 @@ export class ContractViewService {
         ? contract.signedByLandlord
         : false
 
+    const executionStrategy =
+      contract.executionPolicySnapshot?.strategy ?? 'DEPOSIT_FIRST'
+    const activationReady =
+      isDepositPaid && contract.signedByTenant && contract.signedByLandlord
+    const executionPolicy: ContractExecutionPolicyViewDto = {
+      policyId: contract.executionPolicySnapshot?.policyId ?? 'deposit-first',
+      version: contract.executionPolicySnapshot?.version ?? 1,
+      strategy: executionStrategy,
+      depositConfirmed: isDepositPaid,
+      activationReady,
+      nextAction: activationReady
+        ? null
+        : !isDepositPaid && executionStrategy === 'DEPOSIT_FIRST'
+          ? 'Xác nhận tiền cọc trước khi ký SmartCA.'
+          : !isDepositPaid
+            ? 'Hoàn tất tiền cọc để kích hoạt sau khi hai bên ký.'
+            : 'Hoàn tất chữ ký SmartCA của cả hai bên.',
+    }
+
     const signingEligibility: SigningEligibilityDto =
       this.deriveSigningEligibility({
         isParticipant: isTenant || isLandlord,
@@ -196,6 +216,7 @@ export class ContractViewService {
         isKycVerified: currentActorKyc?.status === 'verified',
         hasSigned: Boolean(hasCurrentActorSigned),
         isConfigOutdated: contract.configStatus === 'CONFIG_OUTDATED',
+        executionStrategy,
       })
 
     // 5. Chiếu trạng thái Sổ cái Ledger
@@ -303,6 +324,7 @@ export class ContractViewService {
           : '',
         executionMethod: contract.executionMethod || 'POC_ECONSENT',
         notarizationStatus: contract.notarizationStatus || 'not-requested',
+        executionPolicy,
       },
       document,
       parties: {
@@ -314,7 +336,12 @@ export class ContractViewService {
         canPayDeposit:
           isTenant &&
           !isDepositPaid &&
-          ['deposit-pending', 'draft'].includes(contract.status || ''),
+          [
+            'deposit-pending',
+            'draft',
+            'awaiting-signature',
+            'fully-signed-pending-deposit',
+          ].includes(contract.status || ''),
         paymentReasonCode: isDepositPaid ? 'DEPOSIT_ALREADY_PAID' : null,
         signingEligibility,
         canDownloadArtifact: Boolean(contract.contentLockedHash),
@@ -348,6 +375,7 @@ export class ContractViewService {
     isKycVerified: boolean
     hasSigned: boolean
     isConfigOutdated: boolean
+    executionStrategy: 'DEPOSIT_FIRST' | 'SIGN_FIRST'
   }): SigningEligibilityDto {
     if (!input.isParticipant || !input.role) {
       return {
@@ -390,7 +418,7 @@ export class ContractViewService {
       }
     }
 
-    if (!input.isDepositPaid) {
+    if (!input.isDepositPaid && input.executionStrategy === 'DEPOSIT_FIRST') {
       return {
         eligible: false,
         reasonCode: 'DEPOSIT_REQUIRED',

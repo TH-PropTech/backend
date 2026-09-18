@@ -1,6 +1,7 @@
 import { Apartment } from '../schemas/apartment.schema'
 import { User } from '../../users/schemas/user.schema'
 import type { RentalPackageSnapshot } from '../rental-package.util'
+import type { RentalExecutionPolicyRef } from '../../rental-flow-config/rental-execution-policy.util'
 
 export interface RentalPackageResponse {
   packageId: string
@@ -10,6 +11,8 @@ export interface RentalPackageResponse {
   depositPolicy: RentalPackageSnapshot['depositPolicy']
   resolvedDepositAmount: number
   status: 'active' | 'inactive'
+  allowedExecutionPolicies?: RentalExecutionPolicyRef[]
+  defaultExecutionPolicy?: RentalExecutionPolicyRef
 }
 
 export interface WebApartmentResponse {
@@ -131,6 +134,12 @@ export class ApartmentResponseMapper {
       depositPolicy: rentalPackage.depositPolicy,
       resolvedDepositAmount: rentalPackage.resolvedDepositAmount,
       status: rentalPackage.status,
+      ...(rentalPackage.allowedExecutionPolicies
+        ? { allowedExecutionPolicies: rentalPackage.allowedExecutionPolicies }
+        : {}),
+      ...(rentalPackage.defaultExecutionPolicy
+        ? { defaultExecutionPolicy: rentalPackage.defaultExecutionPolicy }
+        : {}),
     }))
   }
 

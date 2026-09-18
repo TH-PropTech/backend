@@ -10,10 +10,12 @@ import { ObjectId } from 'mongodb'
 import { createHash } from 'node:crypto'
 import { Repository } from 'typeorm'
 import type { RentalPackageSnapshot } from '../apartments/rental-package.util'
+import type { RentalExecutionPolicyRef } from '../rental-flow-config/rental-execution-policy.util'
 import { Apartment } from '../apartments/schemas/apartment.schema'
 import { validateDepositConsent } from './deposit-consent.util'
 import { DepositAgreement } from './schemas/deposit-agreement.schema'
 import { LedgerOutboxService } from '../fabric/ledger-outbox.service'
+import { ContractsService } from './contracts.service'
 
 @Injectable()
 export class DepositAgreementsService {
@@ -24,7 +26,8 @@ export class DepositAgreementsService {
     private readonly ledgerOutboxService?: LedgerOutboxService,
     @Optional()
     @InjectRepository(Apartment)
-    private readonly apartmentRepository?: Repository<Apartment>
+    private readonly apartmentRepository?: Repository<Apartment>,
+    @Optional() private readonly contractsService?: ContractsService
   ) {}
 
   async createFromApplicationSnapshot(input: {
@@ -33,6 +36,7 @@ export class DepositAgreementsService {
     tenantId: string
     landlordId: string
     packageSnapshot: RentalPackageSnapshot
+    executionPolicySnapshot?: RentalExecutionPolicyRef | null
   }): Promise<DepositAgreement> {
     const existing = await this.repository.findOne({
       where: { applicationId: input.applicationId },
@@ -58,6 +62,10 @@ export class DepositAgreementsService {
       tenantId: input.tenantId,
       landlordId: input.landlordId,
       packageSnapshot: input.packageSnapshot,
+      executionPolicySnapshot:
+        input.executionPolicySnapshot ??
+        input.packageSnapshot.defaultExecutionPolicy ??
+        null,
       purpose: 'SECURE_CONCLUSION_THEN_PERFORMANCE',
       dispositionPolicySnapshot: {
         version: 'deposit-disposition-v1',
@@ -167,6 +175,11 @@ export class DepositAgreementsService {
     const saved = await this.repository.save(agreement)
     await this.enqueueDepositLedgerEvent(saved)
     await this.projectApartmentDepositPaid(saved)
+    if (this.contractsService) {
+      await this.contractsService.activatePendingForDepositAgreement(
+        saved._id.toHexString()
+      )
+    }
     return saved
   }
 
@@ -192,6 +205,11 @@ export class DepositAgreementsService {
     const saved = await this.repository.save(agreement)
     await this.enqueueDepositLedgerEvent(saved)
     await this.projectApartmentDepositPaid(saved)
+    if (this.contractsService) {
+      await this.contractsService.activatePendingForDepositAgreement(
+        saved._id.toHexString()
+      )
+    }
     return saved
   }
 
