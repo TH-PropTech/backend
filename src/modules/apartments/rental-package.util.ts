@@ -15,6 +15,8 @@ export type DepositPolicyInput =
   | { type: 'MONTHS_OF_RENT'; months: number }
   | { type: 'FIXED_AMOUNT'; amount: number }
 
+import type { RentalExecutionPolicyRef } from '../rental-flow-config/rental-execution-policy.util'
+
 export type RentalPackageInput = {
   packageId: string
   version: number
@@ -22,6 +24,8 @@ export type RentalPackageInput = {
   monthlyRent: number
   depositPolicy: DepositPolicyInput
   status: 'active' | 'inactive'
+  allowedExecutionPolicies?: RentalExecutionPolicyRef[]
+  defaultExecutionPolicy?: RentalExecutionPolicyRef
 }
 
 export type RentalPackageSnapshot = {
@@ -33,6 +37,8 @@ export type RentalPackageSnapshot = {
   resolvedDepositAmount: number
   currency?: 'VND'
   capturedAt?: Date
+  allowedExecutionPolicies?: RentalExecutionPolicyRef[]
+  defaultExecutionPolicy?: RentalExecutionPolicyRef
 }
 
 export type RentalPackageRecord = RentalPackageSnapshot & {
@@ -125,6 +131,12 @@ export function validateRentalPackages(
       depositPolicy: packageItem.depositPolicy,
       resolvedDepositAmount,
       status: packageItem.status,
+      ...(packageItem.allowedExecutionPolicies
+        ? { allowedExecutionPolicies: packageItem.allowedExecutionPolicies }
+        : {}),
+      ...(packageItem.defaultExecutionPolicy
+        ? { defaultExecutionPolicy: packageItem.defaultExecutionPolicy }
+        : {}),
     }
   })
 

@@ -8,11 +8,32 @@ import {
   IsInt,
   IsNotEmpty,
   IsOptional,
+  IsIn,
   IsString,
   Max,
   MaxLength,
   Min,
+  ValidateNested,
 } from 'class-validator'
+import type { RentalExecutionPolicyRef } from '../../rental-flow-config/rental-execution-policy.util'
+
+class SelectedExecutionPolicyRefDto implements RentalExecutionPolicyRef {
+  @IsString()
+  @IsNotEmpty()
+  policyId!: string
+
+  @IsInt()
+  @Min(1)
+  version!: number
+
+  @IsIn(['DEPOSIT_FIRST', 'SIGN_FIRST'])
+  strategy!: RentalExecutionPolicyRef['strategy']
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(128)
+  contentHash!: string
+}
 
 export class CreateRentalApplicationDto {
   @ApiProperty() @IsString() @IsNotEmpty() apartmentId!: string
@@ -78,4 +99,12 @@ export class CreateRentalApplicationDto {
   @IsString()
   @MaxLength(64)
   flowProfileHash?: string
+
+  @ApiPropertyOptional({
+    description: 'Execution policy selected in Step 2 and confirmed in Step 3',
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => SelectedExecutionPolicyRefDto)
+  selectedExecutionPolicy?: SelectedExecutionPolicyRefDto
 }

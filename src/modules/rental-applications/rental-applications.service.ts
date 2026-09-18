@@ -18,6 +18,11 @@ import { DepositAgreementsService } from '../contracts/deposit-agreements.servic
 import { NotificationsService } from '../notifications/notifications.service'
 import { LegalTermsService } from '../legal-terms/legal-terms.service'
 import { RentalFlowConfigResolver } from '../rental-flow-config/rental-flow-config-resolver.service'
+import { RentalExecutionPoliciesService } from '../rental-flow-config/rental-execution-policies.service'
+import {
+  getDefaultRentalExecutionPolicyRef,
+  type RentalExecutionPolicyRef,
+} from '../rental-flow-config/rental-execution-policy.util'
 import { CreateRentalApplicationDto } from './dto/create-rental-application.dto'
 import type { RentalApplicationContext } from './dto/rental-application-context.dto'
 import { RentalApplicationQueryDto } from './dto/rental-application-query.dto'
@@ -60,7 +65,9 @@ export class RentalApplicationsService {
     @Optional() private readonly contractsService?: ContractsService,
     @Optional() private readonly notificationsService?: NotificationsService,
     @Optional() private readonly legalTermsService?: LegalTermsService,
-    @Optional() private readonly flowConfigResolver?: RentalFlowConfigResolver
+    @Optional() private readonly flowConfigResolver?: RentalFlowConfigResolver,
+    @Optional()
+    private readonly executionPoliciesService?: RentalExecutionPoliciesService
   ) {}
 
   async getContext(
@@ -180,6 +187,10 @@ export class RentalApplicationsService {
     }
 
     const selectedPackage = this.resolveSelectedPackage(apartment, dto)
+    const executionPolicySnapshot = await this.resolveSelectedExecutionPolicy(
+      selectedPackage,
+      dto.selectedExecutionPolicy
+    )
     const disclosureHash = buildRentalDisclosureHash()
     if (
       dto.disclosureVersion !== RENTAL_REVIEW_DISCLOSURE_VERSION ||
@@ -191,6 +202,7 @@ export class RentalApplicationsService {
     const listingSnapshot = this.toListingSnapshot(apartment)
     const packageSnapshot: RentalPackageRecord = {
       ...selectedPackage,
+      defaultExecutionPolicy: executionPolicySnapshot,
       currency: 'VND',
       capturedAt,
     }
@@ -261,6 +273,7 @@ export class RentalApplicationsService {
       reviewHash: buildRentalReviewHash({
         listing: listingSnapshot,
         packageSnapshot,
+        executionPolicySnapshot,
         disclosureVersion: dto.disclosureVersion,
         disclosureHash,
         acknowledgedDisclosureIds: dto.acknowledgedDisclosureIds,
@@ -279,6 +292,7 @@ export class RentalApplicationsService {
         packageId: selectedPackage.packageId,
         packageVersion: selectedPackage.version,
         packageSnapshot,
+        executionPolicySnapshot,
         contractId: null,
         depositAgreementId: null,
         applicationRevision: 1,
@@ -451,6 +465,7 @@ export class RentalApplicationsService {
           tenantId: application.tenantId,
           landlordId: application.landlordId,
           packageSnapshot: application.packageSnapshot,
+          executionPolicySnapshot: application.executionPolicySnapshot ?? null,
         })
       const contract = await this.contractsService.createDraftFromApplication({
         rentalApplicationId: application._id.toHexString(),
@@ -464,6 +479,7 @@ export class RentalApplicationsService {
         tenantId: application.tenantId,
         moveInDate: application.moveInDate,
         packageSnapshot: application.packageSnapshot,
+        executionPolicySnapshot: application.executionPolicySnapshot ?? null,
         applicationReviewHash: application.reviewSnapshot?.reviewHash ?? null,
         termsRef: application.reviewSnapshot?.termsRef ?? null,
         flowProfileRef: application.reviewSnapshot?.flowProfileRef ?? null,
@@ -513,6 +529,41 @@ export class RentalApplicationsService {
     return selectedPackage
   }
 
+  private async resolveSelectedExecutionPolicy(
+    selectedPackage: RentalPackageRecord,
+    requested?: RentalExecutionPolicyRef
+  ): Promise<RentalExecutionPolicyRef> {
+    const allowed = selectedPackage.allowedExecutionPolicies?.length
+      ? selectedPackage.allowedExecutionPolicies
+      : [
+          selectedPackage.defaultExecutionPolicy ??
+            getDefaultRentalExecutionPolicyRef(),
+        ]
+    const selected =
+      requested ?? selectedPackage.defaultExecutionPolicy ?? allowed[0]
+    if (!selected) {
+      throw new ConflictException('RENTAL_EXECUTION_POLICY_SELECTION_REQUIRED')
+    }
+    if (
+      !allowed.some(
+        ref =>
+          ref.policyId === selected.policyId &&
+          ref.version === selected.version &&
+          ref.strategy === selected.strategy &&
+          ref.contentHash === selected.contentHash
+      )
+    ) {
+      throw new ConflictException('RENTAL_EXECUTION_POLICY_INVALID')
+    }
+    if (allowed.length > 1 && !requested) {
+      throw new ConflictException('RENTAL_EXECUTION_POLICY_SELECTION_REQUIRED')
+    }
+    if (this.executionPoliciesService) {
+      await this.executionPoliciesService.resolvePublishedRef(selected)
+    }
+    return { ...selected }
+  }
+
   /** [PROP-321] [uc_customer_contract] Keeps available legacy listings rentable. */
   private getOfferedPackages(
     apartment: Awaited<ReturnType<ApartmentsService['findOne']>>
@@ -538,6 +589,8 @@ export class RentalApplicationsService {
         depositPolicy: { type: 'MONTHS_OF_RENT', months: 1 },
         resolvedDepositAmount: apartment.priceMonthly,
         status: 'active',
+        defaultExecutionPolicy: getDefaultRentalExecutionPolicyRef(),
+        allowedExecutionPolicies: [getDefaultRentalExecutionPolicyRef()],
       },
     ]
   }

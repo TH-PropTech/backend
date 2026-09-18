@@ -11,6 +11,11 @@ import type { LegalTermsService } from '../legal-terms/legal-terms.service'
 import type { CreateRentalApplicationDto } from './dto/create-rental-application.dto'
 import type { RentalApplication } from './schemas/rental-application.schema'
 import { RentalApplicationsService } from './rental-applications.service'
+import {
+  DEFAULT_RENTAL_EXECUTION_POLICY_INPUTS,
+  computeRentalExecutionPolicyHash,
+  getDefaultRentalExecutionPolicyRef,
+} from '../rental-flow-config/rental-execution-policy.util'
 
 function application(
   overrides: Partial<RentalApplication> = {}
@@ -139,6 +144,74 @@ describe('RentalApplicationsService', () => {
         leaseDurationMonths: 12,
       })
     )
+  })
+
+  it('snapshots the tenant-selected execution policy when a package exposes two options', async () => {
+    const depositFirst = getDefaultRentalExecutionPolicyRef()
+    const signFirstInput = DEFAULT_RENTAL_EXECUTION_POLICY_INPUTS[1]
+    const signFirst = {
+      policyId: signFirstInput.policyId,
+      version: 1,
+      strategy: signFirstInput.strategy,
+      contentHash: computeRentalExecutionPolicyHash({
+        ...signFirstInput,
+        version: 1,
+      }),
+    }
+    apartments.findOne.mockResolvedValue({
+      ...apartment,
+      rentalPackages: [
+        {
+          ...apartment.rentalPackages[0],
+          allowedExecutionPolicies: [depositFirst, signFirst],
+          defaultExecutionPolicy: depositFirst,
+        },
+      ],
+    })
+    repository.findOne.mockResolvedValue(null)
+    repository.create.mockImplementation(
+      (value: unknown) => value as RentalApplication
+    )
+    repository.save.mockImplementation(value => Promise.resolve(value))
+
+    const result = await service.create(
+      'tenant-1',
+      input({ selectedExecutionPolicy: signFirst })
+    )
+
+    expect(result.executionPolicySnapshot).toEqual(signFirst)
+    expect(result.packageSnapshot?.defaultExecutionPolicy).toEqual(signFirst)
+    expect(result.reviewSnapshot?.reviewHash).toBeDefined()
+  })
+
+  it('requires a selection when a package exposes multiple execution policies', async () => {
+    const depositFirst = getDefaultRentalExecutionPolicyRef()
+    const signFirstInput = DEFAULT_RENTAL_EXECUTION_POLICY_INPUTS[1]
+    const signFirst = {
+      policyId: signFirstInput.policyId,
+      version: 1,
+      strategy: signFirstInput.strategy,
+      contentHash: computeRentalExecutionPolicyHash({
+        ...signFirstInput,
+        version: 1,
+      }),
+    }
+    apartments.findOne.mockResolvedValue({
+      ...apartment,
+      rentalPackages: [
+        {
+          ...apartment.rentalPackages[0],
+          allowedExecutionPolicies: [depositFirst, signFirst],
+          defaultExecutionPolicy: depositFirst,
+        },
+      ],
+    })
+    repository.findOne.mockResolvedValue(null)
+
+    await expect(service.create('tenant-1', input())).rejects.toThrow(
+      'RENTAL_EXECUTION_POLICY_SELECTION_REQUIRED'
+    )
+    expect(repository.save).not.toHaveBeenCalled()
   })
 
   it('projects a ready contract handoff only after accepted provisioning completes', async () => {

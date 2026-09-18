@@ -7,6 +7,7 @@ import {
   UpdateDateColumn,
 } from 'typeorm'
 import type { RentalPackageSnapshot } from '../../apartments/rental-package.util'
+import type { RentalExecutionPolicyRef } from '../../rental-flow-config/rental-execution-policy.util'
 import type {
   RentalApplicationListingSnapshot,
   RentalApplicationReviewSnapshot,
@@ -30,6 +31,8 @@ export class RentalApplication {
   @Column({ nullable: true }) packageId?: string | null
   @Column({ nullable: true }) packageVersion?: number | null
   @Column({ nullable: true }) packageSnapshot?: RentalPackageSnapshot | null
+  @Column({ nullable: true })
+  executionPolicySnapshot?: RentalExecutionPolicyRef | null
   @Column({ nullable: true }) contractId?: string | null
   @Column({ nullable: true }) depositAgreementId?: string | null
   @Column({ default: 1 }) applicationRevision!: number

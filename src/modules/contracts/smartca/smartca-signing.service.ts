@@ -44,6 +44,16 @@ export class SmartCaSigningService {
     ) {
       throw new ConflictException('CONTRACT_NOT_READY_FOR_SMARTCA')
     }
+    if (
+      (contract.executionPolicySnapshot?.strategy ?? 'DEPOSIT_FIRST') ===
+        'DEPOSIT_FIRST' &&
+      contract.deposit > 0 &&
+      !contract.depositPaidAt
+    ) {
+      throw new ConflictException(
+        'EXECUTION_POLICY_DEPOSIT_REQUIRED_BEFORE_SIGNING'
+      )
+    }
     const existing = await this.sessionRepository.findOne({
       where: {
         contractId,

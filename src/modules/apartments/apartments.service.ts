@@ -7,6 +7,7 @@ import {
   ConflictException,
   OnApplicationBootstrap,
   OnModuleDestroy,
+  Optional,
 } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { IsNull, Repository } from 'typeorm'
@@ -27,6 +28,7 @@ import { NotificationsService } from '../notifications/notifications.service'
 import { ProjectsService } from '../projects/projects.service'
 import { BuildingsService } from '../buildings/buildings.service'
 import { SavedSearchesService } from '../saved-searches/saved-searches.service'
+import { RentalExecutionPoliciesService } from '../rental-flow-config/rental-execution-policies.service'
 
 interface ApartmentMongoQuery {
   $or?: Array<Record<string, unknown>>
@@ -84,6 +86,12 @@ function toRentalPackageInputs(
       monthlyRent: packageItem.monthlyRent,
       depositPolicy,
       status: packageItem.status ?? 'active',
+      ...(packageItem.allowedExecutionPolicies
+        ? { allowedExecutionPolicies: packageItem.allowedExecutionPolicies }
+        : {}),
+      ...(packageItem.defaultExecutionPolicy
+        ? { defaultExecutionPolicy: packageItem.defaultExecutionPolicy }
+        : {}),
     }
   })
 }
@@ -206,7 +214,9 @@ export class ApartmentsService
     private readonly notificationsService: NotificationsService,
     private readonly projectsService: ProjectsService,
     private readonly buildingsService: BuildingsService,
-    private readonly savedSearchesService: SavedSearchesService
+    private readonly savedSearchesService: SavedSearchesService,
+    @Optional()
+    private readonly executionPoliciesService?: RentalExecutionPoliciesService
   ) {}
 
   onApplicationBootstrap(): void {
@@ -679,9 +689,10 @@ export class ApartmentsService
     const pricing = validateRentalPackages(
       toRentalPackageInputs(dto.rentalPackages)
     )
+    const packages = await this.resolveExecutionPolicies(pricing.packages)
     apartment.pricingMode = pricing.pricingMode
     apartment.pricingRevision = (apartment.pricingRevision ?? 0) + 1
-    apartment.rentalPackages = pricing.packages
+    apartment.rentalPackages = packages
     if (pricing.representativeMonthlyRent !== null) {
       apartment.priceMonthly = pricing.representativeMonthlyRent
     }
@@ -730,6 +741,7 @@ export class ApartmentsService
     const pricing = validateRentalPackages(
       toRentalPackageInputs(dto.rentalPackages)
     )
+    const packages = await this.resolveExecutionPolicies(pricing.packages)
 
     // Auto find-or-create Project nếu có tên nhưng không có ID
     let resolvedProjectId = dto.projectId || null
@@ -778,7 +790,7 @@ export class ApartmentsService
       priceMonthly: pricing.representativeMonthlyRent ?? dto.priceMonthly,
       pricingMode: pricing.pricingMode,
       pricingRevision: pricing.pricingMode === 'packages' ? 1 : 0,
-      rentalPackages: pricing.packages,
+      rentalPackages: packages,
       area: dto.area,
       bedrooms: dto.bedrooms,
       bathrooms: dto.bathrooms,
@@ -906,6 +918,7 @@ export class ApartmentsService
     const pricing = validateRentalPackages(
       toRentalPackageInputs(dto.rentalPackages)
     )
+    const packages = await this.resolveExecutionPolicies(pricing.packages)
 
     // Cập nhật thông tin mới
     Object.assign(apartment, {
@@ -925,7 +938,7 @@ export class ApartmentsService
       priceMonthly: pricing.representativeMonthlyRent ?? dto.priceMonthly,
       pricingMode: pricing.pricingMode,
       pricingRevision: (apartment.pricingRevision ?? 0) + 1,
-      rentalPackages: pricing.packages,
+      rentalPackages: packages,
       area: dto.area,
       bedrooms: dto.bedrooms,
       bathrooms: dto.bathrooms,
@@ -993,6 +1006,29 @@ export class ApartmentsService
         { apartmentId: apartment._id.toString() }
       )
     }
+  }
+
+  private async resolveExecutionPolicies(
+    packages: Apartment['rentalPackages']
+  ): Promise<NonNullable<Apartment['rentalPackages']>> {
+    const policyService = this.executionPoliciesService
+    if (!packages || packages.length === 0 || !policyService) {
+      return packages ?? []
+    }
+    const resolved = await Promise.all(
+      packages.map(async packageItem => {
+        const policySet = await policyService.validatePackagePolicies(
+          packageItem.allowedExecutionPolicies,
+          packageItem.defaultExecutionPolicy
+        )
+        return {
+          ...packageItem,
+          allowedExecutionPolicies: policySet.allowedExecutionPolicies,
+          defaultExecutionPolicy: policySet.defaultExecutionPolicy,
+        }
+      })
+    )
+    return resolved
   }
 
   private async publishSearchAlerts(

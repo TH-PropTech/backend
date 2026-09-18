@@ -41,6 +41,26 @@ export class ContractCommercialSnapshotDto {
   terminationNoticeDays!: number
 }
 
+export class ContractExecutionPolicyViewDto {
+  @ApiProperty()
+  policyId!: string
+
+  @ApiProperty()
+  version!: number
+
+  @ApiProperty({ enum: ['DEPOSIT_FIRST', 'SIGN_FIRST'] })
+  strategy!: 'DEPOSIT_FIRST' | 'SIGN_FIRST'
+
+  @ApiProperty()
+  depositConfirmed!: boolean
+
+  @ApiProperty()
+  activationReady!: boolean
+
+  @ApiProperty({ nullable: true })
+  nextAction!: string | null
+}
+
 export class ContractDocumentSectionDto {
   @ApiProperty()
   id!: string
@@ -265,6 +285,9 @@ export class ContractOverviewSnapshotDto {
 
   @ApiProperty()
   notarizationStatus!: string
+
+  @ApiProperty({ type: ContractExecutionPolicyViewDto })
+  executionPolicy!: ContractExecutionPolicyViewDto
 }
 
 export class ContractPartiesEnrichedDto {

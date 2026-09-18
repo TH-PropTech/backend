@@ -12,6 +12,24 @@ import {
   ValidateNested,
 } from 'class-validator'
 import { Type } from 'class-transformer'
+import type { RentalExecutionPolicyRef } from '../../rental-flow-config/rental-execution-policy.util'
+
+class RentalExecutionPolicyRefDto implements RentalExecutionPolicyRef {
+  @IsString()
+  @IsNotEmpty()
+  policyId!: string
+
+  @IsInt()
+  @Min(1)
+  version!: number
+
+  @IsIn(['DEPOSIT_FIRST', 'SIGN_FIRST'])
+  strategy!: RentalExecutionPolicyRef['strategy']
+
+  @IsString()
+  @IsNotEmpty()
+  contentHash!: string
+}
 
 class RentalPackageDepositPolicyDto {
   @IsIn(['MONTHS_OF_RENT', 'FIXED_AMOUNT'])
@@ -53,6 +71,17 @@ export class RentalPackageDto {
   @IsIn(['active', 'inactive'])
   @IsOptional()
   status?: 'active' | 'inactive'
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => RentalExecutionPolicyRefDto)
+  @IsOptional()
+  allowedExecutionPolicies?: RentalExecutionPolicyRefDto[]
+
+  @ValidateNested()
+  @Type(() => RentalExecutionPolicyRefDto)
+  @IsOptional()
+  defaultExecutionPolicy?: RentalExecutionPolicyRefDto
 }
 
 export class CreateApartmentDto {

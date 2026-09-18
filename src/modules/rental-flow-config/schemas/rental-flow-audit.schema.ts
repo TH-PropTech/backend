@@ -13,6 +13,9 @@ export type FlowAuditAction =
   | 'ASSIGNMENT_ACTIVATED'
   | 'ASSIGNMENT_SUPERSEDED'
   | 'CONTRACT_RECONCILED'
+  | 'EXECUTION_POLICY_DRAFT_SAVED'
+  | 'EXECUTION_POLICY_PUBLISHED'
+  | 'EXECUTION_POLICY_ARCHIVED'
 
 @Entity('rental_flow_audits')
 export class RentalFlowAudit {
@@ -26,7 +29,7 @@ export class RentalFlowAudit {
   actorId!: string
 
   @Column()
-  targetType!: 'profile' | 'assignment' | 'contract'
+  targetType!: 'profile' | 'assignment' | 'contract' | 'execution-policy'
 
   @Column()
   targetId!: string

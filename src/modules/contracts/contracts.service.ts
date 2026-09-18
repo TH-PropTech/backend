@@ -37,6 +37,7 @@ import { Apartment } from '../apartments/schemas/apartment.schema'
 import { LedgerOutboxService } from '../fabric/ledger-outbox.service'
 import { PaymentsService } from '../payments/payments.service'
 import type { RentalPackageSnapshot } from '../apartments/rental-package.util'
+import type { RentalExecutionPolicyRef } from '../rental-flow-config/rental-execution-policy.util'
 import { BiometricEvidenceService } from '../kyc/biometric-evidence.service'
 import { SmartOtpService } from '../smart-otp/services/smart-otp.service'
 
@@ -78,6 +79,7 @@ export interface CreateContractFromApplicationInput {
   tenantId: string
   moveInDate: Date
   packageSnapshot: RentalPackageSnapshot
+  executionPolicySnapshot?: RentalExecutionPolicyRef | null
   applicationReviewHash?: string | null
   termsRef?: {
     key: string
@@ -212,6 +214,10 @@ export class ContractsService {
     contract.depositTxHash = null
     contract.depositAgreementCode = null
     contract.packageSnapshot = input.packageSnapshot
+    contract.executionPolicySnapshot =
+      input.executionPolicySnapshot ??
+      input.packageSnapshot.defaultExecutionPolicy ??
+      null
     contract.applicationReviewHash = input.applicationReviewHash ?? null
     contract.termsRef = input.termsRef ?? null
     contract.flowProfileRef = input.flowProfileRef ?? null
@@ -690,11 +696,27 @@ export class ContractsService {
     if (!contract) {
       throw new NotFoundException('Không tìm thấy hợp đồng')
     }
-    if (contract.status !== 'awaiting-signature') {
+    if (
+      !['awaiting-signature', 'fully-signed-pending-deposit'].includes(
+        contract.status ?? ''
+      )
+    ) {
       throw new BadRequestException('Hợp đồng không ở trạng thái chờ ký')
     }
 
     // Bước 1: Xác minh KYC của người ký trước khi chấp nhận chữ ký
+    const executionStrategy =
+      contract.executionPolicySnapshot?.strategy ?? 'DEPOSIT_FIRST'
+    if (
+      executionStrategy === 'DEPOSIT_FIRST' &&
+      contract.deposit > 0 &&
+      !(await this.isDepositConfirmed(contract))
+    ) {
+      throw new BadRequestException(
+        'EXECUTION_POLICY_DEPOSIT_REQUIRED_BEFORE_SIGNING: Hợp đồng yêu cầu tiền cọc đã thanh toán trước khi có hiệu lực'
+      )
+    }
+
     const userId = role === 'tenant' ? contract.tenantId : contract.landlordId
     const kyc = await this.kycService.findByUserId(userId)
     if (!kyc || kyc.status !== 'verified') {
@@ -734,6 +756,10 @@ export class ContractsService {
           (depositAgreement.status !== 'paid' &&
             depositAgreement.status !== 'applied-to-lease-security')
         ) {
+          if (executionStrategy === 'SIGN_FIRST') {
+            contract.status = 'fully-signed-pending-deposit'
+            return this.contractRepository.save(contract)
+          }
           throw new BadRequestException(
             'Hợp đồng yêu cầu tiền cọc đã thanh toán trước khi có hiệu lực'
           )
@@ -836,6 +862,51 @@ export class ContractsService {
   }
 
   // ── Lấy chi tiết hợp đồng ──
+
+  async activateAfterDeposit(contractId: string): Promise<Contract> {
+    const contract = await this.findOne(contractId)
+    if (
+      contract.status !== 'fully-signed-pending-deposit' ||
+      !contract.signedByTenant ||
+      !contract.signedByLandlord
+    ) {
+      return contract
+    }
+    return this.signContract(contractId, 'tenant')
+  }
+
+  async activatePendingForDepositAgreement(
+    depositAgreementId: string
+  ): Promise<Contract | null> {
+    const contract = await this.contractRepository.findOne({
+      where: { depositAgreementId },
+    })
+    if (!contract) return null
+    return this.activateAfterDeposit(contract._id.toHexString())
+  }
+
+  private async isDepositConfirmed(contract: Contract): Promise<boolean> {
+    if (contract.deposit <= 0 || contract.depositPaidAt) return true
+    let agreement: DepositAgreement | null = null
+    if (
+      contract.depositAgreementId &&
+      ObjectId.isValid(contract.depositAgreementId)
+    ) {
+      agreement = await this.depositAgreementRepository.findOne({
+        where: { _id: new ObjectId(contract.depositAgreementId) },
+      })
+    }
+    if (!agreement && contract.rentalApplicationId) {
+      agreement = await this.depositAgreementRepository.findOne({
+        where: { applicationId: contract.rentalApplicationId },
+      })
+    }
+    return Boolean(
+      agreement &&
+      (agreement.status === 'paid' ||
+        agreement.status === 'applied-to-lease-security')
+    )
+  }
 
   async findOne(contractId: string): Promise<Contract> {
     if (!ObjectId.isValid(contractId)) {

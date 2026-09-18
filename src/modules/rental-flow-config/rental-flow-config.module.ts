@@ -10,6 +10,9 @@ import { RentalFlowConfigResolver } from './rental-flow-config-resolver.service'
 import { ContractImpactAnalyzer } from './contract-impact-analyzer.service'
 import { RentalFlowProfilesController } from './rental-flow-profiles.controller'
 import { RentalFlowAssignmentsController } from './rental-flow-assignments.controller'
+import { RentalExecutionPolicy } from './schemas/rental-execution-policy.schema'
+import { RentalExecutionPoliciesService } from './rental-execution-policies.service'
+import { RentalExecutionPoliciesController } from './rental-execution-policies.controller'
 
 @Module({
   imports: [
@@ -18,20 +21,27 @@ import { RentalFlowAssignmentsController } from './rental-flow-assignments.contr
       RentalFlowAssignment,
       RentalFlowAudit,
       Contract,
+      RentalExecutionPolicy,
     ]),
   ],
-  controllers: [RentalFlowProfilesController, RentalFlowAssignmentsController],
+  controllers: [
+    RentalFlowProfilesController,
+    RentalFlowAssignmentsController,
+    RentalExecutionPoliciesController,
+  ],
   providers: [
     RentalFlowProfilesService,
     RentalFlowAssignmentsService,
     RentalFlowConfigResolver,
     ContractImpactAnalyzer,
+    RentalExecutionPoliciesService,
   ],
   exports: [
     RentalFlowProfilesService,
     RentalFlowAssignmentsService,
     RentalFlowConfigResolver,
     ContractImpactAnalyzer,
+    RentalExecutionPoliciesService,
   ],
 })
 export class RentalFlowConfigModule {}
