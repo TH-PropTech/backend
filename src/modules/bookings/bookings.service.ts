@@ -6,13 +6,21 @@ import {
   ForbiddenException,
 } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
-import { Repository, FindOptionsWhere, FindManyOptions } from 'typeorm'
+import { Repository, FindOptionsWhere } from 'typeorm'
 import { ObjectId } from 'mongodb'
 import { Booking } from './schemas/booking.schema'
 import { Apartment } from '../apartments/schemas/apartment.schema'
 import { User } from '../users/schemas/user.schema'
 import { NotificationsService } from '../notifications/notifications.service'
 import { CreateBookingDto } from './dto/create-booking.dto'
+
+export interface BookingStatusCounts {
+  pending: number
+  confirmed: number
+  rejected: number
+  cancelled: number
+  completed: number
+}
 
 export interface BookingListResult {
   items: (Booking & {
@@ -24,6 +32,7 @@ export interface BookingListResult {
   page: number
   limit: number
   totalPages: number
+  statusCounts?: BookingStatusCounts
 }
 
 @Injectable()
@@ -341,7 +350,7 @@ export class BookingsService {
   }
 
   /**
-   * Staff xem toàn bộ booking — giám sát, không duyệt.
+   * Staff xem toàn bộ booking — giám sát, phân trang tại database layer.
    */
   async findAll(query: {
     status?: string | undefined
@@ -350,23 +359,52 @@ export class BookingsService {
     limit: number
   }): Promise<BookingListResult> {
     this.logger.log(
-      `Staff fetching all bookings, status=${query.status ?? 'all'}`
+      `Staff fetching all bookings, status=${query.status ?? 'all'}, page=${query.page}, limit=${query.limit}`
     )
 
     const where: Record<string, unknown> = {}
     if (query.status) where.status = query.status
     if (query.apartmentId) where.apartmentId = query.apartmentId
 
-    const options: FindManyOptions<Booking> = {
-      order: { createdAt: 'DESC' },
-    }
-    if (Object.keys(where).length > 0) {
-      options.where = where
-    }
+    const skip = (query.page - 1) * query.limit
+    const take = query.limit
 
-    const allRecords = await this.bookingRepository.find(options)
+    const [
+      items,
+      total,
+      pendingCount,
+      confirmedCount,
+      rejectedCount,
+      cancelledCount,
+      completedCount,
+    ] = await Promise.all([
+      this.bookingRepository.find({
+        where: where as FindOptionsWhere<Booking>,
+        order: { createdAt: 'DESC' },
+        skip,
+        take,
+      }),
+      this.bookingRepository.count({
+        where: where as FindOptionsWhere<Booking>,
+      }),
+      this.bookingRepository.count({
+        where: { status: 'pending' } as FindOptionsWhere<Booking>,
+      }),
+      this.bookingRepository.count({
+        where: { status: 'confirmed' } as FindOptionsWhere<Booking>,
+      }),
+      this.bookingRepository.count({
+        where: { status: 'rejected' } as FindOptionsWhere<Booking>,
+      }),
+      this.bookingRepository.count({
+        where: { status: 'cancelled' } as FindOptionsWhere<Booking>,
+      }),
+      this.bookingRepository.count({
+        where: { status: 'completed' } as FindOptionsWhere<Booking>,
+      }),
+    ])
 
-    // Lấy thông tin user (landlord + tenant) tương ứng
+    // Lấy thông tin user (landlord + tenant) chỉ cho các items của trang hiện tại
     const isValidObjectId = (id: string): boolean => {
       try {
         return Boolean(id && /^[a-f\d]{24}$/i.test(id))
@@ -376,8 +414,8 @@ export class BookingsService {
     }
 
     const userIds = [
-      ...allRecords.map(r => r.landlordId),
-      ...allRecords.map(r => r.tenantId),
+      ...items.map(r => r.landlordId),
+      ...items.map(r => r.tenantId),
     ].filter(id => Boolean(id) && isValidObjectId(id))
 
     const users =
@@ -390,7 +428,7 @@ export class BookingsService {
         : []
     const userMap = new Map(users.map(u => [u._id.toString(), u]))
 
-    const enrichedRecords = allRecords.map(record => {
+    const enrichedRecords = items.map(record => {
       const landlord = userMap.get(record.landlordId)
       const tenant = userMap.get(record.tenantId)
       return {
@@ -406,18 +444,35 @@ export class BookingsService {
       }
     })
 
-    const total = enrichedRecords.length
     const totalPages = Math.ceil(total / query.limit)
-    const skip = (query.page - 1) * query.limit
-    const items = enrichedRecords.slice(skip, skip + query.limit)
+    const statusCounts: BookingStatusCounts = {
+      pending: pendingCount,
+      confirmed: confirmedCount,
+      rejected: rejectedCount,
+      cancelled: cancelledCount,
+      completed: completedCount,
+    }
 
-    return { items, total, page: query.page, limit: query.limit, totalPages }
+    return {
+      items: enrichedRecords,
+      total,
+      page: query.page,
+      limit: query.limit,
+      totalPages,
+      statusCounts,
+    }
   }
 
   /**
    * Lấy chi tiết 1 booking theo ID.
+   * Chống IDOR: Chỉ trả về booking nếu người gọi có role staff/admin,
+   * hoặc là tenantId/landlordId của booking đó.
+   * Ngược lại trả về NotFoundException (404) để không làm lộ sự tồn tại của ID.
    */
-  async findOneById(id: string): Promise<Booking> {
+  async findOneById(
+    id: string,
+    currentUser?: { userId?: string; roles?: string[] }
+  ): Promise<Booking> {
     try {
       const booking = await this.bookingRepository.findOne({
         where: { _id: new ObjectId(id) },
@@ -425,6 +480,22 @@ export class BookingsService {
       if (!booking) {
         throw new NotFoundException(`Không tìm thấy lịch hẹn: ${id}`)
       }
+
+      if (currentUser) {
+        const isStaffOrAdmin = currentUser.roles?.some(role =>
+          ['staff', 'admin'].includes(role)
+        )
+        const isOwner = Boolean(
+          currentUser.userId &&
+          (booking.tenantId === currentUser.userId ||
+            booking.landlordId === currentUser.userId)
+        )
+
+        if (!isStaffOrAdmin && !isOwner) {
+          throw new NotFoundException(`Không tìm thấy lịch hẹn: ${id}`)
+        }
+      }
+
       return booking
     } catch (error) {
       if (error instanceof NotFoundException) throw error

@@ -136,10 +136,16 @@ export class BookingsController {
 
   /**
    * GET /api/v1/bookings/:id
-   * Xem chi tiết 1 lịch hẹn (cho cả tenant, landlord, staff)
+   * Xem chi tiết 1 lịch hẹn (cho cả tenant, landlord, staff có phân quyền IDOR)
    */
   @Get(':id')
-  async findOne(@Param('id') id: string): Promise<Booking> {
-    return this.bookingsService.findOneById(id)
+  async findOne(
+    @Param('id') id: string,
+    @Request() req: { user?: UserPayload }
+  ): Promise<Booking> {
+    return this.bookingsService.findOneById(id, {
+      userId: req.user?._id,
+      roles: req.user?.roles,
+    })
   }
 }
