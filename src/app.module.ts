@@ -5,6 +5,7 @@ import { configuration } from './config/configuration'
 import { envValidationSchema } from './config/env.validation'
 import { LoggerModule } from './common/logger/logger.module'
 import { ThrottlerModule } from '@nestjs/throttler'
+import { ScheduleModule } from '@nestjs/schedule'
 
 import { HealthModule } from './modules/health/health.module'
 import { UsersModule } from './modules/users/users.module'
@@ -73,6 +74,7 @@ import { RentalFlowConfigModule } from './modules/rental-flow-config/rental-flow
         limit: 10,
       },
     ]),
+    ScheduleModule.forRoot(),
     LoggerModule,
     HealthModule,
     UsersModule,

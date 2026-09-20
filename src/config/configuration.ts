@@ -33,6 +33,11 @@ export const configuration = (): {
     mediaEncryptionKey: string
     privateMediaDir: string
   }
+  cloudinary: {
+    cloudName: string
+    apiKey: string
+    apiSecret: string
+  }
   rentalFlow: {
     enabled: boolean
     paymentProvider: 'mock-bank' | 'vnpay' | 'momo' | 'sepay' | 'techcombank'
@@ -83,6 +88,11 @@ export const configuration = (): {
   kyc: {
     mediaEncryptionKey: process.env.KYC_MEDIA_ENCRYPTION_KEY ?? '',
     privateMediaDir: process.env.KYC_PRIVATE_MEDIA_DIR ?? '.data/kyc',
+  },
+  cloudinary: {
+    cloudName: process.env.CLOUDINARY_CLOUD_NAME ?? '',
+    apiKey: process.env.CLOUDINARY_API_KEY ?? '',
+    apiSecret: process.env.CLOUDINARY_API_SECRET ?? '',
   },
   rentalFlow: {
     enabled: process.env.RENTAL_FLOW_V4_ENABLED === 'true',

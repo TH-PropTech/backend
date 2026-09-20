@@ -1,14 +1,18 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
 import {
+  ArrayMaxSize,
   IsString,
   IsNotEmpty,
   IsOptional,
   IsNumber,
+  IsPositive,
   IsArray,
   IsIn,
   IsInt,
   IsObject,
   Min,
+  MinLength,
+  MaxLength,
   ValidateNested,
 } from 'class-validator'
 import { Type } from 'class-transformer'
@@ -84,10 +88,21 @@ export class RentalPackageDto {
   defaultExecutionPolicy?: RentalExecutionPolicyRefDto
 }
 
+// Hệ thống chỉ cho thuê căn hộ (không nhà riêng, văn phòng, shophouse…).
+export const APARTMENT_CATEGORIES = [
+  'Căn hộ chung cư',
+  'Chung cư mini, căn hộ dịch vụ',
+] as const
+
 export class CreateApartmentDto {
-  @ApiProperty({ description: 'Tiêu đề tin đăng' })
+  @ApiProperty({
+    description: 'Tiêu đề tin đăng',
+    minLength: 10,
+    maxLength: 200,
+  })
   @IsString()
-  @IsNotEmpty()
+  @MinLength(10)
+  @MaxLength(200)
   title!: string
 
   @ApiPropertyOptional({ description: 'ID tòa nhà' })
@@ -110,20 +125,30 @@ export class CreateApartmentDto {
   @IsOptional()
   projectName?: string | null
 
-  @ApiProperty({ description: 'Danh mục căn hộ' })
-  @IsString()
-  @IsNotEmpty()
+  @ApiProperty({
+    description: 'Danh mục căn hộ',
+    enum: APARTMENT_CATEGORIES,
+  })
+  @IsIn(APARTMENT_CATEGORIES)
   category!: string
 
-  @ApiProperty({ description: 'Mô tả chi tiết' })
+  @ApiProperty({
+    description: 'Mô tả chi tiết',
+    minLength: 50,
+    maxLength: 5000,
+  })
   @IsString()
-  @IsNotEmpty()
+  @MinLength(50)
+  @MaxLength(5000)
   description!: string
 
-  @ApiProperty({ description: 'Địa chỉ đầy đủ' })
+  @ApiPropertyOptional({
+    description:
+      'Địa chỉ đầy đủ; bỏ trống thì backend ghép từ đường, phường, quận, thành phố',
+  })
   @IsString()
-  @IsNotEmpty()
-  location!: string
+  @IsOptional()
+  location?: string
 
   @ApiProperty({ description: 'Thành phố' })
   @IsString()
@@ -153,6 +178,7 @@ export class CreateApartmentDto {
   @ApiProperty({ description: 'Giá thuê hàng tháng (VNĐ)' })
   @Type(() => Number)
   @IsNumber()
+  @IsPositive()
   priceMonthly!: number
 
   @ApiPropertyOptional({ type: [RentalPackageDto] })
@@ -165,72 +191,66 @@ export class CreateApartmentDto {
   @ApiProperty({ description: 'Diện tích (m²)' })
   @Type(() => Number)
   @IsNumber()
+  @IsPositive()
   area!: number
 
   @ApiProperty({ description: 'Số phòng ngủ' })
   @Type(() => Number)
-  @IsNumber()
+  @IsInt()
+  @Min(0)
   bedrooms!: number
 
   @ApiProperty({ description: 'Số phòng tắm' })
   @Type(() => Number)
-  @IsNumber()
+  @IsInt()
+  @Min(0)
   bathrooms!: number
 
-  @ApiProperty({ description: 'Hướng nhà' })
+  @ApiPropertyOptional({ description: 'Hướng nhà' })
   @IsString()
-  @IsNotEmpty()
-  direction!: string
+  @IsOptional()
+  direction?: string
 
-  @ApiProperty({ description: 'Hướng ban công' })
+  @ApiPropertyOptional({ description: 'Hướng ban công' })
   @IsString()
-  @IsNotEmpty()
-  balconyDirection!: string
+  @IsOptional()
+  balconyDirection?: string
 
-  @ApiProperty({ description: 'Tình trạng nội thất' })
+  @ApiPropertyOptional({ description: 'Tình trạng nội thất' })
   @IsString()
-  @IsNotEmpty()
-  furniture!: string
+  @IsOptional()
+  furniture?: string
 
-  @ApiProperty({ description: 'Thời gian dọn vào' })
+  @ApiPropertyOptional({ description: 'Thời gian dọn vào' })
   @IsString()
-  @IsNotEmpty()
-  moveInTime!: string
+  @IsOptional()
+  moveInTime?: string
 
-  @ApiProperty({ description: 'Thông tin tiền điện' })
+  @ApiPropertyOptional({ description: 'Thông tin tiền điện' })
   @IsString()
-  @IsNotEmpty()
-  electricity!: string
+  @IsOptional()
+  electricity?: string
 
-  @ApiProperty({ description: 'Thông tin tiền nước' })
+  @ApiPropertyOptional({ description: 'Thông tin tiền nước' })
   @IsString()
-  @IsNotEmpty()
-  water!: string
+  @IsOptional()
+  water?: string
 
-  @ApiProperty({ description: 'Thông tin internet' })
+  @ApiPropertyOptional({ description: 'Thông tin internet' })
   @IsString()
-  @IsNotEmpty()
-  internet!: string
+  @IsOptional()
+  internet?: string
 
-  @ApiPropertyOptional({ description: 'Danh sách ảnh thường' })
+  @ApiPropertyOptional({ description: 'Danh sách ảnh thường (tối đa 20)' })
   @IsArray()
+  @ArrayMaxSize(20)
   @IsString({ each: true })
   @IsOptional()
   gallery?: string[]
 
-  @ApiPropertyOptional({ description: 'Danh sách ảnh 360' })
+  @ApiPropertyOptional({ description: 'Danh sách tiện ích (tối đa 30)' })
   @IsArray()
-  @IsString({ each: true })
-  @IsOptional()
-  images360?: string[]
-
-  @ApiPropertyOptional({ description: 'Link VR Tour' })
-  @IsString()
-  @IsOptional()
-  vrUrl?: string
-
-  @ApiPropertyOptional({ description: 'Danh sách tiện ích' })
-  @IsArray()
+  @ArrayMaxSize(30)
   @IsString({ each: true })
   @IsOptional()
   amenities?: string[]

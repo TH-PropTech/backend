@@ -17,6 +17,8 @@ import {
   ApartmentResponseMapper,
   WebApartmentResponse,
   MobileApartmentResponse,
+  LandlordApartmentResponse,
+  StaffApartmentResponse,
 } from './mappers/apartment-response.mapper'
 import { ApartmentFilterDto } from './dto/apartment-filter.dto'
 import {
@@ -32,47 +34,30 @@ import { Roles } from '../../common/decorators/roles.decorator'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import type { UserPayload } from '../auth/interfaces/auth.interface'
 import { FilesInterceptor } from '@nestjs/platform-express'
-import { diskStorage } from 'multer'
-import { extname } from 'path'
-import * as fs from 'fs'
-import { ConfigService } from '@nestjs/config'
 import {
   ListingQualityService,
   type QualityScoreResult,
 } from './listing-quality.service'
 import { QualityScoreResponseDto } from './dto/quality-score-response.dto'
+import { UpdateApartmentDto } from './dto/update-apartment.dto'
+import { ApartmentMediaUploadService } from './apartment-media-upload.service'
+import {
+  APARTMENT_IMAGE_MAX_BYTES,
+  APARTMENT_IMAGE_MAX_COUNT,
+  apartmentImageFilter,
+} from './apartment-upload.options'
 
-import { Request } from 'express'
-
-const uploadDir = './uploads/apartments'
-const storage = diskStorage({
-  destination: (
-    req: Request,
-    file: Express.Multer.File,
-    cb: (error: Error | null, destination: string) => void
-  ) => {
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true })
-    }
-    cb(null, uploadDir)
-  },
-  filename: (
-    req: Request,
-    file: Express.Multer.File,
-    cb: (error: Error | null, filename: string) => void
-  ) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9)
-    cb(null, `${uniqueSuffix}${extname(file.originalname)}`)
-  },
-})
+function isStaffOrAdmin(user: UserPayload): boolean {
+  return user.roles?.some(role => ['staff', 'admin'].includes(role)) ?? false
+}
 
 @ApiTags('apartments')
 @Controller('apartments')
 export class ApartmentsController {
   constructor(
     private readonly apartmentsService: ApartmentsService,
-    private readonly configService: ConfigService,
-    private readonly listingQualityService: ListingQualityService
+    private readonly listingQualityService: ListingQualityService,
+    private readonly mediaUploadService: ApartmentMediaUploadService
   ) {}
 
   @Get('my-listings')
@@ -81,9 +66,16 @@ export class ApartmentsController {
   @ApiOkResponse({ type: QualityScoreResponseDto })
   async getMyListings(
     @CurrentUser('id') landlordId: string,
-    @Query('format') format?: 'web' | 'mobile'
-  ): Promise<WebApartmentResponse[] | MobileApartmentResponse[]> {
+    @Query('format') format?: 'web' | 'mobile' | 'landlord'
+  ): Promise<
+    | WebApartmentResponse[]
+    | MobileApartmentResponse[]
+    | LandlordApartmentResponse[]
+  > {
     const apartments = await this.apartmentsService.findByLandlord(landlordId)
+    if (format === 'landlord') {
+      return apartments.map(apt => ApartmentResponseMapper.toLandlordJson(apt))
+    }
     if (format === 'mobile') {
       return apartments.map(apt => ApartmentResponseMapper.toMobileJson(apt))
     }
@@ -97,6 +89,27 @@ export class ApartmentsController {
     @Query('format') format?: 'web' | 'mobile'
   ): Promise<WebApartmentResponse[] | MobileApartmentResponse[]> {
     const apartments = await this.apartmentsService.findPending()
+    if (format === 'mobile') {
+      return apartments.map(apt => ApartmentResponseMapper.toMobileJson(apt))
+    }
+    return apartments.map(apt => ApartmentResponseMapper.toWebJson(apt))
+  }
+
+  @Get('manage')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('staff', 'admin')
+  async getManageListings(): Promise<StaffApartmentResponse[]> {
+    const apartments = await this.apartmentsService.findAllForStaff()
+    return apartments.map(apt => ApartmentResponseMapper.toStaffJson(apt))
+  }
+
+  @Get('rejected')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('staff', 'admin')
+  async getRejectedListings(
+    @Query('format') format?: 'web' | 'mobile'
+  ): Promise<WebApartmentResponse[] | MobileApartmentResponse[]> {
+    const apartments = await this.apartmentsService.findRejected()
     if (format === 'mobile') {
       return apartments.map(apt => ApartmentResponseMapper.toMobileJson(apt))
     }
@@ -147,16 +160,34 @@ export class ApartmentsController {
 
   @Post()
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('landlord')
+  @Roles('landlord', 'staff', 'admin')
   async create(
     @Body() createApartmentDto: CreateApartmentDto,
-    @CurrentUser('id') landlordId: string
+    @CurrentUser('id') posterId: string
   ): Promise<WebApartmentResponse> {
     const created = await this.apartmentsService.create(
       createApartmentDto,
-      landlordId
+      posterId
     )
     return ApartmentResponseMapper.toWebJson(created)
+  }
+
+  @Patch(':id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('landlord', 'staff', 'admin')
+  async update(
+    @Param('id') id: string,
+    @Body() dto: UpdateApartmentDto,
+    @CurrentUser('id') userId: string,
+    @CurrentUser() user: UserPayload
+  ): Promise<StaffApartmentResponse> {
+    const updated = await this.apartmentsService.update(
+      id,
+      dto,
+      userId,
+      isStaffOrAdmin(user)
+    )
+    return ApartmentResponseMapper.toStaffJson(updated)
   }
 
   @Patch(':id/approve')
@@ -202,12 +233,17 @@ export class ApartmentsController {
 
   @Patch(':id/renew')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('landlord')
+  @Roles('landlord', 'staff', 'admin')
   async renew(
     @Param('id') id: string,
-    @CurrentUser('id') landlordId: string
+    @CurrentUser('id') userId: string,
+    @CurrentUser() user: UserPayload
   ): Promise<WebApartmentResponse> {
-    const renewed = await this.apartmentsService.renew(id, landlordId)
+    const renewed = await this.apartmentsService.renew(
+      id,
+      userId,
+      isStaffOrAdmin(user)
+    )
     return ApartmentResponseMapper.toWebJson(renewed)
   }
 
@@ -236,13 +272,11 @@ export class ApartmentsController {
     @Body() dto: UpdateRentalPackagesDto,
     @CurrentUser() user: UserPayload
   ): Promise<WebApartmentResponse> {
-    const isStaff =
-      user.roles?.some(role => ['staff', 'admin'].includes(role)) ?? false
     const updated = await this.apartmentsService.updateRentalPackages(
       id,
       dto,
       user._id ?? '',
-      isStaff
+      isStaffOrAdmin(user)
     )
     return ApartmentResponseMapper.toWebJson(updated)
   }
@@ -270,44 +304,27 @@ export class ApartmentsController {
   async updateMedia(
     @Param('id') id: string,
     @Body() dto: UpdateApartmentMediaDto
-  ): Promise<WebApartmentResponse> {
+  ): Promise<StaffApartmentResponse> {
     const updated = await this.apartmentsService.updateMedia(id, dto)
-    return ApartmentResponseMapper.toWebJson(updated)
+    return ApartmentResponseMapper.toStaffJson(updated)
   }
 
   @Post('upload')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('landlord', 'staff', 'admin')
   @UseInterceptors(
-    FilesInterceptor('images', 20, {
-      storage,
-      fileFilter: (req, file, cb) => {
-        if (!file.mimetype.match(/\/(jpg|jpeg|png|webp)$/)) {
-          return cb(
-            new BadRequestException(
-              'Chỉ cho phép tải lên file ảnh (jpg, jpeg, png, webp)!'
-            ),
-            false
-          )
-        }
-        cb(null, true)
-      },
-      limits: {
-        fileSize: 10 * 1024 * 1024, // 10MB
-      },
+    FilesInterceptor('images', APARTMENT_IMAGE_MAX_COUNT, {
+      fileFilter: apartmentImageFilter,
+      limits: { fileSize: APARTMENT_IMAGE_MAX_BYTES },
     })
   )
-  uploadImages(@UploadedFiles() files: Express.Multer.File[]): {
-    urls: string[]
-  } {
+  async uploadImages(
+    @UploadedFiles() files: Express.Multer.File[]
+  ): Promise<{ urls: string[] }> {
     if (!files || files.length === 0) {
       throw new BadRequestException('Vui lòng chọn ít nhất một ảnh để tải lên!')
     }
-    const appUrl =
-      this.configService.get<string>('app.url') || 'http://localhost:3001'
-    const urls = files.map(
-      file => `${appUrl}/uploads/apartments/${file.filename}`
-    )
+    const urls = await this.mediaUploadService.uploadImages(files)
     return { urls }
   }
 }

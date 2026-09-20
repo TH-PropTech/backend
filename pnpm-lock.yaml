@@ -32,6 +32,9 @@ importers:
       '@nestjs/platform-ws':
         specifier: ^11.1.27
         version: 11.1.27(@nestjs/common@11.1.24(class-transformer@0.5.1)(class-validator@0.14.4)(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/websockets@11.1.27)(rxjs@7.8.2)
+      '@nestjs/schedule':
+        specifier: ^6.1.3
+        version: 6.1.3(@nestjs/common@11.1.24(class-transformer@0.5.1)(class-validator@0.14.4)(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.24)
       '@nestjs/swagger':
         specifier: ^11.2.3
         version: 11.4.4(@nestjs/common@11.1.24(class-transformer@0.5.1)(class-validator@0.14.4)(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.24)(class-transformer@0.5.1)(class-validator@0.14.4)(reflect-metadata@0.2.2)
@@ -53,6 +56,9 @@ importers:
       class-validator:
         specifier: ^0.14.2
         version: 0.14.4
+      cloudinary:
+        specifier: ^2.11.0
+        version: 2.11.0
       dotenv:
         specifier: ^16.6.1
         version: 16.6.1
@@ -1039,6 +1045,12 @@ packages:
       '@nestjs/websockets': ^11.0.0
       rxjs: ^7.1.0
 
+  '@nestjs/schedule@6.1.3':
+    resolution: {integrity: sha512-RflMFOpR16Dwd1jAUbeB4mfGTCh65fvEdL4mSjQPJChpkRGRjIXjb+6YQcK2faQrVT60c9DmLmoVR7/ONCtuYQ==}
+    peerDependencies:
+      '@nestjs/common': ^10.0.0 || ^11.0.0
+      '@nestjs/core': ^10.0.0 || ^11.0.0
+
   '@nestjs/schematics@11.1.0':
     resolution: {integrity: sha512-lVxGZ46tcdItFMoXr6vyKWlnOsm1SZm/GUqAEDvy2RL4Q4O+3bkziAhrO7Y8JLssFUUvNFEGqAizI52WAxhjDw==}
     peerDependencies:
@@ -1403,6 +1415,9 @@ packages:
 
   '@types/jsonwebtoken@9.0.10':
     resolution: {integrity: sha512-asx5hIG9Qmf/1oStypjanR7iKTv0gXQ1Ov/jfrX6kS/EO0OFni8orbmGCn0672NHR3kXHwpAwR+B368ZGN/2rA==}
+
+  '@types/luxon@3.7.5':
+    resolution: {integrity: sha512-jJ41Q4z6ZVO260MNDdHfW7+7a5iMiX8Mr6ZJHcmgrvhZha6dz5704o/lF2kKl6URjH6ivEL97w9xS/MgpJEphg==}
 
   '@types/methods@1.1.4':
     resolution: {integrity: sha512-ymXWVrDiCxTBE3+RIrrP533E70eA+9qu7zdWoHuOmGujkYtzf4HQF96b8nwHLqhuf4ykX61IGRIB38CC6/sImQ==}
@@ -2154,6 +2169,10 @@ packages:
     resolution: {integrity: sha512-JQHZ2QMW6l3aH/j6xCqQThY/9OH4D/9ls34cgkUBiEeocRTU04tHfKPBsUK1PqZCUQM7GiA0IIXJSuXHI64Kbg==}
     engines: {node: '>=0.8'}
 
+  cloudinary@2.11.0:
+    resolution: {integrity: sha512-o2pAkDDqrzPFE/mn9GCfFjBIGQmPs++Ts6rtkFl4vY528DNHiMovKWjH16HBjeGa9iwI7eAad24aWN2emT0aww==}
+    engines: {node: '>=9'}
+
   cluster-key-slot@1.1.1:
     resolution: {integrity: sha512-rwHwUfXL40Chm1r08yrhU3qpUvdVlgkKNeyeGPOxnW8/SyVDvgRaed/Uz54AqWNaTCAThlj6QAs3TZcKI0xDEw==}
     engines: {node: '>=0.10.0'}
@@ -2416,6 +2435,10 @@ packages:
 
   create-require@1.1.1:
     resolution: {integrity: sha512-dcKFX3jn0MpIaXjisoRvexIJVEKzaq7z2rZKxf+MSr9TkdmHmsU4m2lcLojrj/FHl8mk5VxMmYA+ftRkP/3oKQ==}
+
+  cron@4.4.0:
+    resolution: {integrity: sha512-fkdfq+b+AHI4cKdhZlppHveI/mgz2qpiYxcm+t5E5TsxX7QrLS1VE0+7GENEk9z0EeGPcpSciGv6ez24duWhwQ==}
+    engines: {node: '>=18.x'}
 
   cross-spawn@7.0.6:
     resolution: {integrity: sha512-uV2QOWP2nWzsy2aMp8aRibhi9dlzF5Hgh5SHaB9OiTGEyDTiJJyx0uy51QXdyWbtAHNua4XJzUKca3OzKUd3vA==}
@@ -2704,6 +2727,7 @@ packages:
   eslint@9.39.4:
     resolution: {integrity: sha512-XoMjdBOwe/esVgEvLmNsD3IRHkm7fbKIUGvrleloJXUZgDHig2IPWNniv+GwjyJXzuNqVjlr5+4yVUZjycJwfQ==}
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
+    deprecated: This version is no longer supported. Please see https://eslint.org/version-support for other options.
     hasBin: true
     peerDependencies:
       jiti: '*'
@@ -3696,6 +3720,10 @@ packages:
   lru-cache@6.0.0:
     resolution: {integrity: sha512-Jo6dJ04CmSjuznwJSS3pUeWmd/H0ffTlkXXgwZi+eq1UCmqQwCh+eLsYOYCwY991i2Fah4h1BEMCx4qThGbsiA==}
     engines: {node: '>=10'}
+
+  luxon@3.7.2:
+    resolution: {integrity: sha512-vtEhXh/gNjI9Yg1u4jX/0YVPMvxzHuGgCm6tC5kZyb08yjGWGnqAjGJvcXbqQR2P3MyMEFnRbpcdFS6PBcLqew==}
+    engines: {node: '>=12'}
 
   madge@8.0.0:
     resolution: {integrity: sha512-9sSsi3TBPhmkTCIpVQF0SPiChj1L7Rq9kU2KDG1o6v2XH9cCw086MopjVCD+vuoL5v8S77DTbVopTO8OUiQpIw==}
@@ -6351,6 +6379,12 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
+  '@nestjs/schedule@6.1.3(@nestjs/common@11.1.24(class-transformer@0.5.1)(class-validator@0.14.4)(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.24)':
+    dependencies:
+      '@nestjs/common': 11.1.24(class-transformer@0.5.1)(class-validator@0.14.4)(reflect-metadata@0.2.2)(rxjs@7.8.2)
+      '@nestjs/core': 11.1.24(@nestjs/common@11.1.24(class-transformer@0.5.1)(class-validator@0.14.4)(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/platform-express@11.1.24)(@nestjs/websockets@11.1.27)(reflect-metadata@0.2.2)(rxjs@7.8.2)
+      cron: 4.4.0
+
   '@nestjs/schematics@11.1.0(chokidar@4.0.3)(prettier@3.8.3)(typescript@5.9.3)':
     dependencies:
       '@angular-devkit/core': 19.2.24(chokidar@4.0.3)
@@ -6689,6 +6723,8 @@ snapshots:
     dependencies:
       '@types/ms': 2.1.0
       '@types/node': 24.13.1
+
+  '@types/luxon@3.7.5': {}
 
   '@types/methods@1.1.4': {}
 
@@ -7519,6 +7555,10 @@ snapshots:
 
   clone@1.0.4: {}
 
+  cloudinary@2.11.0:
+    dependencies:
+      lodash: 4.18.1
+
   cluster-key-slot@1.1.1: {}
 
   co@4.6.0: {}
@@ -7782,6 +7822,11 @@ snapshots:
       typescript: 5.9.3
 
   create-require@1.1.1: {}
+
+  cron@4.4.0:
+    dependencies:
+      '@types/luxon': 3.7.5
+      luxon: 3.7.2
 
   cross-spawn@7.0.6:
     dependencies:
@@ -9280,6 +9325,8 @@ snapshots:
   lru-cache@6.0.0:
     dependencies:
       yallist: 4.0.0
+
+  luxon@3.7.2: {}
 
   madge@8.0.0(typescript@5.9.3):
     dependencies:

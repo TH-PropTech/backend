@@ -1,9 +1,9 @@
 import { ApiProperty } from '@nestjs/swagger'
-import { IsString, IsNotEmpty } from 'class-validator'
+import { IsString, MinLength } from 'class-validator'
 
 export class RejectApartmentDto {
-  @ApiProperty({ description: 'Lý do từ chối bài đăng' })
+  @ApiProperty({ description: 'Lý do từ chối bài đăng', minLength: 10 })
   @IsString()
-  @IsNotEmpty()
+  @MinLength(10)
   rejectedReason!: string
 }
