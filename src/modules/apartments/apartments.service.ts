@@ -5,12 +5,10 @@ import {
   ForbiddenException,
   BadRequestException,
   ConflictException,
-  OnApplicationBootstrap,
-  OnModuleDestroy,
   Optional,
 } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
-import { IsNull, Repository } from 'typeorm'
+import { FindOperator, IsNull, Repository } from 'typeorm'
 import { ObjectId } from 'mongodb'
 import { Apartment } from './schemas/apartment.schema'
 import { User } from '../users/schemas/user.schema'
@@ -19,6 +17,7 @@ import {
   CreateApartmentDto,
   UpdateRentalPackagesDto,
 } from './dto/create-apartment.dto'
+import { UpdateApartmentDto } from './dto/update-apartment.dto'
 import {
   validateRentalPackages,
   type RentalPackageInput,
@@ -198,13 +197,39 @@ function buildVietnameseRegex(str: string): string {
     .join('')
 }
 
+const LISTING_VALIDITY_DAYS = 30
+const EXPIRY_REMINDER_DAYS = 3
+const DAY_MS = 24 * 60 * 60 * 1000
+
+/** Mongo range operator; TypeORM's typed operators do not cover $gt/$lte on Mongo. */
+function mongoDateRange(range: { $gt?: Date; $lte: Date }): FindOperator<Date> {
+  return range as unknown as FindOperator<Date>
+}
+
+const ADDRESS_PART_KEYS = ['street', 'ward', 'district', 'city'] as const
+
+/** Địa chỉ đầy đủ: dùng giá trị client gửi, nếu trống thì ghép từ đường, phường, quận, thành phố. */
+function resolveLocation(
+  dto: Pick<
+    CreateApartmentDto,
+    'location' | 'street' | 'ward' | 'district' | 'city'
+  >
+): string {
+  return (
+    dto.location?.trim() ||
+    [dto.street, dto.ward, dto.district, dto.city].join(', ')
+  )
+}
+
+function definedEntries<T extends object>(source: T): Partial<T> {
+  return Object.fromEntries(
+    Object.entries(source).filter(([, value]) => value !== undefined)
+  ) as Partial<T>
+}
+
 @Injectable()
-// TODO: Migrate to @nestjs/schedule @Cron('0 * * * *') when @nestjs/schedule is installed
-export class ApartmentsService
-  implements OnApplicationBootstrap, OnModuleDestroy
-{
+export class ApartmentsService {
   private readonly logger = new Logger(ApartmentsService.name)
-  private expirationInterval: ReturnType<typeof setInterval> | null = null
 
   constructor(
     @InjectRepository(Apartment)
@@ -219,54 +244,71 @@ export class ApartmentsService
     private readonly executionPoliciesService?: RentalExecutionPoliciesService
   ) {}
 
-  onApplicationBootstrap(): void {
-    this.logger.log(
-      'ApartmentsService initialized. Checking listing expirations...'
-    )
-    this.checkExpiration().catch(err => {
-      this.logger.error('Error checking listing expirations on startup:', err)
-    })
-
-    // Run expiration check every hour
-    this.expirationInterval = setInterval(
-      () => {
-        this.checkExpiration().catch(err => {
-          this.logger.error(
-            'Error checking listing expirations in interval:',
-            err
-          )
-        })
-      },
-      60 * 60 * 1000
-    )
-  }
-
-  onModuleDestroy(): void {
-    if (this.expirationInterval) {
-      clearInterval(this.expirationInterval)
-      this.expirationInterval = null
-      this.logger.log('Cleared expiration check interval.')
-    }
-  }
-
+  // ── Đánh dấu hết hạn các bài đã quá expiresAt và báo chủ nhà ──
   async checkExpiration(): Promise<void> {
-    const now = new Date()
     const expiredApartments = await this.apartmentRepository.find({
       where: {
         status: 'available',
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment
-        expiresAt: { $lte: now } as any,
+        expiresAt: mongoDateRange({ $lte: new Date() }),
       },
     })
 
-    if (expiredApartments.length > 0) {
-      this.logger.log(
-        `Checking expiration: Found ${expiredApartments.length} expired apartments. Expiring them...`
+    if (expiredApartments.length === 0) return
+    this.logger.log(
+      `Found ${expiredApartments.length} expired listings. Expiring them...`
+    )
+    for (const apt of expiredApartments) {
+      apt.status = 'expired'
+      const saved = await this.apartmentRepository.save(apt)
+      await this.notifyLandlord(
+        saved,
+        'Bài đăng đã hết hạn',
+        `Bài đăng "${saved.title}" đã hết hạn, nhấn Gia hạn để tiếp tục.`,
+        'listing-expired'
       )
-      for (const apt of expiredApartments) {
-        apt.status = 'expired'
-        await this.apartmentRepository.save(apt)
-      }
+    }
+  }
+
+  // ── Nhắc chủ nhà các bài sắp hết hạn trong 3 ngày ──
+  // Cửa sổ (now+2d, now+3d] rộng đúng 1 ngày: chạy mỗi ngày một lần thì mỗi bài chỉ được nhắc một lần.
+  async remindExpiringSoon(): Promise<void> {
+    const now = Date.now()
+    const expiringApartments = await this.apartmentRepository.find({
+      where: {
+        status: 'available',
+        expiresAt: mongoDateRange({
+          $gt: new Date(now + (EXPIRY_REMINDER_DAYS - 1) * DAY_MS),
+          $lte: new Date(now + EXPIRY_REMINDER_DAYS * DAY_MS),
+        }),
+      },
+    })
+
+    for (const apt of expiringApartments) {
+      await this.notifyLandlord(
+        apt,
+        'Bài đăng sắp hết hạn',
+        `Bài đăng "${apt.title}" sẽ hết hạn trong ${EXPIRY_REMINDER_DAYS} ngày.`,
+        'listing-expiring'
+      )
+    }
+  }
+
+  private async notifyLandlord(
+    apartment: Apartment,
+    title: string,
+    body: string,
+    type: string
+  ): Promise<void> {
+    try {
+      await this.notificationsService.createNotification(
+        apartment.landlordId,
+        title,
+        body,
+        type,
+        { apartmentId: apartment._id.toString() }
+      )
+    } catch (err) {
+      this.logger.error(`Error sending landlord ${type} notification:`, err)
     }
   }
 
@@ -610,6 +652,44 @@ export class ApartmentsService
     })
   }
 
+  // ── Toàn bộ tin đăng mọi trạng thái kèm thông tin chủ nhà (màn quản lý của Staff/Admin) ──
+  async findAllForStaff(): Promise<
+    Array<Apartment & { landlord: User | null }>
+  > {
+    const apartments = await this.apartmentRepository.find({
+      order: { createdAt: 'DESC' },
+    })
+    const landlordIds = [
+      ...new Set(apartments.map(apartment => apartment.landlordId)),
+    ].filter(id => ObjectId.isValid(id))
+
+    const landlords =
+      landlordIds.length === 0
+        ? []
+        : await this.userRepository.find({
+            where: {
+              _id: { $in: landlordIds.map(id => new ObjectId(id)) },
+            } as unknown as Record<string, unknown>,
+          })
+    const landlordById = new Map(
+      landlords.map(landlord => [landlord._id.toString(), landlord])
+    )
+
+    return apartments.map(apartment => ({
+      ...apartment,
+      landlord: landlordById.get(apartment.landlordId) ?? null,
+    }))
+  }
+
+  // ── Lấy danh sách bài đăng đã bị từ chối (cho Staff/Admin) ──
+  async findRejected(): Promise<Apartment[]> {
+    this.logger.log('Fetching rejected apartment listings for staff review')
+    return this.apartmentRepository.find({
+      where: { status: 'rejected' },
+      order: { createdAt: 'DESC' },
+    })
+  }
+
   // ── Cập nhật trạng thái kiểm duyệt căn hộ ──
   async updateStatus(
     id: string,
@@ -710,9 +790,13 @@ export class ApartmentsService
     id: string,
     dto: UpdateApartmentMediaDto
   ): Promise<Apartment> {
-    if (dto.gallery === undefined && dto.images360 === undefined) {
+    if (
+      dto.gallery === undefined &&
+      dto.images360 === undefined &&
+      dto.vrUrl === undefined
+    ) {
       throw new BadRequestException(
-        'Cần cung cấp danh sách ảnh thường hoặc ảnh 360 độ'
+        'Cần cung cấp danh sách ảnh thường, ảnh 360 độ hoặc liên kết VR Tour'
       )
     }
 
@@ -725,6 +809,7 @@ export class ApartmentsService
 
     if (dto.gallery !== undefined) apartment.gallery = dto.gallery
     if (dto.images360 !== undefined) apartment.images360 = dto.images360
+    if (dto.vrUrl !== undefined) apartment.vrUrl = dto.vrUrl
 
     return this.apartmentRepository.save(apartment)
   }
@@ -751,7 +836,7 @@ export class ApartmentsService
         name: resolvedProjectName,
         city: dto.city,
         district: dto.district,
-        location: dto.location,
+        location: resolveLocation(dto),
       })
       resolvedProjectId = project._id.toString()
       resolvedProjectName = project.name
@@ -767,7 +852,7 @@ export class ApartmentsService
         projectName: resolvedProjectName || null,
         city: dto.city,
         district: dto.district,
-        location: dto.location,
+        location: resolveLocation(dto),
       })
       resolvedBuildingId = building._id.toString()
       resolvedBuildingName = building.name
@@ -781,7 +866,7 @@ export class ApartmentsService
       projectName: resolvedProjectName,
       category: dto.category,
       description: dto.description,
-      location: dto.location,
+      location: resolveLocation(dto),
       city: dto.city,
       district: dto.district,
       ward: dto.ward,
@@ -794,16 +879,17 @@ export class ApartmentsService
       area: dto.area,
       bedrooms: dto.bedrooms,
       bathrooms: dto.bathrooms,
-      direction: dto.direction,
-      balconyDirection: dto.balconyDirection,
-      furniture: dto.furniture,
-      moveInTime: dto.moveInTime,
-      electricity: dto.electricity,
-      water: dto.water,
-      internet: dto.internet,
+      direction: dto.direction ?? '',
+      balconyDirection: dto.balconyDirection ?? '',
+      furniture: dto.furniture ?? '',
+      moveInTime: dto.moveInTime ?? '',
+      electricity: dto.electricity ?? '',
+      water: dto.water ?? '',
+      internet: dto.internet ?? '',
       gallery: dto.gallery || [],
-      images360: dto.images360 || [],
-      vrUrl: dto.vrUrl || '',
+      // Ảnh 360° / VR Tour do nhân viên chụp và gắn sau (PATCH :id/media).
+      images360: [],
+      vrUrl: '',
       amenities: dto.amenities || [],
       status: 'pending',
       isVerified: false,
@@ -828,6 +914,10 @@ export class ApartmentsService
       throw new NotFoundException(`Không tìm thấy căn hộ với ID: ${id}`)
     }
 
+    if (apartment.status !== 'pending') {
+      throw new BadRequestException('Chỉ có thể duyệt bài đăng đang chờ duyệt')
+    }
+
     if (apartment.pricingMode === 'packages') {
       validateRentalPackages(apartment.rentalPackages ?? [])
     }
@@ -836,7 +926,7 @@ export class ApartmentsService
     apartment.isVerified = true
     apartment.approvedAt = new Date()
     apartment.approvedBy = staffId
-    apartment.expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) // 30 ngày
+    apartment.expiresAt = new Date(Date.now() + LISTING_VALIDITY_DAYS * DAY_MS)
     apartment.rejectedReason = null
 
     const saved = await this.apartmentRepository.save(apartment)
@@ -868,6 +958,12 @@ export class ApartmentsService
     })
     if (!apartment) {
       throw new NotFoundException(`Không tìm thấy căn hộ với ID: ${id}`)
+    }
+
+    if (apartment.status !== 'pending') {
+      throw new BadRequestException(
+        'Chỉ có thể từ chối bài đăng đang chờ duyệt'
+      )
     }
 
     apartment.status = 'rejected'
@@ -929,7 +1025,7 @@ export class ApartmentsService
       projectName: dto.projectName || '',
       category: dto.category,
       description: dto.description,
-      location: dto.location,
+      location: resolveLocation(dto),
       city: dto.city,
       district: dto.district,
       ward: dto.ward,
@@ -942,16 +1038,15 @@ export class ApartmentsService
       area: dto.area,
       bedrooms: dto.bedrooms,
       bathrooms: dto.bathrooms,
-      direction: dto.direction,
-      balconyDirection: dto.balconyDirection,
-      furniture: dto.furniture,
-      moveInTime: dto.moveInTime,
-      electricity: dto.electricity,
-      water: dto.water,
-      internet: dto.internet,
+      direction: dto.direction ?? '',
+      balconyDirection: dto.balconyDirection ?? '',
+      furniture: dto.furniture ?? '',
+      moveInTime: dto.moveInTime ?? '',
+      electricity: dto.electricity ?? '',
+      water: dto.water ?? '',
+      internet: dto.internet ?? '',
       gallery: dto.gallery || [],
-      images360: dto.images360 || [],
-      vrUrl: dto.vrUrl || '',
+      // images360/vrUrl giữ nguyên: chủ nhà không sửa, nhân viên đã gắn thì không được xoá.
       amenities: dto.amenities || [],
       status: 'pending',
       isVerified: false,
@@ -967,8 +1062,8 @@ export class ApartmentsService
   }
 
   // ── Gia hạn bài đăng (30 ngày) ──
-  async renew(id: string, landlordId: string): Promise<Apartment> {
-    this.logger.log(`Renewing apartment: ${id} by landlord: ${landlordId}`)
+  async renew(id: string, userId: string, isStaff = false): Promise<Apartment> {
+    this.logger.log(`Renewing apartment: ${id} by user: ${userId}`)
     const apartment = await this.apartmentRepository.findOne({
       where: { _id: new ObjectId(id) },
     })
@@ -976,7 +1071,7 @@ export class ApartmentsService
       throw new NotFoundException(`Không tìm thấy căn hộ với ID: ${id}`)
     }
 
-    if (apartment.landlordId !== landlordId) {
+    if (!isStaff && apartment.landlordId !== userId) {
       throw new ForbiddenException('Bạn không có quyền gia hạn bài đăng này')
     }
 
@@ -987,8 +1082,73 @@ export class ApartmentsService
     }
 
     apartment.status = 'available'
-    apartment.expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) // Gia hạn thêm 30 ngày
+    apartment.expiresAt = new Date(Date.now() + LISTING_VALIDITY_DAYS * DAY_MS)
     apartment.rejectedReason = null
+
+    return this.apartmentRepository.save(apartment)
+  }
+
+  // ── Chỉnh sửa bài đăng (chỉ khi đang chờ duyệt hoặc bị từ chối) ──
+  async update(
+    id: string,
+    dto: UpdateApartmentDto,
+    userId: string,
+    isStaff: boolean
+  ): Promise<Apartment> {
+    this.logger.log(`Updating apartment: ${id} by user: ${userId}`)
+    const apartment = await this.apartmentRepository.findOne({
+      where: { _id: new ObjectId(id) },
+    })
+    if (!apartment) {
+      throw new NotFoundException(`Không tìm thấy căn hộ với ID: ${id}`)
+    }
+
+    if (!isStaff && apartment.landlordId !== userId) {
+      throw new ForbiddenException('Bạn không có quyền chỉnh sửa bài đăng này')
+    }
+
+    // Nhân viên sửa được mọi trạng thái và không kích hoạt duyệt lại; chủ nhà chỉ sửa khi chờ duyệt/bị từ chối.
+    if (
+      !isStaff &&
+      apartment.status !== 'pending' &&
+      apartment.status !== 'rejected'
+    ) {
+      throw new BadRequestException(
+        'Chỉ có thể chỉnh sửa bài đăng đang chờ duyệt hoặc bị từ chối'
+      )
+    }
+
+    const { rentalPackages, ...fields } = dto
+    if (
+      apartment.pricingMode === 'packages' &&
+      fields.priceMonthly !== undefined &&
+      rentalPackages === undefined
+    ) {
+      throw new BadRequestException(
+        'Tin đăng tính giá theo gói: hãy chỉnh sửa rentalPackages thay vì priceMonthly'
+      )
+    }
+    Object.assign(apartment, definedEntries(fields))
+    // Đổi đường/phường/quận/thành phố mà không gửi location thì ghép lại để địa chỉ đầy đủ không bị cũ.
+    const addressPartChanged = ADDRESS_PART_KEYS.some(
+      key => fields[key] !== undefined
+    )
+    if (addressPartChanged && fields.location === undefined) {
+      apartment.location = resolveLocation({ ...apartment, location: '' })
+    }
+
+    if (rentalPackages !== undefined) {
+      const pricing = validateRentalPackages(
+        toRentalPackageInputs(rentalPackages)
+      )
+      apartment.rentalPackages = await this.resolveExecutionPolicies(
+        pricing.packages
+      )
+      apartment.pricingMode = pricing.pricingMode
+      apartment.pricingRevision = (apartment.pricingRevision ?? 0) + 1
+      apartment.priceMonthly =
+        pricing.representativeMonthlyRent ?? apartment.priceMonthly
+    }
 
     return this.apartmentRepository.save(apartment)
   }

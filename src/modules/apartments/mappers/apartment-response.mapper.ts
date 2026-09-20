@@ -122,7 +122,118 @@ export interface MobileApartmentResponse {
   } | null
 }
 
+/**
+ * Dữ liệu "Tin đăng của tôi" cho chủ nhà: giữ nguyên giá VND và mọi trường form
+ * chỉnh sửa/nộp lại cần (web/mobile shape đổi đơn vị giá và thiếu address, street…).
+ */
+export interface LandlordApartmentResponse {
+  id: string
+  title: string
+  category: string
+  description: string
+  location: string
+  city: string
+  district: string
+  ward: string
+  street: string
+  address: string
+  priceMonthly: number
+  area: number
+  bedrooms: number
+  bathrooms: number
+  direction: string
+  balconyDirection: string
+  furniture: string
+  moveInTime: string
+  electricity: string
+  water: string
+  internet: string
+  gallery: string[]
+  images360: string[]
+  vrUrl: string
+  amenities: string[]
+  status: string
+  rejectedReason: string | null
+  submittedAt: Date | null
+  approvedAt: Date | null
+  expiresAt: Date | null
+  projectName: string
+  projectId: string | null
+  buildingName: string
+  buildingId: string | null
+  pricingMode: 'packages' | 'legacy'
+  pricingRevision: number
+  rentalPackages: RentalPackageResponse[]
+}
+
+/** Shape cho màn quản lý của nhân viên: dữ liệu chủ nhà + trạng thái xác minh + liên hệ chủ nhà. */
+export interface StaffApartmentResponse extends LandlordApartmentResponse {
+  isVerified: boolean
+  landlordId: string
+  landlord: { fullName: string; phone: string; email: string } | null
+}
+
 export class ApartmentResponseMapper {
+  static toStaffJson(
+    apartment: Apartment & { landlord?: Partial<User> | null }
+  ): StaffApartmentResponse {
+    const { landlord } = apartment
+    return {
+      ...ApartmentResponseMapper.toLandlordJson(apartment),
+      isVerified: apartment.isVerified ?? false,
+      landlordId: apartment.landlordId,
+      landlord: landlord
+        ? {
+            fullName: landlord.fullName ?? '',
+            phone: landlord.phone ?? '',
+            email: landlord.email ?? '',
+          }
+        : null,
+    }
+  }
+
+  static toLandlordJson(apartment: Apartment): LandlordApartmentResponse {
+    return {
+      id: apartment._id.toString(),
+      title: apartment.title,
+      category: apartment.category,
+      description: apartment.description,
+      location: apartment.location,
+      city: apartment.city,
+      district: apartment.district,
+      ward: apartment.ward,
+      street: apartment.street,
+      address: apartment.address,
+      priceMonthly: apartment.priceMonthly,
+      area: apartment.area,
+      bedrooms: apartment.bedrooms,
+      bathrooms: apartment.bathrooms,
+      direction: apartment.direction ?? '',
+      balconyDirection: apartment.balconyDirection ?? '',
+      furniture: apartment.furniture ?? '',
+      moveInTime: apartment.moveInTime ?? '',
+      electricity: apartment.electricity ?? '',
+      water: apartment.water ?? '',
+      internet: apartment.internet ?? '',
+      gallery: apartment.gallery ?? [],
+      images360: apartment.images360 ?? [],
+      vrUrl: apartment.vrUrl ?? '',
+      amenities: apartment.amenities ?? [],
+      status: apartment.status,
+      rejectedReason: apartment.rejectedReason ?? null,
+      submittedAt: apartment.submittedAt ?? null,
+      approvedAt: apartment.approvedAt ?? null,
+      expiresAt: apartment.expiresAt ?? null,
+      projectName: apartment.projectName ?? '',
+      projectId: apartment.projectId ?? null,
+      buildingName: apartment.buildingName ?? '',
+      buildingId: apartment.buildingId ?? null,
+      pricingMode: apartment.pricingMode ?? 'legacy',
+      pricingRevision: apartment.pricingRevision ?? 0,
+      rentalPackages: ApartmentResponseMapper.mapRentalPackages(apartment),
+    }
+  }
+
   private static mapRentalPackages(
     apartment: Apartment
   ): RentalPackageResponse[] {

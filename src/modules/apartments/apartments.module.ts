@@ -9,6 +9,8 @@ import { ProjectsModule } from '../projects/projects.module'
 import { BuildingsModule } from '../buildings/buildings.module'
 import { SavedSearchesModule } from '../saved-searches/saved-searches.module'
 import { ListingQualityService } from './listing-quality.service'
+import { ApartmentMediaUploadService } from './apartment-media-upload.service'
+import { ApartmentExpirationService } from './apartment-expiration.service'
 import { RentalFlowConfigModule } from '../rental-flow-config/rental-flow-config.module'
 
 @Module({
@@ -20,7 +22,12 @@ import { RentalFlowConfigModule } from '../rental-flow-config/rental-flow-config
     SavedSearchesModule,
     RentalFlowConfigModule,
   ],
-  providers: [ApartmentsService, ListingQualityService],
+  providers: [
+    ApartmentsService,
+    ListingQualityService,
+    ApartmentMediaUploadService,
+    ApartmentExpirationService,
+  ],
   controllers: [ApartmentsController],
   exports: [TypeOrmModule, ApartmentsService],
 })

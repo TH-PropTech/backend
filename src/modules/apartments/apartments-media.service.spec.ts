@@ -57,6 +57,27 @@ describe('ApartmentsService.updateMedia', () => {
     expect(updated.images360).toEqual(['/new-360.jpg'])
   })
 
+  it('sets the VR tour link staff captured without touching images', async () => {
+    const apartment = {
+      gallery: ['/keep.jpg'],
+      images360: ['/keep-360.jpg'],
+      vrUrl: '',
+    } as Apartment
+    const repository = {
+      findOne: jest.fn().mockResolvedValue(apartment),
+      save: jest.fn().mockImplementation(value => Promise.resolve(value)),
+    }
+    const service = createService(repository)
+
+    const updated = await service.updateMedia(apartmentId, {
+      vrUrl: 'https://my.matterport.com/show/?m=abc',
+    })
+
+    expect(updated.vrUrl).toBe('https://my.matterport.com/show/?m=abc')
+    expect(updated.gallery).toEqual(['/keep.jpg'])
+    expect(updated.images360).toEqual(['/keep-360.jpg'])
+  })
+
   it('rejects an empty media update', async () => {
     const repository = {
       findOne: jest.fn(),
