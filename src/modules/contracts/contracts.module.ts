@@ -19,6 +19,7 @@ import { SmartOtpModule } from '../smart-otp/smart-otp.module'
 import { SmartCaSigningSession } from './smartca/smartca-signing-session.schema'
 import { SmartCaProvider } from './smartca/smartca.provider'
 import { SmartCaSigningService } from './smartca/smartca-signing.service'
+import { PropertyOwnershipTransferModule } from '../property-ownership-transfer/property-ownership-transfer.module'
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { SmartCaSigningService } from './smartca/smartca-signing.service'
     KycModule,
     PaymentsModule,
     SmartOtpModule,
+    PropertyOwnershipTransferModule,
   ],
   controllers: [ContractsController, DepositAgreementsController],
   providers: [

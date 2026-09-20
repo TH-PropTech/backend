@@ -19,6 +19,7 @@ import { NotificationsService } from '../notifications/notifications.service'
 import { LegalTermsService } from '../legal-terms/legal-terms.service'
 import { RentalFlowConfigResolver } from '../rental-flow-config/rental-flow-config-resolver.service'
 import { RentalExecutionPoliciesService } from '../rental-flow-config/rental-execution-policies.service'
+import { OwnershipTransferResolver } from '../property-ownership-transfer/ownership-transfer.resolver'
 import {
   getDefaultRentalExecutionPolicyRef,
   type RentalExecutionPolicyRef,
@@ -67,7 +68,9 @@ export class RentalApplicationsService {
     @Optional() private readonly legalTermsService?: LegalTermsService,
     @Optional() private readonly flowConfigResolver?: RentalFlowConfigResolver,
     @Optional()
-    private readonly executionPoliciesService?: RentalExecutionPoliciesService
+    private readonly executionPoliciesService?: RentalExecutionPoliciesService,
+    @Optional()
+    private readonly ownershipTransferResolver?: OwnershipTransferResolver
   ) {}
 
   async getContext(
@@ -252,13 +255,60 @@ export class RentalApplicationsService {
         ) {
           throw new ConflictException('FLOW_CONFIG_STALE')
         }
+
+        if (resolved.steps?.step1) {
+          const s1 = resolved.steps.step1
+          const moveInDateNormalized = new Date(dto.moveInDate)
+          moveInDateNormalized.setHours(0, 0, 0, 0)
+          const diffMs = moveInDateNormalized.getTime() - today.getTime()
+          const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
+
+          if (
+            s1.minMoveInLeadDays !== undefined &&
+            diffDays < s1.minMoveInLeadDays
+          ) {
+            throw new BadRequestException(
+              `Ngày vào ở phải sau hôm nay ít nhất ${s1.minMoveInLeadDays} ngày`
+            )
+          }
+          if (
+            s1.maxMoveInLeadDays !== undefined &&
+            diffDays > s1.maxMoveInLeadDays
+          ) {
+            throw new BadRequestException(
+              `Ngày vào ở không được vượt quá ${s1.maxMoveInLeadDays} ngày tính từ hôm nay`
+            )
+          }
+          if (
+            s1.minOccupants !== undefined &&
+            dto.occupants < s1.minOccupants
+          ) {
+            throw new BadRequestException(
+              `Số người ở tối thiểu là ${s1.minOccupants} người`
+            )
+          }
+          if (
+            s1.maxOccupants !== undefined &&
+            dto.occupants > s1.maxOccupants
+          ) {
+            throw new BadRequestException(
+              `Số người ở tối đa là ${s1.maxOccupants} người`
+            )
+          }
+        }
+
         flowProfileRef = {
           profileId: resolved.profileId,
           version: resolved.version,
           hash: resolved.hash,
         }
       } catch (err) {
-        if (err instanceof ConflictException) throw err
+        if (
+          err instanceof ConflictException ||
+          err instanceof BadRequestException
+        ) {
+          throw err
+        }
         this.logger.warn(
           `Failed to resolve flow profile in create: ${String(err)}`
         )
@@ -330,6 +380,25 @@ export class RentalApplicationsService {
     landlordId: string,
     query: RentalApplicationQueryDto
   ): Promise<RentalApplicationListResult> {
+    if (this.ownershipTransferResolver) {
+      const records = await this.repository.find({
+        order: { updatedAt: 'DESC' },
+      })
+      const visible = await Promise.all(
+        records.map(async application => {
+          if (application.landlordId === landlordId) return true
+          return this.ownershipTransferResolver?.canAccessProperty(
+            landlordId,
+            application.apartmentId,
+            application.landlordId
+          )
+        })
+      )
+      return this.listRecords(
+        records.filter((_application, index) => visible[index]),
+        query
+      )
+    }
     return this.list({ landlordId }, query)
   }
 
@@ -339,11 +408,16 @@ export class RentalApplicationsService {
     isStaff = false
   ): Promise<RentalApplication> {
     const application = await this.findOrThrow(id)
-    if (
-      !isStaff &&
-      application.tenantId !== actorId &&
-      application.landlordId !== actorId
-    ) {
+    const canReadAsLandlord =
+      application.landlordId === actorId ||
+      (this.ownershipTransferResolver
+        ? await this.ownershipTransferResolver.canAccessProperty(
+            actorId,
+            application.apartmentId,
+            application.landlordId
+          )
+        : false)
+    if (!isStaff && application.tenantId !== actorId && !canReadAsLandlord) {
       throw new ForbiddenException('APPLICATION_ACCESS_DENIED')
     }
     return this.withContractHandoff(application)
@@ -603,6 +677,13 @@ export class RentalApplicationsService {
       where,
       order: { updatedAt: 'DESC' },
     })
+    return this.listRecords(records, query)
+  }
+
+  private listRecords(
+    records: RentalApplication[],
+    query: RentalApplicationQueryDto
+  ): RentalApplicationListResult {
     const filtered = query.status
       ? records.filter(item => item.status === query.status)
       : records

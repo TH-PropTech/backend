@@ -13,6 +13,7 @@ import { KycService } from '../kyc/kyc.service'
 import { LedgerAuditQueryService } from '../fabric/ledger-audit-query.service'
 import { FabricService } from '../fabric/fabric.service'
 import { ContractDocumentProjector } from './legal/contract-document.projector'
+import { OwnershipTransferResolver } from '../property-ownership-transfer/ownership-transfer.resolver'
 import {
   ContractViewDto,
   ContractPartyViewDto,
@@ -31,7 +32,9 @@ export class ContractViewService {
     private readonly depositAgreementRepository: Repository<DepositAgreement>,
     private readonly kycService: KycService,
     private readonly ledgerAuditQueryService: LedgerAuditQueryService,
-    @Optional() private readonly fabricService?: FabricService
+    @Optional() private readonly fabricService?: FabricService,
+    @Optional()
+    private readonly ownershipTransferResolver?: OwnershipTransferResolver
   ) {}
 
   /**
@@ -56,8 +59,20 @@ export class ContractViewService {
 
     const isTenant = contract.tenantId === actorId
     const isLandlord = contract.landlordId === actorId
+    const access = this.ownershipTransferResolver
+      ? await this.ownershipTransferResolver.resolveContractAccess(
+          actorId,
+          contract,
+          isStaff
+        )
+      : {
+          canReadWorkspace: isStaff || isTenant || isLandlord,
+          canSign: !isStaff && (isTenant || isLandlord),
+          isOriginalParticipant: isTenant || isLandlord,
+          isSuccessorOwner: false,
+        }
 
-    if (!isStaff && !isTenant && !isLandlord) {
+    if (!access.canReadWorkspace) {
       throw new ForbiddenException('CONTRACT_ACCESS_DENIED')
     }
 
@@ -362,6 +377,7 @@ export class ContractViewService {
             contract.status ?? ''
           ),
       },
+      access,
       ledger,
     }
   }

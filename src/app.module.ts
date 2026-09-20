@@ -45,8 +45,10 @@ import { ConditionAnalysisModule } from './modules/condition-analysis/condition-
 import { LocationRiskModule } from './modules/location-risk/location-risk.module'
 import { OperationsModule } from './modules/operations/operations.module'
 import { RentalFlowConfigModule } from './modules/rental-flow-config/rental-flow-config.module'
+import { PropertyOwnershipTransferModule } from './modules/property-ownership-transfer/property-ownership-transfer.module'
 
 @Module({
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
@@ -74,6 +76,7 @@ import { RentalFlowConfigModule } from './modules/rental-flow-config/rental-flow
         limit: 10,
       },
     ]),
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
     ScheduleModule.forRoot(),
     LoggerModule,
     HealthModule,
@@ -114,6 +117,7 @@ import { RentalFlowConfigModule } from './modules/rental-flow-config/rental-flow
     LocationRiskModule,
     OperationsModule,
     RentalFlowConfigModule,
+    PropertyOwnershipTransferModule,
   ],
 })
 export class AppModule {}

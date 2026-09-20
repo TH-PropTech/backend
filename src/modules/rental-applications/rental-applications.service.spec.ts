@@ -8,9 +8,11 @@ import { ObjectId } from 'mongodb'
 import type { Repository } from 'typeorm'
 import type { ApartmentsService } from '../apartments/apartments.service'
 import type { LegalTermsService } from '../legal-terms/legal-terms.service'
+import type { RentalFlowConfigResolver } from '../rental-flow-config/rental-flow-config-resolver.service'
 import type { CreateRentalApplicationDto } from './dto/create-rental-application.dto'
 import type { RentalApplication } from './schemas/rental-application.schema'
 import { RentalApplicationsService } from './rental-applications.service'
+import type { OwnershipTransferResolver } from '../property-ownership-transfer/ownership-transfer.resolver'
 import {
   DEFAULT_RENTAL_EXECUTION_POLICY_INPUTS,
   computeRentalExecutionPolicyHash,
@@ -241,6 +243,51 @@ describe('RentalApplicationsService', () => {
     ).rejects.toThrow('APPLICATION_ACCESS_DENIED')
   })
 
+  it('lists a closed application for a verified successor while preserving provenance', async () => {
+    const transferredApplication = application({
+      apartmentId: new ObjectId().toString(),
+      landlordId: 'original-landlord',
+      originalLandlordId: 'original-landlord',
+      ownershipTransferId: 'transfer-1',
+      status: 'accepted',
+      actorId: 'original-landlord',
+    })
+    const ownershipTransferResolver = {
+      canAccessProperty: jest.fn().mockResolvedValue(true),
+    }
+    const serviceWithResolver = new RentalApplicationsService(
+      repository as unknown as Repository<RentalApplication>,
+      apartments as unknown as ApartmentsService,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      ownershipTransferResolver as unknown as OwnershipTransferResolver
+    )
+    repository.find.mockResolvedValue([transferredApplication])
+
+    const result = await serviceWithResolver.getReceived('successor-landlord', {
+      page: 1,
+      limit: 20,
+    })
+
+    expect(result.items).toHaveLength(1)
+    expect(result.items[0]).toEqual(
+      expect.objectContaining({
+        originalLandlordId: 'original-landlord',
+        ownershipTransferId: 'transfer-1',
+      })
+    )
+    expect(ownershipTransferResolver.canAccessProperty).toHaveBeenCalledWith(
+      'successor-landlord',
+      transferredApplication.apartmentId,
+      'original-landlord'
+    )
+  })
+
   it('rejects past move-in dates and applying to own listing', async () => {
     apartments.findOne.mockResolvedValue(apartment)
     await expect(
@@ -409,5 +456,140 @@ describe('RentalApplicationsService', () => {
       contentHash: 'hash-v1',
     })
     expect(result.reviewSnapshot?.reviewHash).toBeDefined()
+  })
+
+  describe('Step 1 Flow Profile validations', () => {
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+
+    const flowResolverMock = {
+      resolveProfile: jest.fn().mockResolvedValue({
+        profileId: 'flow-p1',
+        version: 2,
+        hash: 'flow-hash-v2',
+        precedence: 'GLOBAL',
+        steps: {
+          step1: {
+            moveInDateLabel: 'Ngày vào ở dự kiến',
+            minMoveInLeadDays: 3,
+            maxMoveInLeadDays: 30,
+            minOccupants: 2,
+            maxOccupants: 4,
+            allowNotes: true,
+            notesMaxLength: 500,
+          },
+        },
+      }),
+    }
+
+    const serviceWithFlow = new RentalApplicationsService(
+      repository as unknown as Repository<RentalApplication>,
+      apartments as unknown as ApartmentsService,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      flowResolverMock as unknown as RentalFlowConfigResolver
+    )
+
+    it('rejects when moveInDate lead days is less than minMoveInLeadDays', async () => {
+      apartments.findOne.mockResolvedValue(apartment)
+      repository.findOne.mockResolvedValue(null)
+
+      const tooEarly = new Date(today)
+      tooEarly.setDate(today.getDate() + 1) // 1 day lead, min is 3
+
+      await expect(
+        serviceWithFlow.create(
+          'tenant-1',
+          input({
+            moveInDate: tooEarly.toISOString().split('T')[0]!,
+            occupants: 2,
+            flowProfileVersion: 2,
+            flowProfileHash: 'flow-hash-v2',
+          })
+        )
+      ).rejects.toThrow(BadRequestException)
+    })
+
+    it('rejects when moveInDate lead days exceeds maxMoveInLeadDays', async () => {
+      apartments.findOne.mockResolvedValue(apartment)
+      repository.findOne.mockResolvedValue(null)
+
+      const tooLate = new Date(today)
+      tooLate.setDate(today.getDate() + 45) // 45 days lead, max is 30
+
+      await expect(
+        serviceWithFlow.create(
+          'tenant-1',
+          input({
+            moveInDate: tooLate.toISOString().split('T')[0]!,
+            occupants: 2,
+            flowProfileVersion: 2,
+            flowProfileHash: 'flow-hash-v2',
+          })
+        )
+      ).rejects.toThrow(BadRequestException)
+    })
+
+    it('rejects when occupants is below minOccupants or above maxOccupants', async () => {
+      apartments.findOne.mockResolvedValue(apartment)
+      repository.findOne.mockResolvedValue(null)
+
+      const validDate = new Date(today)
+      validDate.setDate(today.getDate() + 10)
+
+      // Below minOccupants (min is 2, testing with 1)
+      await expect(
+        serviceWithFlow.create(
+          'tenant-1',
+          input({
+            moveInDate: validDate.toISOString().split('T')[0]!,
+            occupants: 1,
+            flowProfileVersion: 2,
+            flowProfileHash: 'flow-hash-v2',
+          })
+        )
+      ).rejects.toThrow(BadRequestException)
+
+      // Above maxOccupants (max is 4, testing with 5)
+      await expect(
+        serviceWithFlow.create(
+          'tenant-1',
+          input({
+            moveInDate: validDate.toISOString().split('T')[0]!,
+            occupants: 5,
+            flowProfileVersion: 2,
+            flowProfileHash: 'flow-hash-v2',
+          })
+        )
+      ).rejects.toThrow(BadRequestException)
+    })
+
+    it('succeeds when moveInDate and occupants satisfy Step 1 flow profile rules', async () => {
+      apartments.findOne.mockResolvedValue(apartment)
+      repository.findOne.mockResolvedValue(null)
+      repository.create.mockImplementation(
+        (value: unknown) => value as RentalApplication
+      )
+      repository.save.mockImplementation(value => Promise.resolve(value))
+
+      const validDate = new Date(today)
+      validDate.setDate(today.getDate() + 10) // 10 days lead: 3 <= 10 <= 30
+
+      const result = await serviceWithFlow.create(
+        'tenant-1',
+        input({
+          moveInDate: validDate.toISOString().split('T')[0]!,
+          occupants: 3, // 2 <= 3 <= 4
+          flowProfileVersion: 2,
+          flowProfileHash: 'flow-hash-v2',
+        })
+      )
+
+      expect(result).toBeDefined()
+      expect(result.occupants).toBe(3)
+    })
   })
 })

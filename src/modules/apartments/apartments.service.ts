@@ -8,7 +8,7 @@ import {
   Optional,
 } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
-import { FindOperator, IsNull, Repository } from 'typeorm'
+import { FindOperator, FindOptionsWhere, IsNull, Repository } from 'typeorm'
 import { ObjectId } from 'mongodb'
 import { Apartment } from './schemas/apartment.schema'
 import { User } from '../users/schemas/user.schema'
@@ -53,6 +53,8 @@ interface ApartmentMongoQuery {
   amenities?: { $all: string[] }
   [key: string]: unknown
 }
+
+type ApartmentWithLandlord = Apartment & { landlord?: User | null }
 
 function toRentalPackageInputs(
   packages: CreateApartmentDto['rentalPackages']
@@ -313,7 +315,9 @@ export class ApartmentsService {
   }
 
   // ── Lấy toàn bộ danh sách căn hộ kèm bộ lọc ──
-  async findAll(filters?: ApartmentFilterDto): Promise<Apartment[]> {
+  async findAll(
+    filters?: ApartmentFilterDto
+  ): Promise<ApartmentWithLandlord[]> {
     this.logger.log(
       `Fetching apartments with filters: ${JSON.stringify(filters)}`
     )
@@ -482,11 +486,13 @@ export class ApartmentsService {
       query.status = 'available'
     }
 
-    return this.apartmentRepository.find({
+    const apartments = await this.apartmentRepository.find({
       // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment
       where: query as any,
       order: { createdAt: 'DESC' },
     })
+
+    return this.attachCurrentLandlords(apartments)
   }
 
   // ── Lấy chi tiết căn hộ theo ID ──
@@ -635,21 +641,54 @@ export class ApartmentsService {
   }
 
   // ── Lấy danh sách căn hộ của một chủ nhà ──
-  async findByLandlord(landlordId: string): Promise<Apartment[]> {
+  async findByLandlord(landlordId: string): Promise<ApartmentWithLandlord[]> {
     this.logger.log(`Fetching apartments for landlord: ${landlordId}`)
-    return this.apartmentRepository.find({
+    const apartments = await this.apartmentRepository.find({
       where: { landlordId },
       order: { createdAt: 'DESC' },
     })
+    return this.attachCurrentLandlords(apartments)
   }
 
   // ── Lấy danh sách bài đăng chờ duyệt (cho Staff/Admin) ──
-  async findPending(): Promise<Apartment[]> {
+  async findPending(): Promise<ApartmentWithLandlord[]> {
     this.logger.log('Fetching pending apartment listings for staff review')
-    return this.apartmentRepository.find({
+    const apartments = await this.apartmentRepository.find({
       where: { status: 'pending' },
       order: { createdAt: 'ASC' }, // FIFO — bài cũ nhất duyệt trước
     })
+    return this.attachCurrentLandlords(apartments)
+  }
+
+  private async attachCurrentLandlords(
+    apartments: readonly Apartment[]
+  ): Promise<ApartmentWithLandlord[]> {
+    const landlordIds = [
+      ...new Set(
+        apartments
+          .map(apartment => apartment.landlordId)
+          .filter(landlordId => ObjectId.isValid(landlordId))
+      ),
+    ]
+
+    const landlords =
+      landlordIds.length > 0
+        ? await this.userRepository.find({
+            where: {
+              _id: {
+                $in: landlordIds.map(landlordId => new ObjectId(landlordId)),
+              },
+            } as unknown as FindOptionsWhere<User>,
+          })
+        : []
+    const landlordMap = new Map(
+      landlords.map(landlord => [landlord._id.toString(), landlord])
+    )
+
+    return apartments.map(apartment => ({
+      ...apartment,
+      landlord: landlordMap.get(apartment.landlordId) ?? null,
+    }))
   }
 
   // ── Toàn bộ tin đăng mọi trạng thái kèm thông tin chủ nhà (màn quản lý của Staff/Admin) ──
