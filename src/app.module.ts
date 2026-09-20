@@ -44,6 +44,7 @@ import { ConditionAnalysisModule } from './modules/condition-analysis/condition-
 import { LocationRiskModule } from './modules/location-risk/location-risk.module'
 import { OperationsModule } from './modules/operations/operations.module'
 import { RentalFlowConfigModule } from './modules/rental-flow-config/rental-flow-config.module'
+import { PropertyOwnershipTransferModule } from './modules/property-ownership-transfer/property-ownership-transfer.module'
 
 @Module({
   imports: [
@@ -112,6 +113,7 @@ import { RentalFlowConfigModule } from './modules/rental-flow-config/rental-flow
     LocationRiskModule,
     OperationsModule,
     RentalFlowConfigModule,
+    PropertyOwnershipTransferModule,
   ],
 })
 export class AppModule {}

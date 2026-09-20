@@ -14,6 +14,7 @@ import { NotificationsService } from '../notifications/notifications.service'
 import { generatePaymentSchedule } from './payment-schedule.util'
 import { reminderDateKey, vietnamDateKey } from './payment-reminder.util'
 import { Payment } from './schemas/payment.schema'
+import { OwnershipTransferResolver } from '../property-ownership-transfer/ownership-transfer.resolver'
 
 @Injectable()
 export class PaymentsService {
@@ -23,7 +24,9 @@ export class PaymentsService {
     @InjectRepository(Contract)
     private readonly contractRepository: Repository<Contract>,
     private readonly notificationsService?: NotificationsService,
-    @Optional() private readonly ledgerOutboxService?: LedgerOutboxService
+    @Optional() private readonly ledgerOutboxService?: LedgerOutboxService,
+    @Optional()
+    private readonly ownershipTransferResolver?: OwnershipTransferResolver
   ) {}
 
   async generateSchedule(contract: Contract): Promise<Payment[]> {
@@ -74,11 +77,20 @@ export class PaymentsService {
     isStaff: boolean
   ): Promise<Payment[]> {
     const contract = await this.findContract(contractId)
-    if (
-      !isStaff &&
-      contract.tenantId !== actorId &&
-      contract.landlordId !== actorId
-    ) {
+    const canAccess = this.ownershipTransferResolver
+      ? await this.ownershipTransferResolver.canAccessPayment(
+          actorId,
+          {
+            landlordId: contract.landlordId,
+            tenantId: contract.tenantId,
+          },
+          contract,
+          isStaff
+        )
+      : isStaff ||
+        contract.tenantId === actorId ||
+        contract.landlordId === actorId
+    if (!canAccess) {
       throw new ForbiddenException('PAYMENT_ACCESS_DENIED')
     }
     return this.paymentRepository.find({

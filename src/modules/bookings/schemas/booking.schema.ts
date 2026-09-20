@@ -24,6 +24,13 @@ export class Booking {
   @Column()
   landlordId!: string
 
+  /** Original owner retained when an actionable booking is reassigned. */
+  @Column({ nullable: true })
+  originalLandlordId?: string | null
+
+  @Column({ nullable: true })
+  ownershipTransferId?: string | null
+
   /** ID khách thuê — người gửi yêu cầu đặt lịch */
   @Column()
   tenantId!: string

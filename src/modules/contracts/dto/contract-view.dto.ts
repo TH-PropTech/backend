@@ -216,6 +216,20 @@ export class ContractActionsViewDto {
   canLockContent!: boolean
 }
 
+export class ContractAccessViewDto {
+  @ApiProperty()
+  canReadWorkspace!: boolean
+
+  @ApiProperty()
+  canSign!: boolean
+
+  @ApiProperty()
+  isOriginalParticipant!: boolean
+
+  @ApiProperty()
+  isSuccessorOwner!: boolean
+}
+
 export class ContractLedgerSummaryDto {
   @ApiProperty({ enum: ['simulation', 'fabric'] })
   networkMode!: 'simulation' | 'fabric'
@@ -313,6 +327,9 @@ export class ContractViewDto {
 
   @ApiProperty({ type: ContractActionsViewDto })
   actions!: ContractActionsViewDto
+
+  @ApiProperty({ type: ContractAccessViewDto })
+  access!: ContractAccessViewDto
 
   @ApiProperty({ type: ContractLedgerSummaryDto })
   ledger!: ContractLedgerSummaryDto

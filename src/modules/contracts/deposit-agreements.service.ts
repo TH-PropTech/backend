@@ -16,6 +16,7 @@ import { validateDepositConsent } from './deposit-consent.util'
 import { DepositAgreement } from './schemas/deposit-agreement.schema'
 import { LedgerOutboxService } from '../fabric/ledger-outbox.service'
 import { ContractsService } from './contracts.service'
+import { OwnershipTransferResolver } from '../property-ownership-transfer/ownership-transfer.resolver'
 
 @Injectable()
 export class DepositAgreementsService {
@@ -27,7 +28,9 @@ export class DepositAgreementsService {
     @Optional()
     @InjectRepository(Apartment)
     private readonly apartmentRepository?: Repository<Apartment>,
-    @Optional() private readonly contractsService?: ContractsService
+    @Optional() private readonly contractsService?: ContractsService,
+    @Optional()
+    private readonly ownershipTransferResolver?: OwnershipTransferResolver
   ) {}
 
   async createFromApplicationSnapshot(input: {
@@ -93,11 +96,16 @@ export class DepositAgreementsService {
     isStaff: boolean
   ): Promise<DepositAgreement> {
     const agreement = await this.findById(id)
-    if (
-      !isStaff &&
-      agreement.tenantId !== actorId &&
-      agreement.landlordId !== actorId
-    ) {
+    const canAccess = this.ownershipTransferResolver
+      ? await this.ownershipTransferResolver.canAccessDeposit(
+          actorId,
+          agreement,
+          isStaff
+        )
+      : isStaff ||
+        agreement.tenantId === actorId ||
+        agreement.landlordId === actorId
+    if (!canAccess) {
       throw new ForbiddenException('DEPOSIT_ACCESS_DENIED')
     }
     return agreement

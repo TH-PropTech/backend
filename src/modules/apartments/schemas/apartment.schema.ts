@@ -125,6 +125,10 @@ export class Apartment {
   @Column()
   landlordId!: string
 
+  /** Transfer audit reference; landlordId remains the current owner. */
+  @Column({ nullable: true })
+  ownershipTransferId?: string | null
+
   @Column({ nullable: true })
   submittedAt?: Date | null
 

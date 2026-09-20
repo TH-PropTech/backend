@@ -9,11 +9,15 @@ import { DepositAgreement } from './schemas/deposit-agreement.schema'
 import { KycService } from '../kyc/kyc.service'
 import type { KycRecord } from '../kyc/schemas/kyc-record.schema'
 import { LedgerAuditQueryService } from '../fabric/ledger-audit-query.service'
+import { OwnershipTransferResolver } from '../property-ownership-transfer/ownership-transfer.resolver'
 
 describe('ContractViewService', () => {
   let service: ContractViewService
   let contractRepo: jest.Mocked<Repository<Contract>>
   let kycService: jest.Mocked<KycService>
+  let ownershipTransferResolver: {
+    resolveContractAccess: jest.Mock
+  }
 
   const validContractId = new ObjectId().toString()
 
@@ -54,6 +58,9 @@ describe('ContractViewService', () => {
     const mockLedgerQueryService = {
       getContractEvents: jest.fn().mockResolvedValue([]),
     }
+    const mockOwnershipTransferResolver = {
+      resolveContractAccess: jest.fn(),
+    }
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -74,12 +81,33 @@ describe('ContractViewService', () => {
           provide: LedgerAuditQueryService,
           useValue: mockLedgerQueryService,
         },
+        {
+          provide: OwnershipTransferResolver,
+          useValue: mockOwnershipTransferResolver,
+        },
       ],
     }).compile()
 
     service = module.get<ContractViewService>(ContractViewService)
     contractRepo = module.get(getRepositoryToken(Contract))
     kycService = module.get(KycService)
+    ownershipTransferResolver = module.get(OwnershipTransferResolver)
+    ownershipTransferResolver.resolveContractAccess.mockImplementation(
+      (
+        actorId: string,
+        contract: Pick<Contract, 'landlordId' | 'tenantId'>,
+        isStaff: boolean
+      ) => {
+        const isOriginalParticipant =
+          actorId === contract.landlordId || actorId === contract.tenantId
+        return {
+          canReadWorkspace: isStaff || isOriginalParticipant,
+          canSign: !isStaff && isOriginalParticipant,
+          isOriginalParticipant,
+          isSuccessorOwner: false,
+        }
+      }
+    )
   })
 
   it('should return enriched ContractViewDto for authorized tenant and calculate eligible=true', async () => {
@@ -117,6 +145,35 @@ describe('ContractViewService', () => {
     await expect(
       service.getForActor(validContractId, 'intruder-user', false)
     ).rejects.toThrow(ForbiddenException)
+  })
+
+  it('allows a verified successor to read without granting signing access', async () => {
+    contractRepo.findOne.mockResolvedValue(mockContract as Contract)
+    ownershipTransferResolver.resolveContractAccess.mockResolvedValueOnce({
+      canReadWorkspace: true,
+      canSign: false,
+      isOriginalParticipant: false,
+      isSuccessorOwner: true,
+    })
+    kycService.findByUserId.mockResolvedValue({
+      status: 'verified',
+      idCardNumber: '079987654321',
+    } as KycRecord)
+
+    const view = await service.getForActor(
+      validContractId,
+      'successor-user',
+      false
+    )
+
+    expect(view.access).toEqual({
+      canReadWorkspace: true,
+      canSign: false,
+      isOriginalParticipant: false,
+      isSuccessorOwner: true,
+    })
+    expect(view.parties.landlord.id).toBe('user-landlord-1')
+    expect(view.actions.signingEligibility.reasonCode).toBe('NOT_PARTICIPANT')
   })
 
   it('should return eligible=false with KYC_NOT_VERIFIED if tenant KYC is not verified', async () => {
