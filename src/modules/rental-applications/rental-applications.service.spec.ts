@@ -373,6 +373,23 @@ describe('RentalApplicationsService', () => {
     ).rejects.toThrow(ConflictException)
   })
 
+  it('retries provisionAcceptedApplication when status is accepted and provisioningStatus was failed', async () => {
+    const existing = application({
+      status: 'accepted',
+      provisioningStatus: 'failed',
+      provisioningErrorCode: 'RENTAL_RESERVATION_CONFLICT',
+    })
+    repository.findOne.mockResolvedValue(existing)
+
+    const result = await service.respond(
+      '507f1f77bcf86cd799439011',
+      'landlord-1',
+      { status: 'accepted', reasonCode: 'APPROVED' }
+    )
+
+    expect(result.status).toBe('accepted')
+  })
+
   it('returns not found for invalid IDs without repository access', async () => {
     await expect(
       service.respond('bad-id', 'landlord-1', {

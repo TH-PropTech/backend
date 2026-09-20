@@ -8,7 +8,7 @@ import {
   Optional,
 } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
-import { FindOperator, FindOptionsWhere, IsNull, Repository } from 'typeorm'
+import { FindOperator, FindOptionsWhere, Repository } from 'typeorm'
 import { ObjectId } from 'mongodb'
 import { Apartment } from './schemas/apartment.schema'
 import { User } from '../users/schemas/user.schema'
@@ -553,21 +553,38 @@ export class ApartmentsService {
       throw new NotFoundException('RENTAL_PROPERTY_NOT_FOUND')
     }
 
-    const result = await this.apartmentRepository.update(
-      {
-        _id: new ObjectId(apartmentId),
-        status: 'available',
-        rentalReservation: IsNull(),
-      },
-      {
-        rentalReservation: {
-          applicationId,
-          reservedAt: new Date(),
-          mode: 'application-accepted',
-        },
-      }
-    )
-    return result.affected === 1
+    const apartment = await this.apartmentRepository.findOne({
+      where: { _id: new ObjectId(apartmentId) },
+    })
+
+    if (!apartment) {
+      throw new NotFoundException('RENTAL_PROPERTY_NOT_FOUND')
+    }
+
+    if (apartment.status !== 'available') {
+      return false
+    }
+
+    const existing = apartment.rentalReservation
+    if (existing && existing.applicationId !== applicationId) {
+      return false
+    }
+
+    if (
+      existing &&
+      existing.applicationId === applicationId &&
+      existing.mode === 'application-accepted'
+    ) {
+      return true
+    }
+
+    apartment.rentalReservation = {
+      applicationId,
+      reservedAt: existing?.reservedAt ?? new Date(),
+      mode: 'application-accepted',
+    }
+    await this.apartmentRepository.save(apartment)
+    return true
   }
 
   async markRentalDepositPaid(
