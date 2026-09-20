@@ -503,7 +503,7 @@ export class BookingsService {
    */
   async findOneById(
     id: string,
-    currentUser?: { userId?: string; roles?: string[] }
+    currentUser?: { userId?: string | undefined; roles?: string[] | undefined }
   ): Promise<Booking> {
     try {
       const booking = await this.bookingRepository.findOne({
