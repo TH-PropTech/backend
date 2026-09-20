@@ -460,6 +460,13 @@ export class RentalApplicationsService {
     ) {
       return application
     }
+    if (
+      application.status === 'accepted' &&
+      application.provisioningStatus === 'failed' &&
+      dto.status === 'accepted'
+    ) {
+      return this.provisionAcceptedApplication(application)
+    }
     if (application.status !== 'pending') {
       throw new ConflictException('Application has already been resolved')
     }

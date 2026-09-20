@@ -43,6 +43,12 @@ describe('ContractDocumentProjector', () => {
     }
 
     expect(result.sections[0]!.content).toContain('Masteri Thảo Điền')
+    expect(result.sections[0]!.title).toBe(
+      'Đối tượng hợp đồng và căn hộ cho thuê'
+    )
+    for (const section of result.sections) {
+      expect(section.title).not.toMatch(/^Điều\s+\d+\./)
+    }
     expect(result.sections[3]!.content).toContain('18.000.000 VNĐ')
     expect(result.sections[4]!.content).toContain('36.000.000 VNĐ')
   })
