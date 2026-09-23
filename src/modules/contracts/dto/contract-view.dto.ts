@@ -95,6 +95,26 @@ export class ContractDocumentAnnexDto {
   required!: boolean
 }
 
+export class ContractCanonicalArtifactDto {
+  @ApiProperty()
+  artifactId!: string
+
+  @ApiProperty()
+  revision!: number
+
+  @ApiProperty()
+  templateKey!: string
+
+  @ApiProperty()
+  templateVersion!: number
+
+  @ApiProperty()
+  artifactHash!: string
+
+  @ApiProperty({ enum: ['application/pdf'] })
+  contentType!: 'application/pdf'
+}
+
 export class ContractDocumentViewDto {
   @ApiProperty({ enum: ['draft', 'locked'] })
   mode!: 'draft' | 'locked'
@@ -122,6 +142,9 @@ export class ContractDocumentViewDto {
 
   @ApiProperty({ type: [ContractDocumentAnnexDto] })
   annexes!: ContractDocumentAnnexDto[]
+
+  @ApiProperty({ type: ContractCanonicalArtifactDto, nullable: true })
+  canonicalArtifact!: ContractCanonicalArtifactDto | null
 
   @ApiProperty({ enum: ['not-locked', 'valid', 'mismatch', 'unavailable'] })
   integrity!: 'not-locked' | 'valid' | 'mismatch' | 'unavailable'
@@ -154,6 +177,27 @@ export class ContractPartyViewDto {
 
   @ApiProperty({ nullable: true })
   signatureHash!: string | null
+
+  @ApiProperty({ enum: ['smartca', 'platform-consent'], nullable: true })
+  provider!: 'smartca' | 'platform-consent' | null
+
+  @ApiProperty({ nullable: true })
+  providerTransactionId!: string | null
+
+  @ApiProperty({ nullable: true })
+  certificateSerial!: string | null
+
+  @ApiProperty({ nullable: true })
+  signatureAlgorithm!: string | null
+
+  @ApiProperty({ nullable: true })
+  signatureValueRef!: string | null
+
+  @ApiProperty({ nullable: true })
+  providerStatus!: 'pending' | 'signed' | 'rejected' | null
+
+  @ApiProperty({ nullable: true })
+  verifiedAt!: string | null
 }
 
 export class ContractDepositViewDto {

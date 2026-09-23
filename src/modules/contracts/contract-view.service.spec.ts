@@ -10,11 +10,13 @@ import { KycService } from '../kyc/kyc.service'
 import type { KycRecord } from '../kyc/schemas/kyc-record.schema'
 import { LedgerAuditQueryService } from '../fabric/ledger-audit-query.service'
 import { OwnershipTransferResolver } from '../property-ownership-transfer/ownership-transfer.resolver'
+import { ContractArtifactService } from './contract-artifact.service'
 
 describe('ContractViewService', () => {
   let service: ContractViewService
   let contractRepo: jest.Mocked<Repository<Contract>>
   let kycService: jest.Mocked<KycService>
+  let artifactService: { resolveCanonicalArtifact: jest.Mock }
   let ownershipTransferResolver: {
     resolveContractAccess: jest.Mock
   }
@@ -61,6 +63,9 @@ describe('ContractViewService', () => {
     const mockOwnershipTransferResolver = {
       resolveContractAccess: jest.fn(),
     }
+    const mockArtifactService = {
+      resolveCanonicalArtifact: jest.fn().mockResolvedValue({}),
+    }
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -85,12 +90,17 @@ describe('ContractViewService', () => {
           provide: OwnershipTransferResolver,
           useValue: mockOwnershipTransferResolver,
         },
+        {
+          provide: ContractArtifactService,
+          useValue: mockArtifactService,
+        },
       ],
     }).compile()
 
     service = module.get<ContractViewService>(ContractViewService)
     contractRepo = module.get(getRepositoryToken(Contract))
     kycService = module.get(KycService)
+    artifactService = module.get(ContractArtifactService)
     ownershipTransferResolver = module.get(OwnershipTransferResolver)
     ownershipTransferResolver.resolveContractAccess.mockImplementation(
       (
@@ -137,6 +147,107 @@ describe('ContractViewService', () => {
     expect(view.document.sections).toHaveLength(12)
     expect(view.actions.signingEligibility.eligible).toBe(true)
     expect(view.actions.signingEligibility.reasonCode).toBeNull()
+  })
+
+  it('projects SmartCA certificate evidence into both party view records', async () => {
+    contractRepo.findOne.mockResolvedValue({
+      ...mockContract,
+      signedByTenant: true,
+      signedByLandlord: true,
+      tenantSignature: {
+        signerId: 'user-tenant-1',
+        role: 'tenant',
+        signedAt: new Date('2026-09-15T09:00:00Z'),
+        contentHash: 'tenant-hash',
+        provider: 'smartca',
+        providerTransactionId: 'sca-tenant-1',
+        certificateSerial: 'cert-tenant-1',
+        signatureAlgorithm: 'RSA-PSS-SHA256',
+        signatureValueRef: 'sig-ref-tenant-1',
+        providerStatus: 'signed',
+        verifiedAt: new Date('2026-09-15T09:01:00Z'),
+      },
+      landlordSignature: {
+        signerId: 'user-landlord-1',
+        role: 'landlord',
+        signedAt: new Date('2026-09-15T09:02:00Z'),
+        contentHash: 'landlord-hash',
+        provider: 'smartca',
+        providerTransactionId: 'sca-landlord-1',
+        certificateSerial: 'cert-landlord-1',
+        signatureAlgorithm: 'RSA-PSS-SHA256',
+        signatureValueRef: 'sig-ref-landlord-1',
+        providerStatus: 'signed',
+        verifiedAt: new Date('2026-09-15T09:03:00Z'),
+      },
+    } as Contract)
+    kycService.findByUserId.mockResolvedValue({
+      status: 'verified',
+      idCardNumber: '079123456789',
+    } as KycRecord)
+
+    const view = await service.getForActor(
+      validContractId,
+      'user-tenant-1',
+      false
+    )
+
+    expect(view.parties.tenant).toEqual(
+      expect.objectContaining({
+        provider: 'smartca',
+        providerTransactionId: 'sca-tenant-1',
+        certificateSerial: 'cert-tenant-1',
+        signatureAlgorithm: 'RSA-PSS-SHA256',
+        providerStatus: 'signed',
+        verifiedAt: '2026-09-15T09:01:00.000Z',
+      })
+    )
+    expect(view.parties.landlord).toEqual(
+      expect.objectContaining({
+        provider: 'smartca',
+        providerTransactionId: 'sca-landlord-1',
+        certificateSerial: 'cert-landlord-1',
+        signatureValueRef: 'sig-ref-landlord-1',
+      })
+    )
+  })
+
+  it('resolves the stored canonical artifact before exposing a locked contract view', async () => {
+    const artifactRef = {
+      artifactId: new ObjectId().toHexString(),
+      revision: 2,
+      templateKey: 'lease-vn',
+      templateVersion: 4,
+      hashSchemaVersion: 1,
+      artifactHash: mockContract.contentLockedHash,
+      contentType: 'application/pdf' as const,
+      lockedAt: mockContract.contentLockedAt as Date,
+    }
+    contractRepo.findOne.mockResolvedValue({
+      ...mockContract,
+      artifactRef,
+    } as Contract)
+    kycService.findByUserId.mockResolvedValue({
+      status: 'verified',
+      idCardNumber: '079123456789',
+    } as KycRecord)
+
+    const view = await service.getForActor(
+      validContractId,
+      'user-tenant-1',
+      false
+    )
+
+    expect(artifactService.resolveCanonicalArtifact).toHaveBeenCalledWith(
+      expect.objectContaining({ artifactRef })
+    )
+    expect(view.document.canonicalArtifact).toEqual(
+      expect.objectContaining({
+        artifactId: artifactRef.artifactId,
+        revision: artifactRef.revision,
+        artifactHash: artifactRef.artifactHash,
+      })
+    )
   })
 
   it('should throw ForbiddenException if actor is neither tenant, landlord, nor staff', async () => {
@@ -359,5 +470,29 @@ describe('ContractViewService', () => {
 
     expect(view.actions.canEditContent).toBe(false)
     expect(view.actions.canLockContent).toBe(false)
+  })
+
+  it('exposes canEditContent=true and canLockContent=true for landlord on unlocked draft contracts', async () => {
+    const draftContract = {
+      ...mockContract,
+      status: 'draft',
+      contentLockedHash: null,
+      contentLockedAt: null,
+      landlordId: 'user-landlord-1',
+    }
+    contractRepo.findOne.mockResolvedValue(draftContract as Contract)
+    kycService.findByUserId.mockResolvedValue({
+      status: 'verified',
+      idCardNumber: '079123456789',
+    } as KycRecord)
+
+    const view = await service.getForActor(
+      validContractId,
+      'user-landlord-1',
+      false
+    )
+
+    expect(view.actions.canEditContent).toBe(true)
+    expect(view.actions.canLockContent).toBe(true)
   })
 })

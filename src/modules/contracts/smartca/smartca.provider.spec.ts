@@ -103,4 +103,44 @@ describe('SmartCaProvider', () => {
       BadGatewayException
     )
   })
+
+  it('polls a provider transaction and normalizes certificate evidence', async () => {
+    const config = {
+      get: jest.fn().mockReturnValue({
+        apiUrl: 'https://smartca.test',
+        spId: 'partner',
+        spPassword: 'secret',
+        signV2Path: '/sign',
+        statusPathTmpl: '/status/{transactionId}',
+      }),
+    }
+    const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          transaction_id: 'sca-tx-4',
+          status: 'SIGNED',
+          certificate_serial: 'cert-4',
+          certificate_subject: 'CN=Tenant',
+          certificate_issuer: 'CN=VNPT',
+          artifact_hash: input.artifactHash,
+          signature_hash: 'sig-4',
+          signed_at: '2026-09-23T10:00:00.000Z',
+        }),
+    } as unknown as Response)
+    const provider = new SmartCaProvider(config as unknown as ConfigService)
+
+    await expect(provider.getSignatureStatus('sca-tx-4')).resolves.toEqual(
+      expect.objectContaining({
+        transactionId: 'sca-tx-4',
+        status: 'signed',
+        certificateSerial: 'cert-4',
+        artifactHash: input.artifactHash,
+      })
+    )
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://smartca.test/status/sca-tx-4',
+      expect.objectContaining({ method: 'GET' })
+    )
+  })
 })

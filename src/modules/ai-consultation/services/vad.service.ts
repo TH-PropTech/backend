@@ -2,8 +2,8 @@ import { Injectable } from '@nestjs/common'
 
 @Injectable()
 export class VadService {
-  private readonly rmsThreshold = 200
-  private readonly silenceTimeoutMs = 1200
+  private readonly rmsThreshold = 1000
+  private readonly silenceTimeoutMs = 1500
 
   private readonly lastAudioTimes = new Map<string, number>()
   private readonly hasSpokenFlags = new Map<string, boolean>()

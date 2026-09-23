@@ -149,6 +149,7 @@ describe('ApartmentsService.reserveRentalApplication', () => {
       find: jest.fn(),
       findOne: jest.fn(),
       save: jest.fn(),
+      update: jest.fn(),
     } as unknown as jest.Mocked<Repository<Apartment>>
     const userRepository = {
       find: jest.fn(),
@@ -174,7 +175,11 @@ describe('ApartmentsService.reserveRentalApplication', () => {
       rentalReservation: null,
     } as unknown as Apartment
     apartmentRepository.findOne.mockResolvedValue(apartment)
-    apartmentRepository.save.mockResolvedValue(apartment)
+    apartmentRepository.update.mockResolvedValue({
+      affected: 1,
+      generatedMaps: [],
+      raw: {},
+    })
 
     const result = await service.reserveRentalApplication(
       apartmentId.toHexString(),
@@ -188,7 +193,21 @@ describe('ApartmentsService.reserveRentalApplication', () => {
         mode: 'application-accepted',
       })
     )
-    expect(apartmentRepository.save.mock.calls).toEqual([[apartment]])
+    expect(apartmentRepository.update.mock.calls).toHaveLength(1)
+    expect(apartmentRepository.update.mock.calls[0]?.[0]).toEqual({
+      _id: apartmentId,
+      status: 'available',
+      rentalReservation: null,
+    })
+    expect(apartmentRepository.update.mock.calls[0]?.[1]).toHaveProperty(
+      'rentalReservation.applicationId',
+      applicationId
+    )
+    expect(apartmentRepository.update.mock.calls[0]?.[1]).toHaveProperty(
+      'rentalReservation.mode',
+      'application-accepted'
+    )
+    expect(apartmentRepository.save.mock.calls).toHaveLength(0)
   })
 
   it('Dimension 2: returns true idempotently if already reserved by the same application', async () => {
@@ -268,6 +287,236 @@ describe('ApartmentsService.reserveRentalApplication', () => {
     )
 
     expect(result).toBe(false)
+    expect(apartmentRepository.save.mock.calls).toHaveLength(0)
+  })
+
+  it('returns false when the CAS loses to a different application', async () => {
+    const { service, apartmentRepository } = createService()
+    const apartment = {
+      _id: apartmentId,
+      status: 'available',
+      rentalReservation: null,
+    } as unknown as Apartment
+    const competingReservation = {
+      _id: apartmentId,
+      status: 'available',
+      rentalReservation: {
+        applicationId: 'other-app',
+        reservedAt: new Date(),
+        mode: 'application-accepted',
+      },
+    } as unknown as Apartment
+    apartmentRepository.findOne
+      .mockResolvedValueOnce(apartment)
+      .mockResolvedValueOnce(competingReservation)
+    apartmentRepository.update.mockResolvedValue({
+      affected: 0,
+      generatedMaps: [],
+      raw: {},
+    })
+
+    const result = await service.reserveRentalApplication(
+      apartmentId.toHexString(),
+      applicationId
+    )
+
+    expect(result).toBe(false)
+    expect(apartmentRepository.update.mock.calls).toHaveLength(1)
+    expect(apartmentRepository.save.mock.calls).toHaveLength(0)
+  })
+
+  it('returns true when the CAS loses but the same application won the retry', async () => {
+    const { service, apartmentRepository } = createService()
+    const apartment = {
+      _id: apartmentId,
+      status: 'available',
+      rentalReservation: null,
+    } as unknown as Apartment
+    const retriedReservation = {
+      _id: apartmentId,
+      status: 'available',
+      rentalReservation: {
+        applicationId,
+        reservedAt: new Date(),
+        mode: 'application-accepted',
+      },
+    } as unknown as Apartment
+    apartmentRepository.findOne
+      .mockResolvedValueOnce(apartment)
+      .mockResolvedValueOnce(retriedReservation)
+    apartmentRepository.update.mockResolvedValue({
+      affected: 0,
+      generatedMaps: [],
+      raw: {},
+    })
+
+    const result = await service.reserveRentalApplication(
+      apartmentId.toHexString(),
+      applicationId
+    )
+
+    expect(result).toBe(true)
+    expect(apartmentRepository.save.mock.calls).toHaveLength(0)
+  })
+
+  it('projects a matching reservation to deposit-paid idempotently', async () => {
+    const { service, apartmentRepository } = createService()
+    const apartment = {
+      _id: apartmentId,
+      rentalReservation: {
+        applicationId,
+        reservedAt: new Date('2026-09-20T10:00:00Z'),
+        mode: 'application-accepted',
+      },
+    } as unknown as Apartment
+    apartmentRepository.findOne.mockResolvedValue(apartment)
+    apartmentRepository.save.mockResolvedValue(apartment)
+
+    await expect(
+      service.markRentalDepositPaid(
+        apartmentId.toHexString(),
+        applicationId,
+        'deposit-1'
+      )
+    ).resolves.toBe(true)
+    expect(apartment.rentalReservation).toEqual(
+      expect.objectContaining({
+        applicationId,
+        mode: 'deposit-paid',
+        depositAgreementId: 'deposit-1',
+      })
+    )
+    expect(apartmentRepository.save.mock.calls).toHaveLength(1)
+
+    apartmentRepository.save.mockClear()
+    await expect(
+      service.markRentalDepositPaid(
+        apartmentId.toHexString(),
+        applicationId,
+        'deposit-1'
+      )
+    ).resolves.toBe(true)
+    expect(apartmentRepository.save.mock.calls).toHaveLength(0)
+
+    await expect(
+      service.markRentalDepositPaid(
+        apartmentId.toHexString(),
+        applicationId,
+        'different-deposit'
+      )
+    ).resolves.toBe(false)
+    expect(apartmentRepository.save.mock.calls).toHaveLength(0)
+  })
+
+  it('rejects deposit projection for another application', async () => {
+    const { service, apartmentRepository } = createService()
+    apartmentRepository.findOne.mockResolvedValue({
+      _id: apartmentId,
+      rentalReservation: {
+        applicationId: 'other-app',
+        reservedAt: new Date(),
+        mode: 'application-accepted',
+      },
+    } as unknown as Apartment)
+
+    await expect(
+      service.markRentalDepositPaid(
+        apartmentId.toHexString(),
+        applicationId,
+        'deposit-1'
+      )
+    ).resolves.toBe(false)
+    expect(apartmentRepository.save.mock.calls).toHaveLength(0)
+  })
+
+  it('projects a matching reservation to an active lease and releases it by application guard', async () => {
+    const { service, apartmentRepository } = createService()
+    const apartment = {
+      _id: apartmentId,
+      rentalReservation: {
+        applicationId,
+        reservedAt: new Date(),
+        mode: 'deposit-paid',
+        depositAgreementId: 'deposit-1',
+      },
+    } as unknown as Apartment
+    apartmentRepository.findOne.mockResolvedValue(apartment)
+    apartmentRepository.save.mockResolvedValue(apartment)
+
+    await expect(
+      service.markRentalLeaseActive(
+        apartmentId.toHexString(),
+        applicationId,
+        'contract-1'
+      )
+    ).resolves.toBe(true)
+    expect(apartment.rentalReservation).toEqual(
+      expect.objectContaining({ contractId: 'contract-1' })
+    )
+
+    await expect(
+      service.markRentalLeaseActive(
+        apartmentId.toHexString(),
+        applicationId,
+        'different-contract'
+      )
+    ).resolves.toBe(false)
+
+    await expect(
+      service.releaseRentalReservation(
+        apartmentId.toHexString(),
+        'different-application'
+      )
+    ).resolves.toBe(false)
+    expect(apartment.rentalReservation).not.toBeNull()
+
+    await expect(
+      service.releaseRentalReservation(apartmentId.toHexString(), applicationId)
+    ).resolves.toBe(false)
+    expect(apartment.rentalReservation).not.toBeNull()
+
+    const releasableApartment = {
+      _id: apartmentId,
+      rentalReservation: {
+        applicationId,
+        reservedAt: new Date(),
+        mode: 'application-accepted',
+      },
+    } as unknown as Apartment
+    apartmentRepository.findOne.mockResolvedValue(releasableApartment)
+    await expect(
+      service.releaseRentalReservation(apartmentId.toHexString(), applicationId)
+    ).resolves.toBe(true)
+    expect(releasableApartment.rentalReservation).toBeNull()
+  })
+
+  it('does not release a reservation after a competing revision wins the CAS', async () => {
+    const { service, apartmentRepository } = createService()
+    const reservation = {
+      applicationId,
+      reservedAt: new Date(),
+      mode: 'application-accepted' as const,
+      revision: 3,
+    }
+    const apartment = {
+      _id: apartmentId,
+      rentalReservation: reservation,
+    } as unknown as Apartment
+    apartmentRepository.findOne.mockResolvedValue(apartment)
+    apartmentRepository.update.mockResolvedValue({
+      affected: 0,
+      generatedMaps: [],
+      raw: {},
+    })
+
+    await expect(
+      service.releaseRentalReservation(
+        apartmentId.toHexString(),
+        applicationId,
+        3
+      )
+    ).resolves.toBe(false)
+    expect(apartment.rentalReservation).toBe(reservation)
     expect(apartmentRepository.save.mock.calls).toHaveLength(0)
   })
 })

@@ -6,6 +6,7 @@ export type DepositAgreementConsentState = {
     | 'paid'
     | 'applied-to-lease-security'
     | 'cancelled'
+    | 'expired'
   contentRevision: number
   contentHash: string
 }

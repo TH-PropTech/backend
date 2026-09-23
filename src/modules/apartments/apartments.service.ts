@@ -578,11 +578,44 @@ export class ApartmentsService {
       return true
     }
 
-    apartment.rentalReservation = {
+    const reservation = {
       applicationId,
       reservedAt: existing?.reservedAt ?? new Date(),
       mode: 'application-accepted',
+      revision: existing?.revision ?? 1,
+      acceptedAt: existing?.acceptedAt ?? new Date(),
+    } satisfies NonNullable<Apartment['rentalReservation']>
+
+    const repositoryWithCas = this
+      .apartmentRepository as Repository<Apartment> & {
+      update?: Repository<Apartment>['update']
     }
+    if (typeof repositoryWithCas.update === 'function') {
+      const availableWithoutReservation = {
+        _id: apartment._id,
+        status: 'available',
+        rentalReservation: null,
+      } as unknown as FindOptionsWhere<Apartment>
+      const result = await repositoryWithCas.update(
+        availableWithoutReservation,
+        { rentalReservation: reservation }
+      )
+      if (result.affected === 1) {
+        apartment.rentalReservation = reservation
+        return true
+      }
+
+      const current = await this.apartmentRepository.findOne({
+        where: { _id: apartment._id },
+      })
+      return (
+        current?.status === 'available' &&
+        current.rentalReservation?.applicationId === applicationId &&
+        current.rentalReservation.mode === 'application-accepted'
+      )
+    }
+
+    apartment.rentalReservation = reservation
     await this.apartmentRepository.save(apartment)
     return true
   }
@@ -610,7 +643,11 @@ export class ApartmentsService {
     ) {
       return true
     }
+    if (reservation.mode === 'deposit-paid' || reservation.contractId) {
+      return false
+    }
     reservation.mode = 'deposit-paid'
+    reservation.revision = (reservation.revision ?? 1) + 1
     reservation.depositAgreementId = depositAgreementId
     reservation.depositPaidAt = new Date()
     await this.apartmentRepository.save(apartment)
@@ -634,7 +671,8 @@ export class ApartmentsService {
     ) {
       return false
     }
-    if (reservation.contractId === contractId) return true
+    if (reservation.contractId) return reservation.contractId === contractId
+    reservation.revision = (reservation.revision ?? 1) + 1
     reservation.contractId = contractId
     reservation.leaseActivatedAt = new Date()
     await this.apartmentRepository.save(apartment)
@@ -643,15 +681,48 @@ export class ApartmentsService {
 
   async releaseRentalReservation(
     apartmentId: string,
-    applicationId: string
+    applicationId: string,
+    expectedRevision?: number
   ): Promise<boolean> {
     if (!ObjectId.isValid(apartmentId)) return false
     const apartment = await this.apartmentRepository.findOne({
       where: { _id: new ObjectId(apartmentId) },
     })
-    if (apartment?.rentalReservation?.applicationId !== applicationId) {
+    const reservation = apartment?.rentalReservation
+    if (
+      !apartment ||
+      !reservation ||
+      reservation.applicationId !== applicationId ||
+      reservation.contractId ||
+      (expectedRevision !== undefined &&
+        (reservation.revision ?? 1) !== expectedRevision)
+    ) {
       return false
     }
+
+    const repositoryWithCas = this
+      .apartmentRepository as Repository<Apartment> & {
+      update?: Repository<Apartment>['update']
+    }
+    if (
+      typeof repositoryWithCas.update === 'function' &&
+      reservation.revision !== undefined
+    ) {
+      const result = await repositoryWithCas.update(
+        {
+          _id: apartment._id,
+          'rentalReservation.applicationId': applicationId,
+          'rentalReservation.revision':
+            expectedRevision ?? reservation.revision,
+          'rentalReservation.contractId': null,
+        } as unknown as FindOptionsWhere<Apartment>,
+        { rentalReservation: null }
+      )
+      if (result.affected !== 1) return false
+      apartment.rentalReservation = null
+      return true
+    }
+
     apartment.rentalReservation = null
     await this.apartmentRepository.save(apartment)
     return true

@@ -54,4 +54,21 @@ export class DepositAgreementsController {
   ): Promise<DepositAgreement> {
     return this.service.confirmDepositReceived(id, staffId, dto.note)
   }
+
+  @Post(':id/cancel')
+  @Roles('tenant', 'landlord', 'staff', 'admin')
+  cancel(
+    @Param('id') id: string,
+    @CurrentUser() user: UserPayload
+  ): Promise<DepositAgreement> {
+    const isStaff =
+      user.roles?.some(role => ['staff', 'admin'].includes(role)) ?? false
+    return this.service.cancel(id, user._id ?? '', isStaff)
+  }
+
+  @Post(':id/expire')
+  @Roles('staff', 'admin')
+  expire(@Param('id') id: string): Promise<DepositAgreement> {
+    return this.service.expire(id)
+  }
 }

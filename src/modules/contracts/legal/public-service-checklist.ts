@@ -1,6 +1,6 @@
 export const PUBLIC_SERVICE_PURPOSE = 'temporary-residence' as const
 export const PUBLIC_SERVICE_OFFICIAL_SOURCE_URL =
-  'https://thutuc.dichvucong.gov.vn/p/home/dvc-chi-tiet-thu-tuc-hanh-chinh.html?ma_thu_tuc=1.004194'
+  'https://dichvucong.bocongan.gov.vn/'
 
 export type PublicServiceChecklistPurpose =
   | typeof PUBLIC_SERVICE_PURPOSE

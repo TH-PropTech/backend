@@ -16,6 +16,7 @@ export type DepositAgreementStatus =
   | 'paid'
   | 'applied-to-lease-security'
   | 'cancelled'
+  | 'expired'
 
 @Entity('deposit_agreements')
 export class DepositAgreement {

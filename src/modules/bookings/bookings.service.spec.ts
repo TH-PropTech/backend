@@ -258,6 +258,121 @@ describe('BookingsService', () => {
     })
   })
 
+  describe('Booking workflow', () => {
+    it('returns landlord bookings filtered by owner and status', async () => {
+      bookingRepo.find.mockResolvedValue([mockBooking])
+
+      const result = await service.findByLandlord('landlord-123', {
+        status: 'pending',
+        page: 1,
+        limit: 20,
+      })
+
+      expect(bookingRepo.find).toHaveBeenCalledWith({
+        where: { landlordId: 'landlord-123', status: 'pending' },
+        order: { createdAt: 'DESC' },
+      })
+      expect(result.items).toEqual([mockBooking])
+      expect(result.total).toBe(1)
+      expect(result.totalPages).toBe(1)
+    })
+
+    it('confirms a pending booking for its landlord', async () => {
+      const booking: Booking = { ...mockBooking, status: 'pending' }
+      bookingRepo.findOne.mockResolvedValue(booking)
+
+      const result = await service.updateStatus(
+        validObjectIdStr,
+        'landlord-123',
+        'confirmed'
+      )
+
+      expect(result.status).toBe('confirmed')
+      expect(bookingRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'confirmed', rejectedReason: null })
+      )
+      expect(
+        notificationsService.updateBookingNotificationStatus
+      ).toHaveBeenCalledWith(validObjectIdStr, 'confirmed')
+    })
+
+    it('requires a reason when rejecting a booking', async () => {
+      await expect(
+        service.updateStatus(validObjectIdStr, 'landlord-123', 'rejected')
+      ).rejects.toThrow(BadRequestException)
+      expect(bookingRepo.findOne).not.toHaveBeenCalled()
+      expect(bookingRepo.save).not.toHaveBeenCalled()
+    })
+
+    it('rejects a booking update from a different landlord', async () => {
+      bookingRepo.findOne.mockResolvedValue({
+        ...mockBooking,
+        status: 'pending',
+      })
+
+      await expect(
+        service.updateStatus(validObjectIdStr, 'another-landlord', 'confirmed')
+      ).rejects.toThrow('Bạn không có quyền duyệt lịch hẹn')
+      expect(bookingRepo.save).not.toHaveBeenCalled()
+    })
+
+    it('cancels a pending booking for its tenant', async () => {
+      bookingRepo.findOne.mockResolvedValue({
+        ...mockBooking,
+        status: 'pending',
+      })
+
+      const result = await service.cancel(validObjectIdStr, 'tenant-456')
+
+      expect(result.status).toBe('cancelled')
+      expect(bookingRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'cancelled' })
+      )
+      expect(
+        notificationsService.updateBookingNotificationStatus
+      ).toHaveBeenCalledWith(validObjectIdStr, 'cancelled')
+    })
+
+    it('does not allow another tenant to cancel a booking', async () => {
+      bookingRepo.findOne.mockResolvedValue({
+        ...mockBooking,
+        status: 'pending',
+      })
+
+      await expect(
+        service.cancel(validObjectIdStr, 'another-tenant')
+      ).rejects.toThrow('Bạn không có quyền hủy lịch hẹn này')
+      expect(bookingRepo.save).not.toHaveBeenCalled()
+    })
+
+    it('does not allow cancellation after rejection', async () => {
+      bookingRepo.findOne.mockResolvedValue({
+        ...mockBooking,
+        status: 'rejected',
+      })
+
+      await expect(
+        service.cancel(validObjectIdStr, 'tenant-456')
+      ).rejects.toThrow(BadRequestException)
+      expect(bookingRepo.save).not.toHaveBeenCalled()
+    })
+
+    it('returns tenant bookings from the tenant-owned query', async () => {
+      bookingRepo.find.mockResolvedValue([mockBooking])
+
+      const result = await service.findByTenant('tenant-456', {
+        page: 1,
+        limit: 20,
+      })
+
+      expect(bookingRepo.find).toHaveBeenCalledWith({
+        where: { tenantId: 'tenant-456' },
+        order: { createdAt: 'DESC' },
+      })
+      expect(result.items).toEqual([mockBooking])
+    })
+  })
+
   describe('Phase 1: IDOR Protection in findOneById', () => {
     it('cho phép khách thuê chính chủ xem thông tin lịch hẹn của mình', async () => {
       mockBookingRepository.findOne.mockResolvedValue(mockBooking)

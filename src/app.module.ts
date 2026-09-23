@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common'
 import { ConfigModule, ConfigService } from '@nestjs/config'
 import { TypeOrmModule } from '@nestjs/typeorm'
 import { configuration } from './config/configuration'
+import smartCaConfig from './config/smartca.config'
 import { envValidationSchema } from './config/env.validation'
 import { LoggerModule } from './common/logger/logger.module'
 import { ThrottlerModule } from '@nestjs/throttler'
@@ -48,12 +49,11 @@ import { RentalFlowConfigModule } from './modules/rental-flow-config/rental-flow
 import { PropertyOwnershipTransferModule } from './modules/property-ownership-transfer/property-ownership-transfer.module'
 
 @Module({
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
       cache: true,
-      load: [configuration],
+      load: [configuration, smartCaConfig],
       validationSchema: envValidationSchema,
       validationOptions: {
         abortEarly: false,
@@ -76,7 +76,7 @@ import { PropertyOwnershipTransferModule } from './modules/property-ownership-tr
         limit: 10,
       },
     ]),
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
+
     ScheduleModule.forRoot(),
     LoggerModule,
     HealthModule,
