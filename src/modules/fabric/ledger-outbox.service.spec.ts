@@ -253,6 +253,29 @@ describe('LedgerOutboxService', () => {
   })
 
   describe('5. error handling & classification', () => {
+    it('keeps a Fabric event retryable when the gateway is unavailable and never projects confirmation', async () => {
+      const event = {
+        _id: new ObjectId(),
+        status: 'pending',
+        attempts: 0,
+        nextRetryAt: new Date(Date.now() - 1000),
+        dependencyKey: null,
+        payload: { action: 'createContract', args: ['c-1'] },
+      } as unknown as LedgerOutbox
+      repository.find.mockResolvedValue([event])
+      repository.findOne.mockResolvedValue(event)
+      fabricService.submitTransaction.mockRejectedValue(
+        new Error('FABRIC_GATEWAY_UNAVAILABLE')
+      )
+
+      await expect(service.processPending(1)).resolves.toBe(1)
+
+      expect(event.status).toBe('pending')
+      expect(event.attempts).toBe(1)
+      expect(event.txHash).not.toBe('simulated-tx')
+      expect(projectionService.projectResult).not.toHaveBeenCalled()
+    })
+
     it('marks conflict error as terminal failure immediately without retrying', async () => {
       const eventId = new ObjectId()
       const event = {

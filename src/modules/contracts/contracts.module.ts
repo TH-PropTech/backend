@@ -19,6 +19,16 @@ import { SmartOtpModule } from '../smart-otp/smart-otp.module'
 import { SmartCaSigningSession } from './smartca/smartca-signing-session.schema'
 import { SmartCaProvider } from './smartca/smartca.provider'
 import { SmartCaSigningService } from './smartca/smartca-signing.service'
+import { SmartCaCallbackGuard } from './smartca/smartca-callback.guard'
+import { ContractTemplate } from './legal/contract-template.schema'
+import { ContractTemplateAudit } from './legal/contract-template-audit.schema'
+import { ContractTemplateGovernanceService } from './legal/contract-template-governance.service'
+import { ContractTemplatesController } from './legal/contract-templates.controller'
+import { ContractArtifact } from './schemas/contract-artifact.schema'
+import {
+  CONTRACT_ARTIFACT_STORAGE,
+  MongoGridFsArtifactStorage,
+} from './contract-artifact.storage'
 import { PropertyOwnershipTransferModule } from '../property-ownership-transfer/property-ownership-transfer.module'
 
 @Module({
@@ -29,6 +39,9 @@ import { PropertyOwnershipTransferModule } from '../property-ownership-transfer/
       DepositAgreement,
       Apartment,
       SmartCaSigningSession,
+      ContractTemplate,
+      ContractTemplateAudit,
+      ContractArtifact,
     ]),
     PoliciesModule,
     FabricModule,
@@ -37,7 +50,11 @@ import { PropertyOwnershipTransferModule } from '../property-ownership-transfer/
     SmartOtpModule,
     PropertyOwnershipTransferModule,
   ],
-  controllers: [ContractsController, DepositAgreementsController],
+  controllers: [
+    ContractsController,
+    DepositAgreementsController,
+    ContractTemplatesController,
+  ],
   providers: [
     ContractsService,
     DepositAgreementsService,
@@ -46,6 +63,12 @@ import { PropertyOwnershipTransferModule } from '../property-ownership-transfer/
     ContractViewService,
     SmartCaProvider,
     SmartCaSigningService,
+    SmartCaCallbackGuard,
+    ContractTemplateGovernanceService,
+    {
+      provide: CONTRACT_ARTIFACT_STORAGE,
+      useClass: MongoGridFsArtifactStorage,
+    },
   ],
   exports: [
     ContractsService,
@@ -54,6 +77,7 @@ import { PropertyOwnershipTransferModule } from '../property-ownership-transfer/
     ContractDocumentProjector,
     ContractViewService,
     SmartCaSigningService,
+    ContractTemplateGovernanceService,
   ],
 })
 export class ContractsModule {}

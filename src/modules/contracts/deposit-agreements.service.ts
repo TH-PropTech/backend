@@ -9,6 +9,7 @@ import { InjectRepository } from '@nestjs/typeorm'
 import { ObjectId } from 'mongodb'
 import { createHash } from 'node:crypto'
 import { Repository } from 'typeorm'
+import type { FindOptionsWhere } from 'typeorm'
 import type { RentalPackageSnapshot } from '../apartments/rental-package.util'
 import type { RentalExecutionPolicyRef } from '../rental-flow-config/rental-execution-policy.util'
 import { Apartment } from '../apartments/schemas/apartment.schema'
@@ -154,6 +155,50 @@ export class DepositAgreementsService {
     return this.repository.save(agreement)
   }
 
+  async cancel(
+    id: string,
+    actorId: string,
+    isStaff = false
+  ): Promise<DepositAgreement> {
+    const agreement = await this.findById(id)
+    if (
+      !isStaff &&
+      agreement.tenantId !== actorId &&
+      agreement.landlordId !== actorId
+    ) {
+      throw new ForbiddenException('DEPOSIT_ACCESS_DENIED')
+    }
+    if (agreement.status === 'cancelled') return agreement
+    if (
+      agreement.status === 'paid' ||
+      agreement.status === 'applied-to-lease-security'
+    ) {
+      throw new ConflictException('DEPOSIT_CANCELLATION_NOT_ALLOWED')
+    }
+    if (agreement.status === 'expired') return agreement
+    agreement.status = 'cancelled'
+    const saved = await this.repository.save(agreement)
+    await this.releaseReservation(saved)
+    return saved
+  }
+
+  async expire(id: string): Promise<DepositAgreement> {
+    const agreement = await this.findById(id)
+    if (agreement.status === 'expired' || agreement.status === 'cancelled') {
+      return agreement
+    }
+    if (
+      agreement.status === 'paid' ||
+      agreement.status === 'applied-to-lease-security'
+    ) {
+      throw new ConflictException('DEPOSIT_EXPIRY_NOT_ALLOWED')
+    }
+    agreement.status = 'expired'
+    const saved = await this.repository.save(agreement)
+    await this.releaseReservation(saved)
+    return saved
+  }
+
   async recordDepositPaid(
     id: string,
     paymentAttemptId: string,
@@ -235,9 +280,63 @@ export class DepositAgreementsService {
       reservation.applicationId !== agreement.applicationId
     )
       return
+    if (
+      reservation.contractId ||
+      (reservation.mode === 'deposit-paid' &&
+        reservation.depositAgreementId !== agreement._id.toHexString())
+    ) {
+      return
+    }
+    if (
+      reservation.mode === 'deposit-paid' &&
+      reservation.depositAgreementId === agreement._id.toHexString()
+    ) {
+      return
+    }
     reservation.mode = 'deposit-paid'
     reservation.depositAgreementId = agreement._id.toHexString()
     reservation.depositPaidAt = agreement.paidAt
+    await this.apartmentRepository.save(apartment)
+  }
+
+  private async releaseReservation(agreement: DepositAgreement): Promise<void> {
+    if (!this.apartmentRepository || !agreement.propertyId) return
+    const apartment = await this.apartmentRepository.findOne({
+      where: { _id: new ObjectId(agreement.propertyId) },
+    })
+    const reservation = apartment?.rentalReservation
+    if (
+      !apartment ||
+      !reservation ||
+      reservation.applicationId !== agreement.applicationId ||
+      reservation.contractId
+    ) {
+      return
+    }
+
+    const repositoryWithCas = this
+      .apartmentRepository as Repository<Apartment> & {
+      update?: Repository<Apartment>['update']
+    }
+    if (
+      typeof repositoryWithCas.update === 'function' &&
+      reservation.revision !== undefined
+    ) {
+      const result = await repositoryWithCas.update(
+        {
+          _id: apartment._id,
+          'rentalReservation.applicationId': agreement.applicationId,
+          'rentalReservation.revision': reservation.revision,
+          'rentalReservation.contractId': null,
+        } as unknown as FindOptionsWhere<Apartment>,
+        { rentalReservation: null }
+      )
+      if (result.affected !== 1) return
+      apartment.rentalReservation = null
+      return
+    }
+
+    apartment.rentalReservation = null
     await this.apartmentRepository.save(apartment)
   }
 

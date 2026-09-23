@@ -14,12 +14,20 @@ export type ContractSignature = {
   role: 'tenant' | 'landlord'
   signedAt: Date
   contentHash: string
-  biometricGrantId: string
-  otpSessionId: string
+  biometricGrantId?: string | null
+  otpSessionId?: string | null
   deviceId?: string | null
   provider?: 'smartca' | 'platform-consent'
   providerTransactionId?: string | null
   certificateSerial?: string | null
+  certificateSubject?: string | null
+  certificateIssuer?: string | null
+  signatureHash?: string | null
+  signatureAlgorithm?: string | null
+  signatureValueRef?: string | null
+  artifactHash?: string | null
+  providerStatus?: 'pending' | 'signed' | 'rejected' | null
+  verifiedAt?: Date | null
 }
 
 @Entity('contracts')
@@ -242,6 +250,18 @@ export class Contract {
 
   @Column({ nullable: true })
   hashSchemaVersion?: number | null
+
+  @Column({ nullable: true })
+  artifactRef?: {
+    artifactId: string
+    revision: number
+    templateKey: string
+    templateVersion: number
+    hashSchemaVersion: number
+    artifactHash: string
+    contentType: 'application/pdf'
+    lockedAt: Date
+  } | null
 
   @Column({ nullable: true })
   activationKey?: string | null

@@ -9,6 +9,7 @@ describe('DepositAgreementsService', () => {
     _id: ObjectId
     agreementCode?: string
     applicationId?: string
+    propertyId?: string | null
     amount?: number
     tenantId: string
     landlordId: string
@@ -88,7 +89,8 @@ describe('DepositAgreementsService', () => {
 
   function createService(
     agreement: TestAgreement = baseAgreement(),
-    mockOutbox?: { enqueue: jest.Mock }
+    mockOutbox?: { enqueue: jest.Mock },
+    mockApartmentRepository?: { findOne: jest.Mock; save: jest.Mock }
   ): {
     service: DepositAgreementsService
     repository: { findOne: jest.Mock; save: jest.Mock }
@@ -105,7 +107,8 @@ describe('DepositAgreementsService', () => {
     return {
       service: new DepositAgreementsService(
         repository as never,
-        outbox as never
+        outbox as never,
+        mockApartmentRepository as never
       ),
       repository,
       agreement,
@@ -172,6 +175,147 @@ describe('DepositAgreementsService', () => {
       context.service.recordDepositPaid(agreementId, 'attempt-2')
     ).rejects.toThrow('DEPOSIT_PAYMENT_CONFLICT')
   })
+
+  it('projects a paid deposit onto the matching apartment reservation', async () => {
+    const propertyId = new ObjectId().toHexString()
+    const apartment = {
+      _id: new ObjectId(propertyId),
+      rentalReservation: {
+        applicationId: 'app-1',
+        reservedAt: new Date(),
+        mode: 'application-accepted',
+      },
+    }
+    const apartmentRepository = {
+      findOne: jest.fn().mockResolvedValue(apartment),
+      save: jest.fn((value: unknown) => Promise.resolve(value)),
+    }
+    const context = createService(
+      {
+        ...baseAgreement(),
+        propertyId,
+        status: 'payment-pending',
+      },
+      undefined,
+      apartmentRepository
+    )
+
+    await context.service.recordDepositPaid(agreementId, 'attempt-1')
+
+    expect(apartment.rentalReservation).toEqual(
+      expect.objectContaining({
+        applicationId: 'app-1',
+        mode: 'deposit-paid',
+        depositAgreementId: agreementId,
+      })
+    )
+    expect(apartmentRepository.save).toHaveBeenCalledWith(apartment)
+  })
+
+  it.each([['cancelled', 'cancel'] as const, ['expired', 'expire'] as const])(
+    'releases only the matching reservation when a deposit is %s',
+    async (status, action) => {
+      const propertyId = new ObjectId().toHexString()
+      const apartment = {
+        _id: new ObjectId(propertyId),
+        rentalReservation: {
+          applicationId: 'app-1',
+          reservedAt: new Date(),
+          mode: 'application-accepted' as const,
+          revision: 4,
+        },
+      }
+      const apartmentRepository = {
+        findOne: jest.fn().mockResolvedValue(apartment),
+        save: jest.fn((value: unknown) => Promise.resolve(value)),
+      }
+      const context = createService(
+        {
+          ...baseAgreement(),
+          propertyId,
+          status: 'payment-pending',
+        },
+        undefined,
+        apartmentRepository
+      )
+
+      const result =
+        action === 'cancel'
+          ? await context.service.cancel(agreementId, 'tenant-1')
+          : await context.service.expire(agreementId)
+
+      expect(result.status).toBe(status)
+      expect(apartment.rentalReservation).toBeNull()
+      expect(apartmentRepository.save).toHaveBeenCalledWith(apartment)
+    }
+  )
+
+  it('does not release a reservation or close a paid deposit', async () => {
+    const propertyId = new ObjectId().toHexString()
+    const apartmentRepository = {
+      findOne: jest.fn(),
+      save: jest.fn(),
+    }
+    const context = createService(
+      { ...baseAgreement(), propertyId, status: 'paid' },
+      undefined,
+      apartmentRepository
+    )
+
+    await expect(
+      context.service.cancel(agreementId, 'tenant-1')
+    ).rejects.toThrow('DEPOSIT_CANCELLATION_NOT_ALLOWED')
+    expect(apartmentRepository.findOne).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    [
+      'an active lease',
+      {
+        applicationId: 'app-1',
+        reservedAt: new Date(),
+        mode: 'deposit-paid',
+        depositAgreementId: agreementId,
+        contractId: 'contract-1',
+      },
+    ],
+    [
+      'a different deposit agreement',
+      {
+        applicationId: 'app-1',
+        reservedAt: new Date(),
+        mode: 'deposit-paid',
+        depositAgreementId: 'other-deposit',
+      },
+    ],
+  ])(
+    'does not overwrite the reservation for %s',
+    async (_case, reservation) => {
+      const propertyId = new ObjectId().toHexString()
+      const apartment = {
+        _id: new ObjectId(propertyId),
+        rentalReservation: reservation,
+      }
+      const apartmentRepository = {
+        findOne: jest.fn().mockResolvedValue(apartment),
+        save: jest.fn((value: unknown) => Promise.resolve(value)),
+      }
+      const context = createService(
+        {
+          ...baseAgreement(),
+          propertyId,
+          status: 'payment-pending',
+        },
+        undefined,
+        apartmentRepository
+      )
+
+      await context.service.recordDepositPaid(agreementId, 'attempt-1')
+
+      expect(apartment.rentalReservation).toBe(reservation)
+      expect(apartmentRepository.save.mock.calls).toHaveLength(0)
+    }
+  )
 
   it('allows staff manual confirmation, computes canonical depositHash, enqueues outbox, and does not overwrite a paid agreement', async () => {
     const context = createService({ ...baseAgreement(), status: 'accepted' })

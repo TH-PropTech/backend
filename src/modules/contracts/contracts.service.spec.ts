@@ -294,6 +294,34 @@ describe('ContractsService contract content', () => {
     expect(replay.contentLockedHash).toBe(locked.contentLockedHash)
   })
 
+  it('allows landlord to lock contract content without staff role', async () => {
+    const { service, contract } = createContentService()
+    contract.editorContent = validContent
+    contract.contentRevision = 1
+    contract.landlordId = 'landlord-1'
+
+    const locked = await service.lockContractContent(
+      contract._id.toString(),
+      'landlord-1',
+      1,
+      false
+    )
+    expect(locked.status).toBe('awaiting-signature')
+    expect(locked.contentLockedHash).toMatch(/^[a-f0-9]{64}$/)
+  })
+
+  it('forbids tenant from locking contract content', async () => {
+    const { service, contract } = createContentService()
+    contract.editorContent = validContent
+    contract.contentRevision = 1
+    contract.landlordId = 'landlord-1'
+    contract.tenantId = 'tenant-1'
+
+    await expect(
+      service.lockContractContent(contract._id.toString(), 'tenant-1', 1, false)
+    ).rejects.toBeInstanceOf(ForbiddenException)
+  })
+
   it('rejects edits after content is locked', async () => {
     const { service, contract } = createContentService()
     contract.contentLockedAt = new Date()
@@ -629,6 +657,263 @@ describe('ContractsService activation', () => {
     expect(result.signedByTenant).toBe(true)
     expect(result.signedByLandlord).toBe(true)
     expect(contractRepository.save).toHaveBeenCalledWith(contract)
+  })
+
+  type SmartCaActivationContext = {
+    service: ContractsService
+    contract: Contract
+    contractRepository: { findOne: jest.Mock; save: jest.Mock }
+    depositAgreementRepository: { findOne: jest.Mock; save: jest.Mock }
+    ledgerOutboxService: {
+      enqueue: jest.MockedFunction<(event: unknown) => Promise<unknown>>
+    }
+    paymentsService: { generateSchedule: jest.Mock }
+  }
+
+  function createSmartCaActivationContext(options?: {
+    depositStatus?: 'paid' | 'pending'
+    policy?: 'DEPOSIT_FIRST' | 'SIGN_FIRST'
+    landlordSignature?: Contract['landlordSignature']
+  }): SmartCaActivationContext {
+    const contract = {
+      _id: new ObjectId('507f1f77bcf86cd799439011'),
+      contractCode: 'HD-SMARTCA-1',
+      propertyId: 'property-1',
+      tenantId: 'tenant-1',
+      landlordId: 'landlord-1',
+      monthlyRent: 10_000_000,
+      deposit: 20_000_000,
+      depositAgreementId: '507f1f77bcf86cd799439099',
+      startDate: new Date('2030-01-01T00:00:00.000Z'),
+      status: 'awaiting-signature' as const,
+      signedByTenant: false,
+      signedByLandlord: Boolean(options?.landlordSignature),
+      tenantSignature: null,
+      landlordSignature: options?.landlordSignature ?? null,
+      contentLockedHash: 'a'.repeat(64),
+      contentLockedAt: new Date('2029-12-01T00:00:00.000Z'),
+      artifactRef: {
+        artifactId: 'artifact-1',
+        revision: 1,
+        templateKey: 'lease-vn',
+        templateVersion: 1,
+        hashSchemaVersion: 1,
+        artifactHash: 'a'.repeat(64),
+        contentType: 'application/pdf' as const,
+        lockedAt: new Date('2029-12-01T00:00:00.000Z'),
+      },
+      executionPolicySnapshot: {
+        policyId: 'policy-1',
+        version: 1,
+        strategy: options?.policy ?? 'DEPOSIT_FIRST',
+        contentHash: 'policy-hash',
+      },
+    } as unknown as Contract
+    const contractRepository = {
+      findOne: jest.fn().mockResolvedValue(contract),
+      save: jest.fn(
+        (value: Contract): Promise<Contract> => Promise.resolve(value)
+      ),
+    }
+    const depositAgreementRepository = {
+      findOne: jest.fn().mockResolvedValue({
+        _id: new ObjectId('507f1f77bcf86cd799439099'),
+        status: options?.depositStatus ?? 'paid',
+        depositHash: 'd'.repeat(64),
+        paidAt:
+          options?.depositStatus === 'pending'
+            ? null
+            : new Date('2030-01-01T00:00:00.000Z'),
+      }),
+      save: jest.fn((value: unknown) => Promise.resolve(value)),
+    }
+    const ledgerOutboxService = { enqueue: jest.fn().mockResolvedValue({}) }
+    const paymentsService = {
+      generateSchedule: jest.fn().mockResolvedValue([]),
+    }
+    const service = Object.create(
+      ContractsService.prototype
+    ) as ContractsService
+    Reflect.set(service, 'contractRepository', contractRepository)
+    Reflect.set(
+      service,
+      'depositAgreementRepository',
+      depositAgreementRepository
+    )
+    Reflect.set(service, 'ledgerOutboxService', ledgerOutboxService)
+    Reflect.set(service, 'paymentsService', paymentsService)
+    Reflect.set(service, 'apartmentRepository', { findOne: jest.fn() })
+    return {
+      service,
+      contract,
+      contractRepository,
+      depositAgreementRepository,
+      ledgerOutboxService,
+      paymentsService,
+    }
+  }
+
+  function smartCaEvidence(
+    role: 'tenant' | 'landlord',
+    tx: string
+  ): {
+    contractId: string
+    signerId: string
+    role: 'tenant' | 'landlord'
+    artifactHash: string
+    providerTransactionId: string
+    certificateSerial: string
+    certificateSubject: string
+    certificateIssuer: string
+    signatureHash: string
+    signedAt: Date
+  } {
+    return {
+      contractId: '507f1f77bcf86cd799439011',
+      signerId: `${role}-1`,
+      role,
+      artifactHash: 'a'.repeat(64),
+      providerTransactionId: tx,
+      certificateSerial: `cert-${role}`,
+      certificateSubject: `CN=${role}`,
+      certificateIssuer: 'CN=VNPT',
+      signatureHash: `sig-${role}`,
+      signedAt: new Date('2030-01-01T00:00:00.000Z'),
+    } as const
+  }
+
+  it.each(['DEPOSIT_FIRST', 'SIGN_FIRST'] as const)(
+    'activates only after both valid SmartCA signatures (%s)',
+    async policy => {
+      const context = createSmartCaActivationContext({
+        policy,
+        depositStatus: 'paid',
+      })
+
+      await context.service.recordSmartCaSignature(
+        smartCaEvidence('tenant', 'tx-t')
+      )
+      expect(context.contract.status).toBe('awaiting-signature')
+      expect(context.ledgerOutboxService.enqueue).not.toHaveBeenCalled()
+
+      const result = await context.service.recordSmartCaSignature(
+        smartCaEvidence('landlord', 'tx-l')
+      )
+      expect(result.status).toBe('active')
+      expect(result.contractHash).toBe('a'.repeat(64))
+      expect(result.tenantSignature?.provider).toBe('smartca')
+      expect(result.landlordSignature?.provider).toBe('smartca')
+      expect(context.ledgerOutboxService.enqueue).toHaveBeenCalledTimes(1)
+      const ledgerEvent = context.ledgerOutboxService.enqueue.mock
+        .calls[0]?.[0] as {
+        args?: string[]
+        metadata?: { details?: Record<string, unknown> }
+      }
+      const evidenceArgument = ledgerEvent.args?.[ledgerEvent.args.length - 1]
+      expect(evidenceArgument).toBeDefined()
+      const parsedEvidence = JSON.parse(evidenceArgument ?? '{}') as {
+        schemaVersion?: number
+        artifact?: {
+          artifactId?: string
+          revision?: number
+          artifactHash?: string
+        }
+      }
+      expect(parsedEvidence.schemaVersion).toBe(2)
+      expect(parsedEvidence.artifact).toEqual({
+        artifactId: 'artifact-1',
+        revision: 1,
+        artifactHash: 'a'.repeat(64),
+        contentType: 'application/pdf',
+      })
+      expect(ledgerEvent.metadata?.details).toEqual(
+        expect.objectContaining({
+          artifactId: 'artifact-1',
+          artifactRevision: 1,
+          artifactHash: 'a'.repeat(64),
+        })
+      )
+      expect(context.paymentsService.generateSchedule).toHaveBeenCalledTimes(1)
+    }
+  )
+
+  it('keeps sign-first contracts pending when signatures arrive before deposit', async () => {
+    const context = createSmartCaActivationContext({
+      policy: 'SIGN_FIRST',
+      depositStatus: 'pending',
+    })
+
+    await context.service.recordSmartCaSignature(
+      smartCaEvidence('tenant', 'tx-t')
+    )
+    const pending = await context.service.recordSmartCaSignature(
+      smartCaEvidence('landlord', 'tx-l')
+    )
+    expect(pending.status).toBe('fully-signed-pending-deposit')
+    expect(context.ledgerOutboxService.enqueue).not.toHaveBeenCalled()
+
+    const deposit = (await context.depositAgreementRepository.findOne()) as {
+      status: 'paid' | 'pending'
+      paidAt: Date | null
+    }
+    deposit.status = 'paid'
+    deposit.paidAt = new Date('2030-01-02T00:00:00.000Z')
+    const activated = await context.service.recordSmartCaSignature(
+      smartCaEvidence('landlord', 'tx-l')
+    )
+    expect(activated.status).toBe('active')
+    expect(context.ledgerOutboxService.enqueue).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not treat POC consent, a failed signature, or a simulation as SmartCA evidence', async () => {
+    const context = createSmartCaActivationContext({
+      landlordSignature: {
+        signerId: 'landlord-1',
+        role: 'landlord',
+        signedAt: new Date('2030-01-01T00:00:00.000Z'),
+        contentHash: 'a'.repeat(64),
+        provider: 'platform-consent',
+        biometricGrantId: 'bio-1',
+        otpSessionId: 'otp-1',
+      },
+    })
+
+    const result = await context.service.recordSmartCaSignature(
+      smartCaEvidence('tenant', 'tx-t')
+    )
+    expect(result.status).toBe('awaiting-signature')
+    expect(context.ledgerOutboxService.enqueue).not.toHaveBeenCalled()
+  })
+
+  it('rejects a signature for another artifact and does not enqueue early ledger work', async () => {
+    const context = createSmartCaActivationContext()
+    await expect(
+      context.service.recordSmartCaSignature({
+        ...smartCaEvidence('tenant', 'tx-t'),
+        artifactHash: 'b'.repeat(64),
+      })
+    ).rejects.toThrow('SMARTCA_SIGNATURE_DIGEST_MISMATCH')
+    expect(context.ledgerOutboxService.enqueue).not.toHaveBeenCalled()
+  })
+
+  it('handles a duplicate signed callback idempotently', async () => {
+    const context = createSmartCaActivationContext()
+    await context.service.recordSmartCaSignature(
+      smartCaEvidence('tenant', 'tx-t')
+    )
+    await context.service.recordSmartCaSignature(
+      smartCaEvidence('landlord', 'tx-l')
+    )
+    const savesAfterActivation =
+      context.contractRepository.save.mock.calls.length
+
+    await context.service.recordSmartCaSignature(
+      smartCaEvidence('landlord', 'tx-l')
+    )
+    expect(context.ledgerOutboxService.enqueue).toHaveBeenCalledTimes(1)
+    expect(context.contractRepository.save).toHaveBeenCalledTimes(
+      savesAfterActivation
+    )
   })
 })
 

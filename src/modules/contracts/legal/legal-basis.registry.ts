@@ -38,8 +38,7 @@ export const LEGAL_BASIS_REGISTRY: readonly LegalBasis[] = [
   {
     id: 'NATIONAL_PUBLIC_SERVICE_TEMPORARY_RESIDENCE_1004194',
     citation: 'TTHC 1.004194 – Đăng ký tạm trú',
-    sourceUrl:
-      'https://thutuc.dichvucong.gov.vn/p/home/dvc-chi-tiet-thu-tuc-hanh-chinh.html?ma_thu_tuc=1.004194',
+    sourceUrl: 'https://dichvucong.bocongan.gov.vn/',
     effectiveFrom: '2021-07-01',
     lastCheckedAt: '2026-09-16',
     status: 'active',

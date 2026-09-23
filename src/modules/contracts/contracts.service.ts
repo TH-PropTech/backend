@@ -11,7 +11,7 @@ import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 import { ObjectId } from 'mongodb'
 import * as crypto from 'crypto'
-import { Contract } from './schemas/contract.schema'
+import { Contract, ContractSignature } from './schemas/contract.schema'
 import { SigningGrant } from './schemas/signing-grant.schema'
 import { DepositAgreement } from './schemas/deposit-agreement.schema'
 import {
@@ -40,6 +40,11 @@ import type { RentalPackageSnapshot } from '../apartments/rental-package.util'
 import type { RentalExecutionPolicyRef } from '../rental-flow-config/rental-execution-policy.util'
 import { BiometricEvidenceService } from '../kyc/biometric-evidence.service'
 import { SmartOtpService } from '../smart-otp/services/smart-otp.service'
+import { requireCanonicalArtifactReference } from './contract-artifact.service'
+import {
+  buildSignedContractLedgerEvidence,
+  hashSignedContractLedgerEvidence,
+} from '../fabric/ledger-evidence-envelope'
 
 // ── Interfaces ──
 
@@ -367,6 +372,255 @@ export class ContractsService {
     return this.signContract(contractId, role)
   }
 
+  async recordSmartCaSignature(input: {
+    contractId: string
+    signerId: string
+    role: 'tenant' | 'landlord'
+    artifactHash: string
+    providerTransactionId: string
+    certificateSerial: string
+    certificateSubject?: string | null
+    certificateIssuer?: string | null
+    signatureHash?: string | null
+    signatureAlgorithm?: string | null
+    signatureValueRef?: string | null
+    providerStatus?: 'pending' | 'signed' | 'rejected' | null
+    verifiedAt?: Date | null
+    signedAt: Date
+  }): Promise<Contract> {
+    const contract = await this.findOne(input.contractId)
+    const expectedSignerId =
+      input.role === 'tenant' ? contract.tenantId : contract.landlordId
+    if (input.signerId !== expectedSignerId) {
+      throw new ForbiddenException('CONTRACT_SIGN_ACCESS_DENIED')
+    }
+    if (
+      !contract.contentLockedHash ||
+      !contract.artifactRef ||
+      contract.artifactRef.contentType !== 'application/pdf' ||
+      contract.artifactRef.artifactHash !== contract.contentLockedHash ||
+      input.artifactHash !== contract.contentLockedHash
+    ) {
+      throw new ConflictException('SMARTCA_SIGNATURE_DIGEST_MISMATCH')
+    }
+    requireCanonicalArtifactReference(contract)
+    if (!input.providerTransactionId || !input.certificateSerial) {
+      throw new ConflictException('SMARTCA_CERTIFICATE_INVALID')
+    }
+
+    const currentSignature =
+      input.role === 'tenant'
+        ? contract.tenantSignature
+        : contract.landlordSignature
+    if (
+      currentSignature?.provider === 'smartca' &&
+      currentSignature.providerTransactionId !== input.providerTransactionId
+    ) {
+      throw new ConflictException('SMARTCA_SIGNATURE_ALREADY_RECORDED')
+    }
+
+    const signature: ContractSignature = {
+      signerId: input.signerId,
+      role: input.role,
+      signedAt: input.signedAt,
+      contentHash: input.artifactHash,
+      biometricGrantId: null,
+      otpSessionId: null,
+      provider: 'smartca',
+      providerTransactionId: input.providerTransactionId,
+      certificateSerial: input.certificateSerial,
+      certificateSubject: input.certificateSubject ?? null,
+      certificateIssuer: input.certificateIssuer ?? null,
+      signatureHash: input.signatureHash ?? null,
+      signatureAlgorithm: input.signatureAlgorithm ?? null,
+      signatureValueRef: input.signatureValueRef ?? null,
+      artifactHash: input.artifactHash,
+      providerStatus: input.providerStatus ?? 'signed',
+      verifiedAt: input.verifiedAt ?? new Date(),
+    }
+    if (input.role === 'tenant') {
+      contract.tenantSignature = signature
+      contract.signedByTenant = true
+    } else {
+      contract.landlordSignature = signature
+      contract.signedByLandlord = true
+    }
+    contract.executionMethod = 'SMARTCA'
+
+    if (
+      !this.hasValidSmartCaSignature(contract, 'tenant') ||
+      !this.hasValidSmartCaSignature(contract, 'landlord')
+    ) {
+      return this.contractRepository.save(contract)
+    }
+
+    if (!(await this.isDepositConfirmed(contract))) {
+      contract.status = 'fully-signed-pending-deposit'
+      return this.contractRepository.save(contract)
+    }
+
+    return this.activateSmartCaContract(contract)
+  }
+
+  private hasValidSmartCaSignature(
+    contract: Contract,
+    role: 'tenant' | 'landlord'
+  ): boolean {
+    const signature =
+      role === 'tenant' ? contract.tenantSignature : contract.landlordSignature
+    const expectedSignerId =
+      role === 'tenant' ? contract.tenantId : contract.landlordId
+    return Boolean(
+      signature &&
+      signature.provider === 'smartca' &&
+      signature.role === role &&
+      signature.signerId === expectedSignerId &&
+      signature.contentHash === contract.contentLockedHash &&
+      signature.providerTransactionId &&
+      signature.certificateSerial &&
+      signature.signedAt &&
+      !Number.isNaN(new Date(signature.signedAt).getTime())
+    )
+  }
+
+  private async activateSmartCaContract(contract: Contract): Promise<Contract> {
+    if (
+      !this.hasValidSmartCaSignature(contract, 'tenant') ||
+      !this.hasValidSmartCaSignature(contract, 'landlord')
+    ) {
+      throw new ConflictException('SMARTCA_SIGNATURES_REQUIRED')
+    }
+    if (contract.status === 'active' && contract.activationKey) {
+      return contract
+    }
+
+    const depositAgreement =
+      await this.findDepositAgreementForContract(contract)
+    if (contract.deposit > 0) {
+      if (
+        !depositAgreement ||
+        !['paid', 'applied-to-lease-security'].includes(depositAgreement.status)
+      ) {
+        contract.status = 'fully-signed-pending-deposit'
+        return this.contractRepository.save(contract)
+      }
+      if (!depositAgreement.depositHash) {
+        throw new ConflictException('DEPOSIT_HASH_REQUIRED_FOR_ACTIVATION')
+      }
+      contract.depositId = depositAgreement._id.toHexString()
+      contract.depositHash = depositAgreement.depositHash
+      if (depositAgreement.paidAt) {
+        contract.depositPaidAt = depositAgreement.paidAt
+      }
+      if (depositAgreement.status === 'paid') {
+        depositAgreement.status = 'applied-to-lease-security'
+        depositAgreement.linkedLeaseContractId = contract._id.toHexString()
+        await this.depositAgreementRepository.save(depositAgreement)
+      }
+    } else {
+      contract.depositHash = null
+    }
+
+    contract.status = 'active'
+    contract.ledgerStatus = 'pending'
+    const canonicalReference = requireCanonicalArtifactReference(contract)
+    const canonicalHash = canonicalReference.artifactHash
+    const tenantSignature = contract.tenantSignature
+    const landlordSignature = contract.landlordSignature
+    if (!tenantSignature || !landlordSignature) {
+      throw new ConflictException('SMARTCA_SIGNATURES_REQUIRED')
+    }
+    const ledgerEvidence = buildSignedContractLedgerEvidence({
+      contractId: contract._id.toHexString(),
+      artifact: {
+        artifactId: canonicalReference.artifactId,
+        revision: canonicalReference.revision,
+        artifactHash: canonicalReference.artifactHash,
+        contentType: canonicalReference.contentType,
+      },
+      signatures: {
+        tenant: {
+          providerTransactionId: tenantSignature.providerTransactionId ?? '',
+          certificateSerial: tenantSignature.certificateSerial ?? '',
+          certificateSubject: tenantSignature.certificateSubject ?? null,
+          certificateIssuer: tenantSignature.certificateIssuer ?? null,
+          signatureHash: tenantSignature.signatureHash ?? null,
+          signatureAlgorithm: tenantSignature.signatureAlgorithm ?? null,
+          signatureValueRef: tenantSignature.signatureValueRef ?? null,
+        },
+        landlord: {
+          providerTransactionId: landlordSignature.providerTransactionId ?? '',
+          certificateSerial: landlordSignature.certificateSerial ?? '',
+          certificateSubject: landlordSignature.certificateSubject ?? null,
+          certificateIssuer: landlordSignature.certificateIssuer ?? null,
+          signatureHash: landlordSignature.signatureHash ?? null,
+          signatureAlgorithm: landlordSignature.signatureAlgorithm ?? null,
+          signatureValueRef: landlordSignature.signatureValueRef ?? null,
+        },
+      },
+      depositId: contract.depositId ?? null,
+      depositHash: contract.depositHash ?? null,
+    })
+    const ledgerEvidenceHash = hashSignedContractLedgerEvidence(ledgerEvidence)
+    contract.contractHash = canonicalHash
+    contract.activationKey = `smartca:${canonicalHash}`
+
+    if (contract.rentalApplicationId && ObjectId.isValid(contract.propertyId)) {
+      const apartment = await this.apartmentRepository.findOne({
+        where: { _id: new ObjectId(contract.propertyId) },
+      })
+      const reservation = apartment?.rentalReservation
+      if (
+        apartment &&
+        reservation?.applicationId === contract.rentalApplicationId
+      ) {
+        reservation.contractId = contract._id.toHexString()
+        reservation.leaseActivatedAt = new Date()
+        await this.apartmentRepository.save(apartment)
+      }
+    }
+
+    const contractArgs = [
+      contract._id.toHexString(),
+      contract.contractCode,
+      contract.tenantId,
+      contract.landlordId,
+      canonicalHash,
+      contract.monthlyRent.toString(),
+      contract.startDate.toISOString(),
+    ]
+    if (contract.depositId && contract.depositHash) {
+      contractArgs.push(contract.depositId, contract.depositHash)
+    }
+    contractArgs.push(JSON.stringify(ledgerEvidence))
+    await this.ledgerOutboxService.enqueue({
+      aggregateType: 'contract',
+      aggregateId: contract._id.toHexString(),
+      eventType: 'contract.activated',
+      action: 'createContract',
+      args: contractArgs,
+      dependencyKey: contract.depositId
+        ? `deposit:${contract.depositId}:deposit.paid`
+        : null,
+      metadata: {
+        contractId: contract._id.toHexString(),
+        details: {
+          contractHash: contract.contractHash,
+          artifactHash: canonicalReference.artifactHash,
+          artifactId: contract.artifactRef?.artifactId ?? null,
+          artifactRevision: canonicalReference.revision,
+          evidenceSchemaVersion: ledgerEvidence.schemaVersion,
+          evidenceEnvelopeHash: ledgerEvidenceHash,
+          evidenceEnvelope: ledgerEvidence,
+        },
+      },
+    })
+
+    const saved = await this.contractRepository.save(contract)
+    if (this.paymentsService) await this.paymentsService.generateSchedule(saved)
+    return saved
+  }
+
   async saveContractContent(
     contractId: string,
     actorId: string,
@@ -407,9 +661,11 @@ export class ContractsService {
     expectedRevision: number,
     isStaff: boolean
   ): Promise<Contract> {
-    if (!isStaff)
-      throw new ForbiddenException('CONTRACT_CONTENT_LOCK_ACCESS_DENIED')
     const contract = await this.findOne(contractId)
+    const isLandlord = contract.landlordId === actorId
+    if (!isStaff && !isLandlord) {
+      throw new ForbiddenException('CONTRACT_CONTENT_LOCK_ACCESS_DENIED')
+    }
     if (contract.contentLockedAt || contract.contentLockedHash) {
       return contract
     }
@@ -423,10 +679,9 @@ export class ContractsService {
     if ((contract.contentRevision ?? 0) !== expectedRevision) {
       throw new ConflictException('CONTRACT_CONTENT_REVISION_STALE')
     }
-    if (!contract.editorContent) {
-      throw new BadRequestException('CONTRACT_CONTENT_REQUIRED')
+    if (contract.editorContent) {
+      sanitizeTipTapContent(contract.editorContent)
     }
-    sanitizeTipTapContent(contract.editorContent)
     contract.contentLockedHash = this.buildLockedContentHash(contract)
     contract.contentLockedAt = new Date()
     contract.hashSchemaVersion = 1
@@ -705,6 +960,10 @@ export class ContractsService {
     }
 
     // Bước 1: Xác minh KYC của người ký trước khi chấp nhận chữ ký
+    if (contract.executionMethod === 'SMARTCA') {
+      throw new ConflictException('SMARTCA_SIGNATURE_REQUIRED')
+    }
+
     const executionStrategy =
       contract.executionPolicySnapshot?.strategy ?? 'DEPOSIT_FIRST'
     if (
@@ -887,6 +1146,17 @@ export class ContractsService {
 
   private async isDepositConfirmed(contract: Contract): Promise<boolean> {
     if (contract.deposit <= 0 || contract.depositPaidAt) return true
+    const agreement = await this.findDepositAgreementForContract(contract)
+    return Boolean(
+      agreement &&
+      (agreement.status === 'paid' ||
+        agreement.status === 'applied-to-lease-security')
+    )
+  }
+
+  private async findDepositAgreementForContract(
+    contract: Contract
+  ): Promise<DepositAgreement | null> {
     let agreement: DepositAgreement | null = null
     if (
       contract.depositAgreementId &&
@@ -901,11 +1171,7 @@ export class ContractsService {
         where: { applicationId: contract.rentalApplicationId },
       })
     }
-    return Boolean(
-      agreement &&
-      (agreement.status === 'paid' ||
-        agreement.status === 'applied-to-lease-security')
-    )
+    return agreement
   }
 
   async findOne(contractId: string): Promise<Contract> {
@@ -960,7 +1226,9 @@ export class ContractsService {
   private buildLockedContentHash(contract: Contract): string {
     const canonicalPayload = JSON.stringify({
       hashSchemaVersion: 1,
-      editorContent: canonicalizeTipTapContent(contract.editorContent),
+      editorContent: contract.editorContent
+        ? canonicalizeTipTapContent(contract.editorContent)
+        : null,
       packageSnapshot: contract.packageSnapshot ?? null,
       parties: {
         tenantId: contract.tenantId,

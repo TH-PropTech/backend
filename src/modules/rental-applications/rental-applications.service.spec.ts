@@ -4,6 +4,7 @@ import {
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common'
+import type { ConfigService } from '@nestjs/config'
 import { ObjectId } from 'mongodb'
 import type { Repository } from 'typeorm'
 import type { ApartmentsService } from '../apartments/apartments.service'
@@ -146,6 +147,31 @@ describe('RentalApplicationsService', () => {
         leaseDurationMonths: 12,
       })
     )
+  })
+
+  it('reports the disabled context and blocks creation when v4 is disabled', async () => {
+    const disabledConfig = {
+      get: jest.fn().mockReturnValue(false),
+    }
+    const disabledService = new RentalApplicationsService(
+      repository as unknown as Repository<RentalApplication>,
+      apartments as unknown as ApartmentsService,
+      disabledConfig as unknown as ConfigService
+    )
+    apartments.findOne.mockResolvedValue(apartment)
+
+    await expect(
+      disabledService.getContext('tenant-1', 'apartment-1')
+    ).resolves.toMatchObject({
+      enabled: false,
+      eligible: false,
+      reasonCode: 'RENTAL_FLOW_DISABLED',
+    })
+    apartments.findOne.mockClear()
+    await expect(disabledService.create('tenant-1', input())).rejects.toThrow(
+      'RENTAL_FLOW_DISABLED'
+    )
+    expect(apartments.findOne).not.toHaveBeenCalled()
   })
 
   it('snapshots the tenant-selected execution policy when a package exposes two options', async () => {

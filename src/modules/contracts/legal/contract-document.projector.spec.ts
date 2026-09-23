@@ -43,14 +43,12 @@ describe('ContractDocumentProjector', () => {
     }
 
     expect(result.sections[0]!.content).toContain('Masteri Thảo Điền')
-    expect(result.sections[0]!.title).toBe(
-      'Đối tượng hợp đồng và căn hộ cho thuê'
-    )
+    expect(result.sections[0]!.title).toBe('Các thông tin về nhà ở cho thuê')
     for (const section of result.sections) {
       expect(section.title).not.toMatch(/^Điều\s+\d+\./)
     }
-    expect(result.sections[3]!.content).toContain('18.000.000 VNĐ')
-    expect(result.sections[4]!.content).toContain('36.000.000 VNĐ')
+    expect(result.sections[1]!.content).toContain('18.000.000 VNĐ')
+    expect(result.sections[7]!.content).toContain('36.000.000 VNĐ')
   })
 
   it('should project a locked contract with mode=locked and integrity=valid', () => {
@@ -70,5 +68,37 @@ describe('ContractDocumentProjector', () => {
     expect(result.lockedHash).toBe('mock-locked-sha256-hash')
     expect(result.lockedAt).toBe('2026-09-14T08:00:00.000Z')
     expect(result.revision).toBe(2)
+  })
+
+  it('exposes the same canonical artifact identity used by signing and download', () => {
+    const artifactContract: Partial<Contract> = {
+      ...mockContract,
+      contentLockedHash: 'a'.repeat(64),
+      contentLockedAt: new Date('2026-09-14T08:00:00Z'),
+      artifactRef: {
+        artifactId: 'artifact-1',
+        revision: 3,
+        templateKey: 'lease-vn',
+        templateVersion: 4,
+        hashSchemaVersion: 2,
+        artifactHash: 'a'.repeat(64),
+        contentType: 'application/pdf',
+        lockedAt: new Date('2026-09-14T08:00:00Z'),
+      },
+    }
+
+    const result = ContractDocumentProjector.projectDocument(
+      artifactContract as Contract
+    )
+    expect(result.lockedHash).toBe('a'.repeat(64))
+    expect(result.templateVersion).toBe('lease-vn@4')
+    expect(result.canonicalArtifact).toEqual({
+      artifactId: 'artifact-1',
+      revision: 3,
+      templateKey: 'lease-vn',
+      templateVersion: 4,
+      artifactHash: 'a'.repeat(64),
+      contentType: 'application/pdf',
+    })
   })
 })

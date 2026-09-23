@@ -14,6 +14,7 @@ import { LedgerAuditQueryService } from '../fabric/ledger-audit-query.service'
 import { FabricService } from '../fabric/fabric.service'
 import { ContractDocumentProjector } from './legal/contract-document.projector'
 import { OwnershipTransferResolver } from '../property-ownership-transfer/ownership-transfer.resolver'
+import { ContractArtifactService } from './contract-artifact.service'
 import {
   ContractViewDto,
   ContractPartyViewDto,
@@ -34,7 +35,8 @@ export class ContractViewService {
     private readonly ledgerAuditQueryService: LedgerAuditQueryService,
     @Optional() private readonly fabricService?: FabricService,
     @Optional()
-    private readonly ownershipTransferResolver?: OwnershipTransferResolver
+    private readonly ownershipTransferResolver?: OwnershipTransferResolver,
+    @Optional() private readonly artifactService?: ContractArtifactService
   ) {}
 
   /**
@@ -76,6 +78,10 @@ export class ContractViewService {
       throw new ForbiddenException('CONTRACT_ACCESS_DENIED')
     }
 
+    if (contract.artifactRef && this.artifactService) {
+      await this.artifactService.resolveCanonicalArtifact(contract)
+    }
+
     // 1. Chiếu cấu trúc văn bản pháp lý
     const document = ContractDocumentProjector.projectDocument(contract)
 
@@ -111,6 +117,16 @@ export class ContractViewService {
         ? new Date(contract.tenantSignature.signedAt).toISOString()
         : null,
       signatureHash: contract.tenantSignature?.contentHash ?? null,
+      provider: contract.tenantSignature?.provider ?? null,
+      providerTransactionId:
+        contract.tenantSignature?.providerTransactionId ?? null,
+      certificateSerial: contract.tenantSignature?.certificateSerial ?? null,
+      signatureAlgorithm: contract.tenantSignature?.signatureAlgorithm ?? null,
+      signatureValueRef: contract.tenantSignature?.signatureValueRef ?? null,
+      providerStatus: contract.tenantSignature?.providerStatus ?? null,
+      verifiedAt: contract.tenantSignature?.verifiedAt
+        ? new Date(contract.tenantSignature.verifiedAt).toISOString()
+        : null,
     }
 
     const landlordParty: ContractPartyViewDto = {
@@ -130,6 +146,17 @@ export class ContractViewService {
         ? new Date(contract.landlordSignature.signedAt).toISOString()
         : null,
       signatureHash: contract.landlordSignature?.contentHash ?? null,
+      provider: contract.landlordSignature?.provider ?? null,
+      providerTransactionId:
+        contract.landlordSignature?.providerTransactionId ?? null,
+      certificateSerial: contract.landlordSignature?.certificateSerial ?? null,
+      signatureAlgorithm:
+        contract.landlordSignature?.signatureAlgorithm ?? null,
+      signatureValueRef: contract.landlordSignature?.signatureValueRef ?? null,
+      providerStatus: contract.landlordSignature?.providerStatus ?? null,
+      verifiedAt: contract.landlordSignature?.verifiedAt
+        ? new Date(contract.landlordSignature.verifiedAt).toISOString()
+        : null,
     }
 
     // 3. Chiếu thông tin tiền cọc
@@ -364,15 +391,14 @@ export class ContractViewService {
           ? 'CONTENT_NOT_LOCKED'
           : null,
         canEditContent:
-          isStaff &&
+          (isStaff || isLandlord) &&
           !contract.contentLockedHash &&
           ['draft', 'deposit-pending', 'deposit-paid'].includes(
             contract.status ?? ''
           ),
         canLockContent:
-          isStaff &&
+          (isStaff || isLandlord) &&
           !contract.contentLockedHash &&
-          Boolean(contract.editorContent) &&
           ['draft', 'deposit-pending', 'deposit-paid'].includes(
             contract.status ?? ''
           ),

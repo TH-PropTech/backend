@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ForbiddenException,
   UnprocessableEntityException,
 } from '@nestjs/common'
@@ -28,8 +29,8 @@ function createImage(fieldname: string): Express.Multer.File {
 
 function createService(options?: { grantError?: Error }): {
   service: KycService
-  kycRepository: { findOne: jest.Mock; save: jest.Mock }
-  userRepository: { findOne: jest.Mock; save: jest.Mock }
+  kycRepository: { find: jest.Mock; findOne: jest.Mock; save: jest.Mock }
+  userRepository: { find: jest.Mock; findOne: jest.Mock; save: jest.Mock }
   media: jest.Mocked<Pick<KycMediaService, 'store' | 'read' | 'remove'>>
 } {
   const grantError = options?.grantError
@@ -38,6 +39,7 @@ function createService(options?: { grantError?: Error }): {
     kycStatus: 'not-started',
   } as User
   const kycRepository = {
+    find: jest.fn().mockResolvedValue([]),
     findOne: jest.fn().mockResolvedValue(null),
     save: jest.fn().mockImplementation((record: KycRecord) =>
       Promise.resolve({
@@ -49,6 +51,7 @@ function createService(options?: { grantError?: Error }): {
     ),
   }
   const userRepository = {
+    find: jest.fn().mockResolvedValue([]),
     findOne: jest.fn().mockResolvedValue(user),
     save: jest.fn().mockImplementation(value => Promise.resolve(value)),
   }
@@ -133,6 +136,145 @@ describe('KycService.submitKyc', () => {
       'database unavailable'
     )
     expect(media.remove).toHaveBeenCalledTimes(3)
+  })
+})
+
+describe('KycService monitoring and review', () => {
+  const recordId = '507f1f77bcf86cd799439012'
+  const userId = '507f1f77bcf86cd799439011'
+
+  const pendingRecord = (): KycRecord => {
+    const record: KycRecord = {
+      _id: new ObjectId(recordId),
+      userId,
+      idCardNumber: '079123456789',
+      frontCardUrl: 'kyc-media:front',
+      backCardUrl: 'kyc-media:back',
+      selfieUrl: 'kyc-media:selfie',
+      fullName: 'Nguyen Van A',
+      status: 'pending',
+      rejectedReason: null,
+      verifiedAt: null,
+      createdAt: new Date('2026-09-01T00:00:00Z'),
+      updatedAt: new Date('2026-09-01T00:00:00Z'),
+    }
+    return record
+  }
+
+  it('lists records with status/search filters and page metadata', async () => {
+    const { service, kycRepository, userRepository } = createService()
+    const record = pendingRecord()
+    kycRepository.find.mockResolvedValue([record])
+    userRepository.find.mockResolvedValue([
+      {
+        _id: new ObjectId(userId),
+        email: 'a@example.com',
+        phone: '0901234567',
+      },
+    ])
+
+    const result = await service.findAll({
+      status: 'pending',
+      search: 'nguyen',
+      page: 1,
+      limit: 20,
+    })
+
+    expect(kycRepository.find).toHaveBeenCalledWith({
+      order: { createdAt: 'DESC' },
+      where: { status: 'pending' },
+    })
+    expect(result.total).toBe(1)
+    expect(result.items[0]?.fullName).toBe('Nguyen Van A')
+    expect(result.items[0]?.user).toEqual({
+      email: 'a@example.com',
+      phone: '0901234567',
+    })
+  })
+
+  it('counts pending, verified, rejected and total records', async () => {
+    const { service, kycRepository } = createService()
+    kycRepository.find.mockResolvedValue([
+      { status: 'pending' },
+      { status: 'verified' },
+      { status: 'rejected' },
+      { status: 'pending' },
+    ])
+
+    await expect(service.countByStatus()).resolves.toEqual({
+      pending: 2,
+      verified: 1,
+      rejected: 1,
+      total: 4,
+    })
+  })
+
+  it('verifies a pending record and synchronizes the user status', async () => {
+    const { service, kycRepository, userRepository } = createService()
+    const record = pendingRecord()
+    let savedRecord: KycRecord | undefined
+    kycRepository.save.mockImplementation((value: KycRecord) => {
+      savedRecord = value
+      return Promise.resolve(value)
+    })
+    kycRepository.findOne.mockResolvedValue(record)
+
+    const result = await service.review(recordId, 'verified', 'staff-1')
+
+    expect(kycRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'verified',
+        reviewedBy: 'staff-1',
+        rejectedReason: null,
+      })
+    )
+    expect(savedRecord?.verifiedAt).toBeInstanceOf(Date)
+    expect(userRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kycStatus: 'verified',
+        kycRejectReason: null,
+      })
+    )
+    expect(result.status).toBe('verified')
+  })
+
+  it('rejects with a reason and synchronizes the rejection reason', async () => {
+    const { service, kycRepository, userRepository } = createService()
+    const record = pendingRecord()
+    kycRepository.findOne.mockResolvedValue(record)
+
+    const result = await service.review(
+      recordId,
+      'rejected',
+      'staff-1',
+      'Ảnh CCCD bị lóa'
+    )
+
+    expect(kycRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'rejected',
+        reviewedBy: 'staff-1',
+        rejectedReason: 'Ảnh CCCD bị lóa',
+        verifiedAt: null,
+      })
+    )
+    expect(userRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kycStatus: 'rejected',
+        kycRejectReason: 'Ảnh CCCD bị lóa',
+      })
+    )
+    expect(result.status).toBe('rejected')
+  })
+
+  it('requires a reason before rejecting and does not persist', async () => {
+    const { service, kycRepository } = createService()
+
+    await expect(
+      service.review(recordId, 'rejected', 'staff-1')
+    ).rejects.toThrow(BadRequestException)
+    expect(kycRepository.findOne).not.toHaveBeenCalled()
+    expect(kycRepository.save).not.toHaveBeenCalled()
   })
 })
 

@@ -17,6 +17,13 @@ export type SmartCaSigningResponse = {
   status: 'pending' | 'signed' | 'rejected'
   confirmationUrl?: string
   certificateSerial?: string
+  certificateSubject?: string
+  certificateIssuer?: string
+  signatureHash?: string
+  signatureAlgorithm?: string
+  signatureValueRef?: string
+  artifactHash?: string
+  signedAt?: string
 }
 
 type SmartCaConfig = {
@@ -25,6 +32,7 @@ type SmartCaConfig = {
   spPassword?: string
   mobileCode?: string
   signV2Path?: string
+  statusPathTmpl?: string
 }
 
 @Injectable()
@@ -73,13 +81,53 @@ export class SmartCaProvider {
       throw new BadGatewayException('SMARTCA_REQUEST_FAILED')
     }
 
+    return this.normalizeResponse(payload, input.transactionId)
+  }
+
+  async getSignatureStatus(
+    providerTransactionId: string
+  ): Promise<SmartCaSigningResponse> {
+    const config = this.configService.get<SmartCaConfig>('smartCA')
+    if (!config?.apiUrl || !config.statusPathTmpl) {
+      throw new ServiceUnavailableException('SMARTCA_NOT_CONFIGURED')
+    }
+
+    let response: Response
+    try {
+      response = await fetch(
+        `${config.apiUrl}${config.statusPathTmpl.replace(
+          '{transactionId}',
+          encodeURIComponent(providerTransactionId)
+        )}`,
+        { method: 'GET', headers: { accept: 'application/json' } }
+      )
+    } catch {
+      throw new ServiceUnavailableException('SMARTCA_PROVIDER_UNAVAILABLE')
+    }
+
+    let payload: unknown
+    try {
+      payload = await response.json()
+    } catch {
+      throw new BadGatewayException('SMARTCA_RESPONSE_INVALID')
+    }
+    if (!response.ok || !payload || typeof payload !== 'object') {
+      throw new BadGatewayException('SMARTCA_REQUEST_FAILED')
+    }
+    return this.normalizeResponse(payload, providerTransactionId)
+  }
+
+  private normalizeResponse(
+    payload: object,
+    fallbackTransactionId: string
+  ): SmartCaSigningResponse {
     const data = payload as Record<string, unknown>
     const transactionId =
       typeof data.transaction_id === 'string'
         ? data.transaction_id
         : typeof data.transactionId === 'string'
           ? data.transactionId
-          : input.transactionId
+          : fallbackTransactionId
     const rawStatusValue = data.status ?? data.result
     const rawStatus =
       typeof rawStatusValue === 'string'
@@ -104,6 +152,27 @@ export class SmartCaProvider {
         : {}),
       ...(typeof data.certificate_serial === 'string'
         ? { certificateSerial: data.certificate_serial }
+        : {}),
+      ...(typeof data.certificate_subject === 'string'
+        ? { certificateSubject: data.certificate_subject }
+        : {}),
+      ...(typeof data.certificate_issuer === 'string'
+        ? { certificateIssuer: data.certificate_issuer }
+        : {}),
+      ...(typeof data.signature_hash === 'string'
+        ? { signatureHash: data.signature_hash }
+        : {}),
+      ...(typeof data.signature_algorithm === 'string'
+        ? { signatureAlgorithm: data.signature_algorithm }
+        : {}),
+      ...(typeof data.signature_value_ref === 'string'
+        ? { signatureValueRef: data.signature_value_ref }
+        : {}),
+      ...(typeof data.artifact_hash === 'string'
+        ? { artifactHash: data.artifact_hash }
+        : {}),
+      ...(typeof data.signed_at === 'string'
+        ? { signedAt: data.signed_at }
         : {}),
     }
   }

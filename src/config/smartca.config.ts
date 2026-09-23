@@ -25,6 +25,11 @@ export default registerAs('smartCA', () => {
       ? process.env.SMARTCA_TEST_MOBILE_CODE || ''
       : process.env.SMARTCA_MOBILE_CODE || '',
 
+    // Shared secret used to authenticate provider callbacks.
+    callbackSecret: isTest
+      ? process.env.SMARTCA_TEST_CALLBACK_SECRET || ''
+      : process.env.SMARTCA_CALLBACK_SECRET || '',
+
     // Default user_id (CCCD) - taken from user's KYC in production
     defaultUserId: isTest
       ? process.env.SMARTCA_TEST_DEFAULT_USER_ID || ''

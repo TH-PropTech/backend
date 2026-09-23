@@ -12,7 +12,12 @@ import {
   BadRequestException,
   ForbiddenException,
 } from '@nestjs/common'
-import { ApiTags, ApiBearerAuth, ApiProduces } from '@nestjs/swagger'
+import {
+  ApiTags,
+  ApiBearerAuth,
+  ApiProduces,
+  ApiConsumes,
+} from '@nestjs/swagger'
 import { FileInterceptor } from '@nestjs/platform-express'
 import {
   IsString,
@@ -23,12 +28,15 @@ import {
   IsInt,
   IsObject,
   MaxLength,
+  IsOptional,
+  IsIn,
 } from 'class-validator'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import type { UserPayload } from '../auth/interfaces/auth.interface'
 import { RolesGuard } from '../../common/guards/roles.guard'
 import { Roles } from '../../common/decorators/roles.decorator'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
+import { Public } from '../../common/decorators/public.decorator'
 import { ContractsService } from './contracts.service'
 import { Contract } from './schemas/contract.schema'
 import { ContractArtifactService } from './contract-artifact.service'
@@ -41,6 +49,8 @@ import type { ContractViewDto } from './dto/contract-view.dto'
 import type { ContractAuditEventDto } from './dto/contract-audit-event.dto'
 import { SmartCaSigningService } from './smartca/smartca-signing.service'
 import type { SmartCaSigningSession } from './smartca/smartca-signing-session.schema'
+import { SmartCaCallbackGuard } from './smartca/smartca-callback.guard'
+import type { ContractArtifact } from './schemas/contract-artifact.schema'
 
 // ── DTOs ──
 
@@ -168,6 +178,54 @@ export class TerminateContractDto {
   @IsNotEmpty()
   @MaxLength(128)
   idempotencyKey!: string
+}
+
+export class CreateSmartCaSigningSessionDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(128)
+  idempotencyKey?: string
+}
+
+export class SmartCaCallbackDto {
+  @IsString()
+  @IsNotEmpty()
+  transactionId!: string
+
+  @IsIn(['signed', 'rejected'])
+  status!: 'signed' | 'rejected'
+
+  @IsString()
+  @IsNotEmpty()
+  artifactHash!: string
+
+  @IsOptional()
+  @IsString()
+  certificateSerial?: string
+
+  @IsOptional()
+  @IsString()
+  certificateSubject?: string
+
+  @IsOptional()
+  @IsString()
+  certificateIssuer?: string
+
+  @IsOptional()
+  @IsString()
+  signatureHash?: string
+
+  @IsOptional()
+  @IsString()
+  signatureAlgorithm?: string
+
+  @IsOptional()
+  @IsString()
+  signatureValueRef?: string
+
+  @IsOptional()
+  @IsString()
+  signedAt?: string
 }
 
 // ── Controller ──
@@ -326,9 +384,14 @@ export class ContractsController {
   @Roles('landlord', 'tenant')
   async createSmartCaSigningSession(
     @Param('id') id: string,
-    @CurrentUser('id') signerId: string
+    @CurrentUser('id') signerId: string,
+    @Body() dto: CreateSmartCaSigningSessionDto
   ): Promise<SmartCaSigningSession> {
-    return this.smartCaSigningService.createSession(id, signerId)
+    return this.smartCaSigningService.createSession(
+      id,
+      signerId,
+      dto?.idempotencyKey
+    )
   }
 
   @Get(':id/smartca/signing-sessions/:sessionId')
@@ -348,22 +411,50 @@ export class ContractsController {
     )
   }
 
-  @Post('smartca/callback')
-  async smartCaCallback(
-    @Body()
-    body: {
-      transactionId: string
-      status: 'signed' | 'rejected'
-      certificateSerial?: string
-    }
+  @Post(':id/smartca/signing-sessions/:sessionId/poll')
+  @Roles('admin', 'staff', 'landlord', 'tenant')
+  async pollSmartCaSigningSession(
+    @Param('id') id: string,
+    @Param('sessionId') sessionId: string,
+    @CurrentUser() user: UserPayload
   ): Promise<SmartCaSigningSession> {
-    if (!body?.transactionId || !body.status) {
-      throw new BadRequestException('SMARTCA_CALLBACK_INVALID')
-    }
+    const isStaff =
+      user.roles?.some(role => ['staff', 'admin'].includes(role)) ?? false
+    return this.smartCaSigningService.poll(
+      id,
+      sessionId,
+      user._id ?? '',
+      isStaff
+    )
+  }
+
+  @Post(':id/smartca/signing-sessions/:sessionId/cancel')
+  @Roles('admin', 'staff', 'landlord', 'tenant')
+  async cancelSmartCaSigningSession(
+    @Param('id') id: string,
+    @Param('sessionId') sessionId: string,
+    @CurrentUser() user: UserPayload
+  ): Promise<SmartCaSigningSession> {
+    const isStaff =
+      user.roles?.some(role => ['staff', 'admin'].includes(role)) ?? false
+    return this.smartCaSigningService.cancelSession(
+      id,
+      sessionId,
+      user._id ?? '',
+      isStaff
+    )
+  }
+
+  @Post('smartca/callback')
+  @Public()
+  @UseGuards(SmartCaCallbackGuard)
+  async smartCaCallback(
+    @Body() body: SmartCaCallbackDto
+  ): Promise<SmartCaSigningSession> {
     return this.smartCaSigningService.reconcile(
       body.transactionId,
       body.status,
-      body.certificateSerial
+      body
     )
   }
 
@@ -415,17 +506,41 @@ export class ContractsController {
   }
 
   @Post(':id/lock-content')
-  @Roles('admin', 'staff')
+  @Roles('admin', 'staff', 'landlord')
   lockContent(
     @Param('id') id: string,
     @Body() dto: LockContractContentDto,
-    @CurrentUser('id') actorId: string
+    @CurrentUser() user: UserPayload
   ): Promise<Contract> {
+    const isStaff =
+      user.roles?.some(role => ['staff', 'admin'].includes(role)) ?? false
     return this.contractsService.lockContractContent(
       id,
-      actorId,
+      user._id ?? '',
       dto.expectedRevision,
-      true
+      isStaff
+    )
+  }
+
+  @Post(':id/artifacts/lock')
+  @Roles('admin', 'staff', 'landlord')
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(FileInterceptor('artifact'))
+  lockCanonicalArtifact(
+    @Param('id') id: string,
+    @CurrentUser() user: UserPayload,
+    @UploadedFile() artifact?: Express.Multer.File
+  ): Promise<ContractArtifact> {
+    if (!artifact?.buffer) {
+      throw new BadRequestException('CONTRACT_ARTIFACT_BYTES_MISSING')
+    }
+    const isStaff =
+      user.roles?.some(role => ['staff', 'admin'].includes(role)) ?? false
+    return this.artifactService.lockCanonicalArtifact(
+      id,
+      user._id ?? '',
+      isStaff,
+      artifact.buffer
     )
   }
 

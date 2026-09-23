@@ -17,9 +17,7 @@ describe('public service checklist', () => {
 
     expect(result.purpose).toBe('temporary-residence')
     expect(result.externalProcedureCompleted).toBe(false)
-    expect(result.officialSourceUrl).toBe(
-      'https://thutuc.dichvucong.gov.vn/p/home/dvc-chi-tiet-thu-tuc-hanh-chinh.html?ma_thu_tuc=1.004194'
-    )
+    expect(result.officialSourceUrl).toBe('https://dichvucong.bocongan.gov.vn/')
     expect(result.disclaimer).toContain('POC_ECONSENT')
     expect(result.items).toEqual(
       expect.arrayContaining([

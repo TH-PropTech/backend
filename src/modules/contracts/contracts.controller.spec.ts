@@ -23,6 +23,7 @@ describe('ContractsController', () => {
   }
   const artifactService = {
     generateDocument: jest.fn(),
+    lockCanonicalArtifact: jest.fn(),
   }
   const contractViewService = {
     getForActor: jest.fn(),
@@ -143,14 +144,14 @@ describe('ContractsController', () => {
     )
   })
 
-  it('locks content only through the staff/admin route', async () => {
+  it('locks content through authorized route for staff or landlord', async () => {
     service.lockContractContent.mockResolvedValue({
       status: 'awaiting-signature',
     })
     await controller.lockContent(
       'contract-1',
       { expectedRevision: 1 },
-      'staff-1'
+      { _id: 'staff-1', roles: ['staff'] }
     )
 
     expect(service.lockContractContent).toHaveBeenCalledWith(
@@ -195,6 +196,32 @@ describe('ContractsController', () => {
       false,
       'docx'
     )
+  })
+
+  it('requires a canonical PDF upload for the staff artifact-lock route', async () => {
+    expect(() =>
+      controller.lockCanonicalArtifact(
+        'contract-1',
+        { _id: 'staff-1', roles: ['staff'] },
+        undefined
+      )
+    ).toThrow('CONTRACT_ARTIFACT_BYTES_MISSING')
+
+    artifactService.lockCanonicalArtifact.mockResolvedValue({
+      artifactHash: 'a'.repeat(64),
+    })
+    const result = await controller.lockCanonicalArtifact(
+      'contract-1',
+      { _id: 'staff-1', roles: ['staff'] },
+      { buffer: Buffer.from('%PDF-1.7\nbytes') } as Express.Multer.File
+    )
+    expect(artifactService.lockCanonicalArtifact).toHaveBeenCalledWith(
+      'contract-1',
+      'staff-1',
+      true,
+      Buffer.from('%PDF-1.7\nbytes')
+    )
+    expect(result.artifactHash).toHaveLength(64)
   })
 
   it('delegates contract view to ContractViewService', async () => {
