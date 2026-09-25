@@ -1,5 +1,6 @@
 import {
   Injectable,
+  ConflictException,
   NotFoundException,
   ForbiddenException,
   Optional,
@@ -15,6 +16,8 @@ import { FabricService } from '../fabric/fabric.service'
 import { ContractDocumentProjector } from './legal/contract-document.projector'
 import { OwnershipTransferResolver } from '../property-ownership-transfer/ownership-transfer.resolver'
 import { ContractArtifactService } from './contract-artifact.service'
+import { ContractTemplateGovernanceService } from './legal/contract-template-governance.service'
+import { ContractAmendment } from './schemas/contract-amendment.schema'
 import {
   ContractViewDto,
   ContractPartyViewDto,
@@ -36,7 +39,12 @@ export class ContractViewService {
     @Optional() private readonly fabricService?: FabricService,
     @Optional()
     private readonly ownershipTransferResolver?: OwnershipTransferResolver,
-    @Optional() private readonly artifactService?: ContractArtifactService
+    @Optional() private readonly artifactService?: ContractArtifactService,
+    @Optional()
+    private readonly templateGovernanceService?: ContractTemplateGovernanceService,
+    @Optional()
+    @InjectRepository(ContractAmendment)
+    private readonly amendmentRepository?: Repository<ContractAmendment>
   ) {}
 
   /**
@@ -78,12 +86,67 @@ export class ContractViewService {
       throw new ForbiddenException('CONTRACT_ACCESS_DENIED')
     }
 
+    let artifactFailure: 'mismatch' | 'unavailable' | null = null
+    let artifactAvailable = false
     if (contract.artifactRef && this.artifactService) {
-      await this.artifactService.resolveCanonicalArtifact(contract)
+      try {
+        await this.artifactService.resolveCanonicalArtifact(contract)
+        artifactAvailable = true
+      } catch (error) {
+        artifactFailure =
+          error instanceof ConflictException ? 'mismatch' : 'unavailable'
+      }
     }
 
     // 1. Chiếu cấu trúc văn bản pháp lý
-    const document = ContractDocumentProjector.projectDocument(contract)
+    const templateRef =
+      contract.contractTemplateRef ??
+      (contract.termsRef?.key.startsWith('VN_') ? contract.termsRef : undefined)
+    const template =
+      templateRef && this.templateGovernanceService
+        ? await this.templateGovernanceService.getPublishedVersion(
+            templateRef.key,
+            templateRef.version
+          )
+        : undefined
+    const document = ContractDocumentProjector.projectDocument(
+      contract,
+      template
+    )
+    if (artifactFailure) document.integrity = artifactFailure
+    const amendments = this.amendmentRepository
+      ? await this.amendmentRepository.find({
+          where: { contractId },
+          order: { sequence: 'ASC' },
+        })
+      : []
+    const effectiveAmendments = amendments.filter(
+      amendment =>
+        amendment.status === 'effective' &&
+        amendment.effectiveFrom.getTime() <= Date.now()
+    )
+    const governingAmendment =
+      effectiveAmendments[effectiveAmendments.length - 1]
+    document.amendmentHistory = amendments.map(amendment => ({
+      id: amendment._id.toHexString(),
+      sequence: amendment.sequence,
+      status:
+        amendment.status === 'effective' &&
+        amendment.effectiveFrom.getTime() > Date.now()
+          ? 'pending-effective'
+          : amendment.status,
+      effectiveFrom: amendment.effectiveFrom.toISOString(),
+      contentHash: amendment.contentHash ?? null,
+      artifactHash: amendment.artifactHash ?? null,
+      artifactId: amendment.artifactId ?? null,
+      artifactIntegrity: amendment.artifactRef ? 'available' : 'missing',
+      ledgerStatus: amendment.ledgerStatus ?? 'not-requested',
+      ledgerTxHash: amendment.ledgerTxHash ?? null,
+      tenantSigned: Boolean(amendment.tenantSignature),
+      landlordSigned: Boolean(amendment.landlordSignature),
+    }))
+    document.governingAmendmentId =
+      governingAmendment?._id.toHexString() ?? null
 
     // 2. Chiếu thông tin 2 bên
     const [tenantKyc, landlordKyc] = await Promise.all([
@@ -329,6 +392,16 @@ export class ContractViewService {
       onChainValid: null,
     }
 
+    const commercial = contract.effectiveCommercial ??
+      contract.commercialDraft ?? {
+        monthlyRent: contract.monthlyRent,
+        deposit: contract.deposit,
+        paymentDay: contract.paymentDay,
+        durationMonths: contract.durationMonths ?? null,
+        latePenaltyRate: contract.latePenaltyRate || 10,
+        terminationNoticeDays: contract.terminationNoticeDays || 30,
+      }
+
     // 6. Hoàn thiện ContractViewDto
     return {
       contract: {
@@ -351,12 +424,15 @@ export class ContractViewService {
           value: contract.propertyValue || contract.monthlyRent,
         },
         commercial: {
-          monthlyRent: contract.monthlyRent,
-          deposit: contract.deposit,
-          paymentDay: contract.paymentDay,
-          durationMonths: contract.durationMonths ?? null,
-          latePenaltyRate: contract.latePenaltyRate || 10,
-          terminationNoticeDays: contract.terminationNoticeDays || 30,
+          monthlyRent: commercial.monthlyRent,
+          deposit: commercial.deposit,
+          paymentDay: commercial.paymentDay,
+          durationMonths: commercial.durationMonths ?? null,
+          latePenaltyRate: commercial.latePenaltyRate,
+          terminationNoticeDays:
+            ('noticePeriodDays' in commercial
+              ? commercial.noticePeriodDays
+              : undefined) ?? commercial.terminationNoticeDays,
         },
         startDate: contract.startDate
           ? new Date(contract.startDate).toISOString()
@@ -386,10 +462,22 @@ export class ContractViewService {
           ].includes(contract.status || ''),
         paymentReasonCode: isDepositPaid ? 'DEPOSIT_ALREADY_PAID' : null,
         signingEligibility,
-        canDownloadArtifact: Boolean(contract.contentLockedHash),
+        canDownloadArtifact: Boolean(
+          contract.contentLockedHash &&
+          contract.artifactRef &&
+          artifactAvailable
+        ),
         artifactReasonCode: !contract.contentLockedHash
           ? 'CONTENT_NOT_LOCKED'
-          : null,
+          : !contract.artifactRef
+            ? 'ARTIFACT_NOT_AVAILABLE'
+            : !this.artifactService
+              ? 'ARTIFACT_STORAGE_UNAVAILABLE'
+              : artifactFailure === 'mismatch'
+                ? 'ARTIFACT_HASH_MISMATCH'
+                : artifactFailure === 'unavailable'
+                  ? 'ARTIFACT_STORAGE_UNAVAILABLE'
+                  : null,
         canEditContent:
           (isStaff || isLandlord) &&
           !contract.contentLockedHash &&

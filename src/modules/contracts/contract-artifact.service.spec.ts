@@ -273,4 +273,89 @@ describe('ContractArtifactService', () => {
       )
     ).rejects.toThrow('gridfs down')
   })
+
+  it('locks and resolves amendment artifacts with both byte and canonical hashes', async () => {
+    const bytes = Buffer.from('%PDF-1.7\namendment bytes')
+    const contract = {
+      _id: new ObjectId('507f1f77bcf86cd799439011'),
+      contractCode: 'CT-001',
+      tenantId: 'tenant-1',
+      landlordId: 'landlord-1',
+      contractTemplateRef: {
+        key: 'VN_INDIVIDUAL_RESIDENTIAL_LEASE',
+        version: 2,
+        contentHash: 'template-hash',
+      },
+    } as unknown as Contract
+    const amendment = {
+      _id: new ObjectId('507f1f77bcf86cd799439012'),
+      contractId: contract._id.toHexString(),
+      sequence: 1,
+      status: 'locked',
+      revision: 0,
+      contentHash: 'canonical-amendment-hash',
+      effectiveFrom: new Date(Date.now() + 86_400_000),
+    } as unknown as import('./schemas/contract-amendment.schema').ContractAmendment
+    const artifactId = new ObjectId('507f1f77bcf86cd799439013')
+    const artifactHash = createHash('sha256').update(bytes).digest('hex')
+    const artifact = {
+      _id: artifactId,
+      contractId: contract._id.toHexString(),
+      amendmentId: amendment._id.toHexString(),
+      revision: 1,
+      artifactHash,
+      canonicalContentHash: amendment.contentHash,
+      byteLength: bytes.length,
+      contentType: 'application/pdf' as const,
+      lockedAt: new Date(),
+      gridFsFileId: new ObjectId(),
+      rendererVersion: 'uploaded-amendment-pdf-v1',
+      sourceSchemaVersion: 2,
+    } as unknown as ContractArtifact
+    const amendmentRepository = {
+      findOne: jest.fn().mockResolvedValue(amendment),
+      save: jest.fn().mockResolvedValue(amendment),
+    }
+    const artifactRepository = {
+      create: jest.fn().mockReturnValue(artifact),
+      save: jest.fn().mockResolvedValue(artifact),
+      findOne: jest.fn().mockResolvedValue(artifact),
+    }
+    const storage = {
+      upload: jest.fn().mockResolvedValue(artifact.gridFsFileId),
+      download: jest.fn().mockResolvedValue(bytes),
+    }
+    const service = new ContractArtifactService(
+      { findOne: jest.fn().mockResolvedValue(contract) } as never,
+      artifactRepository as never,
+      storage,
+      amendmentRepository as never
+    )
+
+    const locked = await service.lockAmendmentArtifact(
+      contract._id.toHexString(),
+      amendment._id.toHexString(),
+      'staff-1',
+      true,
+      bytes
+    )
+
+    expect(locked.status).toBe('pending-signature')
+    expect(locked.artifactRef).toEqual(
+      expect.objectContaining({
+        artifactHash,
+        canonicalContentHash: amendment.contentHash,
+      })
+    )
+    await expect(
+      service.resolveAmendmentArtifact(
+        contract._id.toHexString(),
+        amendment._id.toHexString(),
+        'tenant-1',
+        false
+      )
+    ).resolves.toEqual(
+      expect.objectContaining({ bytes, artifactHash, revision: 1 })
+    )
+  })
 })
