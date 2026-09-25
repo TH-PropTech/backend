@@ -16,7 +16,9 @@ import {
   BuildingRecord,
   TrainingRecord,
   UserProfile,
+  EngineConfig,
 } from './engine/naive-bayes.types'
+import { RecommendationConfigService } from './recommendation-config.service'
 
 @Injectable()
 export class RecommendationsService implements OnApplicationBootstrap {
@@ -27,7 +29,8 @@ export class RecommendationsService implements OnApplicationBootstrap {
     @InjectRepository(RecommendationHistory)
     private readonly historyRepository: Repository<RecommendationHistory>,
     private readonly apartmentsService: ApartmentsService,
-    private readonly nbEngine: NaiveBayesEngine
+    private readonly nbEngine: NaiveBayesEngine,
+    private readonly configService: RecommendationConfigService
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
@@ -87,7 +90,8 @@ export class RecommendationsService implements OnApplicationBootstrap {
   }
 
   /**
-   * Retrains the Naive Bayes engine using real database apartments and historical records.
+   * Retrains the Naive Bayes engine using real database apartments and historical records,
+   * applying the active engine strategy and hyperparameters from RecommendationConfigService.
    */
   public async retrainModel(): Promise<{
     buildingCount: number
@@ -113,11 +117,36 @@ export class RecommendationsService implements OnApplicationBootstrap {
       rented_apartment_id: h.rentedApartmentId,
     }))
 
-    this.nbEngine.train(buildingRecords, trainingRecords)
+    // Load active engine strategy and hyperparameters with resilient fallback
+    let engineConfig: EngineConfig = {
+      strategy: 'hybrid',
+      alpha: 1.0,
+      nbWeight: 0.5,
+      ruleWeight: 0.5,
+    }
+
+    try {
+      const activeConfig = await this.configService.getConfig()
+      if (activeConfig) {
+        engineConfig = {
+          strategy: activeConfig.strategy,
+          alpha: activeConfig.alpha,
+          nbWeight: activeConfig.nbWeight,
+          ruleWeight: activeConfig.ruleWeight,
+        }
+      }
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error)
+      this.logger.warn(
+        `Failed to retrieve recommendation engine config: ${msg}. Falling back to default hybrid config.`
+      )
+    }
+
+    this.nbEngine.train(buildingRecords, trainingRecords, engineConfig)
     this.isModelTrained = true
 
     this.logger.log(
-      `Model retrained: ${buildingRecords.length} available apartments, ${trainingRecords.length} history records.`
+      `Model retrained: ${buildingRecords.length} available apartments, ${trainingRecords.length} history records using strategy '${engineConfig.strategy}'.`
     )
 
     return {

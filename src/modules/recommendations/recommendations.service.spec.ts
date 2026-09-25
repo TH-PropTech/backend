@@ -7,6 +7,7 @@ import { RecommendationHistory } from './schemas/recommendation-history.schema'
 import { Apartment } from '../apartments/schemas/apartment.schema'
 import { RecommendDto } from './dto/recommend.dto'
 import { FeedbackDto, FeedbackType } from './dto/feedback.dto'
+import { RecommendationConfigService } from './recommendation-config.service'
 import { ObjectId } from 'mongodb'
 
 describe('RecommendationsService', () => {
@@ -19,6 +20,10 @@ describe('RecommendationsService', () => {
   }
   let mockApartmentsService: {
     findAll: jest.Mock
+  }
+  let mockConfigService: {
+    getConfig: jest.Mock
+    updateConfig: jest.Mock
   }
   let nbEngine: NaiveBayesEngine
 
@@ -134,6 +139,17 @@ describe('RecommendationsService', () => {
       findAll: jest.fn().mockResolvedValue(mockApartments),
     }
 
+    mockConfigService = {
+      getConfig: jest.fn().mockResolvedValue({
+        configId: 'global',
+        strategy: 'hybrid',
+        alpha: 1.0,
+        nbWeight: 0.5,
+        ruleWeight: 0.5,
+      }),
+      updateConfig: jest.fn(),
+    }
+
     nbEngine = new NaiveBayesEngine()
 
     const module: TestingModule = await Test.createTestingModule({
@@ -150,6 +166,10 @@ describe('RecommendationsService', () => {
         {
           provide: NaiveBayesEngine,
           useValue: nbEngine,
+        },
+        {
+          provide: RecommendationConfigService,
+          useValue: mockConfigService,
         },
       ],
     }).compile()
@@ -264,6 +284,37 @@ describe('RecommendationsService', () => {
       const res = await service.sync()
       expect(res.status).toBe('success')
       expect(res.apartments_loaded).toBe(2)
+    })
+  })
+
+  describe('Dimension 5: Engine Config & Fallback Handling', () => {
+    it('should retrain model with active config from configService', async () => {
+      mockConfigService.getConfig.mockResolvedValueOnce({
+        configId: 'global',
+        strategy: 'map',
+        alpha: 2.5,
+        nbWeight: 0.6,
+        ruleWeight: 0.4,
+      })
+
+      const res = await service.retrainModel()
+      expect(mockConfigService.getConfig).toHaveBeenCalled()
+      expect(res.buildingCount).toBe(2)
+      expect(nbEngine.getConfig().strategy).toBe('map')
+      expect(nbEngine.getConfig().alpha).toBe(2.5)
+    })
+
+    it('should fallback to default hybrid config if configService.getConfig throws error', async () => {
+      mockConfigService.getConfig.mockRejectedValueOnce(
+        new Error('Database connection failed')
+      )
+
+      const res = await service.retrainModel()
+      expect(res.buildingCount).toBe(2)
+      expect(nbEngine.getConfig().strategy).toBe('hybrid')
+      expect(nbEngine.getConfig().alpha).toBe(1.0)
+      expect(nbEngine.getConfig().nbWeight).toBe(0.5)
+      expect(nbEngine.getConfig().ruleWeight).toBe(0.5)
     })
   })
 })

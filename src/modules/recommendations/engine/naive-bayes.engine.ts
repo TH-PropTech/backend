@@ -6,26 +6,90 @@ import {
   RecommendationOutput,
   BuildingModelParams,
   RecommendationContributions,
+  EngineConfig,
 } from './naive-bayes.types'
 
+/**
+ * Hybrid Naive Bayes + Content-based Filtering engine for apartment recommendations.
+ *
+ * The engine combines two scoring strategies:
+ * - **Naive Bayes (NB) score**: Probabilistic likelihood computed from rental history
+ *   using Gaussian distributions (age, income) and categorical likelihoods
+ *   (district, rooms, gym, parking) with Laplace or MAP Dirichlet smoothing.
+ * - **Content-based (rule) score**: A four-pillar checklist (finance, location,
+ *   demographics, amenities) that captures domain heuristics.
+ *
+ * Supports 4 strategies:
+ * 1. 'hybrid': Standard Laplace smoothing + 50/50 NB/Rule (default)
+ * 2. 'map': MAP Bayesian with configurable Dirichlet prior alpha and variance floor
+ * 3. 'weighted': Feature-weighted NB using Mutual Information
+ * 4. 'map-weighted': MAP Bayesian + Mutual Information feature weighting
+ */
 @Injectable()
 export class NaiveBayesEngine {
   private readonly logger = new Logger(NaiveBayesEngine.name)
 
+  /** Current active configuration for the recommendation engine. */
+  private currentConfig: EngineConfig = {
+    strategy: 'hybrid',
+    alpha: 1.0,
+    nbWeight: 0.5,
+    ruleWeight: 0.5,
+  }
+
+  /**
+   * Normalized mutual information weights for the 4 categorical features.
+   * Sums to 1.0. Used when strategy === 'weighted' | 'map-weighted'.
+   */
+  private featureWeights: Record<
+    'district' | 'rooms' | 'gym' | 'parking',
+    number
+  > = {
+    district: 0.25,
+    rooms: 0.25,
+    gym: 0.25,
+    parking: 0.25,
+  }
+
+  public getConfig(): EngineConfig {
+    return { ...this.currentConfig }
+  }
+
+  public getFeatureWeights(): Record<
+    'district' | 'rooms' | 'gym' | 'parking',
+    number
+  > {
+    return { ...this.featureWeights }
+  }
+
+  /**
+   * Geographic adjacency map for TP.HCM's 22 administrative units.
+   * Covers all quận/huyện; adjacency is symmetric — the lookup handles
+   * both directions so each pair only needs to appear once.
+   */
   public static readonly DISTRICT_NEIGHBORS: Record<string, string[]> = {
     'Quận 1': ['Quận 3', 'Quận 4', 'Quận 5', 'Bình Thạnh', 'Quận 10', 'Quận 2'],
     'Quận 2': ['Bình Thạnh', 'Quận 9', 'Thủ Đức', 'Quận 7', 'Quận 4', 'Quận 1'],
     'Quận 3': ['Quận 1', 'Quận 10', 'Phú Nhuận', 'Tân Bình'],
     'Quận 4': ['Quận 1', 'Quận 7', 'Quận 2', 'Quận 5', 'Quận 8'],
+    'Quận 5': ['Quận 1', 'Quận 4', 'Quận 6', 'Quận 8', 'Quận 10', 'Quận 11'],
+    'Quận 6': ['Quận 5', 'Quận 8', 'Quận 11', 'Bình Tân', 'Tân Phú'],
     'Quận 7': ['Quận 4', 'Quận 8', 'Quận 2', 'Nhà Bè', 'Bình Chánh'],
     'Quận 8': ['Quận 7', 'Quận 5', 'Quận 6', 'Bình Tân', 'Quận 4'],
     'Quận 9': ['Quận 2', 'Thủ Đức'],
     'Quận 10': ['Quận 3', 'Quận 11', 'Quận 5', 'Tân Bình', 'Quận 1'],
+    'Quận 11': ['Quận 3', 'Quận 5', 'Quận 6', 'Quận 10', 'Tân Phú'],
+    'Quận 12': ['Gò Vấp', 'Thủ Đức', 'Hóc Môn', 'Bình Thạnh'],
     'Bình Thạnh': ['Quận 1', 'Quận 2', 'Phú Nhuận', 'Gò Vấp', 'Thủ Đức'],
     'Thủ Đức': ['Quận 2', 'Quận 9', 'Bình Thạnh', 'Gò Vấp'],
     'Bình Tân': ['Quận 6', 'Quận 8', 'Tân Phú', 'Bình Chánh'],
     'Gò Vấp': ['Bình Thạnh', 'Phú Nhuận', 'Quận 12', 'Tân Bình'],
     'Phú Nhuận': ['Quận 1', 'Quận 3', 'Bình Thạnh', 'Gò Vấp', 'Tân Bình'],
+    'Tân Phú': ['Quận 6', 'Quận 11', 'Bình Tân', 'Tân Bình', 'Hóc Môn'],
+    'Nhà Bè': ['Quận 7', 'Bình Chánh', 'Cần Giờ'],
+    'Bình Chánh': ['Quận 7', 'Quận 8', 'Bình Tân', 'Nhà Bè', 'Hóc Môn'],
+    'Hóc Môn': ['Quận 12', 'Bình Chánh', 'Củ Chi', 'Tân Phú'],
+    'Củ Chi': ['Hóc Môn'],
   }
 
   private buildings: BuildingRecord[] = []
@@ -59,6 +123,16 @@ export class NaiveBayesEngine {
     return false
   }
 
+  /**
+   * Infers demographic targets (min income, age range) from a monthly rent price.
+   *
+   * @remarks
+   * **Price-based heuristic fallback** — does NOT learn from historical data.
+   * The age and income ranges are fixed rule tiers used to seed `target_age_min`,
+   * `target_age_max`, and `min_income` on `BuildingRecord` when no historical
+   * signal is available for a building. This makes it a domain heuristic,
+   * not a statistical model output.
+   */
   public inferDemographics(price: number): {
     minIncome: number
     targetAgeMin: number
@@ -75,7 +149,15 @@ export class NaiveBayesEngine {
     return { minIncome, targetAgeMin: 28, targetAgeMax: 60 }
   }
 
-  public train(buildings: BuildingRecord[], history: TrainingRecord[]): void {
+  public train(
+    buildings: BuildingRecord[],
+    history: TrainingRecord[],
+    config?: EngineConfig
+  ): void {
+    if (config) {
+      this.currentConfig = { ...config }
+    }
+
     this.buildings = buildings
     this.history = history
     this.priors = {}
@@ -132,7 +214,10 @@ export class NaiveBayesEngine {
       grouped.set(bId, list)
     }
 
-    const alpha = 1.0 // Laplace smoothing for prior
+    const isMap =
+      this.currentConfig.strategy === 'map' ||
+      this.currentConfig.strategy === 'map-weighted'
+    const alpha = isMap ? (this.currentConfig.alpha ?? 1.0) : 1.0 // Dirichlet prior for MAP, Laplace smoothing (1.0) for hybrid
 
     for (const bId of buildingIds) {
       const bData = grouped.get(bId) || []
@@ -153,8 +238,9 @@ export class NaiveBayesEngine {
               ) /
               (bCount - 1)
             : 1.0
-        if (Number.isNaN(ageVar) || ageVar < 0.1) {
-          ageVar = 1.0
+        const ageVarFloor = isMap ? Math.max(0.1, alpha * 0.5) : 0.1
+        if (Number.isNaN(ageVar) || ageVar < ageVarFloor) {
+          ageVar = isMap ? Math.max(1.0, ageVarFloor) : 1.0
         }
 
         // Continuous: Income
@@ -219,10 +305,121 @@ export class NaiveBayesEngine {
       }
     }
 
+    if (
+      this.currentConfig.strategy === 'weighted' ||
+      this.currentConfig.strategy === 'map-weighted'
+    ) {
+      this.computeFeatureWeights(history)
+    }
+
     this.isTrained = true
     this.logger.log(
-      `Naive Bayes trained successfully on ${totalRecords} history records across ${numBuildings} buildings.`
+      `Naive Bayes trained successfully on ${totalRecords} history records across ${numBuildings} buildings using strategy '${this.currentConfig.strategy}'.`
     )
+  }
+
+  /**
+   * Computes mutual information weights for the 4 categorical features
+   * (district, rooms, gym, parking) against the target rented apartment ID.
+   * Standardizes weights so that sum(weights) === 1.0.
+   */
+  private computeFeatureWeights(history: TrainingRecord[]): void {
+    const N = history.length
+    if (N === 0) {
+      this.featureWeights = {
+        district: 0.25,
+        rooms: 0.25,
+        gym: 0.25,
+        parking: 0.25,
+      }
+      return
+    }
+
+    const featureExtractors: Record<
+      'district' | 'rooms' | 'gym' | 'parking',
+      (r: TrainingRecord) => string
+    > = {
+      district: r => String(r.preferred_district),
+      rooms: r => String(r.preferred_bedrooms),
+      gym: r => String(r.requires_gym),
+      parking: r => String(r.requires_parking),
+    }
+
+    // Marginal counts for building (B)
+    const bCounts = new Map<string, number>()
+    for (const r of history) {
+      bCounts.set(
+        r.rented_apartment_id,
+        (bCounts.get(r.rented_apartment_id) || 0) + 1
+      )
+    }
+
+    const rawMI: Record<'district' | 'rooms' | 'gym' | 'parking', number> = {
+      district: 0,
+      rooms: 0,
+      gym: 0,
+      parking: 0,
+    }
+
+    const features: Array<'district' | 'rooms' | 'gym' | 'parking'> = [
+      'district',
+      'rooms',
+      'gym',
+      'parking',
+    ]
+
+    for (const feat of features) {
+      const extractor = featureExtractors[feat]
+      const xCounts = new Map<string, number>()
+      const bxCounts = new Map<string, number>()
+
+      for (const r of history) {
+        const x = extractor(r)
+        const b = r.rented_apartment_id
+        xCounts.set(x, (xCounts.get(x) || 0) + 1)
+        const bxKey = `${b}:::${x}`
+        bxCounts.set(bxKey, (bxCounts.get(bxKey) || 0) + 1)
+      }
+
+      let mi = 0
+      for (const [bxKey, countBX] of bxCounts.entries()) {
+        const [b, x] = bxKey.split(':::')
+        if (b === undefined || x === undefined) continue
+        const countB = bCounts.get(b) || 0
+        const countX = xCounts.get(x) || 0
+        if (countBX > 0 && countB > 0 && countX > 0) {
+          const pBX = countBX / N
+          const pB = countB / N
+          const pX = countX / N
+          mi += pBX * Math.log(pBX / (pB * pX))
+        }
+      }
+      rawMI[feat] = Math.max(0, mi)
+    }
+
+    const totalMI = rawMI.district + rawMI.rooms + rawMI.gym + rawMI.parking
+
+    if (totalMI < 1e-9) {
+      this.featureWeights = {
+        district: 0.25,
+        rooms: 0.25,
+        gym: 0.25,
+        parking: 0.25,
+      }
+      return
+    }
+
+    const wDistrict = rawMI.district / totalMI
+    const wRooms = rawMI.rooms / totalMI
+    const wGym = rawMI.gym / totalMI
+    const wParking = 1.0 - (wDistrict + wRooms + wGym)
+
+    this.featureWeights = {
+      district: wDistrict,
+      rooms: wRooms,
+      gym: wGym,
+      parking: wParking,
+    }
   }
 
   public gaussianProbability(
@@ -240,10 +437,22 @@ export class NaiveBayesEngine {
     value: string | number,
     stats: { counts: Record<string, number>; total: number },
     vocabSize: number,
-    beta = 1.0
+    beta?: number
   ): number {
+    const isMap =
+      this.currentConfig.strategy === 'map' ||
+      this.currentConfig.strategy === 'map-weighted'
+    const smoothing =
+      beta !== undefined
+        ? beta
+        : isMap
+          ? (this.currentConfig.alpha ?? 1.0)
+          : 1.0
     const valCount = stats.counts[String(value)] || 0
-    return (valCount + beta) / (stats.total + beta * Math.max(vocabSize, 1))
+    return (
+      (valCount + smoothing) /
+      (stats.total + smoothing * Math.max(vocabSize, 1))
+    )
   }
 
   public recommend(
@@ -325,28 +534,40 @@ export class NaiveBayesEngine {
         cat.district,
         this.districtVocabSize
       )
-      logProb += Math.log(pDist)
 
       const pRooms = this.categoricalProbability(
         prefRooms,
         cat.rooms,
         this.roomsVocabSize
       )
-      logProb += Math.log(pRooms)
 
       const pGym = this.categoricalProbability(
         prefGym,
         cat.gym,
         this.gymVocabSize
       )
-      logProb += Math.log(pGym)
 
       const pParking = this.categoricalProbability(
         prefParking,
         cat.parking,
         this.parkingVocabSize
       )
-      logProb += Math.log(pParking)
+
+      const isWeighted =
+        this.currentConfig.strategy === 'weighted' ||
+        this.currentConfig.strategy === 'map-weighted'
+
+      if (isWeighted) {
+        logProb += Math.log(pDist) * this.featureWeights.district
+        logProb += Math.log(pRooms) * this.featureWeights.rooms
+        logProb += Math.log(pGym) * this.featureWeights.gym
+        logProb += Math.log(pParking) * this.featureWeights.parking
+      } else {
+        logProb += Math.log(pDist)
+        logProb += Math.log(pRooms)
+        logProb += Math.log(pGym)
+        logProb += Math.log(pParking)
+      }
 
       logLikelihoods[bId] = logProb
       compProbs[bId] = {
@@ -401,7 +622,9 @@ export class NaiveBayesEngine {
       const incomeRatio = Math.min(1.0, probs.pIncome / maxIncomePdf)
       financeScore += incomeRatio * 15
 
-      // 2. Location Pillar (max score: 45)
+      // 2. Location Pillar (max score: 30)
+      // Note: district probability is already captured in the NB log-likelihood
+      // (nbPercentage). Adding it here again would double-count the district feature.
       let locationScore = 0.0
       const isExact =
         b.district.trim().toLowerCase() === prefDistrict.trim().toLowerCase()
@@ -416,7 +639,6 @@ export class NaiveBayesEngine {
       } else {
         reasons.push(`Khu vực ${b.district}`)
       }
-      locationScore += probs.pDist * 15
 
       // 3. Demographics Pillar (max score: 20)
       let demographicsScore = 0.0
@@ -479,7 +701,7 @@ export class NaiveBayesEngine {
         ),
         location: Math.min(
           100,
-          Math.max(0, Math.round((locationScore / 45.0) * 100))
+          Math.max(0, Math.round((locationScore / 30.0) * 100))
         ),
         demographics: Math.min(
           100,
@@ -518,8 +740,11 @@ export class NaiveBayesEngine {
       // Naive Bayes percentage
       const nbPercentage = (relativeProbs[bId] || 0.0) * 100
 
-      // Hybrid match score
-      let finalMatch = 0.5 * nbPercentage + 0.5 * checklistPercentage
+      // Match score weighted according to active strategy config
+      const nbWeight = this.currentConfig.nbWeight ?? 0.5
+      const ruleWeight = this.currentConfig.ruleWeight ?? 0.5
+      let finalMatch =
+        nbWeight * nbPercentage + ruleWeight * checklistPercentage
       finalMatch = Math.min(
         100.0,
         Math.max(0.0, Math.round(finalMatch * 10) / 10)
@@ -531,8 +756,14 @@ export class NaiveBayesEngine {
 
       const historyCount =
         this.buildingParams[bId]?.categorical?.district?.total || 0
+      const totalHistory = this.history.length
+      const historyRatio = totalHistory > 0 ? historyCount / totalHistory : 0
       const confidence: 'Cao' | 'Trung bình' | 'Thấp' =
-        historyCount >= 150 ? 'Cao' : historyCount >= 20 ? 'Trung bình' : 'Thấp'
+        historyRatio >= 0.05
+          ? 'Cao'
+          : historyRatio >= 0.01
+            ? 'Trung bình'
+            : 'Thấp'
 
       recommendations.push({
         id: bId,
