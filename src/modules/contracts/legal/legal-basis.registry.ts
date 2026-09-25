@@ -46,10 +46,20 @@ export const LEGAL_BASIS_REGISTRY: readonly LegalBasis[] = [
 ]
 
 export function getActiveLegalBasis(ids: string[]): LegalBasis[] {
+  if (ids.length === 0) throw new Error('LEGAL_CITATION_REQUIRED')
+  const now = new Date().toISOString().slice(0, 10)
   const selected = ids.map(id =>
     LEGAL_BASIS_REGISTRY.find(item => item.id === id)
   )
-  if (selected.some(item => !item || item.status !== 'active')) {
+  if (
+    selected.some(
+      item =>
+        !item ||
+        item.status !== 'active' ||
+        item.effectiveFrom > now ||
+        !/^https:\/\//i.test(item.sourceUrl)
+    )
+  ) {
     throw new Error('LEGAL_BASIS_NOT_ACTIVE')
   }
   return selected as LegalBasis[]

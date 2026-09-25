@@ -12,8 +12,11 @@ import type { LegalProfile } from './legal-profile.resolver'
 export type ContractTemplateStatus = 'draft' | 'published'
 
 export type ContractTemplateClause = {
+  id?: string
   number: number
   heading: string
+  content?: string
+  variableRefs?: string[]
   contentHash: string
   citationIds: string[]
   protected: boolean
@@ -26,9 +29,24 @@ export type ContractTemplateAddendum = {
   enabled: boolean
 }
 
+export type ContractTemplateAnnexDefinition = {
+  id: string
+  title: string
+  description?: string
+  required: boolean
+  citationIds?: string[]
+}
+
+export type ContractTemplateReviewStatus =
+  | 'draft'
+  | 'reviewed'
+  | 'published'
+  | 'needs-review'
+
 @Entity('contract_templates')
 @Index(['templateKey', 'version'], { unique: true })
 @Index(['templateKey', 'status'])
+@Index(['legalProfile', 'status', 'effectiveFrom'])
 export class ContractTemplate {
   @ObjectIdColumn()
   _id!: ObjectId
@@ -47,6 +65,24 @@ export class ContractTemplate {
 
   @Column('json')
   clauses!: ContractTemplateClause[]
+
+  @Column({ default: 1 })
+  schemaVersion!: number
+
+  @Column({ nullable: true })
+  effectiveFrom?: Date | null
+
+  @Column({ default: false })
+  referenceOnly!: boolean
+
+  @Column({ type: 'string', default: 'draft' })
+  reviewStatus!: ContractTemplateReviewStatus
+
+  @Column({ nullable: true })
+  reviewReference?: string | null
+
+  @Column('json', { nullable: true })
+  annexDefinitions?: ContractTemplateAnnexDefinition[] | null
 
   @Column('json')
   allowedVariables!: string[]
