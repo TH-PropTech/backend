@@ -36,7 +36,7 @@ type LegacyContract = {
   landlordSignature?: unknown
 }
 
-describe('PROP-321 migrations', () => {
+describe('PROP-321 MongoDB data backfills', () => {
   it('dry-runs apartment package defaults without writing and applies them idempotently', async () => {
     const apartment = {
       pricingMode: undefined,

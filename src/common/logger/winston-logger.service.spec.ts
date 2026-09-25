@@ -7,7 +7,7 @@ describe('WinstonLoggerService', () => {
     // Set env for test
     process.env.LOG_FORMAT = 'json'
     process.env.LOG_LEVEL = 'debug'
-    process.env.LOG_DIR = '/tmp/test-logs'
+    process.env.LOG_DIR = '.test-logs'
     loggerService = new WinstonLoggerService()
   })
 

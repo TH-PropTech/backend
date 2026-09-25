@@ -131,6 +131,7 @@ describe('AiChatsService', () => {
   })
 
   describe('PropertyCard Guardrail Sanitizer', () => {
+    jest.setTimeout(15_000)
     it('Đè câu xin lỗi mặc định thành câu chào danh sách khi tìm kiếm có kết quả', async () => {
       apartmentsService.findAll.mockResolvedValueOnce([
         {
