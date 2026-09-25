@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm'
 import { BlockchainLog } from './schemas/blockchain-log.schema'
 import { LedgerOutbox } from './schemas/ledger-outbox.schema'
 import { Contract } from '../contracts/schemas/contract.schema'
+import { ContractAmendment } from '../contracts/schemas/contract-amendment.schema'
 import { DepositAgreement } from '../contracts/schemas/deposit-agreement.schema'
 import { Payment } from '../payments/schemas/payment.schema'
 import { FabricService } from './fabric.service'
@@ -18,6 +19,7 @@ import { LedgerOutboxWorker } from './ledger-outbox.worker'
       BlockchainLog,
       LedgerOutbox,
       Contract,
+      ContractAmendment,
       DepositAgreement,
       Payment,
     ]),

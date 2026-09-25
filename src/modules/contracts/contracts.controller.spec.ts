@@ -23,6 +23,7 @@ describe('ContractsController', () => {
   }
   const artifactService = {
     generateDocument: jest.fn(),
+    generateDocumentWithMetadata: jest.fn(),
     lockCanonicalArtifact: jest.fn(),
   }
   const contractViewService = {
@@ -184,13 +185,21 @@ describe('ContractsController', () => {
   })
 
   it('passes participant identity and staff scope to artifact generation', async () => {
-    artifactService.generateDocument.mockResolvedValue(Buffer.from('artifact'))
-    await controller.downloadArtifact('contract-1', 'docx', {
-      _id: 'tenant-1',
-      roles: ['tenant'],
+    artifactService.generateDocumentWithMetadata.mockResolvedValue({
+      bytes: Buffer.from('artifact'),
+      reference: {},
     })
+    await controller.downloadArtifact(
+      'contract-1',
+      'docx',
+      {
+        _id: 'tenant-1',
+        roles: ['tenant'],
+      },
+      { setHeader: jest.fn() } as never
+    )
 
-    expect(artifactService.generateDocument).toHaveBeenCalledWith(
+    expect(artifactService.generateDocumentWithMetadata).toHaveBeenCalledWith(
       'contract-1',
       'tenant-1',
       false,

@@ -30,6 +30,29 @@ export type ContractSignature = {
   verifiedAt?: Date | null
 }
 
+export type ContractCommercialDraft = {
+  monthlyRent: number
+  deposit: number
+  paymentDay: number
+  latePenaltyRate: number
+  terminationNoticeDays: number
+  durationMonths: number
+  utilities?: Record<string, 'tenant' | 'landlord' | 'shared'>
+  handoverNotes?: string | null
+  inventoryReference?: string | null
+  noticePeriodDays?: number | null
+  addendaIds?: string[]
+}
+
+export type ContractCommercialAuditEvent = {
+  actorId: string
+  revision: number
+  changedFields: string[]
+  beforeHash: string | null
+  afterHash: string
+  createdAt: Date
+}
+
 @Entity('contracts')
 export class Contract {
   @ObjectIdColumn()
@@ -224,6 +247,17 @@ export class Contract {
     key: string
     version: number
     contentHash: string
+    schemaVersion?: number
+    legalProfile?: string
+  } | null
+
+  @Column({ nullable: true })
+  contractTemplateRef?: {
+    key: string
+    version: number
+    contentHash: string
+    schemaVersion?: number
+    legalProfile?: string
   } | null
 
   @Column({ nullable: true })
@@ -243,6 +277,25 @@ export class Contract {
   editorContent?: Record<string, unknown> | null
 
   @Column({ nullable: true })
+  commercialDraft?: ContractCommercialDraft | null
+
+  @Column({ default: 0 })
+  commercialRevision?: number
+
+  @Column('json', { nullable: true })
+  commercialAudit?: ContractCommercialAuditEvent[] | null
+
+  /** Server-owned current terms projection; the immutable base fields remain unchanged. */
+  @Column('json', { nullable: true })
+  effectiveCommercial?: ContractCommercialDraft | null
+
+  @Column({ nullable: true })
+  effectiveCommercialRevision?: number | null
+
+  @Column({ nullable: true })
+  governingAmendmentId?: string | null
+
+  @Column({ nullable: true })
   contentLockedHash?: string | null
 
   @Column({ nullable: true })
@@ -259,6 +312,11 @@ export class Contract {
     templateVersion: number
     hashSchemaVersion: number
     artifactHash: string
+    canonicalContentHash?: string | null
+    rendererVersion?: string | null
+    sourceSchemaVersion?: number | null
+    byteLength?: number | null
+    amendmentId?: string | null
     contentType: 'application/pdf'
     lockedAt: Date
   } | null

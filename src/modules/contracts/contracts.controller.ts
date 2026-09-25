@@ -11,6 +11,7 @@ import {
   UploadedFile,
   BadRequestException,
   ForbiddenException,
+  Res,
 } from '@nestjs/common'
 import {
   ApiTags,
@@ -51,6 +52,7 @@ import { SmartCaSigningService } from './smartca/smartca-signing.service'
 import type { SmartCaSigningSession } from './smartca/smartca-signing-session.schema'
 import { SmartCaCallbackGuard } from './smartca/smartca-callback.guard'
 import type { ContractArtifact } from './schemas/contract-artifact.schema'
+import type { Response } from 'express'
 
 // ── DTOs ──
 
@@ -368,16 +370,39 @@ export class ContractsController {
   async downloadArtifact(
     @Param('id') id: string,
     @Query('format') format: string | undefined,
-    @CurrentUser() user: UserPayload
+    @CurrentUser() user: UserPayload,
+    @Res({ passthrough: true }) response: Response
   ): Promise<Buffer> {
     const isStaff =
       user.roles?.some(role => ['staff', 'admin'].includes(role)) ?? false
-    return this.artifactService.generateDocument(
+    const resolved = await this.artifactService.generateDocumentWithMetadata(
       id,
       user._id ?? '',
       isStaff,
       format ?? 'pdf'
     )
+    const safeFormat = format === 'docx' ? 'docx' : 'pdf'
+    response.setHeader(
+      'Content-Type',
+      safeFormat === 'pdf'
+        ? 'application/pdf'
+        : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    )
+    response.setHeader('Cache-Control', 'private, no-store')
+    response.setHeader('X-Content-Type-Options', 'nosniff')
+    response.setHeader(
+      'X-Contract-Artifact-Revision',
+      String(resolved.reference.revision)
+    )
+    response.setHeader(
+      'X-Contract-Artifact-Hash',
+      resolved.reference.artifactHash
+    )
+    response.setHeader(
+      'Content-Disposition',
+      `attachment; filename="contract-${id}-r${resolved.reference.revision}.${safeFormat}"`
+    )
+    return resolved.bytes
   }
 
   @Post(':id/smartca/signing-sessions')
@@ -588,6 +613,10 @@ export class ContractsController {
     storedHash: string | null
     blockchainAddress: string | null
     onChain: unknown
+    semanticHash: string | null
+    artifactHash: string | null
+    signatureIntegrity: 'valid' | 'invalid' | 'not-available'
+    amendmentChainIntegrity: 'valid' | 'invalid' | 'not-available'
   }> {
     const isStaff =
       user.roles?.some(role => ['staff', 'admin'].includes(role)) ?? false

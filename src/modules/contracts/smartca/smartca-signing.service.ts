@@ -64,11 +64,11 @@ export class SmartCaSigningService {
       contract.status !== 'awaiting-signature' ||
       !contract.contentLockedHash ||
       !contract.artifactRef ||
-      contract.artifactRef.contentType !== 'application/pdf' ||
-      contract.artifactRef.artifactHash !== contract.contentLockedHash
+      contract.artifactRef.contentType !== 'application/pdf'
     ) {
       throw new ConflictException('CONTRACT_ARTIFACT_NOT_LOCKED')
     }
+    const artifactHash = contract.artifactRef.artifactHash
 
     const strategy =
       contract.executionPolicySnapshot?.strategy ?? 'DEPOSIT_FIRST'
@@ -89,7 +89,7 @@ export class SmartCaSigningService {
       where: {
         contractId,
         signerId,
-        artifactHash: contract.contentLockedHash,
+        artifactHash,
         ...(idempotencyKey ? { idempotencyKey } : {}),
         status: In(['pending', 'signed']),
       },
@@ -107,13 +107,13 @@ export class SmartCaSigningService {
     const transactionSuffix = idempotencyKey ?? Date.now().toString(36)
     const providerResult = await this.provider.requestSignature({
       transactionId: `contract-${contractId}-${signerRole}-${transactionSuffix}`,
-      artifactHash: contract.contentLockedHash,
+      artifactHash,
       signerId,
       signerRole,
     })
     if (
       providerResult.artifactHash &&
-      providerResult.artifactHash !== contract.contentLockedHash
+      providerResult.artifactHash !== artifactHash
     ) {
       throw new ConflictException('SMARTCA_SIGNATURE_DIGEST_MISMATCH')
     }
@@ -122,7 +122,7 @@ export class SmartCaSigningService {
       contractId,
       signerId,
       signerRole,
-      artifactHash: contract.contentLockedHash,
+      artifactHash,
       providerTransactionId: providerResult.transactionId,
       status: providerResult.status,
       ...(idempotencyKey ? { idempotencyKey } : {}),

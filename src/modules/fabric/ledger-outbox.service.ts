@@ -27,6 +27,7 @@ const ALLOWED_RETRY_ACTIONS = new Set([
   'recordDeposit',
   'createContract',
   'recordPayment',
+  'recordContractAmendment',
   'terminateContract',
 ])
 

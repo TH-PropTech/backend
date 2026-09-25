@@ -12,6 +12,7 @@ import { Repository } from 'typeorm'
 import { ObjectId } from 'mongodb'
 import * as crypto from 'crypto'
 import { Contract, ContractSignature } from './schemas/contract.schema'
+import { ContractAmendment } from './schemas/contract-amendment.schema'
 import { SigningGrant } from './schemas/signing-grant.schema'
 import { DepositAgreement } from './schemas/deposit-agreement.schema'
 import {
@@ -24,10 +25,7 @@ import { FabricService } from '../fabric/fabric.service'
 import { KycService } from '../kyc/kyc.service'
 import { EkycProxyService } from '../kyc/ekyc-proxy.service'
 import { KycMediaService } from '../kyc/kyc-media.service'
-import {
-  canonicalizeTipTapContent,
-  sanitizeTipTapContent,
-} from './legal/tiptap-content'
+import { sanitizeTipTapContent } from './legal/tiptap-content'
 import {
   buildPublicServiceChecklist,
   parsePublicServiceChecklistPurpose,
@@ -45,6 +43,12 @@ import {
   buildSignedContractLedgerEvidence,
   hashSignedContractLedgerEvidence,
 } from '../fabric/ledger-evidence-envelope'
+import { ContractTemplateGovernanceService } from './legal/contract-template-governance.service'
+import {
+  buildCanonicalContractPayload,
+  hashCanonicalContractPayload,
+  CONTRACT_CONTENT_HASH_SCHEMA_VERSION,
+} from './legal/contract-canonical-payload'
 
 // ── Interfaces ──
 
@@ -132,7 +136,12 @@ export class ContractsService {
     @Optional() private readonly paymentsService?: PaymentsService,
     @Optional()
     private readonly biometricEvidenceService?: BiometricEvidenceService,
-    @Optional() private readonly smartOtpService?: SmartOtpService
+    @Optional() private readonly smartOtpService?: SmartOtpService,
+    @Optional()
+    private readonly templateGovernanceService?: ContractTemplateGovernanceService,
+    @Optional()
+    @InjectRepository(ContractAmendment)
+    private readonly amendmentRepository?: Repository<ContractAmendment>
   ) {}
 
   // ── Private helpers ──
@@ -225,6 +234,9 @@ export class ContractsService {
       null
     contract.applicationReviewHash = input.applicationReviewHash ?? null
     contract.termsRef = input.termsRef ?? null
+    contract.contractTemplateRef = input.termsRef?.key.startsWith('VN_')
+      ? input.termsRef
+      : await this.resolveCanonicalTemplateRef()
     contract.flowProfileRef = input.flowProfileRef ?? null
     contract.configStatus = 'CURRENT'
     contract.contentRevision = 0
@@ -325,6 +337,15 @@ export class ContractsService {
     contract.contractHash = null
     contract.blockchainAddress = null
     contract.appliedPolicies = null
+    contract.contractTemplateRef = await this.resolveCanonicalTemplateRef()
+    contract.contentRevision = 0
+    contract.editorContent = null
+    contract.contentLockedHash = null
+    contract.contentLockedAt = null
+    contract.hashSchemaVersion = 1
+    contract.termsRef = null
+    contract.commercialDraft = null
+    contract.commercialRevision = 0
 
     const saved = await this.contractRepository.save(contract)
     this.logger.log(`Contract created: ${contractCode}`)
@@ -398,8 +419,7 @@ export class ContractsService {
       !contract.contentLockedHash ||
       !contract.artifactRef ||
       contract.artifactRef.contentType !== 'application/pdf' ||
-      contract.artifactRef.artifactHash !== contract.contentLockedHash ||
-      input.artifactHash !== contract.contentLockedHash
+      input.artifactHash !== contract.artifactRef.artifactHash
     ) {
       throw new ConflictException('SMARTCA_SIGNATURE_DIGEST_MISMATCH')
     }
@@ -475,7 +495,7 @@ export class ContractsService {
       signature.provider === 'smartca' &&
       signature.role === role &&
       signature.signerId === expectedSignerId &&
-      signature.contentHash === contract.contentLockedHash &&
+      signature.contentHash === contract.artifactRef?.artifactHash &&
       signature.providerTransactionId &&
       signature.certificateSerial &&
       signature.signedAt &&
@@ -682,9 +702,21 @@ export class ContractsService {
     if (contract.editorContent) {
       sanitizeTipTapContent(contract.editorContent)
     }
-    contract.contentLockedHash = this.buildLockedContentHash(contract)
+    const templateRef =
+      contract.contractTemplateRef ??
+      (contract.termsRef?.key.startsWith('VN_') ? contract.termsRef : undefined)
+    const template =
+      templateRef && this.templateGovernanceService
+        ? await this.templateGovernanceService.getPublishedVersion(
+            templateRef.key,
+            templateRef.version
+          )
+        : undefined
+    contract.contentLockedHash = hashCanonicalContractPayload(
+      buildCanonicalContractPayload(contract, template)
+    )
     contract.contentLockedAt = new Date()
-    contract.hashSchemaVersion = 1
+    contract.hashSchemaVersion = CONTRACT_CONTENT_HASH_SCHEMA_VERSION
     contract.contentRevision = (contract.contentRevision ?? 0) + 1
     contract.status = 'awaiting-signature'
     return this.contractRepository.save(contract)
@@ -1223,37 +1255,6 @@ export class ContractsService {
     return buildPublicServiceChecklist(contract)
   }
 
-  private buildLockedContentHash(contract: Contract): string {
-    const canonicalPayload = JSON.stringify({
-      hashSchemaVersion: 1,
-      editorContent: contract.editorContent
-        ? canonicalizeTipTapContent(contract.editorContent)
-        : null,
-      packageSnapshot: contract.packageSnapshot ?? null,
-      parties: {
-        tenantId: contract.tenantId,
-        landlordId: contract.landlordId,
-      },
-      property: {
-        propertyId: contract.propertyId,
-        propertyTitle: contract.propertyTitle,
-        propertyAddress: contract.propertyAddress,
-      },
-      money: {
-        monthlyRent: contract.monthlyRent,
-        deposit: contract.deposit,
-      },
-      dates: {
-        startDate: contract.startDate.toISOString(),
-        endDate: contract.endDate.toISOString(),
-      },
-      appliedPolicies: contract.appliedPolicies ?? {},
-      applicationReviewHash: contract.applicationReviewHash ?? null,
-      termsRef: contract.termsRef ?? null,
-    })
-    return crypto.createHash('sha256').update(canonicalPayload).digest('hex')
-  }
-
   // ── Lấy danh sách hợp đồng theo người dùng ──
 
   async findByUser(userId: string): Promise<Contract[]> {
@@ -1289,6 +1290,10 @@ export class ContractsService {
     storedHash: string | null
     blockchainAddress: string | null
     onChain: ChainVerifyResult | null
+    semanticHash: string | null
+    artifactHash: string | null
+    signatureIntegrity: 'valid' | 'invalid' | 'not-available'
+    amendmentChainIntegrity: 'valid' | 'invalid' | 'not-available'
   }> {
     const contract = await this.findOne(contractId)
 
@@ -1343,6 +1348,32 @@ export class ContractsService {
       }
     }
 
+    let amendmentChainIntegrity: 'valid' | 'invalid' | 'not-available' =
+      'not-available'
+    if (this.amendmentRepository) {
+      const amendments = await this.amendmentRepository.find({
+        where: { contractId },
+        order: { sequence: 'ASC' },
+      })
+      amendmentChainIntegrity = amendments.every((amendment, index) => {
+        const previous = amendments[index - 1]
+        const sequenceValid = amendment.sequence === index + 1
+        const signatureValid =
+          amendment.status !== 'effective' ||
+          (Boolean(amendment.tenantSignature) &&
+            Boolean(amendment.landlordSignature) &&
+            amendment.tenantSignature?.artifactHash ===
+              amendment.artifactHash &&
+            amendment.landlordSignature?.artifactHash ===
+              amendment.artifactHash)
+        const predecessorValid =
+          index === 0 || amendment.predecessorId === previous?._id.toHexString()
+        return sequenceValid && signatureValid && predecessorValid
+      })
+        ? 'valid'
+        : 'invalid'
+    }
+
     return {
       isValid,
       verificationStatus,
@@ -1350,6 +1381,18 @@ export class ContractsService {
       storedHash: contract.contractHash,
       blockchainAddress: contract.blockchainAddress,
       onChain,
+      semanticHash: contract.contentLockedHash ?? null,
+      artifactHash: contract.artifactRef?.artifactHash ?? null,
+      signatureIntegrity:
+        contract.tenantSignature && contract.landlordSignature
+          ? contract.tenantSignature.artifactHash ===
+              contract.artifactRef?.artifactHash &&
+            contract.landlordSignature.artifactHash ===
+              contract.artifactRef?.artifactHash
+            ? 'valid'
+            : 'invalid'
+          : 'not-available',
+      amendmentChainIntegrity,
     }
   }
 
@@ -1422,6 +1465,30 @@ export class ContractsService {
       faceMatch: verificationResult.faceMatch,
       liveness: verificationResult.liveness,
       spoofScore: verificationResult.realConfidence,
+    }
+  }
+
+  private async resolveCanonicalTemplateRef(): Promise<NonNullable<
+    Contract['contractTemplateRef']
+  > | null> {
+    if (!this.templateGovernanceService) return null
+    try {
+      const template = await this.templateGovernanceService.getPublishedVersion(
+        'VN_INDIVIDUAL_RESIDENTIAL_LEASE'
+      )
+      return {
+        key: template.templateKey,
+        version: template.version,
+        contentHash: template.contentHash,
+        schemaVersion: template.schemaVersion,
+        legalProfile: template.legalProfile,
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      this.logger.warn(
+        `Canonical lease template unavailable during provisioning: ${message}`
+      )
+      return null
     }
   }
 }
