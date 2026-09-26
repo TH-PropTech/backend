@@ -1,8 +1,10 @@
 import { Test, TestingModule } from '@nestjs/testing'
 import { RecommendationsController } from './recommendations.controller'
 import { RecommendationsService } from './recommendations.service'
+import { RecommendationConfigService } from './recommendation-config.service'
 import { RecommendDto } from './dto/recommend.dto'
 import { FeedbackDto, FeedbackType } from './dto/feedback.dto'
+import { UpdateEngineConfigDto } from './dto/update-engine-config.dto'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { RolesGuard } from '../../common/guards/roles.guard'
 import {
@@ -10,6 +12,7 @@ import {
   FeedbackResponse,
   SyncResponse,
 } from './interfaces/recommendation.interface'
+import { RecommendationConfig } from './entities/recommendation-config.entity'
 
 describe('RecommendationsController', () => {
   let controller: RecommendationsController
@@ -36,6 +39,27 @@ describe('RecommendationsController', () => {
     },
   ]
 
+  const mockConfig: Partial<RecommendationConfig> = {
+    configId: 'global',
+    strategy: 'hybrid',
+    alpha: 1.0,
+    nbWeight: 0.5,
+    ruleWeight: 0.5,
+    updatedAt: new Date(),
+    updatedBy: 'admin@th-proptech.vn',
+  }
+
+  const mockConfigService = {
+    getConfig: jest.fn().mockResolvedValue(mockConfig),
+    updateConfig: jest.fn().mockResolvedValue({
+      ...mockConfig,
+      strategy: 'map',
+      alpha: 2.0,
+      nbWeight: 0.6,
+      ruleWeight: 0.4,
+    }),
+  }
+
   const mockService = {
     recommend: jest
       .fn<Promise<RecommendationResult[]>, [RecommendDto]>()
@@ -52,6 +76,10 @@ describe('RecommendationsController', () => {
       message: 'Apartment data synced and model retrained successfully',
       apartments_loaded: 25,
     }),
+    retrainModel: jest.fn().mockResolvedValue({
+      buildingCount: 25,
+      historyRecords: 100,
+    }),
   }
 
   beforeEach(async () => {
@@ -63,6 +91,10 @@ describe('RecommendationsController', () => {
         {
           provide: RecommendationsService,
           useValue: mockService,
+        },
+        {
+          provide: RecommendationConfigService,
+          useValue: mockConfigService,
         },
       ],
     })
@@ -114,5 +146,27 @@ describe('RecommendationsController', () => {
     expect(mockService.sync).toHaveBeenCalled()
     expect(result.status).toBe('success')
     expect(result.apartments_loaded).toBe(25)
+  })
+
+  it('should call configService.getConfig and return engine config', async () => {
+    const result = await controller.getEngineConfig()
+    expect(mockConfigService.getConfig).toHaveBeenCalled()
+    expect(result).toEqual(mockConfig)
+  })
+
+  it('should call configService.updateConfig and retrainModel on update', async () => {
+    const dto: UpdateEngineConfigDto = {
+      strategy: 'map',
+      alpha: 2.0,
+      nbWeight: 0.6,
+      ruleWeight: 0.4,
+    }
+    const result = await controller.updateEngineConfig(dto, 'admin@test.com')
+    expect(mockConfigService.updateConfig).toHaveBeenCalledWith(
+      dto,
+      'admin@test.com'
+    )
+    expect(mockService.retrainModel).toHaveBeenCalled()
+    expect(result.strategy).toBe('map')
   })
 })

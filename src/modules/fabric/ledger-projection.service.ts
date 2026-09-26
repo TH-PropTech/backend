@@ -1,8 +1,9 @@
-import { Injectable, Logger } from '@nestjs/common'
+import { Injectable, Logger, Optional } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 import { ObjectId } from 'mongodb'
 import { Contract } from '../contracts/schemas/contract.schema'
+import { ContractAmendment } from '../contracts/schemas/contract-amendment.schema'
 import { DepositAgreement } from '../contracts/schemas/deposit-agreement.schema'
 import { Payment } from '../payments/schemas/payment.schema'
 import { LedgerOutbox } from './schemas/ledger-outbox.schema'
@@ -24,7 +25,10 @@ export class LedgerProjectionService {
     @InjectRepository(DepositAgreement)
     private readonly depositAgreementRepository: Repository<DepositAgreement>,
     @InjectRepository(Payment)
-    private readonly paymentRepository: Repository<Payment>
+    private readonly paymentRepository: Repository<Payment>,
+    @Optional()
+    @InjectRepository(ContractAmendment)
+    private readonly amendmentRepository?: Repository<ContractAmendment>
   ) {}
 
   async projectResult(
@@ -88,6 +92,21 @@ export class LedgerProjectionService {
             await this.paymentRepository.save(payment)
             this.logger.log(
               `Projected Fabric confirmation to Payment [${event.aggregateId}], tx: ${result.txHash}`
+            )
+          }
+          break
+        }
+        case 'contract-amendment': {
+          if (!this.amendmentRepository) break
+          const amendment = await this.amendmentRepository.findOne({
+            where: { _id: objId },
+          })
+          if (amendment) {
+            amendment.ledgerStatus = 'confirmed'
+            amendment.ledgerTxHash = result.txHash
+            await this.amendmentRepository.save(amendment)
+            this.logger.log(
+              `Projected Fabric confirmation to ContractAmendment [${event.aggregateId}], tx: ${result.txHash}`
             )
           }
           break

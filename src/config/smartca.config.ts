@@ -8,13 +8,13 @@ export default registerAs('smartCA', () => {
     // Active environment label
     environment: isTest ? 'test' : 'production',
 
-    // VNPT SmartCA API base URL
+    // VNPT SmartCA Signing API base URL
     // Test: https://rmgateway.vnptit.vn  |  Prod: https://gwsca.vnpt.vn
     apiUrl: isTest
       ? process.env.SMARTCA_TEST_API_URL || 'https://rmgateway.vnptit.vn'
       : process.env.SMARTCA_API_URL || 'https://gwsca.vnpt.vn',
 
-    // Service Partner credentials (sent in request body as sp_id / sp_password)
+    // Service Partner credentials — gửi trong body JSON (sp_id / sp_password)
     spId: isTest
       ? process.env.SMARTCA_TEST_SP_ID || ''
       : process.env.SMARTCA_SP_ID || '',
@@ -30,20 +30,17 @@ export default registerAs('smartCA', () => {
       ? process.env.SMARTCA_TEST_CALLBACK_SECRET || ''
       : process.env.SMARTCA_CALLBACK_SECRET || '',
 
-    // Default user_id (CCCD) - taken from user's KYC in production
+    // Default user_id (số CCCD) - lấy từ KYC của user trong production
     defaultUserId: isTest
       ? process.env.SMARTCA_TEST_DEFAULT_USER_ID || ''
       : process.env.SMARTCA_DEFAULT_USER_ID || '',
 
-    // API paths
+    // API paths — base_url = {apiUrl}/sca/sp769
     certPath: isTest
       ? process.env.SMARTCA_TEST_CERT_PATH ||
         '/sca/sp769/v1/credentials/get_certificate'
       : process.env.SMARTCA_CERT_PATH ||
         '/sca/sp769/v1/credentials/get_certificate',
-    signV1Path: isTest
-      ? process.env.SMARTCA_TEST_SIGN_V1_PATH || '/sca/sp769/v1/signatures/sign'
-      : process.env.SMARTCA_SIGN_V1_PATH || '/sca/sp769/v1/signatures/sign',
     signV2Path: isTest
       ? process.env.SMARTCA_TEST_SIGN_V2_PATH || '/sca/sp769/v2/signatures/sign'
       : process.env.SMARTCA_SIGN_V2_PATH || '/sca/sp769/v2/signatures/sign',
@@ -52,6 +49,7 @@ export default registerAs('smartCA', () => {
         '/sca/sp769/v2/signatures/confirm'
       : process.env.SMARTCA_CONFIRM_V2_PATH ||
         '/sca/sp769/v2/signatures/confirm',
+    // Status API: POST (không phải GET!) — template có {transactionId}
     statusPathTmpl: isTest
       ? process.env.SMARTCA_TEST_STATUS_PATH_TMPL ||
         '/sca/sp769/v1/signatures/sign/{transactionId}/status'

@@ -87,6 +87,12 @@ export class Payment {
   @Column({ nullable: true })
   reminderSentAt?: Date | null
 
+  @Column({ nullable: true })
+  governingAmendmentId?: string | null
+
+  @Column({ nullable: true })
+  governingAmendmentHash?: string | null
+
   @CreateDateColumn()
   createdAt!: Date
 

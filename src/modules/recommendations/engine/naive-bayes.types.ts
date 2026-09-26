@@ -5,6 +5,15 @@
  * `BuildingRecommender` (recommender.py) — ported to TypeScript.
  */
 
+export type EngineStrategy = 'hybrid' | 'map' | 'weighted' | 'map-weighted'
+
+export interface EngineConfig {
+  strategy: EngineStrategy
+  alpha: number
+  nbWeight: number
+  ruleWeight: number
+}
+
 /** A flattened building/apartment record used by the NB model. */
 export interface BuildingRecord {
   id: string

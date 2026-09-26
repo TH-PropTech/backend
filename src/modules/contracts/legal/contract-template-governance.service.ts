@@ -1,13 +1,15 @@
 import {
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
+  OnApplicationBootstrap,
 } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
-import { createHash } from 'node:crypto'
 import { Repository } from 'typeorm'
 import {
   ContractTemplate,
+  type ContractTemplateAnnexDefinition,
   type ContractTemplateAddendum,
   type ContractTemplateClause,
 } from './contract-template.schema'
@@ -17,6 +19,13 @@ import {
 } from './contract-template-audit.schema'
 import { getActiveLegalBasis } from './legal-basis.registry'
 import type { LegalProfile } from './legal-profile.resolver'
+import {
+  CONTRACT_TEMPLATE_SCHEMA_VERSION,
+  hashCanonicalTemplateBody,
+  hashText,
+  normalizeTemplateClauses,
+} from './contract-template.canonical'
+import { buildReviewedLeaseTemplateSeed } from './lease-template.seed'
 
 export const CONTRACT_TEMPLATE_VARIABLE_ALLOWLIST = Object.freeze([
   'landlord',
@@ -29,6 +38,7 @@ export const CONTRACT_TEMPLATE_VARIABLE_ALLOWLIST = Object.freeze([
   'monthlyRent',
   'deposit',
   'paymentDay',
+  'latePenaltyRate',
   'terminationNoticeDays',
 ])
 
@@ -49,6 +59,20 @@ export type ContractTemplateDraftInput = {
   allowedVariables: string[]
   addenda: ContractTemplateAddendum[]
   citationIds: string[]
+  annexDefinitions?: ContractTemplateAnnexDefinition[]
+  schemaVersion?: number
+  effectiveFrom?: Date | string | null
+  referenceOnly?: boolean
+  expectedRevision?: number
+}
+
+export type ContractTemplateLegalReleaseInput = Omit<
+  ContractTemplateDraftInput,
+  'schemaVersion' | 'referenceOnly'
+> & {
+  schemaVersion: number
+  referenceOnly: boolean
+  reviewReference: string
 }
 
 export type ContractTemplateValidation = {
@@ -60,13 +84,88 @@ export type ContractTemplateValidation = {
 }
 
 @Injectable()
-export class ContractTemplateGovernanceService {
+export class ContractTemplateGovernanceService implements OnApplicationBootstrap {
+  private readonly logger = new Logger(ContractTemplateGovernanceService.name)
+
   constructor(
     @InjectRepository(ContractTemplate)
     private readonly templateRepository: Repository<ContractTemplate>,
     @InjectRepository(ContractTemplateAudit)
     private readonly auditRepository: Repository<ContractTemplateAudit>
   ) {}
+
+  async onApplicationBootstrap(): Promise<void> {
+    await this.seedReviewedTemplatesIfMissing()
+  }
+
+  /**
+   * MongoDB is schemaless for these additive fields, so legal baselines are
+   * seeded idempotently at bootstrap instead of through a SQL-style migration.
+   * Existing published rows are never overwritten; legacy rows are surfaced for
+   * an explicit reviewed legal release.
+   */
+  async seedReviewedTemplatesIfMissing(): Promise<void> {
+    const profiles = [
+      ['VN_RE_BUSINESS_ND96_APPENDIX_II', 'REAL_ESTATE_BUSINESS_STANDARD'],
+      ['VN_INDIVIDUAL_RESIDENTIAL_LEASE', 'PRIVATE_CIVIL_APARTMENT_LEASE'],
+    ] as const
+
+    for (const [templateKey, legalProfile] of profiles) {
+      const existing = await this.latestPublished(templateKey)
+      if (existing) {
+        if (
+          existing.schemaVersion < CONTRACT_TEMPLATE_SCHEMA_VERSION ||
+          !existing.annexDefinitions?.length ||
+          existing.clauses.some(clause => !clause.content)
+        ) {
+          this.logger.warn(
+            `Legacy published template ${templateKey}@${existing.version} requires an explicit legal release`
+          )
+        }
+        continue
+      }
+
+      const seed = buildReviewedLeaseTemplateSeed(legalProfile)
+      const template = this.templateRepository.create({
+        templateKey,
+        version: 1,
+        status: 'published',
+        legalProfile: seed.legalProfile,
+        clauses: seed.clauses,
+        schemaVersion: seed.schemaVersion,
+        effectiveFrom: new Date(),
+        referenceOnly: seed.referenceOnly,
+        reviewStatus: 'published',
+        reviewReference: seed.reviewReference,
+        annexDefinitions: seed.annexDefinitions,
+        allowedVariables: seed.allowedVariables,
+        addenda: seed.addenda,
+        citationIds: seed.citationIds,
+        contentHash: hashCanonicalTemplateBody({
+          legalProfile: seed.legalProfile,
+          schemaVersion: seed.schemaVersion,
+          clauses: seed.clauses,
+          annexDefinitions: seed.annexDefinitions,
+          citationIds: seed.citationIds,
+        }),
+        createdBy: 'system-legal-bootstrap',
+        publishedBy: 'system-legal-bootstrap',
+        publishedAt: new Date(),
+        draftRevision: 1,
+      })
+      const saved = await this.templateRepository.save(template)
+      await this.recordAudit({
+        templateKey,
+        version: saved.version,
+        action: 'legal-release-published',
+        actorId: 'system-legal-bootstrap',
+        reason: 'mongodb-bootstrap-seed',
+        reviewReference: seed.reviewReference,
+        afterHash: saved.contentHash,
+      })
+      this.logger.log(`Seeded canonical lease template ${templateKey}@1`)
+    }
+  }
 
   async saveDraft(
     templateKey: string,
@@ -82,7 +181,25 @@ export class ContractTemplateGovernanceService {
     }
 
     const published = await this.latestPublished(templateKey)
-    this.assertProtectedClausesUnchanged(input.clauses, published)
+    const clauses = input.clauses
+      ? normalizeTemplateClauses(input.clauses)
+      : (published?.clauses ?? [])
+    await this.assertProtectedClausesUnchanged(
+      clauses,
+      published,
+      actorId,
+      templateKey
+    )
+    const annexDefinitions =
+      input.annexDefinitions ??
+      published?.annexDefinitions ??
+      this.deriveAnnexDefinitions(input.addenda)
+    const normalizedInput = {
+      ...input,
+      clauses,
+      annexDefinitions,
+      schemaVersion: input.schemaVersion ?? published?.schemaVersion ?? 1,
+    }
 
     const target =
       draft ??
@@ -91,21 +208,31 @@ export class ContractTemplateGovernanceService {
         version: 0,
         status: 'draft',
         legalProfile: input.legalProfile,
-        clauses: input.clauses,
+        clauses,
         allowedVariables: input.allowedVariables,
         addenda: input.addenda,
         citationIds: input.citationIds,
-        contentHash: this.contentHash(input),
+        annexDefinitions,
+        schemaVersion: normalizedInput.schemaVersion,
+        effectiveFrom: this.toDate(input.effectiveFrom),
+        referenceOnly: input.referenceOnly ?? false,
+        reviewStatus: 'draft',
+        contentHash: this.contentHash(normalizedInput),
         draftRevision: 1,
         createdBy: actorId,
       })
     if (draft) {
       target.legalProfile = input.legalProfile
-      target.clauses = input.clauses
+      target.clauses = clauses
       target.allowedVariables = input.allowedVariables
       target.addenda = input.addenda
       target.citationIds = input.citationIds
-      target.contentHash = this.contentHash(input)
+      target.annexDefinitions = annexDefinitions
+      target.schemaVersion = normalizedInput.schemaVersion
+      target.effectiveFrom = this.toDate(input.effectiveFrom)
+      target.referenceOnly =
+        input.referenceOnly ?? target.referenceOnly ?? false
+      target.contentHash = this.contentHash(normalizedInput)
       target.draftRevision += 1
       target.updatedBy = actorId
     }
@@ -150,6 +277,12 @@ export class ContractTemplateGovernanceService {
       status: 'published',
       legalProfile: draft.legalProfile,
       clauses: draft.clauses,
+      schemaVersion: draft.schemaVersion ?? 1,
+      effectiveFrom: draft.effectiveFrom ?? new Date(),
+      referenceOnly: draft.referenceOnly ?? false,
+      reviewStatus: 'published',
+      reviewReference: draft.reviewReference ?? null,
+      annexDefinitions: draft.annexDefinitions ?? null,
       allowedVariables: draft.allowedVariables,
       addenda: draft.addenda,
       citationIds: draft.citationIds,
@@ -176,6 +309,52 @@ export class ContractTemplateGovernanceService {
       afterHash: saved.contentHash,
     })
     await this.templateRepository.remove(draft)
+    return saved
+  }
+
+  async publishLegalRelease(
+    templateKey: string,
+    input: ContractTemplateLegalReleaseInput,
+    actorId: string,
+    reason: string
+  ): Promise<ContractTemplate> {
+    if (!input.reviewReference.trim()) {
+      throw new ConflictException('LEGAL_CITATION_REVIEW_REQUIRED')
+    }
+    const candidate = this.templateRepository.create({
+      templateKey,
+      version: ((await this.latestPublished(templateKey))?.version ?? 0) + 1,
+      status: 'published',
+      legalProfile: input.legalProfile,
+      clauses: normalizeTemplateClauses(input.clauses ?? []),
+      schemaVersion: input.schemaVersion,
+      effectiveFrom: this.toDate(input.effectiveFrom) ?? new Date(),
+      referenceOnly: input.referenceOnly,
+      reviewStatus: 'published',
+      reviewReference: input.reviewReference,
+      annexDefinitions: input.annexDefinitions ?? null,
+      allowedVariables: input.allowedVariables,
+      addenda: input.addenda,
+      citationIds: input.citationIds,
+      contentHash: this.contentHash(input),
+      createdBy: actorId,
+      publishedBy: actorId,
+      publishedAt: new Date(),
+      draftRevision: 1,
+    })
+    const validation = this.validationResult(candidate)
+    if (!validation.valid)
+      throw new ConflictException(validation.errors.join(','))
+    const saved = await this.templateRepository.save(candidate)
+    await this.recordAudit({
+      templateKey,
+      version: saved.version,
+      action: 'legal-release-published',
+      actorId,
+      reason,
+      reviewReference: input.reviewReference,
+      afterHash: saved.contentHash,
+    })
     return saved
   }
 
@@ -230,7 +409,11 @@ export class ContractTemplateGovernanceService {
           !clause.protected ||
           !clause.heading.trim() ||
           !/^[a-f0-9]{64}$/i.test(clause.contentHash) ||
-          clause.citationIds.length === 0
+          clause.citationIds.length === 0 ||
+          (template.schemaVersion >= CONTRACT_TEMPLATE_SCHEMA_VERSION &&
+            (!clause.content?.trim() ||
+              clause.contentHash !==
+                hashText(`${clause.heading.trim()}\n${clause.content.trim()}`)))
       )
     ) {
       errors.push('PROTECTED_LEGAL_CLAUSE_INVALID')
@@ -257,6 +440,13 @@ export class ContractTemplateGovernanceService {
     ) {
       errors.push('TEMPLATE_ADDENDUM_NOT_ALLOWED')
     }
+    const annexDefinitions = template.annexDefinitions ?? []
+    if (annexDefinitions.length === 0) errors.push('LEASE_ANNEX_REQUIRED')
+    if (
+      annexDefinitions.some(annex => !annex.id.trim() || !annex.title.trim())
+    ) {
+      errors.push('LEASE_ANNEX_DEFINITION_INVALID')
+    }
     try {
       const citationIds = [
         ...template.citationIds,
@@ -275,10 +465,12 @@ export class ContractTemplateGovernanceService {
     }
   }
 
-  private assertProtectedClausesUnchanged(
+  private async assertProtectedClausesUnchanged(
     clauses: ContractTemplateClause[],
-    published: ContractTemplate | null
-  ): void {
+    published: ContractTemplate | null,
+    actorId: string,
+    templateKey: string
+  ): Promise<void> {
     if (!published) return
     const publishedByNumber = new Map(
       published.clauses.map(clause => [clause.number, clause])
@@ -292,25 +484,47 @@ export class ContractTemplateGovernanceService {
         baseline.protected !== clause.protected
       )
     })
-    if (changed) throw new ConflictException('PROTECTED_LEGAL_CLAUSE_CHANGED')
+    if (changed) {
+      await this.recordAudit({
+        templateKey,
+        version: published.version,
+        action: 'protected-change-denied',
+        actorId,
+        deniedField: 'clauses',
+        beforeHash: published.contentHash,
+      })
+      throw new ConflictException('PROTECTED_LEGAL_CLAUSE_CHANGED')
+    }
   }
 
   private contentHash(
     input: ContractTemplateDraftInput | ContractTemplate
   ): string {
-    return createHash('sha256')
-      .update(
-        JSON.stringify({
-          legalProfile: input.legalProfile,
-          clauses: input.clauses,
-          allowedVariables: [...input.allowedVariables].sort(),
-          addenda: [...input.addenda].sort((left, right) =>
-            left.id.localeCompare(right.id)
-          ),
-          citationIds: [...input.citationIds].sort(),
-        })
-      )
-      .digest('hex')
+    const clauses = normalizeTemplateClauses(input.clauses ?? [])
+    return hashCanonicalTemplateBody({
+      legalProfile: input.legalProfile,
+      schemaVersion: input.schemaVersion ?? 1,
+      clauses,
+      annexDefinitions: input.annexDefinitions ?? [],
+      citationIds: [...input.citationIds].sort(),
+    })
+  }
+
+  private deriveAnnexDefinitions(
+    addenda: ContractTemplateAddendum[]
+  ): ContractTemplateAnnexDefinition[] {
+    return addenda.map(addendum => ({
+      id: addendum.id,
+      title: addendum.title,
+      description: addendum.content,
+      required: addendum.enabled,
+    }))
+  }
+
+  private toDate(value: Date | string | null | undefined): Date | null {
+    if (!value) return null
+    const date = value instanceof Date ? value : new Date(value)
+    return Number.isNaN(date.getTime()) ? null : date
   }
 
   private async recordAudit(input: {
@@ -321,6 +535,9 @@ export class ContractTemplateGovernanceService {
     reason?: string | null
     beforeHash?: string | null
     afterHash?: string | null
+    reviewReference?: string | null
+    deniedField?: string | null
+    metadata?: Record<string, string> | null
   }): Promise<void> {
     await this.auditRepository.save(this.auditRepository.create(input))
   }

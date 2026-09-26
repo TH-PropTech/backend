@@ -25,11 +25,17 @@ import { ContractTemplateAudit } from './legal/contract-template-audit.schema'
 import { ContractTemplateGovernanceService } from './legal/contract-template-governance.service'
 import { ContractTemplatesController } from './legal/contract-templates.controller'
 import { ContractArtifact } from './schemas/contract-artifact.schema'
+import { ContractAmendment } from './schemas/contract-amendment.schema'
+import { Payment } from '../payments/schemas/payment.schema'
 import {
   CONTRACT_ARTIFACT_STORAGE,
   MongoGridFsArtifactStorage,
 } from './contract-artifact.storage'
 import { PropertyOwnershipTransferModule } from '../property-ownership-transfer/property-ownership-transfer.module'
+import { ContractCommercialEditorService } from './contract-commercial-editor.service'
+import { ContractCommercialEditorController } from './contract-commercial-editor.controller'
+import { ContractAmendmentService } from './contract-amendment.service'
+import { ContractAmendmentController } from './contract-amendment.controller'
 
 @Module({
   imports: [
@@ -42,6 +48,8 @@ import { PropertyOwnershipTransferModule } from '../property-ownership-transfer/
       ContractTemplate,
       ContractTemplateAudit,
       ContractArtifact,
+      ContractAmendment,
+      Payment,
     ]),
     PoliciesModule,
     FabricModule,
@@ -54,6 +62,8 @@ import { PropertyOwnershipTransferModule } from '../property-ownership-transfer/
     ContractsController,
     DepositAgreementsController,
     ContractTemplatesController,
+    ContractCommercialEditorController,
+    ContractAmendmentController,
   ],
   providers: [
     ContractsService,
@@ -65,6 +75,8 @@ import { PropertyOwnershipTransferModule } from '../property-ownership-transfer/
     SmartCaSigningService,
     SmartCaCallbackGuard,
     ContractTemplateGovernanceService,
+    ContractCommercialEditorService,
+    ContractAmendmentService,
     {
       provide: CONTRACT_ARTIFACT_STORAGE,
       useClass: MongoGridFsArtifactStorage,
@@ -78,6 +90,8 @@ import { PropertyOwnershipTransferModule } from '../property-ownership-transfer/
     ContractViewService,
     SmartCaSigningService,
     ContractTemplateGovernanceService,
+    ContractCommercialEditorService,
+    ContractAmendmentService,
   ],
 })
 export class ContractsModule {}

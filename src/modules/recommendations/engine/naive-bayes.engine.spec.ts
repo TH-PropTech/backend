@@ -212,6 +212,17 @@ describe('NaiveBayesEngine', () => {
       expect(engine.isNeighbor('Quận 1', undefined)).toBe(false)
     })
 
+    it('should identify newly added districts in the expanded DISTRICT_NEIGHBORS map', () => {
+      // Task 2.2: verify new quận/huyện entries
+      expect(engine.isNeighbor('Quận 12', 'Gò Vấp')).toBe(true)
+      expect(engine.isNeighbor('Quận 5', 'Quận 6')).toBe(true)
+      expect(engine.isNeighbor('Hóc Môn', 'Bình Chánh')).toBe(true)
+      expect(engine.isNeighbor('Nhà Bè', 'Quận 7')).toBe(true)
+      // Củ Chi only neighbors Hóc Môn
+      expect(engine.isNeighbor('Củ Chi', 'Quận 1')).toBe(false)
+      expect(engine.isNeighbor('Củ Chi', 'Hóc Môn')).toBe(true)
+    })
+
     it('should correctly infer demographics from price tiers', () => {
       const budget = engine.inferDemographics(7_000_000)
       expect(budget.targetAgeMin).toBe(20)
@@ -271,6 +282,238 @@ describe('NaiveBayesEngine', () => {
       const lethanh = results.find(r => r.id === 'b3')
       expect(lethanh).toBeDefined()
       expect(lethanh?.reasons.some(r => r.includes('1PN riêng tư'))).toBe(true)
+    })
+  })
+
+  describe('Dimension 6: Normalized Location Score & Confidence Ratio', () => {
+    it('should keep contributions.location in [0,100] for exact district match (denominator fix)', () => {
+      // Task 1.3: denominator changed from 45 to 30; exact match = 30pts → 100%
+      engine.train(mockBuildings, mockHistory)
+
+      const profile: UserProfile = {
+        age: 28,
+        income: 50_000_000,
+        preferred_district: 'Bình Thạnh',
+        rooms: 2,
+        has_gym: true,
+        has_parking: true,
+      }
+
+      const results = engine.recommend(profile, 5)
+      const b1 = results.find(r => r.id === 'b1')
+      expect(b1).toBeDefined()
+      expect(b1?.contributions.location).toBeGreaterThanOrEqual(0)
+      expect(b1?.contributions.location).toBeLessThanOrEqual(100)
+      // Exact match: 30/30 * 100 = 100
+      expect(b1?.contributions.location).toBe(100)
+    })
+
+    it('should compute ratio-based confidence: ≥5% of total history → Cao', () => {
+      // Task 3.2: b1 has 2 records out of 4 total = 50% → Cao
+      engine.train(mockBuildings, mockHistory)
+
+      const profile: UserProfile = {
+        age: 28,
+        income: 50_000_000,
+        preferred_district: 'Bình Thạnh',
+        rooms: 2,
+        has_gym: true,
+        has_parking: true,
+      }
+
+      const results = engine.recommend(profile, 5)
+      const b1 = results.find(r => r.id === 'b1')
+      expect(b1).toBeDefined()
+      expect(b1?.confidence).toBe('Cao')
+    })
+
+    it('should return Thấp confidence when total history is empty', () => {
+      // Task 3.2: zero history → ratio = 0 → Thấp
+      engine.train(mockBuildings, [])
+
+      const profile: UserProfile = {
+        age: 28,
+        income: 50_000_000,
+        preferred_district: 'Bình Thạnh',
+        rooms: 2,
+        has_gym: true,
+        has_parking: true,
+      }
+
+      const results = engine.recommend(profile, 5)
+      expect(results.length).toBeGreaterThan(0)
+      for (const r of results) {
+        expect(r.confidence).toBe('Thấp')
+      }
+    })
+
+    it('should return Thấp confidence when building ratio < 1% of total history', () => {
+      // Task 3.2: b3 has 1 record; if total is large, ratio < 1% → Thấp
+      // Simulate with many extra records for other buildings
+      const extraHistory = Array.from({ length: 200 }, (_, i) => ({
+        user_age: 28 + (i % 10),
+        user_income: 50_000_000,
+        preferred_district: 'Bình Thạnh',
+        preferred_bedrooms: 2,
+        requires_gym: 1,
+        requires_parking: 1,
+        rented_apartment_id: 'b1',
+      }))
+      engine.train(mockBuildings, [...mockHistory, ...extraHistory])
+      // b3 has 1 record out of 204 total ≈ 0.49% < 1% → Thấp
+
+      const profile: UserProfile = {
+        age: 22,
+        income: 20_000_000,
+        preferred_district: 'Bình Tân',
+        rooms: 1,
+        has_gym: false,
+        has_parking: false,
+      }
+
+      const results = engine.recommend(profile, 5)
+      const b3 = results.find(r => r.id === 'b3')
+      expect(b3).toBeDefined()
+      expect(b3?.confidence).toBe('Thấp')
+    })
+  })
+
+  describe('Engine Strategy Pattern & Configuration', () => {
+    it('should default to hybrid strategy with alpha=1.0 and 50/50 weights', () => {
+      engine.train(mockBuildings, mockHistory)
+      const config = engine.getConfig()
+      expect(config.strategy).toBe('hybrid')
+      expect(config.alpha).toBe(1.0)
+      expect(config.nbWeight).toBe(0.5)
+      expect(config.ruleWeight).toBe(0.5)
+    })
+
+    it('should train with hybrid strategy and produce valid recommendations', () => {
+      engine.train(mockBuildings, mockHistory, {
+        strategy: 'hybrid',
+        alpha: 1.0,
+        nbWeight: 0.5,
+        ruleWeight: 0.5,
+      })
+
+      const profile: UserProfile = {
+        age: 28,
+        income: 50_000_000,
+        preferred_district: 'Bình Thạnh',
+        rooms: 2,
+        has_gym: true,
+        has_parking: true,
+      }
+
+      const results = engine.recommend(profile, 5)
+      expect(results.length).toBeGreaterThan(0)
+      const firstResult = results[0]
+      expect(firstResult).toBeDefined()
+      if (!firstResult) throw new Error('Expected at least one recommendation')
+      expect(firstResult.match_score).toBeGreaterThanOrEqual(0)
+      expect(firstResult.match_score).toBeLessThanOrEqual(100)
+    })
+
+    it('should train with MAP strategy and use custom alpha', () => {
+      engine.train(mockBuildings, mockHistory, {
+        strategy: 'map',
+        alpha: 2.0,
+        nbWeight: 0.7,
+        ruleWeight: 0.3,
+      })
+
+      expect(engine.getConfig().strategy).toBe('map')
+      expect(engine.getConfig().alpha).toBe(2.0)
+
+      const profile: UserProfile = {
+        age: 28,
+        income: 50_000_000,
+        preferred_district: 'Bình Thạnh',
+        rooms: 2,
+        has_gym: true,
+        has_parking: true,
+      }
+
+      const results = engine.recommend(profile, 5)
+      expect(results.length).toBeGreaterThan(0)
+    })
+
+    it('should train with weighted strategy and compute feature weights summing to 1.0', () => {
+      engine.train(mockBuildings, mockHistory, {
+        strategy: 'weighted',
+        alpha: 1.0,
+        nbWeight: 0.5,
+        ruleWeight: 0.5,
+      })
+
+      const weights = engine.getFeatureWeights()
+      expect(weights).toBeDefined()
+      expect(weights.district).toBeGreaterThan(0)
+      expect(weights.rooms).toBeGreaterThan(0)
+      expect(weights.gym).toBeGreaterThan(0)
+      expect(weights.parking).toBeGreaterThanOrEqual(0)
+
+      const sum =
+        weights.district + weights.rooms + weights.gym + weights.parking
+      expect(Math.abs(sum - 1.0)).toBeLessThan(1e-9)
+
+      const profile: UserProfile = {
+        age: 28,
+        income: 50_000_000,
+        preferred_district: 'Bình Thạnh',
+        rooms: 2,
+        has_gym: true,
+        has_parking: true,
+      }
+
+      const results = engine.recommend(profile, 5)
+      expect(results.length).toBeGreaterThan(0)
+      const firstResult = results[0]
+      expect(firstResult).toBeDefined()
+      if (!firstResult) throw new Error('Expected at least one recommendation')
+      expect(firstResult.contributions).toBeDefined()
+      expect(firstResult.confidence).toBeDefined()
+    })
+
+    it('should train with map-weighted strategy and produce complete recommendations', () => {
+      engine.train(mockBuildings, mockHistory, {
+        strategy: 'map-weighted',
+        alpha: 1.5,
+        nbWeight: 0.6,
+        ruleWeight: 0.4,
+      })
+
+      const weights = engine.getFeatureWeights()
+      const sum =
+        weights.district + weights.rooms + weights.gym + weights.parking
+      expect(Math.abs(sum - 1.0)).toBeLessThan(1e-9)
+
+      const profile: UserProfile = {
+        age: 28,
+        income: 50_000_000,
+        preferred_district: 'Bình Thạnh',
+        rooms: 2,
+        has_gym: true,
+        has_parking: true,
+      }
+
+      const results = engine.recommend(profile, 5)
+      expect(results.length).toBeGreaterThan(0)
+    })
+
+    it('should assign uniform 0.25 weights when history is empty', () => {
+      engine.train(mockBuildings, [], {
+        strategy: 'weighted',
+        alpha: 1.0,
+        nbWeight: 0.5,
+        ruleWeight: 0.5,
+      })
+
+      const weights = engine.getFeatureWeights()
+      expect(weights.district).toBe(0.25)
+      expect(weights.rooms).toBe(0.25)
+      expect(weights.gym).toBe(0.25)
+      expect(weights.parking).toBe(0.25)
     })
   })
 })

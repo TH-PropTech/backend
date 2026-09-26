@@ -12,7 +12,7 @@ dotenv.config({ path: path.join(__dirname, '..', '..', '.env') })
 
 async function seedRecommendationHistory(): Promise<void> {
   const logger = new Logger('SeedRecommendationHistory')
-  logger.log('Starting migration of rental history from CSV to MongoDB...')
+  logger.log('Starting seed of recommendation history from CSV into MongoDB...')
 
   const app = await NestFactory.createApplicationContext(AppModule)
 

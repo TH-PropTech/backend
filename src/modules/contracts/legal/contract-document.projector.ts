@@ -5,6 +5,7 @@ import {
   LeaseDocumentManifest,
 } from './lease-template.manifest'
 import { resolveLegalProfile, LegalProfile } from './legal-profile.resolver'
+import type { ContractTemplate } from './contract-template.schema'
 import {
   ContractDocumentSectionDto,
   ContractDocumentAnnexDto,
@@ -16,22 +17,46 @@ export class ContractDocumentProjector {
   /**
    * Chiếu Contract entity thành structured document view DTO
    */
-  static projectDocument(contract: Contract): ContractDocumentViewDto {
+  static projectDocument(
+    contract: Contract,
+    template?: Pick<
+      ContractTemplate,
+      | 'legalProfile'
+      | 'version'
+      | 'templateKey'
+      | 'schemaVersion'
+      | 'contentHash'
+      | 'clauses'
+      | 'annexDefinitions'
+      | 'citationIds'
+    >
+  ): ContractDocumentViewDto {
     const isLocked = Boolean(
       contract.contentLockedHash && contract.contentLockedAt
     )
     const revision = contract.contentRevision ?? 1
-    const legalProfile: LegalProfile = resolveLegalProfile({
-      landlordType: 'individual',
-      operatesRealEstateBusiness: false,
-    })
+    const configuredProfile = contract.flowProfileRef?.profileId
+    const legalProfile: LegalProfile | null = template
+      ? template.legalProfile
+      : configuredProfile === 'REAL_ESTATE_BUSINESS_STANDARD' ||
+          configuredProfile === 'PRIVATE_CIVIL_APARTMENT_LEASE'
+        ? configuredProfile
+        : resolveLegalProfile({
+            landlordType: 'individual',
+            operatesRealEstateBusiness: false,
+            transactionType: 'civil',
+          })
 
-    const sections = this.buildStructuredSections(contract)
-    const annexes = this.buildAnnexes()
+    const sections = template?.clauses.some(clause => clause.content)
+      ? this.buildTemplateSections(contract, template)
+      : this.buildStructuredSections(contract)
+    const annexes = template?.annexDefinitions?.length
+      ? this.buildTemplateAnnexes(template.annexDefinitions)
+      : this.buildAnnexes()
 
     // Validate manifest
     const manifest: LeaseDocumentManifest = {
-      legalProfile,
+      legalProfile: legalProfile ?? 'PRIVATE_CIVIL_APARTMENT_LEASE',
       articles: sections.map(s => ({
         number: s.number,
         heading: s.title,
@@ -39,6 +64,11 @@ export class ContractDocumentProjector {
         protected: s.protected,
       })),
       annexes: annexes.map(a => a.title),
+      ...(template?.citationIds ? { citationIds: template.citationIds } : {}),
+      ...(template?.schemaVersion !== undefined
+        ? { schemaVersion: template.schemaVersion }
+        : {}),
+      ...(template?.contentHash ? { contentHash: template.contentHash } : {}),
     }
 
     const validation = validateDocumentManifest(manifest)
@@ -61,6 +91,26 @@ export class ContractDocumentProjector {
             templateKey: contract.artifactRef.templateKey,
             templateVersion: contract.artifactRef.templateVersion,
             artifactHash: contract.artifactRef.artifactHash,
+            ...(contract.artifactRef.canonicalContentHash
+              ? {
+                  canonicalContentHash:
+                    contract.artifactRef.canonicalContentHash,
+                }
+              : {}),
+            ...(contract.artifactRef.rendererVersion
+              ? { rendererVersion: contract.artifactRef.rendererVersion }
+              : {}),
+            ...(contract.artifactRef.sourceSchemaVersion
+              ? {
+                  sourceSchemaVersion: contract.artifactRef.sourceSchemaVersion,
+                }
+              : {}),
+            ...(contract.artifactRef.byteLength
+              ? { byteLength: contract.artifactRef.byteLength }
+              : {}),
+            ...(contract.artifactRef.amendmentId
+              ? { amendmentId: contract.artifactRef.amendmentId }
+              : {}),
             contentType: contract.artifactRef.contentType,
           }
         : null
@@ -71,20 +121,108 @@ export class ContractDocumentProjector {
       lockedAt: contract.contentLockedAt
         ? contract.contentLockedAt.toISOString()
         : null,
-      lockedHash:
-        contract.artifactRef?.artifactHash ??
-        contract.contentLockedHash ??
-        null,
-      hashSchemaVersion: contract.hashSchemaVersion ?? 1,
+      lockedHash: contract.contentLockedHash ?? null,
+      contentHash: contract.contentLockedHash ?? null,
+      citationIds: template?.citationIds ?? [],
+      hashSchemaVersion:
+        template?.schemaVersion ?? contract.hashSchemaVersion ?? 1,
       legalProfile,
       templateVersion: contract.artifactRef
         ? `${contract.artifactRef.templateKey}@${contract.artifactRef.templateVersion}`
-        : '2026.1-VN-CIVIL',
+        : template
+          ? `${template.templateKey}@${template.version}`
+          : contract.contractTemplateRef
+            ? `${contract.contractTemplateRef.key}@${contract.contractTemplateRef.version}`
+            : contract.termsRef
+              ? `${contract.termsRef.key}@${contract.termsRef.version}`
+              : '2026.1-VN-CIVIL',
       sections,
       annexes,
       canonicalArtifact,
       integrity,
     }
+  }
+
+  private static buildTemplateSections(
+    contract: Contract,
+    template: Pick<ContractTemplate, 'clauses'>
+  ): ContractDocumentSectionDto[] {
+    const commercial = contract.commercialDraft ?? undefined
+    const values: Record<string, string> = {
+      property: contract.propertyTitle || 'Căn hộ chung cư',
+      propertyAddress: contract.propertyAddress || 'Theo hồ sơ bất động sản',
+      propertyArea: contract.propertyArea
+        ? `${contract.propertyArea} m²`
+        : 'Theo hồ sơ',
+      propertyFurniture: contract.propertyFurniture || 'Theo biên bản bàn giao',
+      startDate: this.formatTemplateDate(contract.startDate),
+      endDate: this.formatTemplateDate(contract.endDate),
+      durationMonths: String(
+        commercial?.durationMonths ?? contract.durationMonths ?? 12
+      ),
+      monthlyRent: this.formatTemplateMoney(
+        commercial?.monthlyRent ?? contract.monthlyRent
+      ),
+      deposit: this.formatTemplateMoney(
+        commercial?.deposit ?? contract.deposit
+      ),
+      paymentDay: String(commercial?.paymentDay ?? contract.paymentDay),
+      latePenaltyRate: String(
+        commercial?.latePenaltyRate ?? contract.latePenaltyRate
+      ),
+      terminationNoticeDays: String(
+        commercial?.terminationNoticeDays ?? contract.terminationNoticeDays
+      ),
+      landlord: contract.landlordName || 'Bên cho thuê',
+      tenant: contract.tenantName || 'Bên thuê',
+    }
+    return template.clauses.map(clause => ({
+      id: clause.id ?? `sec-${clause.number}`,
+      number: clause.number,
+      title: clause.heading,
+      content: this.interpolateTemplate(
+        clause.content ?? clause.heading,
+        values
+      ),
+      protected: true,
+      hash: clause.contentHash,
+      citationIds: clause.citationIds,
+    }))
+  }
+
+  private static buildTemplateAnnexes(
+    definitions: NonNullable<ContractTemplate['annexDefinitions']>
+  ): ContractDocumentAnnexDto[] {
+    return definitions.map(definition => ({
+      id: definition.id,
+      title: definition.title,
+      ...(definition.description
+        ? { description: definition.description }
+        : {}),
+      required: definition.required,
+    }))
+  }
+
+  private static interpolateTemplate(
+    content: string,
+    values: Record<string, string>
+  ): string {
+    return content.replace(
+      /\{\{([a-zA-Z0-9_]+)\}\}/g,
+      (_match, key: string) => values[key] ?? ''
+    )
+  }
+
+  private static formatTemplateMoney(amount: number): string {
+    return `${new Intl.NumberFormat('vi-VN').format(amount)} VNĐ`
+  }
+
+  private static formatTemplateDate(value?: Date | string | null): string {
+    if (!value) return 'Chưa xác định'
+    const date = new Date(value)
+    return Number.isNaN(date.getTime())
+      ? 'Chưa xác định'
+      : date.toLocaleDateString('vi-VN')
   }
 
   private static buildStructuredSections(

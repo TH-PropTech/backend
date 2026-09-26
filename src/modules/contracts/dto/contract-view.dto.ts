@@ -79,6 +79,9 @@ export class ContractDocumentSectionDto {
 
   @ApiProperty()
   hash!: string
+
+  @ApiProperty({ type: [String], required: false })
+  citationIds?: string[]
 }
 
 export class ContractDocumentAnnexDto {
@@ -93,6 +96,44 @@ export class ContractDocumentAnnexDto {
 
   @ApiProperty()
   required!: boolean
+}
+
+export class ContractAmendmentSummaryDto {
+  @ApiProperty()
+  id!: string
+
+  @ApiProperty()
+  sequence!: number
+
+  @ApiProperty()
+  status!: string
+
+  @ApiProperty()
+  effectiveFrom!: string
+
+  @ApiProperty({ nullable: true })
+  contentHash!: string | null
+
+  @ApiProperty({ nullable: true, required: false })
+  artifactHash?: string | null
+
+  @ApiProperty({ nullable: true, required: false })
+  artifactId?: string | null
+
+  @ApiProperty({ enum: ['available', 'missing'], required: false })
+  artifactIntegrity?: 'available' | 'missing'
+
+  @ApiProperty({ required: false })
+  ledgerStatus?: 'not-requested' | 'pending' | 'confirmed' | 'failed'
+
+  @ApiProperty({ nullable: true, required: false })
+  ledgerTxHash?: string | null
+
+  @ApiProperty()
+  tenantSigned!: boolean
+
+  @ApiProperty()
+  landlordSigned!: boolean
 }
 
 export class ContractCanonicalArtifactDto {
@@ -111,6 +152,21 @@ export class ContractCanonicalArtifactDto {
   @ApiProperty()
   artifactHash!: string
 
+  @ApiProperty({ nullable: true, required: false })
+  canonicalContentHash?: string | null
+
+  @ApiProperty({ nullable: true, required: false })
+  rendererVersion?: string | null
+
+  @ApiProperty({ nullable: true, required: false })
+  sourceSchemaVersion?: number | null
+
+  @ApiProperty({ nullable: true, required: false })
+  byteLength?: number | null
+
+  @ApiProperty({ nullable: true, required: false })
+  amendmentId?: string | null
+
   @ApiProperty({ enum: ['application/pdf'] })
   contentType!: 'application/pdf'
 }
@@ -127,6 +183,18 @@ export class ContractDocumentViewDto {
 
   @ApiProperty({ nullable: true })
   lockedHash!: string | null
+
+  @ApiProperty({ nullable: true, required: false })
+  contentHash?: string | null
+
+  @ApiProperty({ type: [String], required: false })
+  citationIds?: string[]
+
+  @ApiProperty({ type: [ContractAmendmentSummaryDto], required: false })
+  amendmentHistory?: ContractAmendmentSummaryDto[]
+
+  @ApiProperty({ nullable: true, required: false })
+  governingAmendmentId?: string | null
 
   @ApiProperty()
   hashSchemaVersion!: number

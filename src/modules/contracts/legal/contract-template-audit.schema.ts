@@ -12,6 +12,8 @@ export type ContractTemplateAuditAction =
   | 'draft-updated'
   | 'validated'
   | 'published'
+  | 'legal-release-published'
+  | 'protected-change-denied'
 
 @Entity('contract_template_audits')
 @Index(['templateKey', 'version', 'createdAt'])
@@ -39,6 +41,15 @@ export class ContractTemplateAudit {
 
   @Column({ nullable: true })
   afterHash?: string | null
+
+  @Column({ nullable: true })
+  reviewReference?: string | null
+
+  @Column({ nullable: true })
+  deniedField?: string | null
+
+  @Column({ nullable: true })
+  metadata?: Record<string, string> | null
 
   @CreateDateColumn()
   createdAt!: Date

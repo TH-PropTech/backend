@@ -5,16 +5,23 @@ export const LEASE_ARTICLE_NUMBERS = Object.freeze(
 )
 
 export type LeaseArticle = {
+  id?: string
   number: number
   heading: string
+  content?: string
+  variableRefs?: string[]
   contentHash: string
+  citationIds?: string[]
   protected: boolean
 }
 
 export type LeaseDocumentManifest = {
   legalProfile: LegalProfile
   articles: LeaseArticle[]
-  annexes: string[]
+  annexes: Array<string | { id: string; title: string; required: boolean }>
+  citationIds?: string[]
+  schemaVersion?: number
+  contentHash?: string
 }
 
 export type LeaseTemplateProfile = {
@@ -63,10 +70,22 @@ export function validateDocumentManifest(
   if (manifest.annexes.length === 0) errors.push('LEASE_ANNEX_REQUIRED')
   if (
     manifest.articles.some(
+      article =>
+        !article.heading.trim() ||
+        (article.content !== undefined && !article.content.trim())
+    )
+  ) {
+    errors.push('LEASE_ARTICLE_CONTENT_INVALID')
+  }
+  if (
+    manifest.articles.some(
       article => !article.protected || !article.contentHash
     )
   ) {
     errors.push('LEASE_PROTECTED_CONTENT_INVALID')
+  }
+  if (manifest.citationIds && manifest.citationIds.length === 0) {
+    errors.push('LEASE_CITATION_REQUIRED')
   }
   return { valid: errors.length === 0, errors }
 }

@@ -25,22 +25,23 @@ import { RolesGuard } from '../../../common/guards/roles.guard'
 import {
   ContractTemplateGovernanceService,
   type ContractTemplateDraftInput,
+  type ContractTemplateLegalReleaseInput,
 } from './contract-template-governance.service'
 import type {
   ContractTemplateAddendum,
-  ContractTemplateClause,
   ContractTemplate,
 } from './contract-template.schema'
 import type { ContractTemplateAudit } from './contract-template-audit.schema'
 import type { ContractTemplateValidation } from './contract-template-governance.service'
 
-export class SaveContractTemplateDraftDto implements ContractTemplateDraftInput {
+export class SaveContractTemplateDraftDto {
   @IsIn(['PRIVATE_CIVIL_APARTMENT_LEASE', 'REAL_ESTATE_BUSINESS_STANDARD'])
   legalProfile!: ContractTemplateDraftInput['legalProfile']
 
+  @IsOptional()
   @IsArray()
   @IsObject({ each: true })
-  clauses!: ContractTemplateClause[]
+  clauses?: ContractTemplateDraftInput['clauses']
 
   @IsArray()
   @IsString({ each: true })
@@ -57,6 +58,48 @@ export class SaveContractTemplateDraftDto implements ContractTemplateDraftInput 
   @IsInt()
   @Min(0)
   expectedRevision!: number
+}
+
+export class PublishLegalReleaseDto implements ContractTemplateLegalReleaseInput {
+  @IsIn(['PRIVATE_CIVIL_APARTMENT_LEASE', 'REAL_ESTATE_BUSINESS_STANDARD'])
+  legalProfile!: ContractTemplateLegalReleaseInput['legalProfile']
+
+  @IsArray()
+  @IsObject({ each: true })
+  clauses!: NonNullable<ContractTemplateLegalReleaseInput['clauses']>
+
+  @IsArray()
+  @IsString({ each: true })
+  allowedVariables!: string[]
+
+  @IsArray()
+  @IsObject({ each: true })
+  addenda!: ContractTemplateAddendum[]
+
+  @IsArray()
+  @IsString({ each: true })
+  citationIds!: string[]
+
+  @IsArray()
+  @IsObject({ each: true })
+  annexDefinitions!: NonNullable<
+    ContractTemplateLegalReleaseInput['annexDefinitions']
+  >
+
+  @IsInt()
+  @Min(2)
+  schemaVersion!: number
+
+  @IsOptional()
+  @IsString()
+  effectiveFrom?: string
+
+  @IsOptional()
+  referenceOnly!: boolean
+
+  @IsString()
+  @IsNotEmpty()
+  reviewReference!: string
 }
 
 export class PublishContractTemplateDto {
@@ -79,7 +122,7 @@ export class ContractTemplatesController {
   @Roles('admin', 'staff')
   getPublished(
     @Param('templateKey') templateKey: string
-  ): Promise<ContractTemplateDraftInput> {
+  ): Promise<ContractTemplate> {
     return this.governanceService.getPublishedVersion(templateKey)
   }
 
@@ -88,7 +131,7 @@ export class ContractTemplatesController {
   getPublishedVersion(
     @Param('templateKey') templateKey: string,
     @Param('version', ParseIntPipe) version: number
-  ): Promise<ContractTemplateDraftInput> {
+  ): Promise<ContractTemplate> {
     return this.governanceService.getPublishedVersion(templateKey, version)
   }
 
@@ -109,7 +152,14 @@ export class ContractTemplatesController {
   ): Promise<ContractTemplate> {
     return this.governanceService.saveDraft(
       templateKey,
-      dto,
+      {
+        legalProfile: dto.legalProfile,
+        clauses: dto.clauses ?? [],
+        allowedVariables: dto.allowedVariables,
+        addenda: dto.addenda,
+        citationIds: dto.citationIds,
+        expectedRevision: dto.expectedRevision,
+      },
       actorId,
       dto.expectedRevision
     )
@@ -131,5 +181,20 @@ export class ContractTemplatesController {
     @CurrentUser('id') actorId: string
   ): Promise<ContractTemplate> {
     return this.governanceService.publishDraft(templateKey, actorId, dto.reason)
+  }
+
+  @Post('legal-release/:templateKey')
+  @Roles('admin')
+  publishLegalRelease(
+    @Param('templateKey') templateKey: string,
+    @Body() dto: PublishLegalReleaseDto,
+    @CurrentUser('id') actorId: string
+  ): Promise<ContractTemplate> {
+    return this.governanceService.publishLegalRelease(
+      templateKey,
+      dto,
+      actorId,
+      dto.reviewReference
+    )
   }
 }

@@ -8,7 +8,8 @@ import {
 } from 'typeorm'
 
 @Entity('contract_artifacts')
-@Index(['contractId', 'revision'], { unique: true })
+@Index(['contractId', 'revision'])
+@Index(['contractId', 'revision', 'amendmentId'], { unique: true })
 export class ContractArtifact {
   @ObjectIdColumn()
   _id!: ObjectId
@@ -34,6 +35,18 @@ export class ContractArtifact {
 
   @Column()
   artifactHash!: string
+
+  @Column({ nullable: true })
+  canonicalContentHash?: string | null
+
+  @Column({ nullable: true })
+  rendererVersion?: string | null
+
+  @Column({ nullable: true })
+  sourceSchemaVersion?: number | null
+
+  @Column({ nullable: true })
+  amendmentId?: string | null
 
   @Column()
   byteLength!: number

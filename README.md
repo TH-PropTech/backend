@@ -6,14 +6,14 @@ NestJS modular monolith API for the TH PropTech platform.
 
 - Node.js >= 22.13.0
 - pnpm >= 10.0.0
-- PostgreSQL >= 15
+- MongoDB 6+ (local or hosted MongoDB-compatible deployment)
 
 ## Getting Started
 
 ```bash
 pnpm install
 cp .env.example .env
-pnpm db:up
+# Set DATABASE_URL to the local or hosted MongoDB instance in .env
 pnpm dev
 ```
 
@@ -23,7 +23,6 @@ If `pnpm` is not available globally, use Corepack:
 
 ```bash
 corepack pnpm install
-corepack pnpm db:up
 corepack pnpm dev
 ```
 
@@ -38,16 +37,20 @@ Swagger/OpenAPI is available at http://localhost:3001/api/docs.
 - `pnpm lint` - run ESLint
 - `pnpm test` - run unit tests with coverage
 - `pnpm test:e2e` - run API e2e tests
-- `pnpm db:up` - start local PostgreSQL for development and e2e
-- `pnpm db:down` - stop local PostgreSQL
-- `pnpm migration:generate -- src/core/database/migrations/<name>` - generate a migration
-- `pnpm migration:run` - apply migrations
+- `pnpm db:up` - optionally start local MongoDB from Docker Compose
+- `pnpm db:down` - stop local MongoDB/Redis Compose services
+- `pnpm db:logs` - follow local MongoDB logs
+- `pnpm seed` - insert local/sample data; use only against an intentionally disposable database
+
+The backend has no SQL migration command. The MongoDB data-backfill utilities in
+`src/data/migrations` are reviewed, manual operations for historical records;
+they are not executed automatically at application startup.
 
 ## Architecture
 
-- `src/core` - config, database, logger, app bootstrap
+- `src/config` - environment and application configuration
 - `src/common` - DTOs, filters, interceptors, guards, pipes, decorators
-- `src/features` - bounded feature modules
+- `src/modules` - bounded feature modules
 
 Controllers stay thin, services contain business logic, repositories isolate data
 access, and API responses use a consistent envelope.
@@ -56,29 +59,24 @@ access, and API responses use a consistent envelope.
 
 ```text
 src/
-  core/                 # Config, database, logger, app bootstrap
+  config/               # Environment and application configuration
   common/               # DTOs, filters, interceptors, guards, pipes, decorators
-  features/health/      # Baseline health feature module
+  modules/              # Bounded feature modules
+  data/migrations/      # Optional reviewed MongoDB data-backfill utilities
 test/                   # Supertest e2e setup
-docker/postgres/init/   # Local database initialization scripts
 ```
 
 ## Environment
 
 Copy `.env.example` to `.env`.
 
-| Variable               | Purpose                                                |
-| ---------------------- | ------------------------------------------------------ |
-| `APP_PORT`             | API port, default `3001`                               |
-| `APP_CORS_ORIGINS`     | Comma-separated frontend origins                       |
-| `DATABASE_HOST`        | PostgreSQL host                                        |
-| `DATABASE_PORT`        | PostgreSQL port                                        |
-| `DATABASE_USER`        | PostgreSQL username                                    |
-| `DATABASE_PASSWORD`    | PostgreSQL password                                    |
-| `DATABASE_NAME`        | PostgreSQL database                                    |
-| `DATABASE_SSL`         | Enables PostgreSQL SSL                                 |
-| `DATABASE_LOGGING`     | Enables TypeORM query logging                          |
-| `DATABASE_SYNCHRONIZE` | Local-only schema sync switch; keep `false` by default |
+| Variable               | Purpose                                                                               |
+| ---------------------- | ------------------------------------------------------------------------------------- |
+| `APP_PORT`             | API port, default `3001`                                                              |
+| `APP_CORS_ORIGINS`     | Comma-separated frontend origins                                                      |
+| `DATABASE_URL`         | MongoDB connection URI; use the hosted URI in shared environments                     |
+| `DATABASE_LOGGING`     | Enables TypeORM query logging                                                         |
+| `DATABASE_SYNCHRONIZE` | Local-only MongoDB entity sync switch; keep `false` in shared/production environments |
 
 ## API Contract
 
@@ -105,23 +103,21 @@ Successful responses use:
 Error responses use the same envelope with `success: false`, `data: null`, and
 a stable `error.code`.
 
-## Database And Migrations
+## MongoDB And Data Backfills
 
-Start local PostgreSQL:
+The backend uses TypeORM with MongoDB. MongoDB does not use SQL schema
+migrations. In local development, `DATABASE_SYNCHRONIZE=true` may be enabled
+to add entity fields; keep it disabled for hosted and production databases.
 
-```bash
-corepack pnpm db:up
-```
+Reviewed legal lease templates are seeded idempotently by the contracts module
+at application bootstrap when their canonical keys are missing. Existing
+published legal templates are never overwritten by bootstrap.
 
-Generate and run migrations:
-
-```bash
-corepack pnpm migration:generate -- src/core/database/migrations/<name>
-corepack pnpm migration:run
-```
-
-Do not enable `DATABASE_SYNCHRONIZE=true` outside short-lived local
-experiments. Production and shared environments must use reviewed migrations.
+The numbered files under `src/data/migrations` are optional repository-level
+MongoDB data backfills for historical records. They support dry-run/idempotent
+operation but have no automatic CLI or startup runner. Snapshot the database,
+review the report, and invoke a specific backfill only through an explicitly
+reviewed operator job.
 
 ## CI Checklist
 
@@ -135,9 +131,8 @@ corepack pnpm test
 corepack pnpm build
 ```
 
-E2E tests require PostgreSQL:
+E2E tests require a reachable MongoDB configured by `DATABASE_URL`:
 
 ```bash
-corepack pnpm db:up
 corepack pnpm test:e2e
 ```

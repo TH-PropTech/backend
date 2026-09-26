@@ -9,3 +9,4 @@ CHANGELOG.md
 .data
 *.log
 .codex*
+.test-logs

@@ -38,12 +38,16 @@ describe('ContractTemplateGovernanceService', () => {
     getPublished: () => ContractTemplate | null
   } {
     let draft: ContractTemplate | null = null
-    let published: ContractTemplate | null = null
+    const published = new Map<string, ContractTemplate>()
     const audits: ContractTemplateAudit[] = []
     const templateRepository = {
       findOne: jest.fn(({ where }: { where: Record<string, unknown> }) => {
         if (where.status === 'draft') return Promise.resolve(draft)
-        if (where.status === 'published') return Promise.resolve(published)
+        if (where.status === 'published') {
+          return Promise.resolve(
+            published.get(String(where.templateKey)) ?? null
+          )
+        }
         return Promise.resolve(null)
       }),
       create: jest.fn((value: Partial<ContractTemplate>) =>
@@ -51,7 +55,8 @@ describe('ContractTemplateGovernanceService', () => {
       ),
       save: jest.fn((value: ContractTemplate) => {
         if (value.status === 'draft') draft = value
-        if (value.status === 'published') published = value
+        if (value.status === 'published')
+          published.set(value.templateKey, value)
         return Promise.resolve(value)
       }),
       remove: jest.fn((value: ContractTemplate) => {
@@ -83,7 +88,7 @@ describe('ContractTemplateGovernanceService', () => {
         auditRepository as unknown as Repository<ContractTemplateAudit>
       ),
       audits,
-      getPublished: () => published,
+      getPublished: () => published.get(templateKey) ?? null,
     }
   }
 
@@ -117,6 +122,23 @@ describe('ContractTemplateGovernanceService', () => {
         'TEMPLATE_ADDENDUM_NOT_ALLOWED',
       ])
     )
+  })
+
+  it('seeds missing MongoDB template documents idempotently without overwriting published rows', async () => {
+    const { service } = context()
+    await service.seedReviewedTemplatesIfMissing()
+
+    const firstBusiness = await service.getPublishedVersion(
+      'VN_RE_BUSINESS_ND96_APPENDIX_II'
+    )
+    expect(firstBusiness.schemaVersion).toBe(2)
+    expect(firstBusiness.clauses).toHaveLength(12)
+    expect(firstBusiness.annexDefinitions).toHaveLength(4)
+
+    await service.seedReviewedTemplatesIfMissing()
+    await expect(
+      service.getPublishedVersion('VN_INDIVIDUAL_RESIDENTIAL_LEASE')
+    ).resolves.toEqual(expect.objectContaining({ version: 1 }))
   })
 
   it('publishes a validated immutable revision and retains audit history', async () => {

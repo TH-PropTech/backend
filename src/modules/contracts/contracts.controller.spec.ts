@@ -1,4 +1,8 @@
-import { BadRequestException } from '@nestjs/common'
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+} from '@nestjs/common'
 import { ContractsController } from './contracts.controller'
 import type { ContractsService } from './contracts.service'
 import type { ContractArtifactService } from './contract-artifact.service'
@@ -23,6 +27,7 @@ describe('ContractsController', () => {
   }
   const artifactService = {
     generateDocument: jest.fn(),
+    generateDocumentWithMetadata: jest.fn(),
     lockCanonicalArtifact: jest.fn(),
   }
   const contractViewService = {
@@ -36,8 +41,11 @@ describe('ContractsController', () => {
     verifyOtpSignature: jest.fn(),
   }
   const smartCaSigningService = {
+    listCertificates: jest.fn(),
     createSession: jest.fn(),
     getSession: jest.fn(),
+    poll: jest.fn(),
+    cancelSession: jest.fn(),
   }
   const controller = new ContractsController(
     service as unknown as ContractsService,
@@ -184,13 +192,21 @@ describe('ContractsController', () => {
   })
 
   it('passes participant identity and staff scope to artifact generation', async () => {
-    artifactService.generateDocument.mockResolvedValue(Buffer.from('artifact'))
-    await controller.downloadArtifact('contract-1', 'docx', {
-      _id: 'tenant-1',
-      roles: ['tenant'],
+    artifactService.generateDocumentWithMetadata.mockResolvedValue({
+      bytes: Buffer.from('artifact'),
+      reference: {},
     })
+    await controller.downloadArtifact(
+      'contract-1',
+      'docx',
+      {
+        _id: 'tenant-1',
+        roles: ['tenant'],
+      },
+      { setHeader: jest.fn() } as never
+    )
 
-    expect(artifactService.generateDocument).toHaveBeenCalledWith(
+    expect(artifactService.generateDocumentWithMetadata).toHaveBeenCalledWith(
       'contract-1',
       'tenant-1',
       false,
@@ -307,5 +323,92 @@ describe('ContractsController', () => {
       'WEB_SIMULATED_SIG'
     )
     expect(result.success).toBe(true)
+  })
+
+  it('lists sanitized SmartCA certificates using the JWT participant identity', async () => {
+    smartCaSigningService.listCertificates.mockResolvedValue({
+      certificates: [
+        {
+          serialNumber: 'SERIAL-001',
+          subject: 'CN=Test Tenant',
+          issuer: 'CN=VNPT Test CA',
+          validFrom: '2026-01-01T00:00:00.000Z',
+          validTo: '2099-01-01T00:00:00.000Z',
+          isValid: true,
+        },
+      ],
+    })
+
+    const result = await controller.listSmartCaCertificates(
+      'contract-1',
+      'tenant-1'
+    )
+
+    expect(smartCaSigningService.listCertificates).toHaveBeenCalledWith(
+      'contract-1',
+      'tenant-1'
+    )
+    expect(JSON.stringify(result)).not.toContain('idCardNumber')
+    expect(JSON.stringify(result)).not.toContain('cert_data')
+  })
+
+  it('propagates participant access and certificate business errors without leaking provider data', async () => {
+    smartCaSigningService.listCertificates.mockRejectedValueOnce(
+      new ForbiddenException('CONTRACT_SIGN_ACCESS_DENIED')
+    )
+    await expect(
+      controller.listSmartCaCertificates('contract-1', 'outsider')
+    ).rejects.toThrow('CONTRACT_SIGN_ACCESS_DENIED')
+
+    smartCaSigningService.listCertificates.mockRejectedValueOnce(
+      new ConflictException('SMARTCA_CERTIFICATE_INVALID')
+    )
+    await expect(
+      controller.listSmartCaCertificates('contract-1', 'tenant-1')
+    ).rejects.toThrow('SMARTCA_CERTIFICATE_INVALID')
+  })
+
+  it('creates a SmartCA v2 session without exposing credential or raw signature', async () => {
+    smartCaSigningService.createSession.mockResolvedValue({
+      _id: { toHexString: () => 'session-1' },
+      contractId: 'contract-1',
+      signerId: 'tenant-1',
+      signerRole: 'tenant',
+      artifactHash: 'a'.repeat(64),
+      providerTransactionId: 'provider-transaction',
+      status: 'signed',
+      idempotencyKey: 'request-1',
+      certificateSerial: 'SERIAL-001',
+      signatureHash: 'signature-hash',
+      signatureValueRef: 'raw-signature-must-not-leak',
+      expiresAt: new Date('2026-09-23T10:05:00.000Z'),
+      createdAt: new Date('2026-09-23T10:00:00.000Z'),
+      updatedAt: new Date('2026-09-23T10:00:01.000Z'),
+    })
+    const dto = {
+      idempotencyKey: 'request-1',
+      certificateSerial: 'SERIAL-001',
+      smartCaPassword: 'password-redacted',
+      smartCaOtp: '000000',
+    }
+
+    const result = await controller.createSmartCaSigningSession(
+      'contract-1',
+      'tenant-1',
+      dto
+    )
+
+    expect(smartCaSigningService.createSession).toHaveBeenCalledWith(
+      'contract-1',
+      'tenant-1',
+      dto
+    )
+    expect(result).toEqual(
+      expect.objectContaining({ id: 'session-1', status: 'signed' })
+    )
+    const serialized = JSON.stringify(result)
+    expect(serialized).not.toContain(dto.smartCaPassword)
+    expect(serialized).not.toContain(dto.smartCaOtp)
+    expect(serialized).not.toContain('raw-signature-must-not-leak')
   })
 })

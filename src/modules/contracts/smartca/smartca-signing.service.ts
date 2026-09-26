@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
@@ -6,13 +7,19 @@ import {
   Optional,
 } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
+import { createHash, randomUUID } from 'crypto'
 import { ObjectId } from 'mongodb'
-import { In, Repository } from 'typeorm'
-import { Contract } from '../schemas/contract.schema'
-import { ContractsService } from '../contracts.service'
-import { SmartCaProvider } from './smartca.provider'
-import { SmartCaSigningSession } from './smartca-signing-session.schema'
+import { Repository } from 'typeorm'
+import { KycRecord } from '../../kyc/schemas/kyc-record.schema'
 import { ContractArtifactService } from '../contract-artifact.service'
+import { ContractsService } from '../contracts.service'
+import { Contract } from '../schemas/contract.schema'
+import {
+  SmartCaProvider,
+  type SmartCaCertificate,
+  type SmartCaSignature,
+} from './smartca.provider'
+import { SmartCaSigningSession } from './smartca-signing-session.schema'
 
 export type SmartCaSignatureEvidence = {
   artifactHash: string
@@ -25,7 +32,25 @@ export type SmartCaSignatureEvidence = {
   signedAt?: string
 }
 
+export type CreateSmartCaSessionInput = {
+  idempotencyKey?: string
+  certificateSerial?: string
+  smartCaPassword: string
+  smartCaOtp: string
+}
+
+export type SmartCaCertificateList = {
+  certificates: SmartCaCertificate[]
+}
+
 type ReconciliationStatus = 'pending' | 'signed' | 'rejected'
+
+type SigningContext = {
+  contract: Contract
+  signerRole: 'tenant' | 'landlord'
+  artifactHash: string
+  documentId: string
+}
 
 @Injectable()
 export class SmartCaSigningService {
@@ -34,111 +59,135 @@ export class SmartCaSigningService {
     private readonly contractRepository: Repository<Contract>,
     @InjectRepository(SmartCaSigningSession)
     private readonly sessionRepository: Repository<SmartCaSigningSession>,
+    @InjectRepository(KycRecord)
+    private readonly kycRepository: Repository<KycRecord>,
     private readonly provider: SmartCaProvider,
     @Optional() private readonly contractsService?: ContractsService,
     @Optional() private readonly artifactService?: ContractArtifactService
   ) {}
 
+  async listCertificates(
+    contractId: string,
+    signerId: string
+  ): Promise<SmartCaCertificateList> {
+    await this.resolveSigningContext(contractId, signerId)
+    const signerCccd = await this.resolveCccd(signerId)
+    return { certificates: await this.resolveValidCertificates(signerCccd) }
+  }
+
   async createSession(
     contractId: string,
     signerId: string,
-    idempotencyKey?: string
+    input: CreateSmartCaSessionInput
   ): Promise<SmartCaSigningSession> {
-    if (!ObjectId.isValid(contractId))
-      throw new NotFoundException('CONTRACT_NOT_FOUND')
-    const contract = await this.contractRepository.findOne({
-      where: { _id: new ObjectId(contractId) },
-    })
-    if (!contract) throw new NotFoundException('CONTRACT_NOT_FOUND')
-    if (this.artifactService) {
-      await this.artifactService.resolveCanonicalArtifact(contract)
-    }
-    const signerRole =
-      contract.tenantId === signerId
-        ? 'tenant'
-        : contract.landlordId === signerId
-          ? 'landlord'
-          : null
-    if (!signerRole) throw new ForbiddenException('CONTRACT_SIGN_ACCESS_DENIED')
-    if (
-      contract.status !== 'awaiting-signature' ||
-      !contract.contentLockedHash ||
-      !contract.artifactRef ||
-      contract.artifactRef.contentType !== 'application/pdf' ||
-      contract.artifactRef.artifactHash !== contract.contentLockedHash
-    ) {
-      throw new ConflictException('CONTRACT_ARTIFACT_NOT_LOCKED')
-    }
+    this.validateCredentials(input)
+    const context = await this.resolveSigningContext(contractId, signerId)
+    const requestedKey = input.idempotencyKey?.trim()
+    const existing = requestedKey
+      ? await this.sessionRepository.findOne({
+          where: {
+            contractId,
+            signerId,
+            artifactHash: context.artifactHash,
+            idempotencyKey: requestedKey,
+          },
+        })
+      : null
 
-    const strategy =
-      contract.executionPolicySnapshot?.strategy ?? 'DEPOSIT_FIRST'
-    if (strategy !== 'DEPOSIT_FIRST' && strategy !== 'SIGN_FIRST') {
-      throw new ConflictException('UNSUPPORTED_RENTAL_EXECUTION_STRATEGY')
-    }
-    if (
-      strategy === 'DEPOSIT_FIRST' &&
-      contract.deposit > 0 &&
-      !contract.depositPaidAt
-    ) {
-      throw new ConflictException(
-        'EXECUTION_POLICY_DEPOSIT_REQUIRED_BEFORE_SIGNING'
+    if (existing) {
+      if (existing.status !== 'pending') return existing
+      if (existing.expiresAt <= new Date()) {
+        existing.status = 'expired'
+        existing.providerStatus = 'expired'
+        return this.sessionRepository.save(existing)
+      }
+      const recovered = await this.recoverPendingSession(
+        existing,
+        context.documentId
       )
+      if (recovered.status !== 'pending') return recovered
     }
 
-    const existing = await this.sessionRepository.findOne({
-      where: {
+    const signerCccd = await this.resolveCccd(signerId)
+    const certificates = await this.resolveValidCertificates(signerCccd)
+    const certificate = this.selectCertificate(
+      certificates,
+      input.certificateSerial ?? existing?.certificateSerial ?? undefined
+    )
+    const idempotencyKey = requestedKey ?? randomUUID()
+    const transactionId = this.createTransactionId(
+      contractId,
+      context.signerRole,
+      idempotencyKey
+    )
+    const session =
+      existing ??
+      this.sessionRepository.create({
         contractId,
         signerId,
-        artifactHash: contract.contentLockedHash,
-        ...(idempotencyKey ? { idempotencyKey } : {}),
-        status: In(['pending', 'signed']),
-      },
-    })
+        signerRole: context.signerRole,
+        artifactHash: context.artifactHash,
+        providerTransactionId: transactionId,
+        status: 'pending',
+        idempotencyKey,
+        confirmationUrl: null,
+        certificateSerial: certificate.serialNumber,
+        certificateSubject: certificate.subject ?? null,
+        certificateIssuer: certificate.issuer ?? null,
+        signatureHash: null,
+        signatureAlgorithm: null,
+        signatureValueRef: null,
+        signedAt: null,
+        verifiedAt: null,
+        providerStatus: 'pending',
+        expiresAt: new Date(Date.now() + 15 * 60 * 1000),
+      })
+
     if (existing) {
-      if (existing.status === 'pending' && existing.expiresAt <= new Date()) {
-        if (idempotencyKey) return existing
-        existing.status = 'expired'
-        await this.sessionRepository.save(existing)
-      } else {
-        return existing
+      session.certificateSerial = certificate.serialNumber
+      session.certificateSubject = certificate.subject ?? null
+      session.certificateIssuer = certificate.issuer ?? null
+    }
+    await this.sessionRepository.save(session)
+
+    let password = input.smartCaPassword
+    let otp = input.smartCaOtp
+    let sad: string | undefined
+    try {
+      const signResult = await this.provider.requestSignature({
+        transactionId: session.providerTransactionId,
+        artifactHash: context.artifactHash,
+        signerCccd,
+        password,
+        otp,
+        certificateSerial: certificate.serialNumber,
+        documentId: context.documentId,
+      })
+      session.providerTransactionId = signResult.transactionId
+      session.expiresAt = new Date(Date.now() + signResult.expiresIn * 1000)
+      await this.sessionRepository.save(session)
+      sad = signResult.sad
+
+      const confirmation = await this.provider.confirmSignature({
+        transactionId: signResult.transactionId,
+        signerCccd,
+        password,
+        sad,
+        documentId: context.documentId,
+      })
+      if (confirmation.transactionId !== signResult.transactionId) {
+        throw new ConflictException('SMARTCA_TRANSACTION_MISMATCH')
       }
+      return this.completeWithSignature(
+        session,
+        confirmation.signature,
+        context.documentId
+      )
+    } finally {
+      password = ''
+      otp = ''
+      sad = undefined
     }
-
-    const transactionSuffix = idempotencyKey ?? Date.now().toString(36)
-    const providerResult = await this.provider.requestSignature({
-      transactionId: `contract-${contractId}-${signerRole}-${transactionSuffix}`,
-      artifactHash: contract.contentLockedHash,
-      signerId,
-      signerRole,
-    })
-    if (
-      providerResult.artifactHash &&
-      providerResult.artifactHash !== contract.contentLockedHash
-    ) {
-      throw new ConflictException('SMARTCA_SIGNATURE_DIGEST_MISMATCH')
-    }
-
-    const session = this.sessionRepository.create({
-      contractId,
-      signerId,
-      signerRole,
-      artifactHash: contract.contentLockedHash,
-      providerTransactionId: providerResult.transactionId,
-      status: providerResult.status,
-      ...(idempotencyKey ? { idempotencyKey } : {}),
-      confirmationUrl: providerResult.confirmationUrl ?? null,
-      certificateSerial: providerResult.certificateSerial ?? null,
-      certificateSubject: providerResult.certificateSubject ?? null,
-      certificateIssuer: providerResult.certificateIssuer ?? null,
-      signatureHash: providerResult.signatureHash ?? null,
-      signatureAlgorithm: providerResult.signatureAlgorithm ?? null,
-      signatureValueRef: providerResult.signatureValueRef ?? null,
-      signedAt: this.parseSignedAt(providerResult.signedAt),
-      verifiedAt: providerResult.status === 'signed' ? new Date() : null,
-      providerStatus: providerResult.status,
-      expiresAt: new Date(Date.now() + 15 * 60 * 1000),
-    })
-    return this.sessionRepository.save(session)
   }
 
   async getSession(
@@ -147,16 +196,19 @@ export class SmartCaSigningService {
     actorId: string,
     isStaff: boolean
   ): Promise<SmartCaSigningSession> {
-    if (!ObjectId.isValid(sessionId))
+    if (!ObjectId.isValid(sessionId)) {
       throw new NotFoundException('SMARTCA_SESSION_NOT_FOUND')
+    }
     const session = await this.sessionRepository.findOne({
       where: { _id: new ObjectId(sessionId), contractId },
     })
     if (!session) throw new NotFoundException('SMARTCA_SESSION_NOT_FOUND')
-    if (!isStaff && session.signerId !== actorId)
+    if (!isStaff && session.signerId !== actorId) {
       throw new ForbiddenException('SMARTCA_SESSION_ACCESS_DENIED')
+    }
     if (session.status === 'pending' && session.expiresAt <= new Date()) {
       session.status = 'expired'
+      session.providerStatus = 'expired'
       await this.sessionRepository.save(session)
     }
     return session
@@ -174,44 +226,10 @@ export class SmartCaSigningService {
       actorId,
       isStaff
     )
-    if (
-      session.status === 'signed' ||
-      session.status === 'rejected' ||
-      session.status === 'expired' ||
-      session.status === 'cancelled'
-    ) {
-      return session
-    }
+    if (session.status !== 'pending') return session
     session.status = 'cancelled'
     session.providerStatus = 'cancelled'
     return this.sessionRepository.save(session)
-  }
-
-  private async syncSignedContract(
-    session: SmartCaSigningSession
-  ): Promise<void> {
-    if (
-      session.status !== 'signed' ||
-      !this.contractsService ||
-      !session.signedAt ||
-      !session.certificateSerial
-    ) {
-      return
-    }
-    await this.contractsService.recordSmartCaSignature({
-      contractId: session.contractId,
-      signerId: session.signerId,
-      role: session.signerRole,
-      artifactHash: session.artifactHash,
-      providerTransactionId: session.providerTransactionId,
-      certificateSerial: session.certificateSerial,
-      certificateSubject: session.certificateSubject ?? null,
-      certificateIssuer: session.certificateIssuer ?? null,
-      signatureHash: session.signatureHash ?? null,
-      signatureAlgorithm: session.signatureAlgorithm ?? null,
-      signatureValueRef: session.signatureValueRef ?? null,
-      signedAt: session.signedAt,
-    })
   }
 
   async poll(
@@ -227,37 +245,15 @@ export class SmartCaSigningService {
       isStaff
     )
     if (session.status !== 'pending') return session
-    const providerResult = await this.provider.getSignatureStatus(
-      session.providerTransactionId
+
+    const context = await this.resolveSigningContext(
+      contractId,
+      session.signerId
     )
-    return this.reconcile(
-      session.providerTransactionId,
-      providerResult.status,
-      {
-        artifactHash: providerResult.artifactHash ?? session.artifactHash,
-        ...(providerResult.certificateSerial
-          ? { certificateSerial: providerResult.certificateSerial }
-          : {}),
-        ...(providerResult.certificateSubject
-          ? { certificateSubject: providerResult.certificateSubject }
-          : {}),
-        ...(providerResult.certificateIssuer
-          ? { certificateIssuer: providerResult.certificateIssuer }
-          : {}),
-        ...(providerResult.signatureHash
-          ? { signatureHash: providerResult.signatureHash }
-          : {}),
-        ...(providerResult.signatureAlgorithm
-          ? { signatureAlgorithm: providerResult.signatureAlgorithm }
-          : {}),
-        ...(providerResult.signatureValueRef
-          ? { signatureValueRef: providerResult.signatureValueRef }
-          : {}),
-        ...(providerResult.signedAt
-          ? { signedAt: providerResult.signedAt }
-          : {}),
-      }
-    )
+    if (context.artifactHash !== session.artifactHash) {
+      throw new ConflictException('SMARTCA_SIGNATURE_DIGEST_MISMATCH')
+    }
+    return this.recoverPendingSession(session, context.documentId)
   }
 
   async reconcile(
@@ -269,14 +265,7 @@ export class SmartCaSigningService {
       where: { providerTransactionId },
     })
     if (!session) throw new NotFoundException('SMARTCA_SESSION_NOT_FOUND')
-    if (
-      session.status === 'signed' ||
-      session.status === 'rejected' ||
-      session.status === 'expired' ||
-      session.status === 'cancelled'
-    ) {
-      return session
-    }
+    if (session.status !== 'pending') return session
     if (session.expiresAt <= new Date()) {
       session.status = 'expired'
       session.providerStatus = 'expired'
@@ -305,6 +294,205 @@ export class SmartCaSigningService {
     const saved = await this.sessionRepository.save(session)
     await this.syncSignedContract(saved)
     return saved
+  }
+
+  private validateCredentials(input: CreateSmartCaSessionInput): void {
+    if (!input.smartCaPassword.trim() || !input.smartCaOtp.trim()) {
+      throw new BadRequestException('SMARTCA_CREDENTIALS_REQUIRED')
+    }
+  }
+
+  private async resolveSigningContext(
+    contractId: string,
+    signerId: string
+  ): Promise<SigningContext> {
+    if (!ObjectId.isValid(contractId)) {
+      throw new NotFoundException('CONTRACT_NOT_FOUND')
+    }
+    const contract = await this.contractRepository.findOne({
+      where: { _id: new ObjectId(contractId) },
+    })
+    if (!contract) throw new NotFoundException('CONTRACT_NOT_FOUND')
+    if (this.artifactService) {
+      await this.artifactService.resolveCanonicalArtifact(contract)
+    }
+    const signerRole =
+      contract.tenantId === signerId
+        ? 'tenant'
+        : contract.landlordId === signerId
+          ? 'landlord'
+          : null
+    if (!signerRole) throw new ForbiddenException('CONTRACT_SIGN_ACCESS_DENIED')
+    if (
+      contract.status !== 'awaiting-signature' ||
+      !contract.contentLockedHash ||
+      !contract.artifactRef ||
+      contract.artifactRef.contentType !== 'application/pdf'
+    ) {
+      throw new ConflictException('CONTRACT_ARTIFACT_NOT_LOCKED')
+    }
+
+    const strategy =
+      contract.executionPolicySnapshot?.strategy ?? 'DEPOSIT_FIRST'
+    if (strategy !== 'DEPOSIT_FIRST' && strategy !== 'SIGN_FIRST') {
+      throw new ConflictException('UNSUPPORTED_RENTAL_EXECUTION_STRATEGY')
+    }
+    if (
+      strategy === 'DEPOSIT_FIRST' &&
+      contract.deposit > 0 &&
+      !contract.depositPaidAt
+    ) {
+      throw new ConflictException(
+        'EXECUTION_POLICY_DEPOSIT_REQUIRED_BEFORE_SIGNING'
+      )
+    }
+
+    return {
+      contract,
+      signerRole,
+      artifactHash: contract.artifactRef.artifactHash,
+      documentId: `contract-${contractId}-r${contract.artifactRef.revision}`,
+    }
+  }
+
+  private async resolveCccd(userId: string): Promise<string> {
+    const kyc = await this.kycRepository.findOne({
+      where: { userId },
+      order: { createdAt: 'DESC' },
+    })
+    if (!kyc) throw new ConflictException('SMARTCA_KYC_REQUIRED')
+    if (kyc.status !== 'verified' || !kyc.idCardNumber?.trim()) {
+      throw new ConflictException('SMARTCA_KYC_NOT_VERIFIED')
+    }
+    return kyc.idCardNumber.trim()
+  }
+
+  private async resolveValidCertificates(
+    signerCccd: string
+  ): Promise<SmartCaCertificate[]> {
+    const certificates = (
+      await this.provider.listCertificates(signerCccd)
+    ).filter(certificate => certificate.isValid)
+    const uniqueSerials = new Set(
+      certificates.map(certificate => certificate.serialNumber)
+    )
+    if (uniqueSerials.size !== certificates.length) {
+      throw new ConflictException('SMARTCA_CERTIFICATE_INVALID')
+    }
+    return certificates
+  }
+
+  private selectCertificate(
+    certificates: SmartCaCertificate[],
+    requestedSerial: string | undefined
+  ): SmartCaCertificate {
+    if (certificates.length === 0) {
+      throw new ConflictException('SMARTCA_CERTIFICATE_INVALID')
+    }
+    if (requestedSerial) {
+      const selected = certificates.find(
+        certificate => certificate.serialNumber === requestedSerial
+      )
+      if (!selected) {
+        throw new ConflictException('SMARTCA_CERTIFICATE_INVALID')
+      }
+      return selected
+    }
+    const onlyCertificate = certificates[0]
+    if (certificates.length === 1 && onlyCertificate) return onlyCertificate
+    throw new ConflictException({
+      message: 'SMARTCA_CERTIFICATE_SELECTION_REQUIRED',
+      certificates,
+    })
+  }
+
+  private createTransactionId(
+    contractId: string,
+    signerRole: 'tenant' | 'landlord',
+    idempotencyKey: string
+  ): string {
+    const suffix = createHash('sha256')
+      .update(idempotencyKey)
+      .digest('hex')
+      .slice(0, 24)
+    return `contract-${contractId}-${signerRole}-${suffix}`
+  }
+
+  private async recoverPendingSession(
+    session: SmartCaSigningSession,
+    documentId: string
+  ): Promise<SmartCaSigningSession> {
+    const providerResult = await this.provider.getSignatureStatus(
+      session.providerTransactionId,
+      documentId
+    )
+    if (providerResult.status === 'pending') return session
+    if (providerResult.status === 'rejected') {
+      session.status = 'rejected'
+      session.providerStatus = 'rejected'
+      return this.sessionRepository.save(session)
+    }
+    if (!providerResult.signature) {
+      throw new ConflictException('SMARTCA_PROVIDER_RESPONSE_INVALID')
+    }
+    return this.completeWithSignature(
+      session,
+      providerResult.signature,
+      documentId
+    )
+  }
+
+  private async completeWithSignature(
+    session: SmartCaSigningSession,
+    signature: SmartCaSignature,
+    documentId: string
+  ): Promise<SmartCaSigningSession> {
+    if (signature.documentId !== documentId) {
+      throw new ConflictException('SMARTCA_PROVIDER_RESPONSE_INVALID')
+    }
+    if (!session.certificateSerial) {
+      throw new ConflictException('SMARTCA_CERTIFICATE_INVALID')
+    }
+    session.status = 'signed'
+    session.providerStatus = 'signed'
+    session.signatureHash = createHash('sha256')
+      .update(signature.signatureValue)
+      .digest('hex')
+    session.signatureValueRef = signature.signatureValue
+    session.signatureAlgorithm = null
+    session.signedAt =
+      this.parseSignedAt(signature.signedAt ?? undefined) ?? new Date()
+    session.verifiedAt = new Date()
+    const saved = await this.sessionRepository.save(session)
+    await this.syncSignedContract(saved)
+    return saved
+  }
+
+  private async syncSignedContract(
+    session: SmartCaSigningSession
+  ): Promise<void> {
+    if (
+      session.status !== 'signed' ||
+      !this.contractsService ||
+      !session.signedAt ||
+      !session.certificateSerial
+    ) {
+      return
+    }
+    await this.contractsService.recordSmartCaSignature({
+      contractId: session.contractId,
+      signerId: session.signerId,
+      role: session.signerRole,
+      artifactHash: session.artifactHash,
+      providerTransactionId: session.providerTransactionId,
+      certificateSerial: session.certificateSerial,
+      certificateSubject: session.certificateSubject ?? null,
+      certificateIssuer: session.certificateIssuer ?? null,
+      signatureHash: session.signatureHash ?? null,
+      signatureAlgorithm: session.signatureAlgorithm ?? null,
+      signatureValueRef: session.signatureValueRef ?? null,
+      signedAt: session.signedAt,
+    })
   }
 
   private parseSignedAt(value: string | undefined): Date | null {
