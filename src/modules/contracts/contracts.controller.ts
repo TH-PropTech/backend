@@ -18,6 +18,8 @@ import {
   ApiBearerAuth,
   ApiProduces,
   ApiConsumes,
+  ApiCreatedResponse,
+  ApiOkResponse,
 } from '@nestjs/swagger'
 import { FileInterceptor } from '@nestjs/platform-express'
 import {
@@ -49,10 +51,16 @@ import { OtpActionType } from '../smart-otp/enums/otp-action-type.enum'
 import type { ContractViewDto } from './dto/contract-view.dto'
 import type { ContractAuditEventDto } from './dto/contract-audit-event.dto'
 import { SmartCaSigningService } from './smartca/smartca-signing.service'
-import type { SmartCaSigningSession } from './smartca/smartca-signing-session.schema'
 import { SmartCaCallbackGuard } from './smartca/smartca-callback.guard'
 import type { ContractArtifact } from './schemas/contract-artifact.schema'
 import type { Response } from 'express'
+import {
+  CreateSmartCaSigningSessionDto,
+  SmartCaCertificateListDto,
+  SmartCaSigningSessionDto,
+  toSmartCaCertificateListDto,
+  toSmartCaSigningSessionDto,
+} from './dto/smartca-signing.dto'
 
 // ── DTOs ──
 
@@ -180,13 +188,6 @@ export class TerminateContractDto {
   @IsNotEmpty()
   @MaxLength(128)
   idempotencyKey!: string
-}
-
-export class CreateSmartCaSigningSessionDto {
-  @IsOptional()
-  @IsString()
-  @MaxLength(128)
-  idempotencyKey?: string
 }
 
 export class SmartCaCallbackDto {
@@ -407,16 +408,32 @@ export class ContractsController {
 
   @Post(':id/smartca/signing-sessions')
   @Roles('landlord', 'tenant')
+  @ApiCreatedResponse({ type: SmartCaSigningSessionDto })
   async createSmartCaSigningSession(
     @Param('id') id: string,
     @CurrentUser('id') signerId: string,
     @Body() dto: CreateSmartCaSigningSessionDto
-  ): Promise<SmartCaSigningSession> {
-    return this.smartCaSigningService.createSession(
+  ): Promise<SmartCaSigningSessionDto> {
+    const session = await this.smartCaSigningService.createSession(
       id,
       signerId,
-      dto?.idempotencyKey
+      dto
     )
+    return toSmartCaSigningSessionDto(session)
+  }
+
+  @Get(':id/smartca/certificates')
+  @Roles('landlord', 'tenant')
+  @ApiOkResponse({ type: SmartCaCertificateListDto })
+  async listSmartCaCertificates(
+    @Param('id') id: string,
+    @CurrentUser('id') signerId: string
+  ): Promise<SmartCaCertificateListDto> {
+    const result = await this.smartCaSigningService.listCertificates(
+      id,
+      signerId
+    )
+    return toSmartCaCertificateListDto(result.certificates)
   }
 
   @Get(':id/smartca/signing-sessions/:sessionId')
@@ -425,15 +442,16 @@ export class ContractsController {
     @Param('id') id: string,
     @Param('sessionId') sessionId: string,
     @CurrentUser() user: UserPayload
-  ): Promise<SmartCaSigningSession> {
+  ): Promise<SmartCaSigningSessionDto> {
     const isStaff =
       user.roles?.some(role => ['staff', 'admin'].includes(role)) ?? false
-    return this.smartCaSigningService.getSession(
+    const session = await this.smartCaSigningService.getSession(
       id,
       sessionId,
       user._id ?? '',
       isStaff
     )
+    return toSmartCaSigningSessionDto(session)
   }
 
   @Post(':id/smartca/signing-sessions/:sessionId/poll')
@@ -442,15 +460,16 @@ export class ContractsController {
     @Param('id') id: string,
     @Param('sessionId') sessionId: string,
     @CurrentUser() user: UserPayload
-  ): Promise<SmartCaSigningSession> {
+  ): Promise<SmartCaSigningSessionDto> {
     const isStaff =
       user.roles?.some(role => ['staff', 'admin'].includes(role)) ?? false
-    return this.smartCaSigningService.poll(
+    const session = await this.smartCaSigningService.poll(
       id,
       sessionId,
       user._id ?? '',
       isStaff
     )
+    return toSmartCaSigningSessionDto(session)
   }
 
   @Post(':id/smartca/signing-sessions/:sessionId/cancel')
@@ -459,15 +478,16 @@ export class ContractsController {
     @Param('id') id: string,
     @Param('sessionId') sessionId: string,
     @CurrentUser() user: UserPayload
-  ): Promise<SmartCaSigningSession> {
+  ): Promise<SmartCaSigningSessionDto> {
     const isStaff =
       user.roles?.some(role => ['staff', 'admin'].includes(role)) ?? false
-    return this.smartCaSigningService.cancelSession(
+    const session = await this.smartCaSigningService.cancelSession(
       id,
       sessionId,
       user._id ?? '',
       isStaff
     )
+    return toSmartCaSigningSessionDto(session)
   }
 
   @Post('smartca/callback')
@@ -475,12 +495,13 @@ export class ContractsController {
   @UseGuards(SmartCaCallbackGuard)
   async smartCaCallback(
     @Body() body: SmartCaCallbackDto
-  ): Promise<SmartCaSigningSession> {
-    return this.smartCaSigningService.reconcile(
+  ): Promise<SmartCaSigningSessionDto> {
+    const session = await this.smartCaSigningService.reconcile(
       body.transactionId,
       body.status,
       body
     )
+    return toSmartCaSigningSessionDto(session)
   }
 
   /** Lấy danh sách hợp đồng theo userId — Admin, Nhân viên, Chủ nhà, Khách thuê */
