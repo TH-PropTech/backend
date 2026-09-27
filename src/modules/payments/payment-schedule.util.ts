@@ -33,7 +33,7 @@ export function generatePaymentSchedule(
     input.monthlyRent <= 0 ||
     Number.isNaN(input.startDate.getTime())
   ) {
-    throw new Error('INVALID_PAYMENT_SCHEDULE')
+    throw new UnprocessableEntityException('INVALID_PAYMENT_SCHEDULE')
   }
 
   const startYear = input.startDate.getUTCFullYear()
@@ -55,3 +55,4 @@ export function generatePaymentSchedule(
     }
   })
 }
+import { UnprocessableEntityException } from '@nestjs/common'

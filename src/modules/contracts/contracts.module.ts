@@ -36,6 +36,7 @@ import { ContractCommercialEditorService } from './contract-commercial-editor.se
 import { ContractCommercialEditorController } from './contract-commercial-editor.controller'
 import { ContractAmendmentService } from './contract-amendment.service'
 import { ContractAmendmentController } from './contract-amendment.controller'
+import { DepositConfirmationResolver } from './deposit-confirmation.resolver'
 
 @Module({
   imports: [
@@ -77,6 +78,7 @@ import { ContractAmendmentController } from './contract-amendment.controller'
     ContractTemplateGovernanceService,
     ContractCommercialEditorService,
     ContractAmendmentService,
+    DepositConfirmationResolver,
     {
       provide: CONTRACT_ARTIFACT_STORAGE,
       useClass: MongoGridFsArtifactStorage,
@@ -92,6 +94,7 @@ import { ContractAmendmentController } from './contract-amendment.controller'
     ContractTemplateGovernanceService,
     ContractCommercialEditorService,
     ContractAmendmentService,
+    DepositConfirmationResolver,
   ],
 })
 export class ContractsModule {}

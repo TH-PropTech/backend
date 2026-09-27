@@ -187,6 +187,41 @@ describe('ContractViewService', () => {
     )
   })
 
+  it('treats an agreement applied to lease security as a confirmed deposit', async () => {
+    const agreementId = new ObjectId()
+    contractRepo.findOne.mockResolvedValue({
+      ...mockContract,
+      depositAgreementId: agreementId.toHexString(),
+      depositPaidAt: null,
+    } as Contract)
+    depositAgreementRepo.findOne.mockResolvedValue({
+      _id: agreementId,
+      agreementCode: 'DPA-2026-APPLIED',
+      amount: 30000000,
+      status: 'applied-to-lease-security',
+      tenantConsent: {
+        consentedAt: new Date('2026-09-14T07:00:00Z'),
+        contentHash: 'deposit-content-hash',
+      },
+      contentRevision: 3,
+      contentHash: 'deposit-content-hash',
+      paidAt: new Date('2026-09-14T07:30:00Z'),
+    } as DepositAgreement)
+    kycService.findByUserId.mockResolvedValue({
+      status: 'verified',
+      idCardNumber: '079123456789',
+    } as KycRecord)
+
+    const view = await service.getForActor(
+      validContractId,
+      'user-tenant-1',
+      false
+    )
+
+    expect(view.contract.executionPolicy.depositConfirmed).toBe(true)
+    expect(view.actions.signingEligibility.eligible).toBe(true)
+  })
+
   it('keeps a contract without a linked agreement compatible with null consent metadata', async () => {
     contractRepo.findOne.mockResolvedValue({
       ...mockContract,

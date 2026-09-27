@@ -10,6 +10,7 @@ import type { ContractViewService } from './contract-view.service'
 import type { LedgerAuditQueryService } from '../fabric/ledger-audit-query.service'
 import type { SmartOtpService } from '../smart-otp/services/smart-otp.service'
 import type { SmartCaSigningService } from './smartca/smartca-signing.service'
+import type { DepositAgreementsService } from './deposit-agreements.service'
 
 describe('ContractsController', () => {
   const service = {
@@ -47,13 +48,17 @@ describe('ContractsController', () => {
     poll: jest.fn(),
     cancelSession: jest.fn(),
   }
+  const depositAgreementsService = {
+    createForContract: jest.fn(),
+  }
   const controller = new ContractsController(
     service as unknown as ContractsService,
     artifactService as unknown as ContractArtifactService,
     contractViewService as unknown as ContractViewService,
     ledgerAuditQueryService as unknown as LedgerAuditQueryService,
     smartOtpService as unknown as SmartOtpService,
-    smartCaSigningService as unknown as SmartCaSigningService
+    smartCaSigningService as unknown as SmartCaSigningService,
+    depositAgreementsService as unknown as DepositAgreementsService
   )
 
   beforeEach(() => jest.clearAllMocks())
@@ -65,6 +70,18 @@ describe('ContractsController', () => {
       'contract-1',
       'tenant-1',
       'sg_1'
+    )
+  })
+
+  it('creates a deposit agreement through the staff contract route', async () => {
+    depositAgreementsService.createForContract.mockResolvedValue({
+      status: 'draft',
+    })
+
+    await controller.createDepositAgreement('contract-1')
+
+    expect(depositAgreementsService.createForContract).toHaveBeenCalledWith(
+      'contract-1'
     )
   })
 

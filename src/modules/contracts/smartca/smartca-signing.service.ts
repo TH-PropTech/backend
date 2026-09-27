@@ -13,6 +13,7 @@ import { Repository } from 'typeorm'
 import { KycRecord } from '../../kyc/schemas/kyc-record.schema'
 import { ContractArtifactService } from '../contract-artifact.service'
 import { ContractsService } from '../contracts.service'
+import { DepositConfirmationResolver } from '../deposit-confirmation.resolver'
 import { Contract } from '../schemas/contract.schema'
 import {
   SmartCaProvider,
@@ -63,7 +64,9 @@ export class SmartCaSigningService {
     private readonly kycRepository: Repository<KycRecord>,
     private readonly provider: SmartCaProvider,
     @Optional() private readonly contractsService?: ContractsService,
-    @Optional() private readonly artifactService?: ContractArtifactService
+    @Optional() private readonly artifactService?: ContractArtifactService,
+    @Optional()
+    private readonly depositConfirmationResolver?: DepositConfirmationResolver
   ) {}
 
   async listCertificates(
@@ -337,14 +340,19 @@ export class SmartCaSigningService {
     if (strategy !== 'DEPOSIT_FIRST' && strategy !== 'SIGN_FIRST') {
       throw new ConflictException('UNSUPPORTED_RENTAL_EXECUTION_STRATEGY')
     }
-    if (
-      strategy === 'DEPOSIT_FIRST' &&
-      contract.deposit > 0 &&
-      !contract.depositPaidAt
-    ) {
-      throw new ConflictException(
-        'EXECUTION_POLICY_DEPOSIT_REQUIRED_BEFORE_SIGNING'
-      )
+    if (strategy === 'DEPOSIT_FIRST' && contract.deposit > 0) {
+      // Nguồn sự thật duy nhất cho "cọc đã xác nhận": dùng
+      // DepositConfirmationResolver (đọc cả trạng thái thỏa thuận cọc, không
+      // chỉ contract.depositPaidAt vốn chỉ được ghi lúc kích hoạt). Khi
+      // resolver chưa được wire (ví dụ test cũ không set), giữ hành vi cũ.
+      const depositConfirmed = this.depositConfirmationResolver
+        ? (await this.depositConfirmationResolver.resolve(contract)).confirmed
+        : Boolean(contract.depositPaidAt)
+      if (!depositConfirmed) {
+        throw new ConflictException(
+          'EXECUTION_POLICY_DEPOSIT_REQUIRED_BEFORE_SIGNING'
+        )
+      }
     }
 
     return {

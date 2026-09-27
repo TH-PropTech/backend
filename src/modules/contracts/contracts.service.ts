@@ -49,6 +49,7 @@ import {
   hashCanonicalContractPayload,
   CONTRACT_CONTENT_HASH_SCHEMA_VERSION,
 } from './legal/contract-canonical-payload'
+import { resolveDepositConfirmation } from './deposit-confirmation.resolver'
 
 // ── Interfaces ──
 
@@ -1163,6 +1164,13 @@ export class ContractsService {
     ) {
       return contract
     }
+    if (
+      contract.executionMethod === 'SMARTCA' &&
+      contract.tenantSignature?.provider === 'smartca' &&
+      contract.landlordSignature?.provider === 'smartca'
+    ) {
+      return this.activateSmartCaContract(contract)
+    }
     return this.signContract(contractId, 'tenant')
   }
 
@@ -1176,14 +1184,30 @@ export class ContractsService {
     return this.activateAfterDeposit(contract._id.toHexString())
   }
 
-  private async isDepositConfirmed(contract: Contract): Promise<boolean> {
-    if (contract.deposit <= 0 || contract.depositPaidAt) return true
+  /**
+   * Nguồn sự thật duy nhất cho "cọc đã xác nhận chưa" của một hợp đồng.
+   * Dùng chung logic với SmartCaSigningService (qua
+   * DepositConfirmationResolver) và ContractViewService để tránh ba nơi
+   * suy luận khác nhau. Public vì các consumer khác trong module (ví dụ
+   * SmartCaSigningService qua optional contractsService reference) có thể
+   * cần tái sử dụng.
+   */
+  async isDepositConfirmed(contract: Contract): Promise<boolean> {
     const agreement = await this.findDepositAgreementForContract(contract)
-    return Boolean(
-      agreement &&
-      (agreement.status === 'paid' ||
-        agreement.status === 'applied-to-lease-security')
-    )
+    return resolveDepositConfirmation(
+      {
+        deposit: contract.deposit,
+        depositPaidAt: contract.depositPaidAt ?? null,
+      },
+      agreement
+        ? {
+            id: agreement._id.toHexString(),
+            status: agreement.status,
+            amount: agreement.amount,
+            paidAt: agreement.paidAt ?? null,
+          }
+        : null
+    ).confirmed
   }
 
   private async findDepositAgreementForContract(

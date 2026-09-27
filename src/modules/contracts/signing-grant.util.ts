@@ -1,3 +1,4 @@
+import { UnprocessableEntityException } from '@nestjs/common'
 import { createHash, randomBytes } from 'node:crypto'
 
 export type SigningRole = 'tenant' | 'landlord'
@@ -23,7 +24,7 @@ export function createSigningGrant(
   ttlMs: number
 ): { grantId: string; record: SigningGrantRecord } {
   if (!Number.isInteger(ttlMs) || ttlMs <= 0) {
-    throw new Error('INVALID_SIGNING_GRANT_TTL')
+    throw new UnprocessableEntityException('INVALID_SIGNING_GRANT_TTL')
   }
   const grantId = `sg_${randomBytes(32).toString('hex')}`
   return {
@@ -52,7 +53,7 @@ export function consumeSigningGrant(
     record.contractId === input.contractId &&
     record.contentLockedHash === input.contentLockedHash
 
-  if (!isValid) throw new Error('SIGNING_GRANT_INVALID')
+  if (!isValid) throw new UnprocessableEntityException('SIGNING_GRANT_INVALID')
   return { ...record, consumedAt: now }
 }
 

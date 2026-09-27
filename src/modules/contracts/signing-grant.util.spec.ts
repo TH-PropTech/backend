@@ -3,6 +3,7 @@ import {
   createSigningGrant,
   type SigningGrantInput,
 } from './signing-grant.util'
+import { UnprocessableEntityException } from '@nestjs/common'
 
 const input: SigningGrantInput = {
   userId: 'tenant-1',
@@ -57,5 +58,14 @@ describe('signing grant', () => {
     expect(() =>
       consumeSigningGrant(consumed, created.grantId, input, now)
     ).toThrow('SIGNING_GRANT_INVALID')
+  })
+
+  it('rejects an invalid TTL with a 422 exception and stable code', () => {
+    expect(() => createSigningGrant(input, new Date(), 0)).toThrow(
+      UnprocessableEntityException
+    )
+    expect(() => createSigningGrant(input, new Date(), 0)).toThrow(
+      'INVALID_SIGNING_GRANT_TTL'
+    )
   })
 })

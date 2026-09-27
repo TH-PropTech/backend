@@ -198,6 +198,14 @@ export class Contract {
   depositPaidAt?: Date | null
 
   @Column({ nullable: true })
+  activationFailure?: {
+    code: string
+    message: string
+    at: Date
+    attempts: number
+  } | null
+
+  @Column({ nullable: true })
   depositTxHash?: string | null
 
   @Column({ nullable: true })

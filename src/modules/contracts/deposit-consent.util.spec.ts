@@ -1,4 +1,5 @@
 import { validateDepositConsent } from './deposit-consent.util'
+import { ConflictException } from '@nestjs/common'
 
 describe('deposit consent', () => {
   const agreement = {
@@ -17,6 +18,12 @@ describe('deposit consent', () => {
   })
 
   it('rejects stale hash, revision or non-accepted state', () => {
+    expect(() =>
+      validateDepositConsent(agreement, {
+        expectedRevision: 1,
+        expectedContentHash: 'a'.repeat(64),
+      })
+    ).toThrow(ConflictException)
     expect(() =>
       validateDepositConsent(agreement, {
         expectedRevision: 1,

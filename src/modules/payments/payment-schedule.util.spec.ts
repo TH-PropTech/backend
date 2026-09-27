@@ -1,4 +1,5 @@
 import { generatePaymentSchedule } from './payment-schedule.util'
+import { UnprocessableEntityException } from '@nestjs/common'
 
 describe('payment schedule', () => {
   it('clamps a payment day beyond month end', () => {
@@ -21,6 +22,15 @@ describe('payment schedule', () => {
   })
 
   it('rejects invalid duration and payment day', () => {
+    expect(() =>
+      generatePaymentSchedule({
+        contractId: 'contract-1',
+        startDate: new Date('2030-01-01T00:00:00.000Z'),
+        durationMonths: 0,
+        monthlyRent: 12_000_000,
+        paymentDay: 10,
+      })
+    ).toThrow(UnprocessableEntityException)
     expect(() =>
       generatePaymentSchedule({
         contractId: 'contract-1',

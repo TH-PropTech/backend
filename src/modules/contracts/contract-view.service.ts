@@ -18,6 +18,7 @@ import { OwnershipTransferResolver } from '../property-ownership-transfer/owners
 import { ContractArtifactService } from './contract-artifact.service'
 import { ContractTemplateGovernanceService } from './legal/contract-template-governance.service'
 import { ContractAmendment } from './schemas/contract-amendment.schema'
+import { resolveDepositConfirmation } from './deposit-confirmation.resolver'
 import {
   ContractViewDto,
   ContractPartyViewDto,
@@ -224,17 +225,16 @@ export class ContractViewService {
 
     // 3. Chiếu thông tin tiền cọc
     let depositDto: ContractDepositViewDto | null = null
-    let isDepositPaid = Boolean(contract.depositPaidAt)
+    let depositAgreement: DepositAgreement | null = null
 
     if (
       contract.depositAgreementId &&
       ObjectId.isValid(contract.depositAgreementId)
     ) {
-      const depositAgreement = await this.depositAgreementRepository.findOne({
+      depositAgreement = await this.depositAgreementRepository.findOne({
         where: { _id: new ObjectId(contract.depositAgreementId) },
       })
       if (depositAgreement) {
-        if (depositAgreement.status === 'paid') isDepositPaid = true
         depositDto = {
           agreementId: depositAgreement._id.toString(),
           agreementCode:
@@ -259,6 +259,21 @@ export class ContractViewService {
         }
       }
     }
+
+    const isDepositPaid = resolveDepositConfirmation(
+      {
+        deposit: contract.deposit,
+        depositPaidAt: contract.depositPaidAt ?? null,
+      },
+      depositAgreement
+        ? {
+            id: depositAgreement._id.toHexString(),
+            status: depositAgreement.status,
+            amount: depositAgreement.amount,
+            paidAt: depositAgreement.paidAt ?? null,
+          }
+        : null
+    ).confirmed
 
     if (!depositDto && contract.deposit > 0) {
       depositDto = {

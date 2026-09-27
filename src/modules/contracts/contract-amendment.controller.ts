@@ -152,18 +152,22 @@ export class ContractAmendmentController {
 
   @Post(':amendmentId/sign')
   @Roles('landlord', 'tenant')
-  sign(
+  async sign(
     @Param('contractId') contractId: string,
     @Param('amendmentId') amendmentId: string,
     @Body() dto: SignContractAmendmentDto,
     @CurrentUser() user: UserPayload
   ): Promise<ContractAmendment> {
+    const role = await this.amendmentService.resolveParticipantRole(
+      contractId,
+      user._id ?? ''
+    )
     return this.amendmentService.sign(
       contractId,
       amendmentId,
       dto.expectedRevision,
       dto.signatureHash,
-      this.actor(user)
+      { actorId: user._id ?? '', isStaff: false, ...(role ? { role } : {}) }
     )
   }
 

@@ -1,3 +1,5 @@
+import { ConflictException } from '@nestjs/common'
+
 export type DepositAgreementConsentState = {
   status:
     | 'draft'
@@ -24,6 +26,6 @@ export function validateDepositConsent(
     agreement.status === 'accepted' &&
     agreement.contentRevision === input.expectedRevision &&
     agreement.contentHash === input.expectedContentHash
-  if (!valid) throw new Error('DEPOSIT_CONSENT_REQUIRED')
+  if (!valid) throw new ConflictException('DEPOSIT_CONSENT_REQUIRED')
   return true
 }
