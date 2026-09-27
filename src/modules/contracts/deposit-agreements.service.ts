@@ -8,12 +8,13 @@ import {
 import { InjectRepository } from '@nestjs/typeorm'
 import { ObjectId } from 'mongodb'
 import { createHash } from 'node:crypto'
-import { Repository } from 'typeorm'
+import { IsNull, Repository } from 'typeorm'
 import type { FindOptionsWhere } from 'typeorm'
 import type { RentalPackageSnapshot } from '../apartments/rental-package.util'
 import type { RentalExecutionPolicyRef } from '../rental-flow-config/rental-execution-policy.util'
 import { Apartment } from '../apartments/schemas/apartment.schema'
 import { validateDepositConsent } from './deposit-consent.util'
+import { Contract } from './schemas/contract.schema'
 import { DepositAgreement } from './schemas/deposit-agreement.schema'
 import { LedgerOutboxService } from '../fabric/ledger-outbox.service'
 import { ContractsService } from './contracts.service'
@@ -31,7 +32,10 @@ export class DepositAgreementsService {
     private readonly apartmentRepository?: Repository<Apartment>,
     @Optional() private readonly contractsService?: ContractsService,
     @Optional()
-    private readonly ownershipTransferResolver?: OwnershipTransferResolver
+    private readonly ownershipTransferResolver?: OwnershipTransferResolver,
+    @Optional()
+    @InjectRepository(Contract)
+    private readonly contractRepository?: Repository<Contract>
   ) {}
 
   async createFromApplicationSnapshot(input: {
@@ -91,6 +95,50 @@ export class DepositAgreementsService {
     return this.repository.save(agreement)
   }
 
+  async createForContract(contractId: string): Promise<DepositAgreement> {
+    if (!this.contractRepository || !ObjectId.isValid(contractId)) {
+      throw new NotFoundException('CONTRACT_NOT_FOUND')
+    }
+    const contract = await this.contractRepository.findOne({
+      where: { _id: new ObjectId(contractId) },
+    })
+    if (!contract) throw new NotFoundException('CONTRACT_NOT_FOUND')
+    if (contract.depositAgreementId) {
+      throw new ConflictException('DEPOSIT_AGREEMENT_ALREADY_EXISTS')
+    }
+
+    const duration = [1, 3, 6, 12, 24].includes(contract.durationMonths ?? 12)
+      ? (contract.durationMonths ?? 12)
+      : 12
+    const packageSnapshot = contract.packageSnapshot ?? {
+      packageId: `legacy-${contract._id.toHexString()}`,
+      version: 1,
+      durationMonths: duration as 1 | 3 | 6 | 12 | 24,
+      monthlyRent: contract.monthlyRent,
+      depositPolicy: {
+        type: 'FIXED_AMOUNT' as const,
+        amount: contract.deposit,
+      },
+      resolvedDepositAmount: contract.deposit,
+      currency: 'VND' as const,
+    }
+    const agreement = await this.createFromApplicationSnapshot({
+      applicationId:
+        contract.rentalApplicationId ??
+        `contract-${contract._id.toHexString()}`,
+      propertyId: contract.propertyId,
+      tenantId: contract.tenantId,
+      landlordId: contract.landlordId,
+      packageSnapshot,
+      ...(contract.executionPolicySnapshot
+        ? { executionPolicySnapshot: contract.executionPolicySnapshot }
+        : {}),
+    })
+    contract.depositAgreementId = agreement._id.toHexString()
+    await this.contractRepository.save(contract)
+    return agreement
+  }
+
   async getAgreement(
     id: string,
     actorId: string,
@@ -128,6 +176,7 @@ export class DepositAgreementsService {
         expectedRevision,
         expectedContentHash,
       })
+      return agreement
     } else if (
       agreement.contentRevision !== expectedRevision ||
       agreement.contentHash !== expectedContentHash
@@ -226,13 +275,10 @@ export class DepositAgreementsService {
     agreement.depositHash = depositHash || this.calculateDepositHash(agreement)
     agreement.ledgerStatus = 'pending'
     const saved = await this.repository.save(agreement)
+    await this.recordContractDepositPaidAt(saved)
     await this.enqueueDepositLedgerEvent(saved)
     await this.projectApartmentDepositPaid(saved)
-    if (this.contractsService) {
-      await this.contractsService.activatePendingForDepositAgreement(
-        saved._id.toHexString()
-      )
-    }
+    await this.activatePendingContract(saved)
     return saved
   }
 
@@ -256,14 +302,52 @@ export class DepositAgreementsService {
       note,
     }
     const saved = await this.repository.save(agreement)
+    await this.recordContractDepositPaidAt(saved)
     await this.enqueueDepositLedgerEvent(saved)
     await this.projectApartmentDepositPaid(saved)
-    if (this.contractsService) {
+    await this.activatePendingContract(saved)
+    return saved
+  }
+
+  private async recordContractDepositPaidAt(
+    agreement: DepositAgreement
+  ): Promise<void> {
+    if (!this.contractRepository || !agreement.paidAt) return
+
+    await this.contractRepository.update(
+      {
+        depositAgreementId: agreement._id.toHexString(),
+        depositPaidAt: IsNull(),
+      },
+      { depositPaidAt: agreement.paidAt }
+    )
+  }
+
+  private async activatePendingContract(
+    agreement: DepositAgreement
+  ): Promise<void> {
+    if (!this.contractsService) return
+    try {
       await this.contractsService.activatePendingForDepositAgreement(
-        saved._id.toHexString()
+        agreement._id.toHexString()
+      )
+    } catch (error) {
+      if (!this.contractRepository) return
+      const message =
+        error instanceof Error ? error.message : 'ACTIVATION_FAILED'
+      const code = message.split(':', 1)[0] || 'ACTIVATION_FAILED'
+      await this.contractRepository.update(
+        { depositAgreementId: agreement._id.toHexString() },
+        {
+          activationFailure: {
+            code,
+            message: message.slice(0, 120),
+            at: new Date(),
+            attempts: 1,
+          },
+        }
       )
     }
-    return saved
   }
 
   private async projectApartmentDepositPaid(

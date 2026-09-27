@@ -19,6 +19,7 @@ describe('ContractAmendmentController', () => {
     const service = {
       create: jest.fn().mockResolvedValue({ sequence: 1 }),
       sign: jest.fn().mockResolvedValue({ status: 'effective' }),
+      resolveParticipantRole: jest.fn().mockResolvedValue('tenant'),
     }
     const controller = new ContractAmendmentController(
       service as unknown as ContractAmendmentService
@@ -56,6 +57,39 @@ describe('ContractAmendmentController', () => {
         getMethodTarget(ContractAmendmentController.prototype, 'create')
       )
     ).toEqual(['admin', 'staff'])
+  })
+
+  it('resolves landlord signing from the contract relationship when JWT has both roles', async () => {
+    const service = {
+      resolveParticipantRole: jest.fn().mockResolvedValue('landlord'),
+      sign: jest.fn().mockResolvedValue({ status: 'effective' }),
+    }
+    const controller = new ContractAmendmentController(
+      service as unknown as ContractAmendmentService
+    )
+    const landlord = {
+      _id: 'landlord-1',
+      roles: ['tenant', 'landlord'],
+    } as never
+
+    await controller.sign(
+      'contract-1',
+      'amendment-1',
+      { expectedRevision: 2, signatureHash: 'a'.repeat(64) },
+      landlord
+    )
+
+    expect(service.resolveParticipantRole).toHaveBeenCalledWith(
+      'contract-1',
+      'landlord-1'
+    )
+    expect(service.sign).toHaveBeenCalledWith(
+      'contract-1',
+      'amendment-1',
+      2,
+      'a'.repeat(64),
+      { actorId: 'landlord-1', isStaff: false, role: 'landlord' }
+    )
   })
 
   it('adds private no-cache metadata to amendment artifact downloads', async () => {

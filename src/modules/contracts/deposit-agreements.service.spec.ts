@@ -87,10 +87,62 @@ describe('DepositAgreementsService', () => {
     expect(repository.save).toHaveBeenCalledTimes(1)
   })
 
+  it('creates and links one draft deposit agreement for a contract', async () => {
+    const contractId = new ObjectId()
+    const contract = {
+      _id: contractId,
+      contractCode: 'HD-1',
+      propertyId: 'property-1',
+      tenantId: 'tenant-1',
+      landlordId: 'landlord-1',
+      rentalApplicationId: 'application-1',
+      depositAgreementId: null,
+      monthlyRent: 10_000_000,
+      deposit: 20_000_000,
+      durationMonths: 12,
+      executionPolicySnapshot: null,
+      packageSnapshot: null,
+    }
+    const repository = {
+      findOne: jest.fn().mockResolvedValue(null),
+      create: jest.fn((value: unknown) => ({
+        ...(value as object),
+        _id: new ObjectId(),
+      })),
+      save: jest.fn((value: unknown) => Promise.resolve(value)),
+    }
+    const contractRepository = {
+      findOne: jest.fn().mockResolvedValue(contract),
+      save: jest.fn((value: unknown) => Promise.resolve(value)),
+      update: jest.fn(),
+    }
+    const service = new DepositAgreementsService(
+      repository as never,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      contractRepository as never
+    )
+
+    const created = await service.createForContract(contractId.toHexString())
+
+    expect(created.status).toBe('draft')
+    expect(contract.depositAgreementId).toBe(created._id.toHexString())
+    expect(contractRepository.save).toHaveBeenCalledWith(contract)
+    await expect(
+      service.createForContract(contractId.toHexString())
+    ).rejects.toThrow('DEPOSIT_AGREEMENT_ALREADY_EXISTS')
+  })
+
   function createService(
     agreement: TestAgreement = baseAgreement(),
     mockOutbox?: { enqueue: jest.Mock },
-    mockApartmentRepository?: { findOne: jest.Mock; save: jest.Mock }
+    mockApartmentRepository?: { findOne: jest.Mock; save: jest.Mock },
+    mockContractRepository?: { update: jest.Mock },
+    mockContractsService?: {
+      activatePendingForDepositAgreement: jest.Mock
+    }
   ): {
     service: DepositAgreementsService
     repository: { findOne: jest.Mock; save: jest.Mock }
@@ -108,7 +160,10 @@ describe('DepositAgreementsService', () => {
       service: new DepositAgreementsService(
         repository as never,
         outbox as never,
-        mockApartmentRepository as never
+        mockApartmentRepository as never,
+        mockContractsService as never,
+        undefined,
+        mockContractRepository as never
       ),
       repository,
       agreement,
@@ -129,6 +184,25 @@ describe('DepositAgreementsService', () => {
     expect(result.status).toBe('accepted')
     expect(result.tenantConsent?.contentHash).toBe('a'.repeat(64))
     expect(repository.save).toHaveBeenCalled()
+  })
+
+  it('treats a repeated accepted consent as idempotent and preserves consentedAt', async () => {
+    const consentedAt = new Date('2026-01-01T00:00:00.000Z')
+    const context = createService({
+      ...baseAgreement(),
+      status: 'accepted',
+      tenantConsent: { consentedAt, contentHash: 'a'.repeat(64) },
+    })
+
+    const result = await context.service.consent(
+      agreementId,
+      'tenant-1',
+      1,
+      'a'.repeat(64)
+    )
+
+    expect(result.tenantConsent?.consentedAt).toBe(consentedAt)
+    expect(context.repository.save).not.toHaveBeenCalled()
   })
 
   it('rejects consent from another tenant or for a stale hash', async () => {
@@ -174,6 +248,28 @@ describe('DepositAgreementsService', () => {
     await expect(
       context.service.recordDepositPaid(agreementId, 'attempt-2')
     ).rejects.toThrow('DEPOSIT_PAYMENT_CONFLICT')
+  })
+
+  it('records depositPaidAt on the linked contract only when it is still null', async () => {
+    const contractRepository = { update: jest.fn().mockResolvedValue({}) }
+    const context = createService(
+      { ...baseAgreement(), status: 'payment-pending' },
+      undefined,
+      undefined,
+      contractRepository
+    )
+
+    await context.service.recordDepositPaid(agreementId, 'attempt-1')
+
+    expect(contractRepository.update).toHaveBeenCalledWith(
+      {
+        depositAgreementId: agreementId,
+        depositPaidAt: expect.any(Object) as unknown,
+      },
+      expect.objectContaining({
+        depositPaidAt: expect.any(Date) as unknown,
+      }) as unknown
+    )
   })
 
   it('projects a paid deposit onto the matching apartment reservation', async () => {
@@ -318,7 +414,13 @@ describe('DepositAgreementsService', () => {
   )
 
   it('allows staff manual confirmation, computes canonical depositHash, enqueues outbox, and does not overwrite a paid agreement', async () => {
-    const context = createService({ ...baseAgreement(), status: 'accepted' })
+    const contractRepository = { update: jest.fn().mockResolvedValue({}) }
+    const context = createService(
+      { ...baseAgreement(), status: 'accepted' },
+      undefined,
+      undefined,
+      contractRepository
+    )
     const confirmed = await context.service.confirmDepositReceived(
       agreementId,
       'staff-1',
@@ -334,6 +436,15 @@ describe('DepositAgreementsService', () => {
         aggregateId: agreementId,
         action: 'recordDeposit',
       })
+    )
+    expect(contractRepository.update).toHaveBeenCalledWith(
+      {
+        depositAgreementId: agreementId,
+        depositPaidAt: expect.any(Object) as unknown,
+      },
+      expect.objectContaining({
+        depositPaidAt: expect.any(Date) as unknown,
+      }) as unknown
     )
 
     context.agreement.status = 'paid'
@@ -363,5 +474,43 @@ describe('DepositAgreementsService', () => {
     await expect(
       context.service.linkToLease(agreementId, 'contract-2', 'hash-2')
     ).rejects.toThrow('DEPOSIT_LEASE_LINK_CONFLICT')
+  })
+
+  it('keeps payment callbacks successful and records activation failures', async () => {
+    const contractRepository = { update: jest.fn().mockResolvedValue({}) }
+    const contractsService = {
+      activatePendingForDepositAgreement: jest
+        .fn()
+        .mockRejectedValue(new ConflictException('ACTIVATION_FAILED')),
+    }
+    const context = createService(
+      { ...baseAgreement(), status: 'payment-pending' },
+      undefined,
+      undefined,
+      contractRepository,
+      contractsService
+    )
+
+    await expect(
+      context.service.recordDepositPaid(
+        agreementId,
+        'attempt-activation-failure'
+      )
+    ).resolves.toEqual(expect.objectContaining({ status: 'paid' }))
+
+    expect(
+      contractsService.activatePendingForDepositAgreement
+    ).toHaveBeenCalledWith(agreementId)
+    expect(contractRepository.update).toHaveBeenCalledWith(
+      { depositAgreementId: agreementId },
+      {
+        activationFailure: expect.objectContaining({
+          code: 'ACTIVATION_FAILED',
+          message: 'ACTIVATION_FAILED',
+          attempts: 1,
+          at: expect.any(Date) as unknown,
+        }) as unknown,
+      }
+    )
   })
 })

@@ -69,8 +69,34 @@ export class MockBankService {
       currentUserId,
       false
     )
-    if (!agreement.tenantConsent || agreement.status !== 'accepted') {
+    if (
+      !agreement.tenantConsent ||
+      !['accepted', 'payment-pending'].includes(agreement.status)
+    ) {
       throw new ConflictException('DEPOSIT_NOT_READY')
+    }
+    if (agreement.tenantId !== currentUserId) {
+      throw new ForbiddenException('PAYMENT_ACCESS_DENIED')
+    }
+    if (agreement.status === 'payment-pending') {
+      const existingAttempt = await this.attemptRepository.findOne({
+        where: {
+          paymentId: agreement._id.toHexString(),
+          paymentType: 'deposit',
+          userId: currentUserId,
+          status: 'pending',
+        },
+      })
+      if (existingAttempt) {
+        if (existingAttempt.expiresAt.getTime() > Date.now()) {
+          return this.toPaymentInit(
+            existingAttempt,
+            `Deposit ${agreement.agreementCode}`
+          )
+        }
+        existingAttempt.status = 'expired'
+        await this.attemptRepository.save(existingAttempt)
+      }
     }
     const result = await this.createAttempt(
       agreement.tenantId,
@@ -325,14 +351,21 @@ export class MockBankService {
       callbackDigest: null,
     })
     await this.attemptRepository.save(attempt)
-    const deepLink = intent.redirectUrl
+    return this.toPaymentInit(attempt, description, intent.redirectUrl)
+  }
+
+  private toPaymentInit(
+    attempt: PaymentAttempt,
+    description: string,
+    deepLink = `mockbank://pay?txRef=${encodeURIComponent(attempt.txRef)}&amount=${attempt.amount}`
+  ): MockPaymentInit {
     return {
-      txRef: intent.txRef,
-      amount,
+      txRef: attempt.txRef,
+      amount: attempt.amount,
       description,
       qrCode: `data:text/plain,${encodeURIComponent(deepLink)}`,
       deepLink,
-      expiresAt: intent.expiresAt,
+      expiresAt: attempt.expiresAt,
       status: 'pending',
     }
   }

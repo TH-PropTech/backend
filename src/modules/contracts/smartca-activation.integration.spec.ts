@@ -147,4 +147,24 @@ describe('SmartCA two-party activation integration', () => {
     expect(activated.status).toBe('active')
     expect(context.ledgerOutboxService.enqueue).toHaveBeenCalledTimes(1)
   })
+
+  it('activates a fully signed SmartCA contract exactly once when its deposit arrives', async () => {
+    const context = setup('pending')
+
+    await context.service.recordSmartCaSignature(evidence('tenant'))
+    await context.service.recordSmartCaSignature(evidence('landlord'))
+    context.deposit.status = 'paid'
+    context.deposit.paidAt = new Date('2030-01-02T00:00:00.000Z')
+
+    const activated = await context.service.activateAfterDeposit(
+      context.contract._id.toHexString()
+    )
+    const replay = await context.service.activateAfterDeposit(
+      context.contract._id.toHexString()
+    )
+
+    expect(activated.status).toBe('active')
+    expect(replay.status).toBe('active')
+    expect(context.ledgerOutboxService.enqueue).toHaveBeenCalledTimes(1)
+  })
 })

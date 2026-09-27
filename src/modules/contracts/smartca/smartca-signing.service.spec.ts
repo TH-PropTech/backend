@@ -73,6 +73,7 @@ describe('SmartCaSigningService', () => {
     }
     contractsService: { recordSmartCaSignature: jest.Mock }
     artifactService: { resolveCanonicalArtifact: jest.Mock }
+    depositConfirmationResolver: { resolve: jest.Mock }
   }
 
   function context(contractValue: typeof contract = contract): TestContext {
@@ -136,6 +137,14 @@ describe('SmartCaSigningService', () => {
         artifact: {},
       }),
     }
+    // Mặc định phản chiếu hành vi cũ (chỉ dựa vào contract.depositPaidAt) để
+    // các test hiện có không phải sửa; test cho DepositConfirmationResolver
+    // sẽ tự override qua mockResolvedValueOnce/mockResolvedValue khi cần.
+    const depositConfirmationResolver = {
+      resolve: jest
+        .fn()
+        .mockResolvedValue({ confirmed: Boolean(contractValue.depositPaidAt) }),
+    }
     return {
       service: new SmartCaSigningService(
         contractRepository as never,
@@ -143,7 +152,8 @@ describe('SmartCaSigningService', () => {
         kycRepository as never,
         provider as never,
         contractsService as never,
-        artifactService as never
+        artifactService as never,
+        depositConfirmationResolver as never
       ),
       contractRepository,
       sessionRepository,
@@ -151,6 +161,7 @@ describe('SmartCaSigningService', () => {
       provider,
       contractsService,
       artifactService,
+      depositConfirmationResolver,
     }
   }
 
@@ -375,6 +386,45 @@ describe('SmartCaSigningService', () => {
     await expect(
       depositFirst.service.createSession(contractId, 'tenant-1', signingInput)
     ).rejects.toThrow('EXECUTION_POLICY_DEPOSIT_REQUIRED_BEFORE_SIGNING')
+  })
+
+  it('allows deposit-first signing when the deposit agreement is paid even though contract.depositPaidAt is still null', async () => {
+    // RED trước khi sửa smartca-signing.service.ts: điều kiện cũ chỉ đọc
+    // contract.depositPaidAt (chỉ được ghi lúc kích hoạt), nên case này ném
+    // EXECUTION_POLICY_DEPOSIT_REQUIRED_BEFORE_SIGNING dù cọc đã trả qua
+    // thỏa thuận cọc. Sau khi dùng DepositConfirmationResolver, case này
+    // phải tạo được phiên ký (GREEN).
+    const ctx = context({
+      ...contract,
+      deposit: 20_000_000,
+      depositPaidAt: null,
+      executionPolicySnapshot: {
+        policyId: 'deposit-first',
+        version: 1,
+        strategy: 'DEPOSIT_FIRST',
+        contentHash: 'policy-hash',
+      },
+    })
+    ctx.depositConfirmationResolver.resolve.mockResolvedValue({
+      confirmed: true,
+      required: true,
+      requiredAmount: 20_000_000,
+      source: 'agreement',
+      agreementId: 'agreement-1',
+      agreementStatus: 'paid',
+      paidAt: new Date('2026-09-01T00:00:00.000Z'),
+    })
+
+    const session = await ctx.service.createSession(
+      contractId,
+      'tenant-1',
+      signingInput
+    )
+
+    expect(session.status).toBe('signed')
+    expect(ctx.depositConfirmationResolver.resolve).toHaveBeenCalledWith(
+      expect.objectContaining({ deposit: 20_000_000 })
+    )
   })
 
   it('allows sign-first policy before deposit confirmation', async () => {

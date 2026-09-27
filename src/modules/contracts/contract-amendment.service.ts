@@ -58,6 +58,16 @@ export class ContractAmendmentService {
     @Optional() private readonly artifactService?: ContractArtifactService
   ) {}
 
+  async resolveParticipantRole(
+    contractId: string,
+    actorId: string
+  ): Promise<'tenant' | 'landlord' | undefined> {
+    const contract = await this.findContract(contractId)
+    if (contract.landlordId === actorId) return 'landlord'
+    if (contract.tenantId === actorId) return 'tenant'
+    return undefined
+  }
+
   async create(
     contractId: string,
     input: {

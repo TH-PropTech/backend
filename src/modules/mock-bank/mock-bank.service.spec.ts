@@ -179,6 +179,89 @@ describe('MockBankService', () => {
     )
   })
 
+  it('rejects landlord deposit initialization before creating an attempt', async () => {
+    const context = createContext()
+    context.depositAgreementsService.getAgreement.mockResolvedValue({
+      _id: new ObjectId(),
+      agreementCode: 'DPA-1',
+      tenantId,
+      landlordId: 'landlord-1',
+      amount: 2_000_000,
+      status: 'accepted',
+      tenantConsent: { consentedAt: new Date(), contentHash: 'hash' },
+    })
+
+    await expect(
+      context.service.initDepositPayment('deposit-1', 'landlord-1')
+    ).rejects.toThrow('PAYMENT_ACCESS_DENIED')
+    expect(context.providerRegistry.createPaymentIntent).not.toHaveBeenCalled()
+    expect(context.attemptRepository.save).not.toHaveBeenCalled()
+  })
+
+  it('reuses a live deposit attempt once the agreement is payment-pending', async () => {
+    const context = createContext()
+    const depositAttempt = {
+      ...context.attempt,
+      paymentId: 'deposit-1',
+      paymentType: 'deposit' as const,
+      userId: tenantId,
+      txRef: 'MOCK-DEPOSIT-1',
+      expiresAt: new Date(Date.now() + 60_000),
+    }
+    context.depositAgreementsService.getAgreement.mockResolvedValue({
+      _id: new ObjectId('507f1f77bcf86cd799439011'),
+      agreementCode: 'DPA-1',
+      tenantId,
+      landlordId: 'landlord-1',
+      amount: depositAttempt.amount,
+      status: 'payment-pending',
+      tenantConsent: { consentedAt: new Date(), contentHash: 'hash' },
+    })
+    context.attemptRepository.findOne.mockResolvedValueOnce(depositAttempt)
+
+    const result = await context.service.initDepositPayment(
+      'deposit-1',
+      tenantId
+    )
+
+    expect(result.txRef).toBe('MOCK-DEPOSIT-1')
+    expect(result.deepLink).toContain('MOCK-DEPOSIT-1')
+    expect(context.providerRegistry.createPaymentIntent).not.toHaveBeenCalled()
+    expect(
+      context.depositAgreementsService.markPaymentPending
+    ).not.toHaveBeenCalled()
+  })
+
+  it('expires a stale deposit attempt before creating a replacement', async () => {
+    const context = createContext()
+    const staleAttempt = {
+      ...context.attempt,
+      paymentId: 'deposit-1',
+      paymentType: 'deposit' as const,
+      userId: tenantId,
+      status: 'pending' as const,
+      expiresAt: new Date(Date.now() - 60_000),
+    }
+    context.depositAgreementsService.getAgreement.mockResolvedValue({
+      _id: new ObjectId('507f1f77bcf86cd799439011'),
+      agreementCode: 'DPA-1',
+      tenantId,
+      landlordId: 'landlord-1',
+      amount: staleAttempt.amount,
+      status: 'payment-pending',
+      tenantConsent: { consentedAt: new Date(), contentHash: 'hash' },
+    })
+    context.attemptRepository.findOne.mockResolvedValueOnce(staleAttempt)
+
+    await context.service.initDepositPayment('deposit-1', tenantId)
+
+    expect(staleAttempt.status).toBe('expired')
+    expect(context.attemptRepository.save).toHaveBeenCalledWith(staleAttempt)
+    expect(context.providerRegistry.createPaymentIntent).toHaveBeenCalledTimes(
+      1
+    )
+  })
+
   it('rejects a callback with an invalid HMAC before any business mutation', async () => {
     const { service, walletRepository } = createContext()
     const body = {

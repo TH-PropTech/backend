@@ -8,6 +8,7 @@ import {
   Query,
   UseGuards,
   Request,
+  BadRequestException,
 } from '@nestjs/common'
 import { ApiTags } from '@nestjs/swagger'
 import { BookingsService, BookingListResult } from './bookings.service'
@@ -53,7 +54,7 @@ export class BookingsController {
     @Query() query: BookingQueryDto
   ): Promise<BookingListResult> {
     const tenantId = req.user._id
-    if (!tenantId) throw new Error('Không thể xác thực người dùng')
+    if (!tenantId) throw new BadRequestException('BOOKING_USER_REQUIRED')
     return this.bookingsService.findByTenant(tenantId, {
       status: query.status,
       page: query.page ?? 1,
@@ -71,7 +72,7 @@ export class BookingsController {
     @Request() req: { user: UserPayload }
   ): Promise<Booking> {
     const tenantId = req.user._id
-    if (!tenantId) throw new Error('Không thể xác thực người dùng')
+    if (!tenantId) throw new BadRequestException('BOOKING_USER_REQUIRED')
     return this.bookingsService.cancel(id, tenantId)
   }
 
@@ -87,7 +88,7 @@ export class BookingsController {
     @Query() query: BookingQueryDto
   ): Promise<BookingListResult> {
     const landlordId = req.user._id
-    if (!landlordId) throw new Error('Không thể xác thực người dùng')
+    if (!landlordId) throw new BadRequestException('BOOKING_USER_REQUIRED')
     return this.bookingsService.findByLandlord(landlordId, {
       status: query.status,
       apartmentId: query.apartmentId,
@@ -107,7 +108,7 @@ export class BookingsController {
     @Request() req: { user: UserPayload }
   ): Promise<Booking> {
     const landlordId = req.user._id
-    if (!landlordId) throw new Error('Không thể xác thực người dùng')
+    if (!landlordId) throw new BadRequestException('BOOKING_USER_REQUIRED')
     return this.bookingsService.updateStatus(
       id,
       landlordId,

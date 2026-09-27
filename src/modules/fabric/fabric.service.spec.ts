@@ -62,7 +62,7 @@ describe('FabricService', () => {
 
   function setupValidConfig(): void {
     configService.get.mockImplementation((key: string) => {
-      if (key === 'FABRIC_ENABLED') return 'true'
+      if (key === 'fabric.enabled') return true
       return undefined
     })
     configService.getOrThrow.mockImplementation((key: string) => {
@@ -82,8 +82,10 @@ describe('FabricService', () => {
   }
 
   describe('1. simulation / disabled mode', () => {
-    it('initializes in simulation mode when FABRIC_ENABLED is not true', async () => {
-      configService.get.mockReturnValue('false')
+    it('initializes in simulation mode when Fabric is disabled in typed configuration', async () => {
+      configService.get.mockImplementation((key: string) =>
+        key === 'fabric.enabled' ? false : undefined
+      )
       const service = new FabricService(
         logRepository as never,
         configService as never
@@ -99,7 +101,9 @@ describe('FabricService', () => {
     })
 
     it('submits simulated transaction with sim_ prefix and nullable blockNumber', async () => {
-      configService.get.mockReturnValue('false')
+      configService.get.mockImplementation((key: string) =>
+        key === 'fabric.enabled' ? false : undefined
+      )
       const service = new FabricService(
         logRepository as never,
         configService as never
@@ -228,7 +232,9 @@ describe('FabricService', () => {
     })
 
     it('sets sanitized errorCode FABRIC_CONFIG_MISSING when configuration is incomplete', async () => {
-      configService.get.mockReturnValue('true')
+      configService.get.mockImplementation((key: string) =>
+        key === 'fabric.enabled' ? true : undefined
+      )
       configService.getOrThrow.mockImplementation(() => {
         throw new Error('FABRIC_MSP_ID is missing')
       })

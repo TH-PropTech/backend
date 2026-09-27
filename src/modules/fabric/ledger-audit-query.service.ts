@@ -39,7 +39,7 @@ export class LedgerAuditQueryService {
     for (const outbox of outboxList) {
       const networkMode: 'simulation' | 'fabric' =
         outbox.networkMode ??
-        (this.configService?.get<string>('FABRIC_ENABLED') === 'true'
+        (this.configService?.get<boolean>('fabric.enabled')
           ? 'fabric'
           : 'simulation')
       events.push({

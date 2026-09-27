@@ -10,7 +10,9 @@ import {
   UseInterceptors,
   UploadedFile,
   BadRequestException,
+  ConflictException,
   ForbiddenException,
+  Optional,
   Res,
 } from '@nestjs/common'
 import {
@@ -52,6 +54,8 @@ import type { ContractViewDto } from './dto/contract-view.dto'
 import type { ContractAuditEventDto } from './dto/contract-audit-event.dto'
 import { SmartCaSigningService } from './smartca/smartca-signing.service'
 import { SmartCaCallbackGuard } from './smartca/smartca-callback.guard'
+import { DepositAgreementsService } from './deposit-agreements.service'
+import { DepositAgreement } from './schemas/deposit-agreement.schema'
 import type { ContractArtifact } from './schemas/contract-artifact.schema'
 import type { Response } from 'express'
 import {
@@ -244,7 +248,9 @@ export class ContractsController {
     private readonly contractViewService: ContractViewService,
     private readonly ledgerAuditQueryService: LedgerAuditQueryService,
     private readonly smartOtpService: SmartOtpService,
-    private readonly smartCaSigningService: SmartCaSigningService
+    private readonly smartCaSigningService: SmartCaSigningService,
+    @Optional()
+    private readonly depositAgreementsService?: DepositAgreementsService
   ) {}
 
   /** Lấy chi tiết hợp đồng phong phú cho Contract Workspace */
@@ -331,6 +337,18 @@ export class ContractsController {
   @Roles('admin', 'staff')
   async create(@Body() dto: CreateContractDto): Promise<Contract> {
     return this.contractsService.createContract(dto)
+  }
+
+  @Post(':id/deposit-agreement')
+  @Roles('admin', 'staff')
+  @ApiCreatedResponse({ type: DepositAgreement })
+  async createDepositAgreement(
+    @Param('id') id: string
+  ): Promise<DepositAgreement> {
+    if (!this.depositAgreementsService) {
+      throw new ConflictException('DEPOSIT_AGREEMENT_SERVICE_UNAVAILABLE')
+    }
+    return this.depositAgreementsService.createForContract(id)
   }
 
   @Get(':id/public-service-checklist')
