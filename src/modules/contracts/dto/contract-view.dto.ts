@@ -288,6 +288,12 @@ export class ContractDepositViewDto {
   consentGiven!: boolean
 
   @ApiProperty({ nullable: true })
+  contentRevision!: number | null
+
+  @ApiProperty({ nullable: true })
+  contentHash!: string | null
+
+  @ApiProperty({ nullable: true })
   paidAt!: string | null
 
   @ApiProperty({ nullable: true })

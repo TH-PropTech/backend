@@ -15,6 +15,7 @@ import { ContractArtifactService } from './contract-artifact.service'
 describe('ContractViewService', () => {
   let service: ContractViewService
   let contractRepo: jest.Mocked<Repository<Contract>>
+  let depositAgreementRepo: jest.Mocked<Repository<DepositAgreement>>
   let kycService: jest.Mocked<KycService>
   let artifactService: { resolveCanonicalArtifact: jest.Mock }
   let ownershipTransferResolver: {
@@ -99,6 +100,7 @@ describe('ContractViewService', () => {
 
     service = module.get<ContractViewService>(ContractViewService)
     contractRepo = module.get(getRepositoryToken(Contract))
+    depositAgreementRepo = module.get(getRepositoryToken(DepositAgreement))
     kycService = module.get(KycService)
     artifactService = module.get(ContractArtifactService)
     ownershipTransferResolver = module.get(OwnershipTransferResolver)
@@ -147,6 +149,67 @@ describe('ContractViewService', () => {
     expect(view.document.sections).toHaveLength(12)
     expect(view.actions.signingEligibility.eligible).toBe(true)
     expect(view.actions.signingEligibility.reasonCode).toBeNull()
+  })
+
+  it('projects the current linked deposit agreement revision and hash for tenant consent', async () => {
+    const agreementId = new ObjectId()
+    contractRepo.findOne.mockResolvedValue({
+      ...mockContract,
+      depositAgreementId: agreementId.toHexString(),
+      depositPaidAt: null,
+    } as Contract)
+    depositAgreementRepo.findOne.mockResolvedValue({
+      _id: agreementId,
+      agreementCode: 'DPA-2026-001',
+      amount: 30000000,
+      status: 'draft',
+      tenantConsent: null,
+      contentRevision: 3,
+      contentHash: 'deposit-content-hash',
+    } as DepositAgreement)
+    kycService.findByUserId.mockResolvedValue({
+      status: 'verified',
+      idCardNumber: '079123456789',
+    } as KycRecord)
+
+    const view = await service.getForActor(
+      validContractId,
+      'user-tenant-1',
+      false
+    )
+
+    expect(view.deposit).toEqual(
+      expect.objectContaining({
+        consentGiven: false,
+        contentRevision: 3,
+        contentHash: 'deposit-content-hash',
+      })
+    )
+  })
+
+  it('keeps a contract without a linked agreement compatible with null consent metadata', async () => {
+    contractRepo.findOne.mockResolvedValue({
+      ...mockContract,
+      depositAgreementId: null,
+      depositPaidAt: null,
+    } as Contract)
+    kycService.findByUserId.mockResolvedValue({
+      status: 'verified',
+      idCardNumber: '079123456789',
+    } as KycRecord)
+
+    const view = await service.getForActor(
+      validContractId,
+      'user-tenant-1',
+      false
+    )
+
+    expect(view.deposit).toEqual(
+      expect.objectContaining({
+        contentRevision: null,
+        contentHash: null,
+      })
+    )
   })
 
   it('projects SmartCA certificate evidence into both party view records', async () => {

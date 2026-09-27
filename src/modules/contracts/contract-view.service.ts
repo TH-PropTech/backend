@@ -250,6 +250,8 @@ export class ContractViewService {
               | 'paid'
               | 'transferred') || 'pending',
           consentGiven: Boolean(depositAgreement.tenantConsent),
+          contentRevision: depositAgreement.contentRevision,
+          contentHash: depositAgreement.contentHash,
           paidAt: depositAgreement.paidAt
             ? depositAgreement.paidAt.toISOString()
             : null,
@@ -266,6 +268,8 @@ export class ContractViewService {
         currency: 'VND',
         status: isDepositPaid ? 'paid' : 'pending',
         consentGiven: true,
+        contentRevision: null,
+        contentHash: null,
         paidAt: contract.depositPaidAt
           ? contract.depositPaidAt.toISOString()
           : null,
