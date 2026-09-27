@@ -45,6 +45,35 @@ export class NotificationsService {
   }
 
   /**
+   * Tạo thông báo nếu user chưa nhận `dedupeKey` này; trả `null` khi đã có.
+   * ponytail: find-then-insert không có unique index, hai request đồng thời
+   * có thể cùng tạo; thêm unique (userId, dedupeKey) khi cần chặt hơn.
+   */
+  async createNotificationOnce(
+    userId: string,
+    dedupeKey: string,
+    title: string,
+    body: string,
+    type: string,
+    data: Record<string, unknown> = {}
+  ): Promise<Notification | null> {
+    const existing = await this.notificationRepository.findOne({
+      where: { userId, dedupeKey },
+    })
+    if (existing) return null
+    const notification = this.notificationRepository.create({
+      userId,
+      title,
+      body,
+      type,
+      data,
+      dedupeKey,
+      isRead: false,
+    })
+    return this.notificationRepository.save(notification)
+  }
+
+  /**
    * Lấy danh sách thông báo của người dùng kèm phân trang và lọc trạng thái
    */
   async getUserNotifications(

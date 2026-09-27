@@ -37,6 +37,8 @@ import { ContractCommercialEditorController } from './contract-commercial-editor
 import { ContractAmendmentService } from './contract-amendment.service'
 import { ContractAmendmentController } from './contract-amendment.controller'
 import { DepositConfirmationResolver } from './deposit-confirmation.resolver'
+import { FlowNotificationService } from './flow/flow-notification.service'
+import { NotificationsModule } from '../notifications/notifications.module'
 
 @Module({
   imports: [
@@ -58,6 +60,7 @@ import { DepositConfirmationResolver } from './deposit-confirmation.resolver'
     PaymentsModule,
     SmartOtpModule,
     PropertyOwnershipTransferModule,
+    NotificationsModule,
   ],
   controllers: [
     ContractsController,
@@ -83,6 +86,7 @@ import { DepositConfirmationResolver } from './deposit-confirmation.resolver'
       provide: CONTRACT_ARTIFACT_STORAGE,
       useClass: MongoGridFsArtifactStorage,
     },
+    FlowNotificationService,
   ],
   exports: [
     ContractsService,

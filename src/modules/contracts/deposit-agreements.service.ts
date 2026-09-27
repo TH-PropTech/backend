@@ -14,6 +14,8 @@ import type { RentalPackageSnapshot } from '../apartments/rental-package.util'
 import type { RentalExecutionPolicyRef } from '../rental-flow-config/rental-execution-policy.util'
 import { Apartment } from '../apartments/schemas/apartment.schema'
 import { validateDepositConsent } from './deposit-consent.util'
+import { evaluatePayDeposit } from './flow/flow-guards'
+import { FlowNotificationService } from './flow/flow-notification.service'
 import { Contract } from './schemas/contract.schema'
 import { DepositAgreement } from './schemas/deposit-agreement.schema'
 import { LedgerOutboxService } from '../fabric/ledger-outbox.service'
@@ -35,7 +37,9 @@ export class DepositAgreementsService {
     private readonly ownershipTransferResolver?: OwnershipTransferResolver,
     @Optional()
     @InjectRepository(Contract)
-    private readonly contractRepository?: Repository<Contract>
+    private readonly contractRepository?: Repository<Contract>,
+    @Optional()
+    private readonly flowNotificationService?: FlowNotificationService
   ) {}
 
   async createFromApplicationSnapshot(input: {
@@ -188,7 +192,9 @@ export class DepositAgreementsService {
       consentedAt: new Date(),
       contentHash: agreement.contentHash,
     }
-    return this.repository.save(agreement)
+    const saved = await this.repository.save(agreement)
+    await this.notifyFlow(saved)
+    return saved
   }
 
   async markPaymentPending(
@@ -197,9 +203,15 @@ export class DepositAgreementsService {
   ): Promise<DepositAgreement> {
     const agreement = await this.findById(id)
     this.assertTenant(agreement, tenantId)
-    if (agreement.status !== 'accepted' || !agreement.tenantConsent) {
+    const guard = evaluatePayDeposit({
+      status: agreement.status,
+      hasConsent: Boolean(agreement.tenantConsent),
+    })
+    if (!guard.enabled) {
       throw new ConflictException('DEPOSIT_CONSENT_REQUIRED')
     }
+    // Attempt mới thay attempt đã hết hạn: thỏa thuận đã ở payment-pending.
+    if (agreement.status === 'payment-pending') return agreement
     agreement.status = 'payment-pending'
     return this.repository.save(agreement)
   }
@@ -279,6 +291,7 @@ export class DepositAgreementsService {
     await this.enqueueDepositLedgerEvent(saved)
     await this.projectApartmentDepositPaid(saved)
     await this.activatePendingContract(saved)
+    await this.notifyFlow(saved)
     return saved
   }
 
@@ -306,7 +319,15 @@ export class DepositAgreementsService {
     await this.enqueueDepositLedgerEvent(saved)
     await this.projectApartmentDepositPaid(saved)
     await this.activatePendingContract(saved)
+    await this.notifyFlow(saved)
     return saved
+  }
+
+  /** Thông báo stage hoàn tất; notifier tự nuốt lỗi và log cảnh báo. */
+  private async notifyFlow(agreement: DepositAgreement): Promise<void> {
+    await this.flowNotificationService?.notifyForDepositAgreement(
+      agreement._id.toHexString()
+    )
   }
 
   private async recordContractDepositPaidAt(

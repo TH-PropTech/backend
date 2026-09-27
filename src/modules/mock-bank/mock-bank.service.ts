@@ -11,6 +11,7 @@ import { InjectRepository } from '@nestjs/typeorm'
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { MongoRepository, Repository } from 'typeorm'
 import { DepositAgreementsService } from '../contracts/deposit-agreements.service'
+import { evaluatePayDeposit } from '../contracts/flow/flow-guards'
 import { Payment } from '../payments/schemas/payment.schema'
 import { PaymentAttempt } from '../payments/schemas/payment-attempt.schema'
 import { MockWallet } from './schemas/mock-wallet.schema'
@@ -69,10 +70,11 @@ export class MockBankService {
       currentUserId,
       false
     )
-    if (
-      !agreement.tenantConsent ||
-      !['accepted', 'payment-pending'].includes(agreement.status)
-    ) {
+    const payGuard = evaluatePayDeposit({
+      status: agreement.status,
+      hasConsent: Boolean(agreement.tenantConsent),
+    })
+    if (!payGuard.enabled) {
       throw new ConflictException('DEPOSIT_NOT_READY')
     }
     if (agreement.tenantId !== currentUserId) {

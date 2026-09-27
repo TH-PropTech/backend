@@ -222,6 +222,172 @@ describe('ContractViewService', () => {
     expect(view.actions.signingEligibility.eligible).toBe(true)
   })
 
+  it('blocks SmartCA signing with ARTIFACT_NOT_LOCKED until the PDF artifact is locked', async () => {
+    contractRepo.findOne.mockResolvedValue({
+      ...mockContract,
+      executionMethod: 'SMARTCA',
+    } as Contract)
+    kycService.findByUserId.mockResolvedValue({
+      status: 'verified',
+      idCardNumber: '079123456789',
+    } as KycRecord)
+
+    const view = await service.getForActor(
+      validContractId,
+      'user-tenant-1',
+      false
+    )
+
+    expect(view.actions.signingEligibility).toEqual(
+      expect.objectContaining({
+        eligible: false,
+        reasonCode: 'ARTIFACT_NOT_LOCKED',
+      })
+    )
+  })
+
+  it('enables deposit payment only after tenant consent on the linked agreement', async () => {
+    const agreementId = new ObjectId()
+    const agreement = {
+      _id: agreementId,
+      agreementCode: 'DPA-2026-PAY',
+      amount: 30000000,
+      contentRevision: 1,
+      contentHash: 'deposit-content-hash',
+    }
+    contractRepo.findOne.mockResolvedValue({
+      ...mockContract,
+      status: 'draft',
+      depositAgreementId: agreementId.toHexString(),
+      depositPaidAt: null,
+    } as Contract)
+    kycService.findByUserId.mockResolvedValue(null)
+
+    depositAgreementRepo.findOne.mockResolvedValue({
+      ...agreement,
+      status: 'draft',
+      tenantConsent: null,
+    } as DepositAgreement)
+    const beforeConsent = await service.getForActor(
+      validContractId,
+      'user-tenant-1',
+      false
+    )
+
+    depositAgreementRepo.findOne.mockResolvedValue({
+      ...agreement,
+      status: 'accepted',
+      tenantConsent: {
+        consentedAt: new Date('2026-09-14T07:00:00Z'),
+        contentHash: 'deposit-content-hash',
+      },
+    } as DepositAgreement)
+    const afterConsent = await service.getForActor(
+      validContractId,
+      'user-tenant-1',
+      false
+    )
+    const landlordView = await service.getForActor(
+      validContractId,
+      'user-landlord-1',
+      false
+    )
+
+    expect(beforeConsent.actions).toEqual(
+      expect.objectContaining({
+        canPayDeposit: false,
+        paymentReasonCode: 'DEPOSIT_NOT_READY',
+      })
+    )
+    expect(afterConsent.actions).toEqual(
+      expect.objectContaining({ canPayDeposit: true, paymentReasonCode: null })
+    )
+    expect(landlordView.actions.canPayDeposit).toBe(false)
+  })
+
+  it('projects the same flow stages but role-specific nextActions for tenant, landlord and staff', async () => {
+    const agreementId = new ObjectId()
+    contractRepo.findOne.mockResolvedValue({
+      ...mockContract,
+      status: 'draft',
+      contentLockedHash: null,
+      contentLockedAt: null,
+      depositAgreementId: agreementId.toHexString(),
+      depositPaidAt: null,
+      executionPolicySnapshot: {
+        policyId: 'deposit-first',
+        version: 1,
+        strategy: 'DEPOSIT_FIRST',
+        hash: 'policy-hash',
+      },
+    } as unknown as Contract)
+    depositAgreementRepo.findOne.mockResolvedValue({
+      _id: agreementId,
+      agreementCode: 'DPA-2026-FLOW',
+      amount: 30000000,
+      status: 'draft',
+      tenantConsent: null,
+      contentRevision: 1,
+      contentHash: 'deposit-content-hash',
+    } as DepositAgreement)
+    kycService.findByUserId.mockImplementation((userId: string) =>
+      Promise.resolve(
+        userId === 'user-landlord-1'
+          ? null
+          : ({ status: 'verified', idCardNumber: '079123456789' } as KycRecord)
+      )
+    )
+
+    const tenantView = await service.getForActor(
+      validContractId,
+      'user-tenant-1',
+      false
+    )
+    const landlordView = await service.getForActor(
+      validContractId,
+      'user-landlord-1',
+      false
+    )
+    const staffView = await service.getForActor(
+      validContractId,
+      'user-staff-1',
+      true
+    )
+
+    expect(tenantView.flow).toEqual(
+      expect.objectContaining({
+        strategy: 'DEPOSIT_FIRST',
+        activeStage: 'document',
+      })
+    )
+    expect(
+      tenantView.flow?.stages.find(stage => stage.key === 'signing')?.blockers
+    ).toEqual([{ code: 'KYC_NOT_VERIFIED', partyRole: 'landlord' }])
+    expect(tenantView.flow?.nextActions).toContainEqual({
+      action: 'CONSENT_DEPOSIT',
+      actorRole: 'tenant',
+      enabled: true,
+      reasonCode: null,
+      stage: 'deposit',
+    })
+    expect(landlordView.flow?.stages).toEqual(tenantView.flow?.stages)
+    expect(
+      landlordView.flow?.nextActions.map(item => item.action)
+    ).not.toContain('CONSENT_DEPOSIT')
+    expect(landlordView.flow?.nextActions).toContainEqual(
+      expect.objectContaining({ action: 'COMPLETE_KYC', enabled: true })
+    )
+    expect(staffView.flow?.nextActions).toEqual([
+      {
+        action: 'LOCK_CONTENT',
+        actorRole: 'staff',
+        enabled: true,
+        reasonCode: null,
+        stage: 'document',
+      },
+    ])
+  })
+
   it('keeps a contract without a linked agreement compatible with null consent metadata', async () => {
     contractRepo.findOne.mockResolvedValue({
       ...mockContract,

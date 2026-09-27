@@ -19,6 +19,12 @@ import {
 } from '../fabric/ledger-evidence-envelope'
 import type { ContractArtifactStorage } from './contract-artifact.storage'
 import type { ContractArtifact as ContractArtifactRecord } from './schemas/contract-artifact.schema'
+import { ContractViewService } from './contract-view.service'
+import { ContractsService } from './contracts.service'
+import { DepositAgreementsService } from './deposit-agreements.service'
+import { DepositConfirmationResolver } from './deposit-confirmation.resolver'
+import { SmartCaSigningService } from './smartca/smartca-signing.service'
+import { MockBankService } from '../mock-bank/mock-bank.service'
 
 describe('canonical contract workspace integration', () => {
   const contractId = new ObjectId('507f1f77bcf86cd799439011')
@@ -214,6 +220,253 @@ describe('canonical contract workspace integration', () => {
     await expect(
       artifactService.resolveCanonicalArtifact(contract)
     ).rejects.toThrow('CONTRACT_ARTIFACT_HASH_MISMATCH')
+  })
+
+  it('accepts every enabled flow action at its endpoint and rejects disabled ones with the same reason', async () => {
+    const { contract } = createCanonicalFixture()
+    const agreementId = new ObjectId('507f1f77bcf86cd799439015')
+    Object.assign(contract, {
+      status: 'draft',
+      executionMethod: 'SMARTCA',
+      executionPolicySnapshot: {
+        policyId: 'deposit-first',
+        version: 1,
+        strategy: 'DEPOSIT_FIRST',
+        hash: 'policy-hash',
+      },
+      depositAgreementId: agreementId.toHexString(),
+      depositPaidAt: null,
+      signedByTenant: false,
+      signedByLandlord: false,
+    })
+    const agreement = {
+      _id: agreementId,
+      agreementCode: 'DPA-FLOW-001',
+      tenantId: 'tenant-1',
+      landlordId: 'landlord-1',
+      amount: 36_000_000,
+      status: 'draft',
+      contentRevision: 1,
+      contentHash: 'd'.repeat(64),
+      tenantConsent: null,
+      paidAt: null,
+    }
+    const pdfBytes = Buffer.from('%PDF-1.7\nflow-guard-integration')
+    const contractRepository = {
+      findOne: jest.fn(() => Promise.resolve(contract)),
+      save: jest.fn((value: Contract) => Promise.resolve(value)),
+    }
+    const depositRepository = {
+      findOne: jest.fn(() => Promise.resolve(agreement)),
+      save: jest.fn((value: typeof agreement) => Promise.resolve(value)),
+    }
+    let savedArtifact: ContractArtifactRecord | null = null
+    const artifactService = new ContractArtifactService(
+      contractRepository as never,
+      {
+        findOne: jest.fn(() => savedArtifact),
+        create: jest.fn((input: Partial<ContractArtifactRecord>) =>
+          Object.assign(new ContractArtifact(), input, {
+            _id: new ObjectId('507f1f77bcf86cd799439016'),
+          })
+        ),
+        save: jest.fn((value: ContractArtifactRecord) => {
+          savedArtifact = value
+          return value
+        }),
+      } as never,
+      {
+        upload: jest
+          .fn()
+          .mockResolvedValue(new ObjectId('507f1f77bcf86cd799439017')),
+        download: jest.fn().mockResolvedValue(pdfBytes),
+      }
+    )
+    const kycService = {
+      findByUserId: jest.fn().mockResolvedValue({ status: 'verified' }),
+    }
+    const viewService = new ContractViewService(
+      contractRepository as never,
+      depositRepository as never,
+      kycService as never,
+      { getContractEvents: jest.fn().mockResolvedValue([]) } as never,
+      undefined,
+      undefined,
+      artifactService
+    )
+    const depositService = new DepositAgreementsService(
+      depositRepository as never
+    )
+    const mockBankService = new MockBankService(
+      depositService,
+      {} as never,
+      {
+        findOne: jest.fn().mockResolvedValue(null),
+        create: jest.fn((value: Record<string, unknown>) => value),
+        save: jest.fn((value: unknown) => Promise.resolve(value)),
+      } as never,
+      {} as never,
+      {
+        assertMockProvider: jest.fn(),
+        createPaymentIntent: jest.fn().mockResolvedValue({
+          provider: 'mock-bank',
+          txRef: 'TX-FLOW-1',
+          expiresAt: new Date(Date.now() + 15 * 60_000),
+        }),
+      } as never,
+      {} as never,
+      {} as never
+    )
+    const contractsService = new ContractsService(
+      contractRepository as never,
+      {} as never,
+      depositRepository as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      kycService as never,
+      {} as never,
+      {} as never
+    )
+    const smartCaService = new SmartCaSigningService(
+      contractRepository as never,
+      {
+        findOne: jest.fn().mockResolvedValue(null),
+        create: jest.fn((value: Record<string, unknown>) => ({
+          _id: new ObjectId(),
+          ...value,
+        })),
+        save: jest.fn((value: unknown) => Promise.resolve(value)),
+      } as never,
+      {
+        findOne: jest.fn().mockResolvedValue({
+          status: 'verified',
+          idCardNumber: '000000000001',
+        }),
+      } as never,
+      {
+        listCertificates: jest.fn().mockResolvedValue([
+          {
+            serialNumber: 'serial-tenant-1',
+            subject: 'CN=Tenant',
+            issuer: 'CN=VNPT SmartCA',
+            validFrom: '2026-01-01T00:00:00.000Z',
+            validTo: '2027-01-01T00:00:00.000Z',
+            isValid: true,
+          },
+        ]),
+        requestSignature: jest.fn(
+          ({ transactionId }: { transactionId: string }) =>
+            Promise.resolve({
+              transactionId,
+              transactionCode: 'redacted',
+              sad: 'redacted',
+              expiresIn: 299,
+            })
+        ),
+        confirmSignature: jest.fn(
+          ({
+            transactionId,
+            documentId,
+          }: {
+            transactionId: string
+            documentId: string
+          }) =>
+            Promise.resolve({
+              transactionId,
+              signature: {
+                documentId,
+                signatureValue: 'redacted',
+                signedAt: '2026-09-23T10:00:00.000Z',
+              },
+            })
+        ),
+        getSignatureStatus: jest.fn(),
+      } as never,
+      {
+        recordSmartCaSignature: jest
+          .fn()
+          .mockResolvedValue({ status: 'awaiting-signature' }),
+      } as never,
+      artifactService,
+      new DepositConfirmationResolver(depositRepository as never)
+    )
+    const id = contractId.toHexString()
+    const endpoints: Record<string, (actorId: string) => Promise<unknown>> = {
+      CONSENT_DEPOSIT: actorId =>
+        depositService.consent(
+          agreementId.toHexString(),
+          actorId,
+          agreement.contentRevision,
+          agreement.contentHash
+        ),
+      PAY_DEPOSIT: actorId =>
+        mockBankService.initDepositPayment(agreementId.toHexString(), actorId),
+      LOCK_CONTENT: actorId =>
+        contractsService.lockContractContent(
+          id,
+          actorId,
+          contract.contentRevision ?? 0,
+          actorId === 'staff-1'
+        ),
+      LOCK_ARTIFACT: actorId =>
+        artifactService.lockCanonicalArtifact(
+          id,
+          actorId,
+          actorId === 'staff-1',
+          pdfBytes
+        ),
+      SIGN_SMARTCA: actorId =>
+        smartCaService.createSession(id, actorId, {
+          smartCaPassword: 'redacted',
+          smartCaOtp: '000000',
+          idempotencyKey: `flow-${actorId}`,
+        }),
+    }
+    const actOnFlow = async (
+      actorId: string,
+      isStaff: boolean,
+      only?: string
+    ): Promise<string[]> => {
+      const view = await viewService.getForActor(id, actorId, isStaff)
+      const performed: string[] = []
+      for (const item of view.flow?.nextActions ?? []) {
+        const endpoint = endpoints[item.action]
+        if (!endpoint || (only && item.action !== only)) continue
+        if (item.enabled) {
+          await expect(endpoint(actorId)).resolves.toBeDefined()
+          performed.push(item.action)
+        } else if (item.action === 'PAY_DEPOSIT') {
+          await expect(endpoint(actorId)).rejects.toThrow(item.reasonCode ?? '')
+        }
+      }
+      return performed
+    }
+
+    await expect(actOnFlow('tenant-1', false, 'PAY_DEPOSIT')).resolves.toEqual(
+      []
+    )
+    await expect(
+      actOnFlow('tenant-1', false, 'CONSENT_DEPOSIT')
+    ).resolves.toEqual(['CONSENT_DEPOSIT'])
+    await expect(actOnFlow('tenant-1', false, 'PAY_DEPOSIT')).resolves.toEqual([
+      'PAY_DEPOSIT',
+    ])
+    Object.assign(agreement, {
+      status: 'paid',
+      paidAt: new Date('2026-09-20T02:00:00.000Z'),
+    })
+    await expect(actOnFlow('staff-1', true)).resolves.toEqual(['LOCK_CONTENT'])
+    await expect(actOnFlow('landlord-1', false)).resolves.toEqual([
+      'LOCK_ARTIFACT',
+    ])
+    await expect(actOnFlow('tenant-1', false)).resolves.toEqual([
+      'SIGN_SMARTCA',
+    ])
+    expect(
+      (await viewService.getForActor(id, 'tenant-1', false)).flow?.activeStage
+    ).toBe('signing')
   })
 
   it('keeps locked history while new template and amendment payloads receive new digests', () => {

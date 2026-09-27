@@ -18,7 +18,15 @@ import { OwnershipTransferResolver } from '../property-ownership-transfer/owners
 import { ContractArtifactService } from './contract-artifact.service'
 import { ContractTemplateGovernanceService } from './legal/contract-template-governance.service'
 import { ContractAmendment } from './schemas/contract-amendment.schema'
-import { resolveDepositConfirmation } from './deposit-confirmation.resolver'
+import {
+  resolveDepositConfirmation,
+  type DepositConfirmation,
+} from './deposit-confirmation.resolver'
+import { evaluatePayDeposit, evaluateSigning } from './flow/flow-guards'
+import {
+  projectContractFlow,
+  type ContractFlowFacts,
+} from './flow/contract-flow.projector'
 import {
   ContractViewDto,
   ContractPartyViewDto,
@@ -260,7 +268,7 @@ export class ContractViewService {
       }
     }
 
-    const isDepositPaid = resolveDepositConfirmation(
+    const depositConfirmation = resolveDepositConfirmation(
       {
         deposit: contract.deposit,
         depositPaidAt: contract.depositPaidAt ?? null,
@@ -273,7 +281,8 @@ export class ContractViewService {
             paidAt: depositAgreement.paidAt ?? null,
           }
         : null
-    ).confirmed
+    )
+    const isDepositPaid = depositConfirmation.confirmed
 
     if (!depositDto && contract.deposit > 0) {
       depositDto = {
@@ -328,20 +337,28 @@ export class ContractViewService {
             : 'Hoàn tất chữ ký SmartCA của cả hai bên.',
     }
 
-    const signingEligibility: SigningEligibilityDto =
-      this.deriveSigningEligibility({
-        isParticipant: isTenant || isLandlord,
-        role: currentActorRole,
-        contractStatus: contract.status || 'draft',
-        isContentLocked: Boolean(
-          contract.contentLockedHash && contract.contentLockedAt
-        ),
-        isDepositPaid,
-        isKycVerified: currentActorKyc?.status === 'verified',
-        hasSigned: Boolean(hasCurrentActorSigned),
-        isConfigOutdated: contract.configStatus === 'CONFIG_OUTDATED',
-        executionStrategy,
-      })
+    const signingEligibility: SigningEligibilityDto = evaluateSigning({
+      isParticipant: currentActorRole !== null,
+      hasSigned: Boolean(hasCurrentActorSigned),
+      isConfigOutdated: contract.configStatus === 'CONFIG_OUTDATED',
+      isContentLocked: Boolean(
+        contract.contentLockedHash && contract.contentLockedAt
+      ),
+      requiresArtifact: contract.executionMethod === 'SMARTCA',
+      hasArtifact: Boolean(contract.artifactRef),
+      contractStatus: contract.status || 'draft',
+      strategy: executionStrategy,
+      isDepositConfirmed: isDepositPaid,
+      isKycVerified: currentActorKyc?.status === 'verified',
+    })
+    const payGuard = evaluatePayDeposit(
+      depositAgreement
+        ? {
+            status: depositAgreement.status,
+            hasConsent: Boolean(depositAgreement.tenantConsent),
+          }
+        : null
+    )
 
     // 5. Chiếu trạng thái Sổ cái Ledger
     const auditEvents =
@@ -470,16 +487,10 @@ export class ContractViewService {
       },
       deposit: depositDto,
       actions: {
-        canPayDeposit:
-          isTenant &&
-          !isDepositPaid &&
-          [
-            'deposit-pending',
-            'draft',
-            'awaiting-signature',
-            'fully-signed-pending-deposit',
-          ].includes(contract.status || ''),
-        paymentReasonCode: isDepositPaid ? 'DEPOSIT_ALREADY_PAID' : null,
+        canPayDeposit: isTenant && !isDepositPaid && payGuard.enabled,
+        paymentReasonCode: isDepositPaid
+          ? 'DEPOSIT_ALREADY_PAID'
+          : payGuard.reasonCode,
         signingEligibility,
         canDownloadArtifact: Boolean(
           contract.contentLockedHash &&
@@ -512,81 +523,72 @@ export class ContractViewService {
       },
       access,
       ledger,
+      flow: projectContractFlow(
+        this.buildFlowFacts(contract, {
+          depositAgreement,
+          depositConfirmation,
+          kycVerified: {
+            tenant: tenantKyc?.status === 'verified',
+            landlord: landlordKyc?.status === 'verified',
+          },
+          ledgerStatus,
+          viewer: { isTenant, isLandlord, isStaff },
+        })
+      ),
     }
   }
 
-  private deriveSigningEligibility(input: {
-    isParticipant: boolean
-    role: 'tenant' | 'landlord' | null
-    contractStatus: string
-    isContentLocked: boolean
-    isDepositPaid: boolean
-    isKycVerified: boolean
-    hasSigned: boolean
-    isConfigOutdated: boolean
-    executionStrategy: 'DEPOSIT_FIRST' | 'SIGN_FIRST'
-  }): SigningEligibilityDto {
-    if (!input.isParticipant || !input.role) {
-      return {
-        eligible: false,
-        reasonCode: 'NOT_PARTICIPANT',
-        message: 'Bạn không phải bên ký kết của hợp đồng này.',
-      }
+  private buildFlowFacts(
+    contract: Contract,
+    context: Pick<ContractFlowFacts, 'kycVerified' | 'viewer'> & {
+      depositAgreement: DepositAgreement | null
+      depositConfirmation: DepositConfirmation
+      ledgerStatus: ContractLedgerSummaryDto['status']
     }
-
-    if (input.hasSigned) {
-      return {
-        eligible: false,
-        reasonCode: 'ALREADY_SIGNED',
-        message: 'Bạn đã hoàn tất xác nhận điện tử hợp đồng này.',
-      }
-    }
-
-    if (input.isConfigOutdated) {
-      return {
-        eligible: false,
-        reasonCode: 'CONFIG_OUTDATED',
-        message: 'Cấu hình hợp đồng đã thay đổi, cần đối soát trước khi ký.',
-      }
-    }
-
-    if (!input.isContentLocked) {
-      return {
-        eligible: false,
-        reasonCode: 'CONTENT_NOT_LOCKED',
-        message: 'Nội dung hợp đồng chưa được khóa để ký.',
-      }
-    }
-
-    if (input.contractStatus !== 'awaiting-signature') {
-      return {
-        eligible: false,
-        reasonCode: 'WRONG_STATE',
-        message:
-          'Hợp đồng chưa sẵn sàng để ký kết (cần chờ duyệt hoặc hoàn tất đặt cọc).',
-      }
-    }
-
-    if (!input.isDepositPaid && input.executionStrategy === 'DEPOSIT_FIRST') {
-      return {
-        eligible: false,
-        reasonCode: 'DEPOSIT_REQUIRED',
-        message: 'Cần hoàn tất thanh toán tiền đặt cọc trước khi ký hợp đồng.',
-      }
-    }
-
-    if (!input.isKycVerified) {
-      return {
-        eligible: false,
-        reasonCode: 'KYC_NOT_VERIFIED',
-        message: 'Tài khoản chưa hoàn tất định danh điện tử (KYC).',
-      }
-    }
-
+  ): ContractFlowFacts {
+    const { depositAgreement: agreement, depositConfirmation } = context
+    const signedAt = (value?: Date | string | null): Date | null =>
+      value ? new Date(value) : null
     return {
-      eligible: true,
-      reasonCode: null,
-      message: null,
+      strategy: contract.executionPolicySnapshot?.strategy ?? 'DEPOSIT_FIRST',
+      contractStatus: contract.status || 'draft',
+      executionMethod: contract.executionMethod || 'POC_ECONSENT',
+      isConfigOutdated: contract.configStatus === 'CONFIG_OUTDATED',
+      agreement: agreement
+        ? {
+            status: agreement.status,
+            hasConsent: Boolean(agreement.tenantConsent),
+            consentedAt: agreement.tenantConsent?.consentedAt ?? null,
+            contentRevision: agreement.contentRevision ?? null,
+            contentHash: agreement.contentHash ?? null,
+          }
+        : null,
+      deposit: {
+        required: depositConfirmation.required,
+        confirmed: depositConfirmation.confirmed,
+        paidAt: depositConfirmation.paidAt,
+      },
+      contentLockedAt: contract.contentLockedHash
+        ? (contract.contentLockedAt ?? null)
+        : null,
+      hasArtifact: Boolean(contract.artifactRef),
+      signatures: {
+        tenant: {
+          signed: Boolean(contract.signedByTenant),
+          signedAt: signedAt(contract.tenantSignature?.signedAt),
+        },
+        landlord: {
+          signed: Boolean(contract.signedByLandlord),
+          signedAt: signedAt(contract.landlordSignature?.signedAt),
+        },
+      },
+      kycVerified: context.kycVerified,
+      activationFailureCode: contract.activationFailure?.code ?? null,
+      ledger: {
+        status: context.ledgerStatus,
+        recordedAt: contract.ledgerRecordedAt ?? null,
+      },
+      viewer: context.viewer,
     }
   }
 }

@@ -14,6 +14,7 @@ import { KycRecord } from '../../kyc/schemas/kyc-record.schema'
 import { ContractArtifactService } from '../contract-artifact.service'
 import { ContractsService } from '../contracts.service'
 import { DepositConfirmationResolver } from '../deposit-confirmation.resolver'
+import { isDepositGateOpen } from '../flow/flow-guards'
 import { Contract } from '../schemas/contract.schema'
 import {
   SmartCaProvider,
@@ -348,7 +349,7 @@ export class SmartCaSigningService {
       const depositConfirmed = this.depositConfirmationResolver
         ? (await this.depositConfirmationResolver.resolve(contract)).confirmed
         : Boolean(contract.depositPaidAt)
-      if (!depositConfirmed) {
+      if (!isDepositGateOpen(strategy, depositConfirmed)) {
         throw new ConflictException(
           'EXECUTION_POLICY_DEPOSIT_REQUIRED_BEFORE_SIGNING'
         )

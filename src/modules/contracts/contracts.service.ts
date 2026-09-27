@@ -50,6 +50,8 @@ import {
   CONTRACT_CONTENT_HASH_SCHEMA_VERSION,
 } from './legal/contract-canonical-payload'
 import { resolveDepositConfirmation } from './deposit-confirmation.resolver'
+import { evaluateLockContent, isDepositGateOpen } from './flow/flow-guards'
+import { FlowNotificationService } from './flow/flow-notification.service'
 
 // ── Interfaces ──
 
@@ -114,6 +116,23 @@ interface ChainVerifyResult {
 
 // ── Service ──
 
+export type SmartCaSignatureRecordInput = {
+  contractId: string
+  signerId: string
+  role: 'tenant' | 'landlord'
+  artifactHash: string
+  providerTransactionId: string
+  certificateSerial: string
+  certificateSubject?: string | null
+  certificateIssuer?: string | null
+  signatureHash?: string | null
+  signatureAlgorithm?: string | null
+  signatureValueRef?: string | null
+  providerStatus?: 'pending' | 'signed' | 'rejected' | null
+  verifiedAt?: Date | null
+  signedAt: Date
+}
+
 @Injectable()
 export class ContractsService {
   private readonly logger = new Logger(ContractsService.name)
@@ -142,7 +161,9 @@ export class ContractsService {
     private readonly templateGovernanceService?: ContractTemplateGovernanceService,
     @Optional()
     @InjectRepository(ContractAmendment)
-    private readonly amendmentRepository?: Repository<ContractAmendment>
+    private readonly amendmentRepository?: Repository<ContractAmendment>,
+    @Optional()
+    private readonly flowNotificationService?: FlowNotificationService
   ) {}
 
   // ── Private helpers ──
@@ -391,25 +412,22 @@ export class ContractsService {
     )
     grant.consumedAt = consumed.consumedAt
     await this.signingGrantRepository.save(grant)
-    return this.signContract(contractId, role)
+    const signed = await this.signContract(contractId, role)
+    await this.flowNotificationService?.notifyForContract(contractId)
+    return signed
   }
 
-  async recordSmartCaSignature(input: {
-    contractId: string
-    signerId: string
-    role: 'tenant' | 'landlord'
-    artifactHash: string
-    providerTransactionId: string
-    certificateSerial: string
-    certificateSubject?: string | null
-    certificateIssuer?: string | null
-    signatureHash?: string | null
-    signatureAlgorithm?: string | null
-    signatureValueRef?: string | null
-    providerStatus?: 'pending' | 'signed' | 'rejected' | null
-    verifiedAt?: Date | null
-    signedAt: Date
-  }): Promise<Contract> {
+  async recordSmartCaSignature(
+    input: SmartCaSignatureRecordInput
+  ): Promise<Contract> {
+    const recorded = await this.applySmartCaSignature(input)
+    await this.flowNotificationService?.notifyForContract(input.contractId)
+    return recorded
+  }
+
+  private async applySmartCaSignature(
+    input: SmartCaSignatureRecordInput
+  ): Promise<Contract> {
     const contract = await this.findOne(input.contractId)
     const expectedSignerId =
       input.role === 'tenant' ? contract.tenantId : contract.landlordId
@@ -690,11 +708,11 @@ export class ContractsService {
     if (contract.contentLockedAt || contract.contentLockedHash) {
       return contract
     }
-    if (
-      ['active', 'terminated', 'completed', 'cancelled'].includes(
-        contract.status ?? ''
-      )
-    ) {
+    const lockGuard = evaluateLockContent({
+      contractStatus: contract.status,
+      isContentLocked: false,
+    })
+    if (!lockGuard.enabled) {
       throw new ConflictException('CONTRACT_CONTENT_STATE_CLOSED')
     }
     if ((contract.contentRevision ?? 0) !== expectedRevision) {
@@ -720,7 +738,9 @@ export class ContractsService {
     contract.hashSchemaVersion = CONTRACT_CONTENT_HASH_SCHEMA_VERSION
     contract.contentRevision = (contract.contentRevision ?? 0) + 1
     contract.status = 'awaiting-signature'
-    return this.contractRepository.save(contract)
+    const locked = await this.contractRepository.save(contract)
+    await this.flowNotificationService?.notifyForContract(contractId)
+    return locked
   }
 
   async reconcileFlowProfile(
@@ -1000,9 +1020,11 @@ export class ContractsService {
     const executionStrategy =
       contract.executionPolicySnapshot?.strategy ?? 'DEPOSIT_FIRST'
     if (
-      executionStrategy === 'DEPOSIT_FIRST' &&
       contract.deposit > 0 &&
-      !(await this.isDepositConfirmed(contract))
+      !isDepositGateOpen(
+        executionStrategy,
+        await this.isDepositConfirmed(contract)
+      )
     ) {
       throw new BadRequestException(
         'EXECUTION_POLICY_DEPOSIT_REQUIRED_BEFORE_SIGNING: Hợp đồng yêu cầu tiền cọc đã thanh toán trước khi có hiệu lực'
