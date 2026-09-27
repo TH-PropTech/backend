@@ -15,6 +15,7 @@ import { Repository } from 'typeorm'
 import { Contract } from './schemas/contract.schema'
 import { ContractAmendment } from './schemas/contract-amendment.schema'
 import { ContractArtifact } from './schemas/contract-artifact.schema'
+import { evaluateLockArtifact } from './flow/flow-guards'
 import {
   CONTRACT_ARTIFACT_STORAGE,
   type ContractArtifactStorage,
@@ -221,7 +222,18 @@ export class ContractArtifactService {
       const resolved = await this.resolveCanonicalArtifact(contract)
       return resolved.artifact
     }
-    if (!contract.contentLockedHash || !contract.contentLockedAt) {
+    const artifactGuard = evaluateLockArtifact({
+      isContentLocked: Boolean(
+        contract.contentLockedHash && contract.contentLockedAt
+      ),
+      hasArtifact: false,
+    })
+    // Kiểm tra lại từng trường để TypeScript thu hẹp kiểu cho đoạn ghi bên dưới.
+    if (
+      !artifactGuard.enabled ||
+      !contract.contentLockedHash ||
+      !contract.contentLockedAt
+    ) {
       throw new ConflictException('CONTRACT_CONTENT_NOT_LOCKED')
     }
     if (bytes.length === 0) {

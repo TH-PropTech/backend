@@ -430,6 +430,103 @@ export class ContractPartiesEnrichedDto {
   landlord!: ContractPartyViewDto
 }
 
+export const CONTRACT_FLOW_STAGE_KEYS = [
+  'document',
+  'deposit',
+  'signing',
+  'ledger',
+  'move-in',
+] as const
+export type ContractFlowStageKey = (typeof CONTRACT_FLOW_STAGE_KEYS)[number]
+
+export const CONTRACT_FLOW_STAGE_STATUSES = [
+  'done',
+  'active',
+  'upcoming',
+  'blocked',
+  'skipped',
+] as const
+export type ContractFlowStageStatus =
+  (typeof CONTRACT_FLOW_STAGE_STATUSES)[number]
+
+export const CONTRACT_FLOW_ACTIONS = [
+  'CONSENT_DEPOSIT',
+  'PAY_DEPOSIT',
+  'LOCK_CONTENT',
+  'LOCK_ARTIFACT',
+  'COMPLETE_KYC',
+  'SIGN_SMARTCA',
+  'SIGN_ECONSENT',
+  'PAY_SETTLEMENT',
+  'PAY_FEE',
+  'RECORD_HANDOVER',
+  'CONFIRM_HANDOVER',
+  'VERIFY_LEDGER',
+] as const
+export type ContractFlowActionKey = (typeof CONTRACT_FLOW_ACTIONS)[number]
+
+export class ContractFlowBlockerDto {
+  @ApiProperty()
+  code!: string
+
+  @ApiProperty({ enum: ['tenant', 'landlord'], nullable: true })
+  partyRole!: 'tenant' | 'landlord' | null
+}
+
+export class ContractFlowStageDto {
+  @ApiProperty({ enum: CONTRACT_FLOW_STAGE_KEYS })
+  key!: ContractFlowStageKey
+
+  @ApiProperty({ enum: CONTRACT_FLOW_STAGE_STATUSES })
+  status!: ContractFlowStageStatus
+
+  @ApiProperty({ type: [ContractFlowBlockerDto] })
+  blockers!: ContractFlowBlockerDto[]
+
+  @ApiProperty({ nullable: true })
+  completedAt!: string | null
+}
+
+export class ContractFlowActionDto {
+  @ApiProperty({ enum: CONTRACT_FLOW_ACTIONS })
+  action!: ContractFlowActionKey
+
+  @ApiProperty({ enum: ['tenant', 'landlord', 'staff'] })
+  actorRole!: 'tenant' | 'landlord' | 'staff'
+
+  @ApiProperty()
+  enabled!: boolean
+
+  @ApiProperty({ nullable: true })
+  reasonCode!: string | null
+
+  @ApiProperty({
+    enum: CONTRACT_FLOW_STAGE_KEYS,
+    description: 'Stage có panel thực hiện hành động này',
+  })
+  stage!: ContractFlowStageKey
+}
+
+export class ContractFlowDto {
+  @ApiProperty({ example: 1 })
+  version!: 1
+
+  @ApiProperty({ enum: ['DEPOSIT_FIRST', 'SIGN_FIRST'] })
+  strategy!: 'DEPOSIT_FIRST' | 'SIGN_FIRST'
+
+  @ApiProperty({ type: [ContractFlowStageDto] })
+  stages!: ContractFlowStageDto[]
+
+  @ApiProperty({ enum: [...CONTRACT_FLOW_STAGE_KEYS, 'completed'] })
+  activeStage!: ContractFlowStageKey | 'completed'
+
+  @ApiProperty({
+    type: [ContractFlowActionDto],
+    description: 'Chỉ gồm hành động của danh tính JWT hiện tại',
+  })
+  nextActions!: ContractFlowActionDto[]
+}
+
 export class ContractViewDto {
   @ApiProperty({ type: ContractOverviewSnapshotDto })
   contract!: ContractOverviewSnapshotDto
@@ -451,4 +548,7 @@ export class ContractViewDto {
 
   @ApiProperty({ type: ContractLedgerSummaryDto })
   ledger!: ContractLedgerSummaryDto
+
+  @ApiProperty({ type: ContractFlowDto, required: false })
+  flow?: ContractFlowDto
 }

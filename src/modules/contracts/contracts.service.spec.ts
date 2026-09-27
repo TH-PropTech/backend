@@ -294,6 +294,32 @@ describe('ContractsService contract content', () => {
     expect(replay.contentLockedHash).toBe(locked.contentLockedHash)
   })
 
+  it('asks the flow notifier to check stages once content is newly locked', async () => {
+    const { service, contract } = createContentService()
+    const notifier = { notifyForContract: jest.fn() }
+    Reflect.set(service, 'flowNotificationService', notifier)
+    contract.editorContent = validContent
+    contract.contentRevision = 1
+
+    await service.lockContractContent(
+      contract._id.toString(),
+      'staff-1',
+      1,
+      true
+    )
+    await service.lockContractContent(
+      contract._id.toString(),
+      'staff-1',
+      1,
+      true
+    )
+
+    expect(notifier.notifyForContract).toHaveBeenCalledTimes(1)
+    expect(notifier.notifyForContract).toHaveBeenCalledWith(
+      contract._id.toString()
+    )
+  })
+
   it('allows landlord to lock contract content without staff role', async () => {
     const { service, contract } = createContentService()
     contract.editorContent = validContent
@@ -781,6 +807,24 @@ describe('ContractsService activation', () => {
       signedAt: new Date('2030-01-01T00:00:00.000Z'),
     } as const
   }
+
+  it('asks the flow notifier to check stages after each recorded SmartCA signature', async () => {
+    const context = createSmartCaActivationContext({ depositStatus: 'paid' })
+    const notifier = { notifyForContract: jest.fn() }
+    Reflect.set(context.service, 'flowNotificationService', notifier)
+
+    await context.service.recordSmartCaSignature(
+      smartCaEvidence('tenant', 'tx-t')
+    )
+    await context.service.recordSmartCaSignature(
+      smartCaEvidence('landlord', 'tx-l')
+    )
+
+    expect(notifier.notifyForContract).toHaveBeenCalledTimes(2)
+    expect(notifier.notifyForContract).toHaveBeenCalledWith(
+      context.contract._id.toString()
+    )
+  })
 
   it.each(['DEPOSIT_FIRST', 'SIGN_FIRST'] as const)(
     'activates only after both valid SmartCA signatures (%s)',

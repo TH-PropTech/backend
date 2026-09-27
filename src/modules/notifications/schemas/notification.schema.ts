@@ -29,6 +29,10 @@ export class Notification {
   @Column()
   data!: Record<string, unknown>
 
+  /** Khóa chống gửi trùng theo user, ví dụ `flow:<contractId>:<stage>:<state>`. */
+  @Column({ nullable: true })
+  dedupeKey?: string | null
+
   @CreateDateColumn()
   createdAt!: Date
 }

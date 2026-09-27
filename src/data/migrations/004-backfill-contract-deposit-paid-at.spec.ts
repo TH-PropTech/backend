@@ -46,15 +46,13 @@ describe('backfillContractDepositPaidAt', () => {
       save: jest.fn(),
     }
     const depositAgreementRepository = {
-      find: jest
-        .fn()
-        .mockResolvedValue([
-          {
-            _id: agreementId,
-            status: 'applied-to-lease-security',
-            paidAt: new Date(),
-          },
-        ]),
+      find: jest.fn().mockResolvedValue([
+        {
+          _id: agreementId,
+          status: 'applied-to-lease-security',
+          paidAt: new Date(),
+        },
+      ]),
       save: jest.fn(),
     }
 

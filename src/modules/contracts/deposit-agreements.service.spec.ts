@@ -205,6 +205,97 @@ describe('DepositAgreementsService', () => {
     expect(context.repository.save).not.toHaveBeenCalled()
   })
 
+  it('asks the flow notifier to check stages after consent, bank payment and staff confirmation', async () => {
+    const notifier = { notifyForDepositAgreement: jest.fn() }
+    const createNotifyingService = (
+      agreement: TestAgreement
+    ): DepositAgreementsService =>
+      new DepositAgreementsService(
+        {
+          findOne: jest.fn().mockResolvedValue(agreement),
+          save: jest.fn((value: unknown) => Promise.resolve(value)),
+        } as never,
+        { enqueue: jest.fn().mockResolvedValue({}) } as never,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        notifier as never
+      )
+
+    await createNotifyingService(baseAgreement()).consent(
+      agreementId,
+      'tenant-1',
+      1,
+      'a'.repeat(64)
+    )
+    await createNotifyingService({
+      ...baseAgreement(),
+      status: 'payment-pending',
+    }).recordDepositPaid(agreementId, 'attempt-1')
+    await createNotifyingService({
+      ...baseAgreement(),
+      status: 'accepted',
+    }).confirmDepositReceived(agreementId, 'staff-1', 'Đã nhận chuyển khoản')
+
+    expect(notifier.notifyForDepositAgreement).toHaveBeenCalledTimes(3)
+    expect(notifier.notifyForDepositAgreement).toHaveBeenCalledWith(agreementId)
+  })
+
+  it('marks an accepted agreement payment-pending', async () => {
+    const context = createService({
+      ...baseAgreement(),
+      status: 'accepted',
+      tenantConsent: { consentedAt: new Date(), contentHash: 'a'.repeat(64) },
+    })
+
+    const result = await context.service.markPaymentPending(
+      agreementId,
+      'tenant-1'
+    )
+
+    expect(result.status).toBe('payment-pending')
+    expect(context.repository.save).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps a payment-pending agreement unchanged when a new attempt replaces an expired one', async () => {
+    const context = createService({
+      ...baseAgreement(),
+      status: 'payment-pending',
+      tenantConsent: { consentedAt: new Date(), contentHash: 'a'.repeat(64) },
+    })
+
+    const result = await context.service.markPaymentPending(
+      agreementId,
+      'tenant-1'
+    )
+
+    expect(result.status).toBe('payment-pending')
+    expect(context.repository.save).not.toHaveBeenCalled()
+  })
+
+  it('rejects marking payment-pending without consent or for a paid agreement', async () => {
+    await expect(
+      createService().service.markPaymentPending(agreementId, 'tenant-1')
+    ).rejects.toThrow('DEPOSIT_CONSENT_REQUIRED')
+    await expect(
+      createService({
+        ...baseAgreement(),
+        status: 'paid',
+        tenantConsent: {
+          consentedAt: new Date(),
+          contentHash: 'a'.repeat(64),
+        },
+      }).service.markPaymentPending(agreementId, 'tenant-1')
+    ).rejects.toThrow('DEPOSIT_CONSENT_REQUIRED')
+  })
+
+  it('rejects marking payment-pending for another tenant', async () => {
+    await expect(
+      createService().service.markPaymentPending(agreementId, 'tenant-2')
+    ).rejects.toBeInstanceOf(ForbiddenException)
+  })
+
   it('rejects consent from another tenant or for a stale hash', async () => {
     const context = createService()
 
