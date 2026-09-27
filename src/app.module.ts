@@ -30,6 +30,7 @@ import { TwoFactorModule } from './modules/two-factor/two-factor.module'
 import { FabricModule } from './modules/fabric/fabric.module'
 import { PoliciesModule } from './modules/policies/policies.module'
 import { LegalTermsModule } from './modules/legal-terms/legal-terms.module'
+import { LegalSourcesModule } from './modules/legal-sources/legal-sources.module'
 import { AiConsultationModule } from './modules/ai-consultation/ai-consultation.module'
 import { RedisModule } from './modules/redis/redis.module'
 import { RecommendationsModule } from './modules/recommendations/recommendations.module'
@@ -101,6 +102,7 @@ import { PropertyOwnershipTransferModule } from './modules/property-ownership-tr
     FabricModule,
     PoliciesModule,
     LegalTermsModule,
+    LegalSourcesModule,
     AiConsultationModule,
     RedisModule,
     RecommendationsModule,
