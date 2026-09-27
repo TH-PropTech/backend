@@ -73,7 +73,7 @@ export class FabricService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   async onModuleInit(): Promise<void> {
-    const enabled = this.configService.get<string>('FABRIC_ENABLED') === 'true'
+    const enabled = this.configService.get<boolean>('fabric.enabled') ?? false
     this.mode = enabled ? 'fabric' : 'simulation'
     this.lastCheckedAt = new Date().toISOString()
 

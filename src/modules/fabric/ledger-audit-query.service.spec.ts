@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing'
+import { ConfigService } from '@nestjs/config'
 import { getRepositoryToken } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 import { ObjectId } from 'mongodb'
@@ -10,6 +11,7 @@ describe('LedgerAuditQueryService', () => {
   let service: LedgerAuditQueryService
   let logRepo: jest.Mocked<Repository<BlockchainLog>>
   let outboxRepo: jest.Mocked<Repository<LedgerOutbox>>
+  let configService: { get: jest.Mock }
 
   beforeEach(async () => {
     const mockLogRepo = {
@@ -17,6 +19,11 @@ describe('LedgerAuditQueryService', () => {
     }
     const mockOutboxRepo = {
       find: jest.fn(),
+    }
+    configService = {
+      get: jest.fn((key: string) =>
+        key === 'fabric.enabled' ? false : undefined
+      ),
     }
 
     const module: TestingModule = await Test.createTestingModule({
@@ -29,6 +36,10 @@ describe('LedgerAuditQueryService', () => {
         {
           provide: getRepositoryToken(LedgerOutbox),
           useValue: mockOutboxRepo,
+        },
+        {
+          provide: ConfigService,
+          useValue: configService,
         },
       ],
     }).compile()
@@ -88,5 +99,30 @@ describe('LedgerAuditQueryService', () => {
 
     const events = await service.getContractEvents('contract-empty')
     expect(events).toEqual([])
+  })
+
+  it('projects an outbox event as Fabric when typed configuration enables Fabric', async () => {
+    const outboxId = new ObjectId('507f1f77bcf86cd799439033')
+    configService.get.mockImplementation((key: string) =>
+      key === 'fabric.enabled' ? true : undefined
+    )
+    outboxRepo.find.mockResolvedValue([
+      {
+        _id: outboxId,
+        aggregateType: 'contract',
+        aggregateId: 'contract-fabric',
+        eventType: 'contract.activated',
+        status: 'pending',
+        txHash: null,
+        createdAt: new Date('2026-09-14T08:00:00Z'),
+        updatedAt: new Date('2026-09-14T08:00:00Z'),
+      } as LedgerOutbox,
+    ])
+    logRepo.find.mockResolvedValue([])
+
+    const events = await service.getContractEvents('contract-fabric')
+
+    expect(events).toHaveLength(1)
+    expect(events[0]!.networkMode).toBe('fabric')
   })
 })
