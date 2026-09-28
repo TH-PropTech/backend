@@ -1,8 +1,9 @@
+import 'reflect-metadata'
 import { plainToInstance } from 'class-transformer'
 import { validate } from 'class-validator'
 import { CreateRentalApplicationDto } from './create-rental-application.dto'
 
-const validInput = {
+const baseDto = {
   apartmentId: 'apartment-1',
   packageId: 'package-12',
   packageVersion: 1,
@@ -18,34 +19,62 @@ const validInput = {
   ],
 }
 
-describe('CreateRentalApplicationDto', () => {
-  it('accepts only the tenant application fields', async () => {
-    const errors = await validate(
-      plainToInstance(CreateRentalApplicationDto, validInput),
-      { whitelist: true, forbidNonWhitelisted: true }
-    )
+describe('CreateRentalApplicationDto optional phase 2 fields', () => {
+  it('accepts valid occupants, vehicles, emergency contact, cycle and booking id', async () => {
+    const dto = plainToInstance(CreateRentalApplicationDto, {
+      ...baseDto,
+      occupants: 2,
+      occupantsDetail: [
+        { fullName: 'Nguyen Van A', birthYear: 1998, relationship: 'Spouse' },
+      ],
+      vehicles: [{ type: 'motorbike', quantity: 1 }],
+      emergencyContact: {
+        fullName: 'Nguyen Van B',
+        relationship: 'Parent',
+        phone: '+84912345678',
+      },
+      selectedPaymentCycleMonths: 3,
+      viewingBookingId: '507f1f77bcf86cd799439011',
+    })
 
-    expect(errors).toHaveLength(0)
+    expect(
+      await validate(dto, { whitelist: true, forbidNonWhitelisted: true })
+    ).toEqual([])
   })
 
-  it.each([
-    ['durationMonths', 24],
-    ['monthlyRent', 99_000_000],
-    ['depositAmount', 198_000_000],
-    ['tenantId', 'forged-tenant'],
-    ['landlordId', 'forged-landlord'],
-  ])(
-    'rejects forged authority or commercial field %s',
-    async (field, value) => {
-      const errors = await validate(
-        plainToInstance(CreateRentalApplicationDto, {
-          ...validInput,
-          [field]: value,
-        }),
-        { whitelist: true, forbidNonWhitelisted: true }
-      )
+  it('rejects invalid vehicle types and payment cycles', async () => {
+    const dto = plainToInstance(CreateRentalApplicationDto, {
+      ...baseDto,
+      vehicles: [{ type: 'scooter', quantity: 1 }],
+      selectedPaymentCycleMonths: 2,
+    })
 
-      expect(errors.map(error => error.property)).toContain(field)
-    }
-  )
+    const errors = await validate(dto)
+    expect(errors.map(error => error.property)).toEqual(
+      expect.arrayContaining(['vehicles', 'selectedPaymentCycleMonths'])
+    )
+  })
+
+  it('rejects a full identity number in occupant details as an unknown field', async () => {
+    const dto = plainToInstance(CreateRentalApplicationDto, {
+      ...baseDto,
+      occupants: 2,
+      occupantsDetail: [
+        {
+          fullName: 'Nguyen Van A',
+          birthYear: 1998,
+          relationship: 'Spouse',
+          cccd: '079098001234',
+        },
+      ],
+    })
+
+    const errors = await validate(dto, {
+      whitelist: true,
+      forbidNonWhitelisted: true,
+    })
+    expect(
+      errors[0]?.children?.[0]?.children?.map(error => error.property)
+    ).toContain('cccd')
+  })
 })

@@ -51,6 +51,44 @@ export class RentalApplication {
   @Column({ nullable: true }) submittedAt?: Date | null
   @Column({ nullable: true }) decidedAt?: Date | null
   @Column() occupants!: number
+  @Column({ nullable: true })
+  occupantsDetail?: Array<{
+    fullName: string
+    birthYear: number
+    relationship: string
+  }> | null
+  @Column({ nullable: true })
+  vehicles?: Array<{
+    type: 'motorbike' | 'car' | 'bicycle'
+    quantity: number
+  }> | null
+  @Column({ nullable: true })
+  emergencyContact?: {
+    fullName: string
+    relationship: string
+    phone: string
+  } | null
+  @Column({ nullable: true })
+  selectedPaymentCycleMonths?: 1 | 3 | 6 | null
+  @Column({ nullable: true })
+  viewingBookingId?: string | null
+  @Column('json', { nullable: true })
+  feeSnapshot?: {
+    scheduleId: string
+    version: number
+    contentHash: string
+    quote: Array<{
+      feeKind: 'LANDLORD_COMMISSION' | 'TENANT_SERVICE'
+      payerRole: 'tenant' | 'landlord'
+      amountBeforeVat: number
+      vatAmount: number
+      amount: number
+    }>
+  } | null
+  @Column('json', { nullable: true })
+  tenantFeeAck?: { contentHash: string; acknowledgedAt: Date } | null
+  @Column('json', { nullable: true })
+  landlordFeeAck?: { contentHash: string; acknowledgedAt: Date } | null
   @Column() moveInDate!: Date
   @Column() leaseDurationMonths!: number
   @Column() occupation!: string

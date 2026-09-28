@@ -50,4 +50,45 @@ describe('payment schedule', () => {
       })
     ).toThrow('INVALID_PAYMENT_SCHEDULE')
   })
+
+  it('generates one invoice per three-month cycle with its covered period', () => {
+    const schedule = generatePaymentSchedule({
+      contractId: 'contract-1',
+      startDate: new Date('2030-01-01T00:00:00.000Z'),
+      durationMonths: 12,
+      monthlyRent: 10_000_000,
+      paymentDay: 10,
+      cycleMonths: 3,
+    })
+
+    expect(schedule).toHaveLength(4)
+    expect(schedule[0]).toMatchObject({
+      periodKey: '2030-01',
+      amount: 30_000_000,
+      cycleMonths: 3,
+      periodStart: new Date('2030-01-01T00:00:00.000Z'),
+      periodEnd: new Date('2030-03-31T00:00:00.000Z'),
+    })
+  })
+
+  it('preserves the monthly schedule shape when the payment cycle is one month', () => {
+    expect(
+      generatePaymentSchedule({
+        contractId: 'contract-1',
+        startDate: new Date('2030-01-01T00:00:00.000Z'),
+        durationMonths: 1,
+        monthlyRent: 12_000_000,
+        paymentDay: 10,
+        cycleMonths: 1,
+      })
+    ).toEqual([
+      {
+        contractId: 'contract-1',
+        periodKey: '2030-01',
+        amount: 12_000_000,
+        dueDate: new Date('2030-01-10T00:00:00.000Z'),
+        status: 'unpaid',
+      },
+    ])
+  })
 })

@@ -18,6 +18,8 @@ import { OwnershipTransferResolver } from '../property-ownership-transfer/owners
 import { ContractArtifactService } from './contract-artifact.service'
 import { ContractTemplateGovernanceService } from './legal/contract-template-governance.service'
 import { ContractAmendment } from './schemas/contract-amendment.schema'
+import { MoveInSettlement } from '../move-in-settlements/schemas/move-in-settlement.schema'
+import { resolveEffectiveCommercial } from './commercial/resolve-effective-commercial'
 import {
   resolveDepositConfirmation,
   type DepositConfirmation,
@@ -53,7 +55,10 @@ export class ContractViewService {
     private readonly templateGovernanceService?: ContractTemplateGovernanceService,
     @Optional()
     @InjectRepository(ContractAmendment)
-    private readonly amendmentRepository?: Repository<ContractAmendment>
+    private readonly amendmentRepository?: Repository<ContractAmendment>,
+    @Optional()
+    @InjectRepository(MoveInSettlement)
+    private readonly settlementRepository?: Repository<MoveInSettlement>
   ) {}
 
   /**
@@ -428,15 +433,24 @@ export class ContractViewService {
       onChainValid: null,
     }
 
-    const commercial = contract.effectiveCommercial ??
-      contract.commercialDraft ?? {
-        monthlyRent: contract.monthlyRent,
-        deposit: contract.deposit,
-        paymentDay: contract.paymentDay,
-        durationMonths: contract.durationMonths ?? null,
-        latePenaltyRate: contract.latePenaltyRate || 10,
-        terminationNoticeDays: contract.terminationNoticeDays || 30,
-      }
+    const commercial = resolveEffectiveCommercial(contract)
+    const settlement = this.settlementRepository
+      ? await this.settlementRepository.findOne({ where: { contractId } })
+      : null
+    const feeLines = contract.feeSnapshot?.quote ?? []
+    const tenantServiceFee =
+      feeLines.find(line => line.payerRole === 'tenant')?.amount ?? 0
+    const landlordCommission =
+      isLandlord || isStaff
+        ? (feeLines.find(line => line.payerRole === 'landlord')?.amount ?? 0)
+        : 0
+    const holdingDeposit =
+      contract.packageSnapshot?.resolvedHoldingDepositAmount ?? contract.deposit
+    const securityTopUpAmount = Math.max(0, contract.deposit - holdingDeposit)
+    const initialPaymentTotal = (settlement?.lines ?? []).reduce(
+      (sum, line) => sum + line.amount,
+      0
+    )
 
     // 6. Hoàn thiện ContractViewDto
     return {
@@ -533,8 +547,47 @@ export class ContractViewService {
           },
           ledgerStatus,
           viewer: { isTenant, isLandlord, isStaff },
+          settlement: settlement
+            ? {
+                required: true,
+                status: settlement.status,
+                handoverRecorded: Boolean(settlement.handover),
+                handoverCompleted: Boolean(settlement.handover?.completedAt),
+                completedAt: settlement.handover?.completedAt ?? null,
+              }
+            : undefined,
+          fees: {
+            tenantDue: Boolean(
+              feeLines.find(line => line.payerRole === 'tenant')?.amount
+            ),
+            landlordDue: Boolean(
+              feeLines.find(line => line.payerRole === 'landlord')?.amount
+            ),
+          },
         })
       ),
+      settlement: settlement
+        ? {
+            id: settlement._id.toHexString(),
+            status: settlement.status,
+            total: settlement.total,
+            dueAt: settlement.dueAt.toISOString(),
+            statementHash: settlement.statementHash,
+            lines: settlement.lines.map(line => ({
+              kind: line.kind,
+              amount: line.amount,
+              paymentId: line.paymentId,
+            })),
+            handover: settlement.handover ?? null,
+          }
+        : null,
+      financialSummary: {
+        initialPaymentTotal,
+        holdingDeposit,
+        securityTopUpAmount,
+        tenantServiceFee,
+        landlordCommission,
+      },
     }
   }
 
@@ -544,6 +597,8 @@ export class ContractViewService {
       depositAgreement: DepositAgreement | null
       depositConfirmation: DepositConfirmation
       ledgerStatus: ContractLedgerSummaryDto['status']
+      settlement?: ContractFlowFacts['settlement']
+      fees?: ContractFlowFacts['fees']
     }
   ): ContractFlowFacts {
     const { depositAgreement: agreement, depositConfirmation } = context
@@ -589,6 +644,8 @@ export class ContractViewService {
         recordedAt: contract.ledgerRecordedAt ?? null,
       },
       viewer: context.viewer,
+      ...(context.settlement ? { settlement: context.settlement } : {}),
+      ...(context.fees ? { fees: context.fees } : {}),
     }
   }
 }

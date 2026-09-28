@@ -117,6 +117,7 @@ export class Apartment {
     | 'rejected'
     | 'expired'
     | 'unavailable'
+    | 'rented'
     | 'updating'
 
   @Column({ default: false })

@@ -49,6 +49,77 @@ describe('PaymentsService', () => {
     expect(paymentRepository.save).toHaveBeenCalledTimes(2)
   })
 
+  it('creates one rent invoice per configured payment cycle', async () => {
+    paymentRepository.find.mockResolvedValue([])
+    paymentRepository.create.mockImplementation(
+      (value: Payment): Payment => value
+    )
+    paymentRepository.save.mockImplementation(
+      (value: Payment): Promise<Payment> => Promise.resolve(value)
+    )
+
+    const contract = Object.assign(
+      {
+        _id: new ObjectId(),
+        startDate: new Date('2030-01-01T00:00:00.000Z'),
+        durationMonths: 12,
+        monthlyRent: 10_000_000,
+        paymentDay: 10,
+        tenantId: 'tenant-1',
+        landlordId: 'landlord-1',
+      } as Contract,
+      { paymentCycleMonths: 3 }
+    )
+    const result = await service.generateSchedule(contract)
+
+    expect(result).toHaveLength(4)
+    expect(paymentRepository.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        amount: 30_000_000,
+        periodKey: '2030-01',
+        cycleMonths: 3,
+        periodStart: new Date('2030-01-01T00:00:00.000Z'),
+        periodEnd: new Date('2030-03-31T00:00:00.000Z'),
+      })
+    )
+  })
+
+  it('uses locked effective commercial terms when generating rent invoices', async () => {
+    paymentRepository.find.mockResolvedValue([])
+    paymentRepository.create.mockImplementation(
+      (value: Payment): Payment => value
+    )
+    paymentRepository.save.mockImplementation(
+      (value: Payment): Promise<Payment> => Promise.resolve(value)
+    )
+    const contract = {
+      _id: new ObjectId(),
+      startDate: new Date('2030-01-01T00:00:00.000Z'),
+      durationMonths: 12,
+      monthlyRent: 10_000_000,
+      paymentDay: 1,
+      tenantId: 'tenant-1',
+      landlordId: 'landlord-1',
+      contentLockedAt: new Date(),
+      commercialDraft: {
+        monthlyRent: 12_000_000,
+        deposit: 24_000_000,
+        paymentDay: 5,
+        latePenaltyRate: 0,
+        terminationNoticeDays: 30,
+        durationMonths: 12,
+      },
+    } as Contract
+
+    await service.generateSchedule(contract)
+
+    expect(paymentRepository.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        amount: 12_000_000,
+      })
+    )
+  })
+
   it('rejects a non-participant from reading a contract schedule', async () => {
     contractRepository.findOne.mockResolvedValue({
       tenantId: 'tenant-1',

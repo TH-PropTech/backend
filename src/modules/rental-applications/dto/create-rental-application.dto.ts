@@ -2,17 +2,20 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
 import { Type } from 'class-transformer'
 import {
   IsBoolean,
+  IsArray,
   ArrayMaxSize,
   ArrayNotEmpty,
   IsDateString,
   IsInt,
   IsNotEmpty,
+  IsObject,
   IsOptional,
   IsIn,
   IsString,
   Max,
   MaxLength,
   Min,
+  Matches,
   ValidateNested,
 } from 'class-validator'
 import type { RentalExecutionPolicyRef } from '../../rental-flow-config/rental-execution-policy.util'
@@ -35,6 +38,51 @@ class SelectedExecutionPolicyRefDto implements RentalExecutionPolicyRef {
   contentHash!: string
 }
 
+class OccupantDetailDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(100)
+  fullName!: string
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1900)
+  @Max(2100)
+  birthYear!: number
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(100)
+  relationship!: string
+}
+
+class VehicleDto {
+  @IsIn(['motorbike', 'car', 'bicycle'])
+  type!: 'motorbike' | 'car' | 'bicycle'
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(20)
+  quantity!: number
+}
+
+class EmergencyContactDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(100)
+  fullName!: string
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(100)
+  relationship!: string
+
+  @IsString()
+  @Matches(/^\+?[\d\s()-]{8,20}$/)
+  phone!: string
+}
+
 export class CreateRentalApplicationDto {
   @ApiProperty() @IsString() @IsNotEmpty() apartmentId!: string
   @ApiProperty({ description: 'Approved rental package identifier' })
@@ -53,6 +101,41 @@ export class CreateRentalApplicationDto {
   @Min(1)
   @Max(20)
   occupants!: number
+
+  @ApiPropertyOptional({ type: [OccupantDetailDto] })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => OccupantDetailDto)
+  occupantsDetail?: OccupantDetailDto[]
+
+  @ApiPropertyOptional({ type: [VehicleDto] })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(10)
+  @ValidateNested({ each: true })
+  @Type(() => VehicleDto)
+  vehicles?: VehicleDto[]
+
+  @ApiPropertyOptional({ type: EmergencyContactDto })
+  @IsOptional()
+  @IsObject()
+  @ValidateNested()
+  @Type(() => EmergencyContactDto)
+  emergencyContact?: EmergencyContactDto
+
+  @ApiPropertyOptional({ enum: [1, 3, 6] })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @IsIn([1, 3, 6])
+  selectedPaymentCycleMonths?: 1 | 3 | 6
+
+  @ApiPropertyOptional({ maxLength: 24 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(24)
+  viewingBookingId?: string
   @ApiProperty() @IsDateString() moveInDate!: string
   @ApiProperty() @IsString() @IsNotEmpty() @MaxLength(200) occupation!: string
   @ApiProperty() @IsBoolean() hasPets!: boolean
@@ -107,4 +190,26 @@ export class CreateRentalApplicationDto {
   @ValidateNested()
   @Type(() => SelectedExecutionPolicyRefDto)
   selectedExecutionPolicy?: SelectedExecutionPolicyRefDto
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  feeScheduleId?: string
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  feeScheduleVersion?: number
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  feeContentHash?: string
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  feeAcknowledgedHash?: string
 }

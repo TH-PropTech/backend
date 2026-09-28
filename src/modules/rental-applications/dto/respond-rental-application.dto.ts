@@ -37,4 +37,10 @@ export class RespondRentalApplicationDto {
   @IsString()
   @MaxLength(500)
   note?: string
+
+  @ApiPropertyOptional({ maxLength: 64 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  landlordFeeAck?: string
 }

@@ -48,6 +48,7 @@ import { LocationRiskModule } from './modules/location-risk/location-risk.module
 import { OperationsModule } from './modules/operations/operations.module'
 import { RentalFlowConfigModule } from './modules/rental-flow-config/rental-flow-config.module'
 import { PropertyOwnershipTransferModule } from './modules/property-ownership-transfer/property-ownership-transfer.module'
+import { PlatformFeesModule } from './modules/platform-fees/platform-fees.module'
 
 @Module({
   imports: [
@@ -120,6 +121,7 @@ import { PropertyOwnershipTransferModule } from './modules/property-ownership-tr
     OperationsModule,
     RentalFlowConfigModule,
     PropertyOwnershipTransferModule,
+    PlatformFeesModule,
   ],
 })
 export class AppModule {}

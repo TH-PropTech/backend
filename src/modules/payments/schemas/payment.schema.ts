@@ -8,7 +8,12 @@ import {
   Index,
 } from 'typeorm'
 
-export type PaymentType = 'deposit' | 'rent' | 'penalty'
+export type PaymentType =
+  | 'deposit'
+  | 'rent'
+  | 'penalty'
+  | 'deposit-topup'
+  | 'platform-fee'
 export type PaymentLedgerStatus =
   | 'not-required'
   | 'pending'
@@ -43,7 +48,7 @@ export class Payment {
   paidAt!: Date | null
 
   @Column({ type: 'string', default: 'unpaid' })
-  status!: 'unpaid' | 'paid' | 'overdue'
+  status!: 'unpaid' | 'paid' | 'overdue' | 'waived'
 
   @Column({ nullable: true })
   txHash!: string | null
@@ -80,6 +85,34 @@ export class Payment {
 
   @Column({ nullable: true })
   periodKey?: string | null
+
+  @Column({ nullable: true })
+  cycleMonths?: 1 | 3 | 6 | null
+
+  @Column({ nullable: true })
+  periodStart?: Date | null
+
+  @Column({ nullable: true })
+  periodEnd?: Date | null
+
+  @Column({ nullable: true }) payerId?: string | null
+  @Column({ type: 'string', nullable: true }) payerRole?:
+    | 'tenant'
+    | 'landlord'
+    | null
+  @Column({ type: 'string', nullable: true }) payeeRole?:
+    | 'landlord'
+    | 'platform'
+    | null
+  @Column({ type: 'string', nullable: true }) feeKind?:
+    | 'LANDLORD_COMMISSION'
+    | 'TENANT_SERVICE'
+    | null
+  @Column({ nullable: true }) amountBeforeVat?: number | null
+  @Column({ nullable: true }) vatAmount?: number | null
+  @Column({ nullable: true }) waivedBy?: string | null
+  @Column({ nullable: true }) waivedAt?: Date | null
+  @Column({ nullable: true }) waiveReason?: string | null
 
   @Column({ nullable: true })
   reminderSentForDate?: string | null

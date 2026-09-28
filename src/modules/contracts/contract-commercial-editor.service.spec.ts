@@ -2,6 +2,7 @@ import { ConflictException, ForbiddenException } from '@nestjs/common'
 import { ObjectId } from 'mongodb'
 import { ContractCommercialEditorService } from './contract-commercial-editor.service'
 import { ContractsService } from './contracts.service'
+import type { DepositAgreementsService } from './deposit-agreements.service'
 import type {
   Contract,
   ContractCommercialDraft,
@@ -11,6 +12,7 @@ type CommercialEditorTestSetup = {
   contract: Contract
   repository: Record<string, jest.Mock>
   service: ContractCommercialEditorService
+  depositAgreementsService: { reviseSecurityDepositBeforeConsent: jest.Mock }
 }
 
 describe('ContractCommercialEditorService', () => {
@@ -46,6 +48,7 @@ describe('ContractCommercialEditorService', () => {
       propertyAddress: '1 Example Street',
       startDate: new Date('2026-10-01T00:00:00.000Z'),
       endDate: new Date('2027-10-01T00:00:00.000Z'),
+      depositAgreementId: 'deposit-agreement-1',
       contentRevision: 0,
       editorContent: null,
     } as unknown as Contract
@@ -53,10 +56,19 @@ describe('ContractCommercialEditorService', () => {
       findOne: jest.fn().mockResolvedValue(contract),
       save: jest.fn().mockResolvedValue(contract),
     }
+    const depositAgreementsService = {
+      reviseSecurityDepositBeforeConsent: jest
+        .fn()
+        .mockResolvedValue(undefined),
+    }
     return {
       contract,
       repository,
-      service: new ContractCommercialEditorService(repository as never),
+      depositAgreementsService,
+      service: new ContractCommercialEditorService(
+        repository as never,
+        depositAgreementsService as unknown as DepositAgreementsService
+      ),
     }
   }
 
@@ -106,7 +118,7 @@ describe('ContractCommercialEditorService', () => {
   })
 
   it('saves an allowlisted draft with optimistic revision and audit hashes', async () => {
-    const { service, contract, repository } = setup()
+    const { service, contract, repository, depositAgreementsService } = setup()
 
     const result = await service.saveDraft(
       '507f1f77bcf86cd799439011',
@@ -130,6 +142,26 @@ describe('ContractCommercialEditorService', () => {
     expect(audit.afterHash).toMatch(/^[a-f0-9]{64}$/)
     expect(repository.save).toHaveBeenCalledWith(contract)
     expect(result.revision).toBe(1)
+    expect(
+      depositAgreementsService.reviseSecurityDepositBeforeConsent
+    ).toHaveBeenCalledWith('deposit-agreement-1', draft.deposit)
+  })
+
+  it('rejects a deposit change after tenant consent locks the agreement', async () => {
+    const { service, depositAgreementsService } = setup()
+    depositAgreementsService.reviseSecurityDepositBeforeConsent.mockRejectedValue(
+      new ConflictException('COMMERCIAL_DEPOSIT_LOCKED')
+    )
+
+    await expect(
+      service.saveDraft(
+        '507f1f77bcf86cd799439011',
+        { ...draft, deposit: 40_000_000 },
+        0,
+        'admin-1',
+        true
+      )
+    ).rejects.toThrow('COMMERCIAL_DEPOSIT_LOCKED')
   })
 
   it('fails closed for stale revisions and locked or closed contracts', async () => {
@@ -200,6 +232,9 @@ describe('ContractCommercialEditorService', () => {
     )
     expect(locked.status).toBe('awaiting-signature')
     expect(locked.contentLockedHash).toMatch(/^[a-f0-9]{64}$/)
+    expect(locked.effectiveCommercial).toEqual(draft)
+    expect(locked.effectiveCommercialRevision).toBe(1)
+    expect(locked.endDate).toEqual(new Date('2027-10-01T00:00:00.000Z'))
 
     await expect(
       service.getEditor(contract._id.toHexString(), 'admin-1', true)

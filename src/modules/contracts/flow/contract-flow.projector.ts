@@ -47,6 +47,14 @@ export interface ContractFlowFacts {
     recordedAt: Date | null
   }
   viewer: { isTenant: boolean; isLandlord: boolean; isStaff: boolean }
+  settlement?: {
+    required: boolean
+    status: string | null
+    handoverRecorded: boolean
+    handoverCompleted: boolean
+    completedAt: Date | null
+  }
+  fees?: { tenantDue: boolean; landlordDue: boolean }
 }
 
 type StageEvaluation = {
@@ -308,7 +316,40 @@ function projectActions(facts: ContractFlowFacts): ContractFlowActionDto[] {
   const role = resolveActorRole(facts.viewer)
   if (!role || facts.contractStatus === 'cancelled') return []
   if (isActivated(facts)) {
-    return [toAction('VERIFY_LEDGER', role, 'ledger', ALWAYS_ENABLED)]
+    const actions = [toAction('VERIFY_LEDGER', role, 'ledger', ALWAYS_ENABLED)]
+    const settlement = facts.settlement
+    if (settlement?.required) {
+      if (role === 'tenant' && settlement.status !== 'paid')
+        actions.push(
+          toAction('PAY_SETTLEMENT', role, 'move-in', {
+            enabled: settlement.status !== 'cancelled',
+            reasonCode:
+              settlement.status === 'cancelled' ? 'SETTLEMENT_CANCELLED' : null,
+          })
+        )
+      if (
+        role === 'tenant' &&
+        settlement.status === 'paid' &&
+        settlement.handoverRecorded &&
+        !settlement.handoverCompleted
+      )
+        actions.push(
+          toAction('CONFIRM_HANDOVER', role, 'move-in', ALWAYS_ENABLED)
+        )
+      if (
+        (role === 'landlord' || role === 'staff') &&
+        settlement.status === 'paid' &&
+        !settlement.handoverRecorded
+      )
+        actions.push(
+          toAction('RECORD_HANDOVER', role, 'move-in', ALWAYS_ENABLED)
+        )
+    }
+    if (!settlement?.required && role === 'tenant' && facts.fees?.tenantDue)
+      actions.push(toAction('PAY_FEE', role, 'move-in', ALWAYS_ENABLED))
+    if (role === 'landlord' && facts.fees?.landlordDue)
+      actions.push(toAction('PAY_FEE', role, 'move-in', ALWAYS_ENABLED))
+    return actions
   }
   if (role === 'staff') return documentActions(facts, role)
   if (role === 'landlord') {
@@ -324,6 +365,18 @@ function projectActions(facts: ContractFlowFacts): ContractFlowActionDto[] {
  */
 export function projectContractFlow(facts: ContractFlowFacts): ContractFlowDto {
   const stages = projectStages(facts)
+  if (facts.settlement?.required) {
+    const completed =
+      facts.settlement.status === 'paid' && facts.settlement.handoverCompleted
+    stages.push({
+      key: 'move-in',
+      status: completed ? 'done' : isActivated(facts) ? 'active' : 'upcoming',
+      blockers: [],
+      completedAt: completed
+        ? (facts.settlement.completedAt?.toISOString() ?? null)
+        : null,
+    })
+  }
   const firstOpen = stages.find(
     stage => stage.status !== 'done' && stage.status !== 'skipped'
   )

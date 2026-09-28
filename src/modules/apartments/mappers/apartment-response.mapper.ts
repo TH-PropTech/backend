@@ -10,6 +10,9 @@ export interface RentalPackageResponse {
   monthlyRent: number
   depositPolicy: RentalPackageSnapshot['depositPolicy']
   resolvedDepositAmount: number
+  settlementPolicy?: RentalPackageSnapshot['settlementPolicy']
+  resolvedHoldingDepositAmount?: number
+  resolvedSecurityTopUpAmount?: number
   status: 'active' | 'inactive'
   allowedExecutionPolicies?: RentalExecutionPolicyRef[]
   defaultExecutionPolicy?: RentalExecutionPolicyRef
@@ -244,6 +247,21 @@ export class ApartmentResponseMapper {
       monthlyRent: rentalPackage.monthlyRent,
       depositPolicy: rentalPackage.depositPolicy,
       resolvedDepositAmount: rentalPackage.resolvedDepositAmount,
+      ...(rentalPackage.settlementPolicy
+        ? { settlementPolicy: rentalPackage.settlementPolicy }
+        : {}),
+      ...(rentalPackage.resolvedHoldingDepositAmount !== undefined
+        ? {
+            resolvedHoldingDepositAmount:
+              rentalPackage.resolvedHoldingDepositAmount,
+          }
+        : {}),
+      ...(rentalPackage.resolvedSecurityTopUpAmount !== undefined
+        ? {
+            resolvedSecurityTopUpAmount:
+              rentalPackage.resolvedSecurityTopUpAmount,
+          }
+        : {}),
       status: rentalPackage.status,
       ...(rentalPackage.allowedExecutionPolicies
         ? { allowedExecutionPolicies: rentalPackage.allowedExecutionPolicies }
@@ -301,6 +319,10 @@ export class ApartmentResponseMapper {
       case 'unavailable':
         tag = 'unavailable'
         tagText = 'Đã ẩn/Đóng'
+        break
+      case 'rented':
+        tag = 'rented'
+        tagText = 'Đang cho thuê'
         break
       case 'updating':
         tag = 'updating'

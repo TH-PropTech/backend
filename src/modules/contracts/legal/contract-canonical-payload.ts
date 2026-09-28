@@ -5,6 +5,7 @@ import type {
 } from '../schemas/contract.schema'
 import type { ContractTemplate } from './contract-template.schema'
 import { canonicalizeTipTapContent } from './tiptap-content'
+import { resolveEffectiveCommercial } from '../commercial/resolve-effective-commercial'
 
 export const CONTRACT_CONTENT_HASH_SCHEMA_VERSION = 2
 
@@ -59,14 +60,7 @@ export function buildCanonicalContractPayload(
   const editorContent = contract.editorContent
     ? canonicalizeTipTapContent(contract.editorContent)
     : null
-  const commercial = contract.commercialDraft ?? {
-    monthlyRent: contract.monthlyRent,
-    deposit: contract.deposit,
-    paymentDay: contract.paymentDay,
-    latePenaltyRate: contract.latePenaltyRate,
-    terminationNoticeDays: contract.terminationNoticeDays,
-    durationMonths: contract.durationMonths ?? 12,
-  }
+  const commercial = resolveEffectiveCommercial(contract)
   const clauses = (template?.clauses ?? []).map(clause => ({
     id: clause.id ?? `article-${clause.number}`,
     number: clause.number,

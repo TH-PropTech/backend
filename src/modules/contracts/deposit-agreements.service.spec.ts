@@ -1,5 +1,6 @@
 import { ObjectId } from 'mongodb'
 import { ConflictException, ForbiddenException } from '@nestjs/common'
+import { createHash } from 'node:crypto'
 import { DepositAgreementsService } from './deposit-agreements.service'
 import type { DepositAgreementStatus } from './schemas/deposit-agreement.schema'
 
@@ -85,6 +86,112 @@ describe('DepositAgreementsService', () => {
     )
     expect(reused).toEqual({ agreementCode: 'DPA-app-1' })
     expect(repository.save).toHaveBeenCalledTimes(1)
+    expect(created.templateVersion).toBe('deposit-v1')
+    expect(created.contentHash).toBe(
+      createHash('sha256')
+        .update(
+          JSON.stringify({
+            agreementCode: 'DPA-app-1',
+            applicationId: 'app-1',
+            packageSnapshot: input.packageSnapshot,
+            purpose: 'SECURE_CONCLUSION_THEN_PERFORMANCE',
+            templateVersion: 'deposit-v1',
+          })
+        )
+        .digest('hex')
+    )
+  })
+
+  it('revises the security deposit snapshot and hash before consent', async () => {
+    const agreement = {
+      ...baseAgreement(),
+      purpose: 'SECURE_CONCLUSION_THEN_PERFORMANCE',
+      templateVersion: 'deposit-v1',
+      packageSnapshot: {
+        packageId: 'pkg-12',
+        version: 1,
+        durationMonths: 12,
+        monthlyRent: 12_000_000,
+        depositPolicy: { type: 'FIXED_AMOUNT', amount: 24_000_000 },
+        resolvedDepositAmount: 24_000_000,
+      },
+    }
+    const repository = {
+      findOne: jest.fn().mockResolvedValue(agreement),
+      save: jest.fn().mockImplementation(value => Promise.resolve(value)),
+    }
+    const service = new DepositAgreementsService(repository as never)
+    const originalHash = agreement.contentHash
+
+    await service.reviseSecurityDepositBeforeConsent(
+      agreement._id.toHexString(),
+      30_000_000
+    )
+
+    expect(agreement.amount).toBe(30_000_000)
+    expect(agreement.contentRevision).toBe(2)
+    expect(agreement.packageSnapshot.resolvedDepositAmount).toBe(30_000_000)
+    expect(agreement.contentHash).not.toBe(originalHash)
+    expect(repository.save).toHaveBeenCalledWith(agreement)
+  })
+
+  it('rejects a security deposit revision after consent', async () => {
+    const agreement = {
+      ...baseAgreement(),
+      status: 'accepted' as const,
+      tenantConsent: { consentedAt: new Date(), contentHash: 'a'.repeat(64) },
+      packageSnapshot: { resolvedDepositAmount: 24_000_000 },
+    }
+    const service = new DepositAgreementsService({
+      findOne: jest.fn().mockResolvedValue(agreement),
+      save: jest.fn(),
+    } as never)
+
+    await expect(
+      service.reviseSecurityDepositBeforeConsent(
+        agreement._id.toHexString(),
+        30_000_000
+      )
+    ).rejects.toThrow('COMMERCIAL_DEPOSIT_LOCKED')
+  })
+
+  it('creates a deposit-v2 holding agreement for the resolved reservation deposit', async () => {
+    const repository = {
+      findOne: jest.fn().mockResolvedValue(null),
+      create: jest.fn((value: unknown) => value),
+      save: jest.fn((value: unknown) => Promise.resolve(value)),
+    }
+    const service = new DepositAgreementsService(repository as never)
+
+    const agreement = await service.createFromApplicationSnapshot({
+      applicationId: 'app-holding',
+      tenantId: 'tenant-1',
+      landlordId: 'landlord-1',
+      packageSnapshot: {
+        packageId: 'pkg-12',
+        version: 2,
+        durationMonths: 12,
+        monthlyRent: 10_000_000,
+        depositPolicy: { type: 'MONTHS_OF_RENT', months: 2 },
+        resolvedDepositAmount: 20_000_000,
+        settlementPolicy: {
+          holdingDeposit: { type: 'PERCENT_OF_SECURITY', percent: 30 },
+          allowedPaymentCycles: [1, 3, 6],
+          defaultPaymentCycle: 3,
+          firstPaymentDueOffsetDays: 3,
+        },
+        resolvedHoldingDepositAmount: 6_000_000,
+        resolvedSecurityTopUpAmount: 14_000_000,
+      },
+    })
+
+    expect(agreement).toMatchObject({
+      amount: 6_000_000,
+      depositKind: 'HOLDING',
+      securityDepositTotal: 20_000_000,
+      securityTopUpAmount: 14_000_000,
+      templateVersion: 'deposit-v2',
+    })
   })
 
   it('creates and links one draft deposit agreement for a contract', async () => {

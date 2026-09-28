@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
 import {
   ArrayMaxSize,
+  ArrayNotEmpty,
   IsString,
   IsNotEmpty,
   IsOptional,
@@ -11,6 +12,7 @@ import {
   IsInt,
   IsObject,
   Min,
+  Max,
   MinLength,
   MaxLength,
   ValidateNested,
@@ -50,6 +52,47 @@ class RentalPackageDepositPolicyDto {
   amount?: number
 }
 
+class HoldingDepositDto {
+  @IsIn(['FIXED_AMOUNT', 'PERCENT_OF_SECURITY'])
+  type!: 'FIXED_AMOUNT' | 'PERCENT_OF_SECURITY'
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  amount?: number
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0.01)
+  percent?: number
+}
+
+class SettlementPolicyDto {
+  @ApiPropertyOptional({ type: HoldingDepositDto })
+  @IsOptional()
+  @IsObject()
+  @ValidateNested()
+  @Type(() => HoldingDepositDto)
+  holdingDeposit?: HoldingDepositDto
+
+  @ApiProperty({ enum: [1, 3, 6], isArray: true })
+  @IsArray()
+  @ArrayNotEmpty()
+  @IsIn([1, 3, 6], { each: true })
+  allowedPaymentCycles!: Array<1 | 3 | 6>
+
+  @ApiProperty({ enum: [1, 3, 6] })
+  @IsInt()
+  @IsIn([1, 3, 6])
+  defaultPaymentCycle!: 1 | 3 | 6
+
+  @ApiProperty({ minimum: 0, maximum: 15 })
+  @IsInt()
+  @Min(0)
+  @Max(15)
+  firstPaymentDueOffsetDays!: number
+}
+
 export class RentalPackageDto {
   @IsString()
   @IsNotEmpty()
@@ -71,6 +114,13 @@ export class RentalPackageDto {
   @ValidateNested()
   @Type(() => RentalPackageDepositPolicyDto)
   depositPolicy!: RentalPackageDepositPolicyDto
+
+  @ApiPropertyOptional({ type: SettlementPolicyDto })
+  @IsOptional()
+  @IsObject()
+  @ValidateNested()
+  @Type(() => SettlementPolicyDto)
+  settlementPolicy?: SettlementPolicyDto
 
   @IsIn(['active', 'inactive'])
   @IsOptional()
