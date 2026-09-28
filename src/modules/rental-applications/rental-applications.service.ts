@@ -11,6 +11,9 @@ import { ConfigService } from '@nestjs/config'
 import { InjectRepository } from '@nestjs/typeorm'
 import { ObjectId } from 'mongodb'
 import { Repository } from 'typeorm'
+import { BookingsService } from '../bookings/bookings.service'
+import { PlatformFeesService } from '../platform-fees/platform-fees.service'
+import { UnprocessableEntityException } from '@nestjs/common'
 import { ApartmentsService } from '../apartments/apartments.service'
 import type { RentalPackageRecord } from '../apartments/rental-package.util'
 import { ContractsService } from '../contracts/contracts.service'
@@ -70,7 +73,9 @@ export class RentalApplicationsService {
     @Optional()
     private readonly executionPoliciesService?: RentalExecutionPoliciesService,
     @Optional()
-    private readonly ownershipTransferResolver?: OwnershipTransferResolver
+    private readonly ownershipTransferResolver?: OwnershipTransferResolver,
+    @Optional() private readonly bookingsService?: BookingsService,
+    @Optional() private readonly platformFeesService?: PlatformFeesService
   ) {}
 
   async getContext(
@@ -127,10 +132,26 @@ export class RentalApplicationsService {
     ) {
       return { ...base, reasonCode: 'LISTING_UNAVAILABLE' }
     }
-    const packages = this.getOfferedPackages(apartment).map(packageItem => ({
-      ...packageItem,
-      currency: 'VND' as const,
-    }))
+    const packages = await Promise.all(
+      this.getOfferedPackages(apartment).map(async packageItem => {
+        const feeSnapshot = await this.platformFeesService?.quote({
+          durationMonths: packageItem.durationMonths,
+          monthlyRent: packageItem.monthlyRent,
+        })
+        return {
+          ...packageItem,
+          currency: 'VND' as const,
+          feeSnapshot: feeSnapshot
+            ? {
+                ...feeSnapshot,
+                quote: feeSnapshot.quote
+                  .filter(line => line.payerRole === 'tenant')
+                  .map(line => ({ ...line, payerRole: 'tenant' as const })),
+              }
+            : null,
+        }
+      })
+    )
     if (packages.length === 0) {
       return { ...base, reasonCode: 'NO_ACTIVE_PACKAGE' }
     }
@@ -190,6 +211,72 @@ export class RentalApplicationsService {
     }
 
     const selectedPackage = this.resolveSelectedPackage(apartment, dto)
+    if (
+      dto.occupantsDetail &&
+      dto.occupantsDetail.length + 1 !== dto.occupants
+    ) {
+      throw new BadRequestException('APPLICATION_OCCUPANTS_MISMATCH')
+    }
+
+    const selectedPaymentCycleMonths =
+      dto.selectedPaymentCycleMonths ??
+      selectedPackage.settlementPolicy?.defaultPaymentCycle ??
+      1
+    const allowedPaymentCycles = selectedPackage.settlementPolicy
+      ?.allowedPaymentCycles ?? [1]
+    if (!allowedPaymentCycles.includes(selectedPaymentCycleMonths)) {
+      throw new BadRequestException('PAYMENT_CYCLE_NOT_ALLOWED')
+    }
+
+    const feeSnapshot = await this.platformFeesService?.quote({
+      durationMonths: selectedPackage.durationMonths,
+      monthlyRent: selectedPackage.monthlyRent,
+    })
+    const suppliedFeeQuote =
+      dto.feeScheduleId !== undefined ||
+      dto.feeScheduleVersion !== undefined ||
+      dto.feeContentHash !== undefined
+    if (
+      (feeSnapshot &&
+        (dto.feeScheduleId !== feeSnapshot.scheduleId ||
+          dto.feeScheduleVersion !== feeSnapshot.version ||
+          dto.feeContentHash !== feeSnapshot.contentHash)) ||
+      (!feeSnapshot && suppliedFeeQuote)
+    ) {
+      throw new ConflictException('PLATFORM_FEE_QUOTE_STALE')
+    }
+    const tenantFee = feeSnapshot?.quote.find(
+      line => line.payerRole === 'tenant'
+    )
+    if (
+      tenantFee &&
+      tenantFee.amount > 0 &&
+      dto.feeAcknowledgedHash !== feeSnapshot?.contentHash
+    ) {
+      throw new UnprocessableEntityException('PLATFORM_FEE_ACK_REQUIRED')
+    }
+
+    if (dto.viewingBookingId) {
+      if (!this.bookingsService || !ObjectId.isValid(dto.viewingBookingId)) {
+        throw new BadRequestException('APPLICATION_VIEWING_INVALID')
+      }
+      try {
+        const booking = await this.bookingsService.findOneById(
+          dto.viewingBookingId
+        )
+        if (
+          booking.tenantId !== tenantId ||
+          booking.apartmentId !== dto.apartmentId ||
+          !['confirmed', 'completed'].includes(booking.status)
+        ) {
+          throw new BadRequestException('APPLICATION_VIEWING_INVALID')
+        }
+      } catch (error: unknown) {
+        if (error instanceof BadRequestException) throw error
+        throw new BadRequestException('APPLICATION_VIEWING_INVALID')
+      }
+    }
+
     const executionPolicySnapshot = await this.resolveSelectedExecutionPolicy(
       selectedPackage,
       dto.selectedExecutionPolicy
@@ -334,7 +421,7 @@ export class RentalApplicationsService {
       ...(flowProfileRef ? { flowProfileRef } : {}),
     }
 
-    return this.repository.save(
+    const created = await this.repository.save(
       this.repository.create({
         tenantId,
         apartmentId: dto.apartmentId,
@@ -356,6 +443,19 @@ export class RentalApplicationsService {
         submittedAt: capturedAt,
         decidedAt: null,
         occupants: dto.occupants,
+        occupantsDetail: dto.occupantsDetail ?? null,
+        vehicles: dto.vehicles ?? null,
+        emergencyContact: dto.emergencyContact ?? null,
+        selectedPaymentCycleMonths,
+        viewingBookingId: dto.viewingBookingId ?? null,
+        feeSnapshot: feeSnapshot ?? null,
+        tenantFeeAck:
+          tenantFee && feeSnapshot
+            ? {
+                contentHash: feeSnapshot.contentHash,
+                acknowledgedAt: capturedAt,
+              }
+            : null,
         moveInDate,
         leaseDurationMonths: selectedPackage.durationMonths,
         occupation: dto.occupation,
@@ -367,6 +467,7 @@ export class RentalApplicationsService {
         actorTimestamp: null,
       })
     )
+    return this.withContractHandoff(this.withFeeVisibility(created, 'tenant'))
   }
 
   async getMine(
@@ -396,7 +497,8 @@ export class RentalApplicationsService {
       )
       return this.listRecords(
         records.filter((_application, index) => visible[index]),
-        query
+        query,
+        'landlord'
       )
     }
     return this.list({ landlordId }, query)
@@ -420,7 +522,12 @@ export class RentalApplicationsService {
     if (!isStaff && application.tenantId !== actorId && !canReadAsLandlord) {
       throw new ForbiddenException('APPLICATION_ACCESS_DENIED')
     }
-    return this.withContractHandoff(application)
+    const role = isStaff ? 'staff' : canReadAsLandlord ? 'landlord' : 'tenant'
+    const visible =
+      canReadAsLandlord && !isStaff
+        ? this.withMaskedEmergencyPhone(application)
+        : application
+    return this.withContractHandoff(this.withFeeVisibility(visible, role))
   }
 
   async retryProvisioning(
@@ -474,6 +581,24 @@ export class RentalApplicationsService {
       throw new ConflictException('APPLICATION_REVISION_STALE')
     }
 
+    const landlordFee = application.feeSnapshot?.quote.find(
+      line => line.payerRole === 'landlord'
+    )
+    if (
+      dto.status === 'accepted' &&
+      landlordFee &&
+      landlordFee.amount > 0 &&
+      dto.landlordFeeAck !== application.feeSnapshot?.contentHash
+    ) {
+      throw new UnprocessableEntityException('PLATFORM_FEE_ACK_REQUIRED')
+    }
+    if (dto.status === 'accepted' && landlordFee && application.feeSnapshot) {
+      application.landlordFeeAck = {
+        contentHash: application.feeSnapshot.contentHash,
+        acknowledgedAt: new Date(),
+      }
+    }
+
     const decisionTimestamp = new Date()
     const decisionPatch = {
       status: dto.status,
@@ -511,8 +636,10 @@ export class RentalApplicationsService {
       typeof repositoryWithCas.update === 'function'
         ? application
         : await this.repository.save(application)
-    if (dto.status === 'rejected') return savedDecision
-    return this.provisionAcceptedApplication(savedDecision)
+    if (dto.status === 'rejected')
+      return this.withFeeVisibility(savedDecision, 'landlord')
+    const provisioned = await this.provisionAcceptedApplication(savedDecision)
+    return this.withFeeVisibility(provisioned, 'landlord')
   }
 
   private async provisionAcceptedApplication(
@@ -560,6 +687,8 @@ export class RentalApplicationsService {
         tenantId: application.tenantId,
         moveInDate: application.moveInDate,
         packageSnapshot: application.packageSnapshot,
+        paymentCycleMonths: application.selectedPaymentCycleMonths ?? 1,
+        feeSnapshot: application.feeSnapshot ?? null,
         executionPolicySnapshot: application.executionPolicySnapshot ?? null,
         applicationReviewHash: application.reviewSnapshot?.reviewHash ?? null,
         termsRef: application.reviewSnapshot?.termsRef ?? null,
@@ -684,12 +813,17 @@ export class RentalApplicationsService {
       where,
       order: { updatedAt: 'DESC' },
     })
-    return this.listRecords(records, query)
+    return this.listRecords(
+      records,
+      query,
+      where.landlordId ? 'landlord' : 'tenant'
+    )
   }
 
   private listRecords(
     records: RentalApplication[],
-    query: RentalApplicationQueryDto
+    query: RentalApplicationQueryDto,
+    role: 'tenant' | 'landlord' | 'staff' = 'staff'
   ): RentalApplicationListResult {
     const filtered = query.status
       ? records.filter(item => item.status === query.status)
@@ -698,11 +832,36 @@ export class RentalApplicationsService {
     return {
       items: filtered
         .slice(start, start + query.limit)
-        .map(application => this.withContractHandoff(application)),
+        .map(application =>
+          this.withContractHandoff(
+            this.withFeeVisibility(
+              role === 'landlord'
+                ? this.withMaskedEmergencyPhone(application)
+                : application,
+              role
+            )
+          )
+        ),
       total: filtered.length,
       page: query.page,
       limit: query.limit,
       totalPages: Math.ceil(filtered.length / query.limit),
+    }
+  }
+
+  private withFeeVisibility(
+    application: RentalApplication,
+    role: 'tenant' | 'landlord' | 'staff'
+  ): RentalApplication {
+    if (!application.feeSnapshot || role === 'staff') return application
+    return {
+      ...application,
+      feeSnapshot: {
+        ...application.feeSnapshot,
+        quote: application.feeSnapshot.quote.filter(
+          line => line.payerRole === role
+        ),
+      },
     }
   }
 
@@ -759,6 +918,24 @@ export class RentalApplicationsService {
                   reasonCode: null,
                 }
     return Object.assign(application, { contractHandoff: handoff })
+  }
+
+  private withMaskedEmergencyPhone(
+    application: RentalApplication
+  ): RentalApplication {
+    const emergencyContact = application.emergencyContact
+    if (!emergencyContact) return application
+
+    const phone = emergencyContact.phone
+    const visiblePrefixLength = Math.min(3, Math.max(phone.length - 2, 0))
+    const maskedPhone = `${phone.slice(0, visiblePrefixLength)}${'*'.repeat(
+      Math.max(phone.length - visiblePrefixLength - 2, 0)
+    )}${phone.slice(-2)}`
+
+    return {
+      ...application,
+      emergencyContact: { ...emergencyContact, phone: maskedPhone },
+    }
   }
 
   private toListingSnapshot(

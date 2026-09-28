@@ -77,6 +77,7 @@ describe('SmartCA two-party activation integration', () => {
     Reflect.set(service, 'ledgerOutboxService', ledgerOutboxService)
     Reflect.set(service, 'paymentsService', {
       generateSchedule: jest.fn().mockResolvedValue([]),
+      generatePlatformFeeInvoices: jest.fn().mockResolvedValue([]),
     })
     Reflect.set(service, 'apartmentRepository', { findOne: jest.fn() })
     return { service, contract, deposit, ledgerOutboxService }

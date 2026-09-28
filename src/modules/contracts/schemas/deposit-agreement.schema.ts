@@ -56,6 +56,15 @@ export class DepositAgreement {
   @Column()
   amount!: number
 
+  @Column({ type: 'string', nullable: true, default: 'FULL_SECURITY' })
+  depositKind?: 'HOLDING' | 'FULL_SECURITY'
+
+  @Column({ nullable: true })
+  securityDepositTotal?: number | null
+
+  @Column({ nullable: true })
+  securityTopUpAmount?: number | null
+
   @Column()
   templateVersion!: string
 

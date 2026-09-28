@@ -1,7 +1,9 @@
 import {
   calculateRepresentativeMonthlyRent,
+  validateSettlementPolicy,
   validateRentalPackages,
   type RentalPackageInput,
+  type SettlementPolicyInput,
 } from './rental-package.util'
 
 describe('rental package rules', () => {
@@ -76,5 +78,112 @@ describe('rental package rules', () => {
         },
       ])
     ).toThrow('INVALID_RENTAL_PACKAGE')
+  })
+
+  it('snapshots holding deposit and remaining security deposit for a settlement policy', () => {
+    const result = validateRentalPackages([
+      {
+        ...validPackages[0]!,
+        settlementPolicy: {
+          holdingDeposit: { type: 'FIXED_AMOUNT', amount: 6_000_500 },
+          allowedPaymentCycles: [1, 3, 6],
+          defaultPaymentCycle: 3,
+          firstPaymentDueOffsetDays: 3,
+        },
+      },
+    ])
+
+    expect(result.packages[0]).toMatchObject({
+      resolvedDepositAmount: 24_000_000,
+      settlementPolicy: {
+        holdingDeposit: { type: 'FIXED_AMOUNT', amount: 6_000_500 },
+        allowedPaymentCycles: [1, 3, 6],
+        defaultPaymentCycle: 3,
+        firstPaymentDueOffsetDays: 3,
+      },
+      resolvedHoldingDepositAmount: 6_000_000,
+      resolvedSecurityTopUpAmount: 18_000_000,
+    })
+  })
+
+  const invalidSettlementPolicies: Array<{
+    code: string
+    policy: Partial<SettlementPolicyInput>
+    durationMonths: number
+  }> = [
+    {
+      code: 'PAYMENT_CYCLE_EXCEEDS_DURATION',
+      policy: { allowedPaymentCycles: [6], defaultPaymentCycle: 6 },
+      durationMonths: 3,
+    },
+    {
+      code: 'DEFAULT_CYCLE_NOT_ALLOWED',
+      policy: { allowedPaymentCycles: [1, 3], defaultPaymentCycle: 6 },
+      durationMonths: 12,
+    },
+    {
+      code: 'HOLDING_DEPOSIT_EXCEEDS_SECURITY',
+      policy: { holdingDeposit: { type: 'FIXED_AMOUNT', amount: 25_000_000 } },
+      durationMonths: 12,
+    },
+    {
+      code: 'HOLDING_DEPOSIT_INVALID',
+      policy: {
+        holdingDeposit: { type: 'PERCENT_OF_SECURITY', percent: 0 },
+      },
+      durationMonths: 12,
+    },
+    {
+      code: 'FIRST_PAYMENT_OFFSET_INVALID',
+      policy: { firstPaymentDueOffsetDays: 16 },
+      durationMonths: 12,
+    },
+  ]
+
+  it('rejects a payment cycle that does not divide the package duration', () => {
+    expect(() =>
+      validateSettlementPolicy(
+        {
+          allowedPaymentCycles: [3],
+          defaultPaymentCycle: 3,
+          firstPaymentDueOffsetDays: 0,
+        },
+        8,
+        12_000_000
+      )
+    ).toThrow('PAYMENT_CYCLE_NOT_DIVISOR')
+  })
+
+  it.each(invalidSettlementPolicies)(
+    'rejects settlement policy with $code',
+    ({ code, policy, durationMonths }) => {
+      const [packageItem] = validPackages
+      if (!packageItem) throw new Error('Missing rental package test fixture')
+
+      expect(() =>
+        validateRentalPackages([
+          {
+            ...packageItem,
+            durationMonths,
+            settlementPolicy: {
+              allowedPaymentCycles: [1, 3, 6],
+              defaultPaymentCycle: 1,
+              firstPaymentDueOffsetDays: 0,
+              ...policy,
+            },
+          },
+        ])
+      ).toThrow(code)
+    }
+  )
+
+  it('keeps the legacy package snapshot unchanged when settlement policy is absent', () => {
+    const result = validateRentalPackages([validPackages[0]!])
+
+    expect(result.packages[0]).toEqual({
+      ...validPackages[0],
+      resolvedDepositAmount: 24_000_000,
+      status: 'active',
+    })
   })
 })

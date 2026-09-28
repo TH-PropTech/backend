@@ -3,6 +3,7 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { createHash } from 'node:crypto'
@@ -18,6 +19,7 @@ import type {
   ContractCommercialValidationDto,
 } from './dto/contract-commercial-editor.dto'
 import { isUtilityParty } from './dto/contract-commercial-editor.dto'
+import { DepositAgreementsService } from './deposit-agreements.service'
 
 export const PROTECTED_CONTRACT_EDITOR_FIELDS = Object.freeze([
   'legalProfile',
@@ -60,7 +62,9 @@ const ALLOWED_COMMERCIAL_FIELDS = new Set<keyof ContractCommercialDraft>([
 export class ContractCommercialEditorService {
   constructor(
     @InjectRepository(Contract)
-    private readonly contractRepository: Repository<Contract>
+    private readonly contractRepository: Repository<Contract>,
+    @Optional()
+    private readonly depositAgreementsService?: DepositAgreementsService
   ) {}
 
   async getEditor(
@@ -113,6 +117,16 @@ export class ContractCommercialEditorService {
     const validation = this.validation(input, current)
     if (!validation.valid)
       throw new ConflictException(validation.errors.join(','))
+    if (
+      input.deposit !== current.deposit &&
+      contract.depositAgreementId &&
+      this.depositAgreementsService
+    ) {
+      await this.depositAgreementsService.reviseSecurityDepositBeforeConsent(
+        contract.depositAgreementId,
+        input.deposit
+      )
+    }
     const beforeHash = this.hash(current)
     const afterHash = this.hash(input)
     const auditEvent: ContractCommercialAuditEvent = {

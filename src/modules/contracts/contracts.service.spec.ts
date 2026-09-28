@@ -36,6 +36,7 @@ describe('ContractsService application draft factory', () => {
       landlordId: 'landlord-1',
       tenantId: 'tenant-1',
       moveInDate: new Date('2030-01-01'),
+      paymentCycleMonths: 3 as const,
       packageSnapshot: {
         packageId: 'pkg-12',
         version: 2,
@@ -51,6 +52,7 @@ describe('ContractsService application draft factory', () => {
     expect(created.status).toBe('draft')
     expect(created.legacyFlow).toBe(false)
     expect(created.deposit).toBe(24_000_000)
+    expect(created.paymentCycleMonths).toBe(3)
     expect(created.rentalApplicationId).toBe('app-1')
     expect(reused.contractCode).toBe('HD-APP-app-1')
     expect(repository.save).toHaveBeenCalledTimes(1)
@@ -551,6 +553,7 @@ describe('ContractsService activation', () => {
     const ledgerOutboxService = { enqueue: jest.fn().mockResolvedValue({}) }
     const paymentsService = {
       generateSchedule: jest.fn().mockResolvedValue([]),
+      generatePlatformFeeInvoices: jest.fn().mockResolvedValue([]),
     }
     const service = Object.create(
       ContractsService.prototype
@@ -693,7 +696,10 @@ describe('ContractsService activation', () => {
     ledgerOutboxService: {
       enqueue: jest.MockedFunction<(event: unknown) => Promise<unknown>>
     }
-    paymentsService: { generateSchedule: jest.Mock }
+    paymentsService: {
+      generateSchedule: jest.Mock
+      generatePlatformFeeInvoices: jest.Mock
+    }
   }
 
   function createSmartCaActivationContext(options?: {
@@ -756,6 +762,7 @@ describe('ContractsService activation', () => {
     const ledgerOutboxService = { enqueue: jest.fn().mockResolvedValue({}) }
     const paymentsService = {
       generateSchedule: jest.fn().mockResolvedValue([]),
+      generatePlatformFeeInvoices: jest.fn().mockResolvedValue([]),
     }
     const service = Object.create(
       ContractsService.prototype

@@ -44,6 +44,12 @@ describe('ApartmentsService.updateRentalPackages', () => {
         durationMonths: 3 as const,
         monthlyRent: 12_000_000,
         depositPolicy: { type: 'MONTHS_OF_RENT' as const, months: 2 },
+        settlementPolicy: {
+          holdingDeposit: { type: 'FIXED_AMOUNT' as const, amount: 8_000_000 },
+          allowedPaymentCycles: [1, 3] as Array<1 | 3 | 6>,
+          defaultPaymentCycle: 3 as const,
+          firstPaymentDueOffsetDays: 3,
+        },
         status: 'active' as const,
       },
     ],
@@ -60,6 +66,10 @@ describe('ApartmentsService.updateRentalPackages', () => {
 
     expect(result.pricingRevision).toBe(2)
     expect(result.priceMonthly).toBe(12_000_000)
+    expect(result.rentalPackages?.[0]).toMatchObject({
+      resolvedHoldingDepositAmount: 8_000_000,
+      resolvedSecurityTopUpAmount: 16_000_000,
+    })
     expect(result.status).toBe('updating')
     expect(result.isVerified).toBe(false)
     expect(result.approvedBy).toBeNull()

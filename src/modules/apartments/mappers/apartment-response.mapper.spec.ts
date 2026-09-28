@@ -29,6 +29,17 @@ describe('ApartmentResponseMapper rental pricing', () => {
           monthlyRent: 10000000,
           depositPolicy: { type: 'MONTHS_OF_RENT' as const, months: 2 },
           resolvedDepositAmount: 20000000,
+          settlementPolicy: {
+            holdingDeposit: {
+              type: 'FIXED_AMOUNT' as const,
+              amount: 6_000_000,
+            },
+            allowedPaymentCycles: [1, 3, 6] as Array<1 | 3 | 6>,
+            defaultPaymentCycle: 3 as const,
+            firstPaymentDueOffsetDays: 3,
+          },
+          resolvedHoldingDepositAmount: 6_000_000,
+          resolvedSecurityTopUpAmount: 14_000_000,
           status: 'active' as const,
         },
       ],
@@ -60,6 +71,15 @@ describe('ApartmentResponseMapper rental pricing', () => {
     expect(web.pricingRevision).toBe(3)
     expect(web.rentalPackages).toEqual(mobile.rentalPackages)
     expect(web.rentalPackages[0]?.resolvedDepositAmount).toBe(20000000)
+    expect(web.rentalPackages[0]?.resolvedHoldingDepositAmount).toBe(6_000_000)
+    expect(web.rentalPackages[0]?.resolvedSecurityTopUpAmount).toBe(14_000_000)
+    const rented = ApartmentResponseMapper.toWebJson({
+      ...apartment,
+      status: 'rented',
+      rentalReservation: { applicationId: 'app-1', contractId: 'contract-1' },
+    } as never)
+    expect(rented.tag).toBe('rented')
+    expect(rented.rentalAvailabilityStatus).toBe('rented')
   })
 
   it('defaults legacy listings to an empty package list', () => {

@@ -19,8 +19,10 @@ import {
 } from './dto/create-apartment.dto'
 import { UpdateApartmentDto } from './dto/update-apartment.dto'
 import {
-  validateRentalPackages,
+  validateRentalPackages as validateRentalPackageInputs,
+  type HoldingDepositInput,
   type RentalPackageInput,
+  type SettlementPolicyInput,
 } from './rental-package.util'
 import { UpdateApartmentMediaDto } from './dto/update-apartment-media.dto'
 import { NotificationsService } from '../notifications/notifications.service'
@@ -63,6 +65,7 @@ function toRentalPackageInputs(
 
   return packages.map(packageItem => {
     const policy = packageItem.depositPolicy
+    const settlementPolicy = packageItem.settlementPolicy
     let depositPolicy: RentalPackageInput['depositPolicy']
     if (policy.type === 'MONTHS_OF_RENT') {
       if (policy.months === undefined) {
@@ -80,6 +83,36 @@ function toRentalPackageInputs(
       depositPolicy = { type: policy.type, amount: policy.amount }
     }
 
+    let normalizedSettlementPolicy: SettlementPolicyInput | undefined
+    if (settlementPolicy) {
+      let holdingDeposit: HoldingDepositInput | undefined
+      if (settlementPolicy.holdingDeposit?.type === 'FIXED_AMOUNT') {
+        if (settlementPolicy.holdingDeposit.amount === undefined) {
+          throw new BadRequestException('HOLDING_DEPOSIT_INVALID')
+        }
+        holdingDeposit = {
+          type: 'FIXED_AMOUNT',
+          amount: settlementPolicy.holdingDeposit.amount,
+        }
+      } else if (
+        settlementPolicy.holdingDeposit?.type === 'PERCENT_OF_SECURITY'
+      ) {
+        if (settlementPolicy.holdingDeposit.percent === undefined) {
+          throw new BadRequestException('HOLDING_DEPOSIT_INVALID')
+        }
+        holdingDeposit = {
+          type: 'PERCENT_OF_SECURITY',
+          percent: settlementPolicy.holdingDeposit.percent,
+        }
+      }
+      normalizedSettlementPolicy = {
+        ...(holdingDeposit ? { holdingDeposit } : {}),
+        allowedPaymentCycles: settlementPolicy.allowedPaymentCycles,
+        defaultPaymentCycle: settlementPolicy.defaultPaymentCycle,
+        firstPaymentDueOffsetDays: settlementPolicy.firstPaymentDueOffsetDays,
+      }
+    }
+
     return {
       packageId: packageItem.packageId,
       version: packageItem.version,
@@ -87,6 +120,9 @@ function toRentalPackageInputs(
       monthlyRent: packageItem.monthlyRent,
       depositPolicy,
       status: packageItem.status ?? 'active',
+      ...(normalizedSettlementPolicy
+        ? { settlementPolicy: normalizedSettlementPolicy }
+        : {}),
       ...(packageItem.allowedExecutionPolicies
         ? { allowedExecutionPolicies: packageItem.allowedExecutionPolicies }
         : {}),
@@ -95,6 +131,19 @@ function toRentalPackageInputs(
         : {}),
     }
   })
+}
+
+function validateRentalPackages(
+  packages: RentalPackageInput[]
+): ReturnType<typeof validateRentalPackageInputs> {
+  try {
+    return validateRentalPackageInputs(packages)
+  } catch (error: unknown) {
+    if (error instanceof Error) {
+      throw new BadRequestException(error.message)
+    }
+    throw error
+  }
 }
 
 function normalizeCity(city?: string): string {
@@ -675,6 +724,7 @@ export class ApartmentsService {
     reservation.revision = (reservation.revision ?? 1) + 1
     reservation.contractId = contractId
     reservation.leaseActivatedAt = new Date()
+    apartment.status = 'rented'
     await this.apartmentRepository.save(apartment)
     return true
   }

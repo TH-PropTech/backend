@@ -42,6 +42,50 @@ export class DepositAgreementsService {
     private readonly flowNotificationService?: FlowNotificationService
   ) {}
 
+  async reviseSecurityDepositBeforeConsent(
+    agreementId: string,
+    securityDepositTotal: number
+  ): Promise<void> {
+    const agreement = await this.findById(agreementId)
+    if (agreement.status !== 'draft' || agreement.tenantConsent) {
+      throw new ConflictException('COMMERCIAL_DEPOSIT_LOCKED')
+    }
+    const packageSnapshot = {
+      ...agreement.packageSnapshot,
+      resolvedDepositAmount: securityDepositTotal,
+    }
+    const hasHoldingDeposit = agreement.depositKind === 'HOLDING'
+    agreement.packageSnapshot = packageSnapshot
+    if (hasHoldingDeposit) {
+      agreement.securityDepositTotal = securityDepositTotal
+      agreement.securityTopUpAmount = Math.max(
+        0,
+        securityDepositTotal - agreement.amount
+      )
+    } else {
+      agreement.amount = securityDepositTotal
+    }
+    agreement.contentRevision += 1
+    const content = {
+      agreementCode: agreement.agreementCode,
+      applicationId: agreement.applicationId,
+      packageSnapshot,
+      purpose: agreement.purpose,
+      templateVersion: agreement.templateVersion,
+      ...(hasHoldingDeposit
+        ? {
+            depositKind: agreement.depositKind,
+            securityDepositTotal: agreement.securityDepositTotal,
+            securityTopUpAmount: agreement.securityTopUpAmount ?? 0,
+          }
+        : {}),
+    }
+    agreement.contentHash = createHash('sha256')
+      .update(JSON.stringify(content))
+      .digest('hex')
+    await this.repository.save(agreement)
+  }
+
   async createFromApplicationSnapshot(input: {
     applicationId: string
     propertyId?: string
@@ -56,16 +100,29 @@ export class DepositAgreementsService {
     if (existing) return existing
 
     const agreementCode = `DPA-${input.applicationId}`
+    const resolvedHoldingDepositAmount =
+      input.packageSnapshot.resolvedHoldingDepositAmount
+    const hasHoldingDeposit = resolvedHoldingDepositAmount !== undefined
+    const depositKind = hasHoldingDeposit ? 'HOLDING' : 'FULL_SECURITY'
+    const securityTopUpAmount =
+      input.packageSnapshot.resolvedSecurityTopUpAmount ?? 0
+    const templateVersion = hasHoldingDeposit ? 'deposit-v2' : 'deposit-v1'
+    const content = {
+      agreementCode,
+      applicationId: input.applicationId,
+      packageSnapshot: input.packageSnapshot,
+      purpose: 'SECURE_CONCLUSION_THEN_PERFORMANCE',
+      templateVersion,
+      ...(hasHoldingDeposit
+        ? {
+            depositKind,
+            securityDepositTotal: input.packageSnapshot.resolvedDepositAmount,
+            securityTopUpAmount,
+          }
+        : {}),
+    }
     const contentHash = createHash('sha256')
-      .update(
-        JSON.stringify({
-          agreementCode,
-          applicationId: input.applicationId,
-          packageSnapshot: input.packageSnapshot,
-          purpose: 'SECURE_CONCLUSION_THEN_PERFORMANCE',
-          templateVersion: 'deposit-v1',
-        })
-      )
+      .update(JSON.stringify(content))
       .digest('hex')
     const agreement = this.repository.create({
       agreementCode,
@@ -83,8 +140,17 @@ export class DepositAgreementsService {
         version: 'deposit-disposition-v1',
         note: 'Internal platform template; disposition requires approved policy.',
       },
-      amount: input.packageSnapshot.resolvedDepositAmount,
-      templateVersion: 'deposit-v1',
+      amount:
+        resolvedHoldingDepositAmount ??
+        input.packageSnapshot.resolvedDepositAmount,
+      ...(hasHoldingDeposit
+        ? {
+            depositKind,
+            securityDepositTotal: input.packageSnapshot.resolvedDepositAmount,
+            securityTopUpAmount,
+          }
+        : {}),
+      templateVersion,
       contentRevision: 1,
       contentHash,
       status: 'draft',

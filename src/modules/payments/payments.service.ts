@@ -1,5 +1,6 @@
 import {
   ForbiddenException,
+  ConflictException,
   Injectable,
   NotFoundException,
   Optional,
@@ -15,6 +16,7 @@ import { generatePaymentSchedule } from './payment-schedule.util'
 import { reminderDateKey, vietnamDateKey } from './payment-reminder.util'
 import { Payment } from './schemas/payment.schema'
 import { OwnershipTransferResolver } from '../property-ownership-transfer/ownership-transfer.resolver'
+import { resolveEffectiveCommercial } from '../contracts/commercial/resolve-effective-commercial'
 
 @Injectable()
 export class PaymentsService {
@@ -37,14 +39,16 @@ export class PaymentsService {
     const existingPeriods = new Set(
       existing.map(payment => payment.periodKey).filter(Boolean)
     )
+    const commercial = resolveEffectiveCommercial(contract)
     const durationMonths =
-      contract.durationMonths ?? this.calculateDurationMonths(contract)
+      commercial.durationMonths ?? this.calculateDurationMonths(contract)
     const schedule = generatePaymentSchedule({
       contractId,
       startDate: contract.startDate,
       durationMonths,
-      monthlyRent: contract.monthlyRent,
-      paymentDay: contract.paymentDay,
+      monthlyRent: commercial.monthlyRent,
+      paymentDay: commercial.paymentDay,
+      cycleMonths: contract.paymentCycleMonths ?? 1,
     })
 
     const newPayments: Payment[] = []
@@ -64,11 +68,91 @@ export class PaymentsService {
         month: item.dueDate.getUTCMonth() + 1,
         year: item.dueDate.getUTCFullYear(),
         periodKey: item.periodKey,
+        ...(item.cycleMonths !== undefined
+          ? { cycleMonths: item.cycleMonths }
+          : {}),
+        ...(item.periodStart ? { periodStart: item.periodStart } : {}),
+        ...(item.periodEnd ? { periodEnd: item.periodEnd } : {}),
         ledgerStatus: 'not-required',
       })
       newPayments.push(await this.paymentRepository.save(payment))
     }
     return [...existing, ...newPayments]
+  }
+
+  async generatePlatformFeeInvoices(contract: Contract): Promise<Payment[]> {
+    const snapshot = contract.feeSnapshot
+    if (!snapshot) return []
+    const created: Payment[] = []
+    for (const line of snapshot.quote) {
+      const periodKey = `FEE:${line.feeKind}`
+      const existing = await this.paymentRepository.findOne({
+        where: {
+          contractId: contract._id.toHexString(),
+          type: 'platform-fee',
+          periodKey,
+        },
+      })
+      if (existing) {
+        created.push(existing)
+        continue
+      }
+      const payerId =
+        line.payerRole === 'landlord' ? contract.landlordId : contract.tenantId
+      const dueDate = new Date()
+      dueDate.setDate(
+        dueDate.getDate() + (line.payerRole === 'landlord' ? 7 : 1)
+      )
+      const invoice = this.paymentRepository.create({
+        contractId: contract._id.toHexString(),
+        tenantId: contract.tenantId,
+        landlordId: contract.landlordId,
+        payerId,
+        payerRole: line.payerRole,
+        payeeRole: 'platform',
+        feeKind: line.feeKind,
+        amountBeforeVat: line.amountBeforeVat,
+        vatAmount: line.vatAmount,
+        amount: line.amount,
+        description:
+          line.feeKind === 'LANDLORD_COMMISSION'
+            ? 'Landlord platform commission'
+            : 'Tenant service fee',
+        dueDate,
+        paidAt: null,
+        status: 'unpaid',
+        txHash: null,
+        type: 'platform-fee',
+        periodKey,
+        ledgerStatus: 'pending',
+      })
+      created.push(await this.paymentRepository.save(invoice))
+    }
+    return created
+  }
+
+  async waivePlatformFee(
+    paymentId: string,
+    actorId: string,
+    reason: string
+  ): Promise<Payment> {
+    if (!ObjectId.isValid(paymentId))
+      throw new NotFoundException('PAYMENT_NOT_FOUND')
+    const payment = await this.paymentRepository.findOne({
+      where: { _id: new ObjectId(paymentId) },
+    })
+    if (!payment || payment.type !== 'platform-fee')
+      throw new NotFoundException('PLATFORM_FEE_INVOICE_NOT_FOUND')
+    if (payment.status === 'paid')
+      throw new ConflictException('PAID_PLATFORM_FEE_CANNOT_BE_WAIVED')
+    if (!reason.trim())
+      throw new ConflictException('PLATFORM_FEE_WAIVE_REASON_REQUIRED')
+    if (payment.status === 'waived') return payment
+    payment.status = 'waived'
+    payment.waivedBy = actorId
+    payment.waivedAt = new Date()
+    payment.waiveReason = reason.trim()
+    return this.paymentRepository.save(payment)
   }
 
   async getByContract(

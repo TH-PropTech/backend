@@ -1,0 +1,223 @@
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common'
+import { InjectRepository } from '@nestjs/typeorm'
+import { createHash } from 'node:crypto'
+import { ObjectId } from 'mongodb'
+import { Repository } from 'typeorm'
+import { Contract } from '../contracts/schemas/contract.schema'
+import { Payment } from '../payments/schemas/payment.schema'
+import { NotificationsService } from '../notifications/notifications.service'
+import {
+  MoveInSettlement,
+  type SettlementLine,
+} from './schemas/move-in-settlement.schema'
+
+@Injectable()
+export class MoveInSettlementsService {
+  constructor(
+    @InjectRepository(MoveInSettlement)
+    private readonly settlementRepo: Repository<MoveInSettlement>,
+    @InjectRepository(Contract)
+    private readonly contractRepo: Repository<Contract>,
+    @InjectRepository(Payment)
+    private readonly paymentRepo: Repository<Payment>,
+    private readonly notifications: NotificationsService
+  ) {}
+
+  async createForContract(
+    contract: Contract,
+    activatedAt = new Date()
+  ): Promise<MoveInSettlement | null> {
+    const contractId = contract._id.toHexString()
+    const existing = await this.settlementRepo.findOne({
+      where: { contractId },
+    })
+    if (existing) return existing
+    const policy = contract.packageSnapshot?.settlementPolicy
+    const tenantFee = contract.feeSnapshot?.quote?.find(
+      line => line.payerRole === 'tenant'
+    )
+    if (!policy && !tenantFee) return null
+    const payments = await this.paymentRepo.find({
+      where: { contractId, type: 'rent' },
+    })
+    const firstRent = payments.sort((a, b) =>
+      (a.periodKey ?? '').localeCompare(b.periodKey ?? '')
+    )[0]
+    const lines: SettlementLine[] = []
+    const holding =
+      contract.packageSnapshot?.resolvedHoldingDepositAmount ?? contract.deposit
+    const topUp = Math.max(0, contract.deposit - holding)
+    if (topUp > 0)
+      lines.push({ kind: 'DEPOSIT_TOPUP', amount: topUp, paymentId: null })
+    if (firstRent)
+      lines.push({
+        kind: 'FIRST_RENT',
+        amount: firstRent.amount,
+        paymentId: firstRent._id.toHexString(),
+      })
+    if (tenantFee && tenantFee.amount > 0) {
+      const feeInvoice = await this.paymentRepo.findOne({
+        where: { contractId, type: 'platform-fee', feeKind: 'TENANT_SERVICE' },
+      })
+      lines.push({
+        kind: 'TENANT_SERVICE_FEE',
+        amount: tenantFee.amount,
+        paymentId: feeInvoice?._id.toHexString() ?? null,
+      })
+    }
+    if (!lines.length) return null
+    const dueAt = new Date(contract.startDate)
+    dueAt.setDate(dueAt.getDate() - (policy?.firstPaymentDueOffsetDays ?? 3))
+    const minimumDue = new Date(activatedAt)
+    minimumDue.setDate(minimumDue.getDate() + 1)
+    if (dueAt < minimumDue) dueAt.setTime(minimumDue.getTime())
+    const total = lines.reduce((sum, line) => sum + line.amount, 0)
+    const canonical = JSON.stringify({
+      contractId,
+      lines,
+      total,
+      dueAt: dueAt.toISOString(),
+    })
+    const settlement = this.settlementRepo.create({
+      contractId,
+      tenantId: contract.tenantId,
+      landlordId: contract.landlordId,
+      lines,
+      total,
+      dueAt,
+      status: 'pending',
+      statementHash: createHash('sha256').update(canonical).digest('hex'),
+      handover: null,
+    })
+    const saved = await this.settlementRepo.save(settlement)
+    contract.settlementId = saved._id.toHexString()
+    await this.contractRepo.save(contract)
+    return saved
+  }
+
+  async updateHandover(
+    id: string,
+    actorId: string,
+    input: {
+      handedOverAt: string
+      electricity: number
+      water: number
+      keyCount: number
+      inventoryReference?: string
+      notes?: string
+      overrideReason?: string
+      isStaff?: boolean
+    }
+  ): Promise<MoveInSettlement> {
+    const settlement = await this.find(id)
+    if (actorId !== settlement.landlordId && !input.isStaff)
+      throw new ConflictException('HANDOVER_ACCESS_DENIED')
+    if (settlement.handover?.completedAt)
+      throw new ConflictException('HANDOVER_COMPLETED_IMMUTABLE')
+    if (
+      settlement.status !== 'paid' &&
+      !(input.isStaff && input.overrideReason?.trim())
+    )
+      throw new ConflictException('HANDOVER_REQUIRES_SETTLEMENT')
+    const revision = (settlement.handover?.revision ?? 0) + 1
+    const body = {
+      revision,
+      handedOverAt: new Date(input.handedOverAt).toISOString(),
+      electricity: input.electricity,
+      water: input.water,
+      keyCount: input.keyCount,
+      inventoryReference: input.inventoryReference ?? null,
+      notes: input.notes ?? null,
+    }
+    const handoverHash = createHash('sha256')
+      .update(JSON.stringify(body))
+      .digest('hex')
+    settlement.handover = {
+      revision,
+      handedOverAt: new Date(input.handedOverAt),
+      meterReadings: { electricity: input.electricity, water: input.water },
+      keyCount: input.keyCount,
+      inventoryReference: input.inventoryReference ?? null,
+      notes: input.notes ?? null,
+      handoverHash,
+      recordedBy: actorId,
+      tenantConfirmation: null,
+      landlordConfirmation: null,
+      discrepancyNote: null,
+      overrideReason: input.overrideReason ?? null,
+      completedAt: null,
+    }
+    return this.settlementRepo.save(settlement)
+  }
+
+  async confirmHandover(
+    id: string,
+    actorId: string,
+    role: 'tenant' | 'landlord',
+    handoverHash: string,
+    discrepancyNote?: string
+  ): Promise<MoveInSettlement> {
+    const settlement = await this.find(id)
+    const handover = settlement.handover
+    if (!handover) throw new ConflictException('HANDOVER_NOT_RECORDED')
+    if (handover.completedAt) return settlement
+    if (handover.handoverHash !== handoverHash)
+      throw new ConflictException('HANDOVER_REVISION_STALE')
+    if (
+      (role === 'tenant' && settlement.tenantId !== actorId) ||
+      (role === 'landlord' && settlement.landlordId !== actorId)
+    )
+      throw new ConflictException('HANDOVER_ACCESS_DENIED')
+    if (role === 'tenant')
+      handover.tenantConfirmation = { at: new Date(), hash: handoverHash }
+    else handover.landlordConfirmation = { at: new Date(), hash: handoverHash }
+    if (discrepancyNote) handover.discrepancyNote = discrepancyNote
+    if (
+      handover.tenantConfirmation?.hash === handoverHash &&
+      handover.landlordConfirmation?.hash === handoverHash
+    ) {
+      handover.completedAt = new Date()
+    }
+    return this.settlementRepo.save(settlement)
+  }
+
+  async processOverdue(now = new Date()): Promise<number> {
+    const rows = await this.settlementRepo.find({
+      where: { status: 'pending' },
+    })
+    let count = 0
+    for (const row of rows) {
+      if (row.dueAt >= now || row.overdueNotifiedAt) continue
+      row.status = 'overdue'
+      row.overdueNotifiedAt = now
+      await this.settlementRepo.save(row)
+      await Promise.all(
+        [row.tenantId, row.landlordId].map(id =>
+          this.notifications.createNotification(
+            id,
+            'Move-in settlement overdue',
+            `Settlement ${row.contractId} is overdue.`,
+            'PAYMENT_REMINDER',
+            { contractId: row.contractId }
+          )
+        )
+      )
+      count += 1
+    }
+    return count
+  }
+
+  private async find(id: string): Promise<MoveInSettlement> {
+    if (!ObjectId.isValid(id))
+      throw new NotFoundException('MOVE_IN_SETTLEMENT_NOT_FOUND')
+    const row = await this.settlementRepo.findOne({
+      where: { _id: new ObjectId(id) },
+    })
+    if (!row) throw new NotFoundException('MOVE_IN_SETTLEMENT_NOT_FOUND')
+    return row
+  }
+}

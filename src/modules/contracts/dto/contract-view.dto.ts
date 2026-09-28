@@ -551,4 +551,24 @@ export class ContractViewDto {
 
   @ApiProperty({ type: ContractFlowDto, required: false })
   flow?: ContractFlowDto
+
+  @ApiProperty({ nullable: true })
+  settlement!: {
+    id: string
+    status: string
+    total: number
+    dueAt: string
+    statementHash: string
+    lines: Array<{ kind: string; amount: number; paymentId: string | null }>
+    handover: unknown
+  } | null
+
+  @ApiProperty()
+  financialSummary!: {
+    initialPaymentTotal: number
+    holdingDeposit: number
+    securityTopUpAmount: number
+    tenantServiceFee: number
+    landlordCommission: number
+  }
 }

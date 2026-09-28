@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Controller,
+  Body,
   Get,
   Param,
   Post,
@@ -56,5 +57,19 @@ export class PaymentsController {
     @CurrentUser('id') actorId: string
   ): Promise<Payment> {
     return this.paymentsService.confirmPayment(paymentId, actorId, true)
+  }
+
+  @Post(':id/waive')
+  @Roles('admin')
+  waive(
+    @Param('id') paymentId: string,
+    @Body() body: { reason: string },
+    @CurrentUser('id') actorId: string
+  ): Promise<Payment> {
+    return this.paymentsService.waivePlatformFee(
+      paymentId,
+      actorId,
+      body.reason
+    )
   }
 }

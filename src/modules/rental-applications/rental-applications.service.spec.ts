@@ -3,6 +3,7 @@ import {
   ConflictException,
   ForbiddenException,
   NotFoundException,
+  UnprocessableEntityException,
 } from '@nestjs/common'
 import type { ConfigService } from '@nestjs/config'
 import { ObjectId } from 'mongodb'
@@ -122,7 +123,10 @@ describe('RentalApplicationsService', () => {
     apartments as unknown as ApartmentsService
   )
 
-  beforeEach(() => jest.clearAllMocks())
+  beforeEach(() => {
+    jest.clearAllMocks()
+    repository.findOne.mockResolvedValue(null)
+  })
 
   it('creates a pending application with server-derived identities', async () => {
     apartments.findOne.mockResolvedValue(apartment)
@@ -147,6 +151,226 @@ describe('RentalApplicationsService', () => {
         leaseDurationMonths: 12,
       })
     )
+  })
+
+  it('rejects stale tenant fee quotes and requires tenant acknowledgement', async () => {
+    const feeSnapshot = {
+      scheduleId: 'fee-v1',
+      version: 1,
+      contentHash: 'a'.repeat(64),
+      quote: [
+        {
+          feeKind: 'LANDLORD_COMMISSION' as const,
+          payerRole: 'landlord' as const,
+          amountBeforeVat: 1_000_000,
+          vatAmount: 100_000,
+          amount: 1_100_000,
+        },
+        {
+          feeKind: 'TENANT_SERVICE' as const,
+          payerRole: 'tenant' as const,
+          amountBeforeVat: 200_000,
+          vatAmount: 20_000,
+          amount: 220_000,
+        },
+      ],
+    }
+    const platformFees = { quote: jest.fn().mockResolvedValue(feeSnapshot) }
+    const feeService = new RentalApplicationsService(
+      repository as unknown as Repository<RentalApplication>,
+      apartments as unknown as ApartmentsService,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      platformFees as never
+    )
+    apartments.findOne.mockResolvedValue(apartment)
+    repository.findOne.mockResolvedValue(null)
+    repository.create.mockImplementation(
+      (value: unknown) => value as RentalApplication
+    )
+    repository.save.mockImplementation((value: unknown) =>
+      Promise.resolve(value as RentalApplication)
+    )
+
+    await expect(
+      feeService.create(
+        'tenant-1',
+        input({
+          feeScheduleId: 'fee-v1',
+          feeScheduleVersion: 1,
+          feeContentHash: 'b'.repeat(64),
+        })
+      )
+    ).rejects.toThrow('PLATFORM_FEE_QUOTE_STALE')
+    await expect(
+      feeService.create(
+        'tenant-1',
+        input({
+          feeScheduleId: 'fee-v1',
+          feeScheduleVersion: 1,
+          feeContentHash: feeSnapshot.contentHash,
+        })
+      )
+    ).rejects.toBeInstanceOf(UnprocessableEntityException)
+    const created = await feeService.create(
+      'tenant-1',
+      input({
+        feeScheduleId: 'fee-v1',
+        feeScheduleVersion: 1,
+        feeContentHash: feeSnapshot.contentHash,
+        feeAcknowledgedHash: feeSnapshot.contentHash,
+      })
+    )
+    expect(created.feeSnapshot?.contentHash).toBe(feeSnapshot.contentHash)
+
+    platformFees.quote.mockResolvedValueOnce(null)
+    await expect(
+      feeService.create(
+        'tenant-1',
+        input({
+          feeScheduleId: 'fee-v1',
+          feeScheduleVersion: 1,
+          feeContentHash: feeSnapshot.contentHash,
+        })
+      )
+    ).rejects.toThrow('PLATFORM_FEE_QUOTE_STALE')
+  })
+
+  it('rejects a co-occupant list that does not match the total occupants', async () => {
+    apartments.findOne.mockResolvedValue(apartment)
+
+    await expect(
+      service.create(
+        'tenant-1',
+        Object.assign(input({ occupants: 3 }), { occupantsDetail: [] })
+      )
+    ).rejects.toThrow('APPLICATION_OCCUPANTS_MISMATCH')
+    expect(repository.save).not.toHaveBeenCalled()
+  })
+
+  it('masks the other party fee line in application responses', async () => {
+    const stored = application({
+      emergencyContact: {
+        fullName: 'Contact',
+        relationship: 'Friend',
+        phone: '+84912345678',
+      },
+      feeSnapshot: {
+        scheduleId: 'fees',
+        version: 1,
+        contentHash: 'a'.repeat(64),
+        quote: [
+          {
+            feeKind: 'LANDLORD_COMMISSION',
+            payerRole: 'landlord',
+            amountBeforeVat: 1_000,
+            vatAmount: 100,
+            amount: 1_100,
+          },
+          {
+            feeKind: 'TENANT_SERVICE',
+            payerRole: 'tenant',
+            amountBeforeVat: 2_000,
+            vatAmount: 200,
+            amount: 2_200,
+          },
+        ],
+      },
+    })
+    repository.findOne.mockResolvedValue(stored)
+    const tenantView = await service.getOne(
+      stored._id.toHexString(),
+      'tenant-1'
+    )
+    const landlordView = await service.getOne(
+      stored._id.toHexString(),
+      'landlord-1'
+    )
+    expect(tenantView.feeSnapshot?.quote.map(line => line.feeKind)).toEqual([
+      'TENANT_SERVICE',
+    ])
+    expect(landlordView.feeSnapshot?.quote.map(line => line.feeKind)).toEqual([
+      'LANDLORD_COMMISSION',
+    ])
+    expect(landlordView.emergencyContact?.phone).not.toBe(
+      stored.emergencyContact?.phone
+    )
+    expect(stored.feeSnapshot?.quote).toHaveLength(2)
+  })
+
+  it('rejects a requested payment cycle that is not enabled by the package', async () => {
+    apartments.findOne.mockResolvedValue({
+      ...apartment,
+      rentalPackages: [
+        {
+          ...(apartment.rentalPackages[0] ?? {}),
+          settlementPolicy: {
+            allowedPaymentCycles: [1, 3],
+            defaultPaymentCycle: 1,
+            firstPaymentDueOffsetDays: 3,
+          },
+        },
+      ],
+    })
+
+    await expect(
+      service.create(
+        'tenant-1',
+        Object.assign(input(), { selectedPaymentCycleMonths: 6 })
+      )
+    ).rejects.toThrow('PAYMENT_CYCLE_NOT_ALLOWED')
+    expect(repository.save).not.toHaveBeenCalled()
+  })
+
+  it('rejects a viewing booking belonging to another tenant', async () => {
+    const bookings = {
+      findOneById: jest.fn().mockResolvedValue({
+        tenantId: 'another-tenant',
+        apartmentId: 'apartment-1',
+        status: 'confirmed',
+      }),
+    }
+    Reflect.set(service, 'bookingsService', bookings)
+    apartments.findOne.mockResolvedValue(apartment)
+
+    await expect(
+      service.create(
+        'tenant-1',
+        Object.assign(input(), {
+          viewingBookingId: '507f1f77bcf86cd799439011',
+        })
+      )
+    ).rejects.toThrow('APPLICATION_VIEWING_INVALID')
+    expect(repository.save).not.toHaveBeenCalled()
+  })
+
+  it('masks emergency contact phone numbers in landlord detail responses', async () => {
+    const record = Object.assign(application(), {
+      emergencyContact: {
+        fullName: 'Contact',
+        relationship: 'Parent',
+        phone: '+84912345678',
+      },
+    })
+    repository.findOne.mockResolvedValue(record)
+
+    const result = await service.getOne(record._id.toHexString(), 'landlord-1')
+
+    const resultContact = Reflect.get(result, 'emergencyContact') as
+      | { phone: string }
+      | undefined
+    const originalContact = Reflect.get(record, 'emergencyContact') as
+      | { phone: string }
+      | undefined
+    expect(resultContact?.phone).toBe('+84*******78')
+    expect(originalContact?.phone).toBe('+84912345678')
   })
 
   it('reports the disabled context and blocks creation when v4 is disabled', async () => {

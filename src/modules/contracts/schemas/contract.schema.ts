@@ -122,6 +122,9 @@ export class Contract {
   @Column({ nullable: true })
   durationMonths?: number | null
 
+  @Column({ nullable: true })
+  paymentCycleMonths?: 1 | 3 | 6 | null
+
   // ── Tài chính ──
 
   @Column()
@@ -299,6 +302,23 @@ export class Contract {
 
   @Column({ nullable: true })
   effectiveCommercialRevision?: number | null
+
+  @Column('json', { nullable: true })
+  feeSnapshot?: {
+    scheduleId: string
+    version: number
+    contentHash: string
+    quote: Array<{
+      feeKind: 'LANDLORD_COMMISSION' | 'TENANT_SERVICE'
+      payerRole: 'tenant' | 'landlord'
+      amountBeforeVat: number
+      vatAmount: number
+      amount: number
+    }>
+  } | null
+
+  @Column({ nullable: true })
+  settlementId?: string | null
 
   @Column({ nullable: true })
   governingAmendmentId?: string | null

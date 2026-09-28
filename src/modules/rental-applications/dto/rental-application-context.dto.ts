@@ -17,7 +17,23 @@ export interface RentalApplicationContext {
     landlordDisplayName: string | null
   }
   pricingRevision: number
-  packages: Array<RentalPackageRecord & { currency: 'VND' }>
+  packages: Array<
+    RentalPackageRecord & {
+      currency: 'VND'
+      feeSnapshot?: {
+        scheduleId: string
+        version: number
+        contentHash: string
+        quote: Array<{
+          feeKind: 'TENANT_SERVICE' | 'LANDLORD_COMMISSION'
+          payerRole: 'tenant'
+          amountBeforeVat: number
+          vatAmount: number
+          amount: number
+        }>
+      } | null
+    }
+  >
   disclosure: {
     version: string
     hash: string

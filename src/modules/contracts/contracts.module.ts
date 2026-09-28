@@ -39,6 +39,8 @@ import { ContractAmendmentController } from './contract-amendment.controller'
 import { DepositConfirmationResolver } from './deposit-confirmation.resolver'
 import { FlowNotificationService } from './flow/flow-notification.service'
 import { NotificationsModule } from '../notifications/notifications.module'
+import { MoveInSettlementsModule } from '../move-in-settlements/move-in-settlements.module'
+import { MoveInSettlement } from '../move-in-settlements/schemas/move-in-settlement.schema'
 
 @Module({
   imports: [
@@ -53,6 +55,7 @@ import { NotificationsModule } from '../notifications/notifications.module'
       ContractArtifact,
       ContractAmendment,
       Payment,
+      MoveInSettlement,
     ]),
     PoliciesModule,
     FabricModule,
@@ -61,6 +64,7 @@ import { NotificationsModule } from '../notifications/notifications.module'
     SmartOtpModule,
     PropertyOwnershipTransferModule,
     NotificationsModule,
+    MoveInSettlementsModule,
   ],
   controllers: [
     ContractsController,

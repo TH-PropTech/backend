@@ -42,6 +42,53 @@ describe('CreateApartmentDto validation (design §8)', () => {
     expect(await invalidFields(validPayload)).toEqual([])
   })
 
+  it('accepts settlement policy nested in a rental package', async () => {
+    expect(
+      await invalidFields({
+        ...validPayload,
+        rentalPackages: [
+          {
+            packageId: 'pkg-12m',
+            version: 1,
+            durationMonths: 12,
+            monthlyRent: 12_000_000,
+            depositPolicy: { type: 'MONTHS_OF_RENT', months: 2 },
+            status: 'active',
+            settlementPolicy: {
+              holdingDeposit: { type: 'PERCENT_OF_SECURITY', percent: 25 },
+              allowedPaymentCycles: [1, 3, 6],
+              defaultPaymentCycle: 3,
+              firstPaymentDueOffsetDays: 3,
+            },
+          },
+        ],
+      })
+    ).toEqual([])
+  })
+
+  it('rejects invalid settlement policy fields in a rental package', async () => {
+    expect(
+      await invalidFields({
+        ...validPayload,
+        rentalPackages: [
+          {
+            packageId: 'pkg-12m',
+            version: 1,
+            durationMonths: 12,
+            monthlyRent: 12_000_000,
+            depositPolicy: { type: 'MONTHS_OF_RENT', months: 2 },
+            status: 'active',
+            settlementPolicy: {
+              allowedPaymentCycles: [2],
+              defaultPaymentCycle: 2,
+              firstPaymentDueOffsetDays: 16,
+            },
+          },
+        ],
+      })
+    ).toContain('rentalPackages')
+  })
+
   it.each([
     ['title shorter than 10', { title: 'ngắn' }, 'title'],
     ['title longer than 200', { title: 'a'.repeat(201) }, 'title'],

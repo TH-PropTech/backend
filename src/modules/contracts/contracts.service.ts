@@ -52,6 +52,8 @@ import {
 import { resolveDepositConfirmation } from './deposit-confirmation.resolver'
 import { evaluateLockContent, isDepositGateOpen } from './flow/flow-guards'
 import { FlowNotificationService } from './flow/flow-notification.service'
+import { resolveEffectiveCommercial } from './commercial/resolve-effective-commercial'
+import { MoveInSettlementsService } from '../move-in-settlements/move-in-settlements.service'
 
 // ── Interfaces ──
 
@@ -91,6 +93,8 @@ export interface CreateContractFromApplicationInput {
   tenantId: string
   moveInDate: Date
   packageSnapshot: RentalPackageSnapshot
+  paymentCycleMonths?: 1 | 3 | 6
+  feeSnapshot?: Contract['feeSnapshot']
   executionPolicySnapshot?: RentalExecutionPolicyRef | null
   applicationReviewHash?: string | null
   termsRef?: {
@@ -163,7 +167,9 @@ export class ContractsService {
     @InjectRepository(ContractAmendment)
     private readonly amendmentRepository?: Repository<ContractAmendment>,
     @Optional()
-    private readonly flowNotificationService?: FlowNotificationService
+    private readonly flowNotificationService?: FlowNotificationService,
+    @Optional()
+    private readonly moveInSettlementsService?: MoveInSettlementsService
   ) {}
 
   // ── Private helpers ──
@@ -199,6 +205,24 @@ export class ContractsService {
     return crypto.createHash('sha256').update(payload).digest('hex')
   }
 
+  private async projectApartmentRental(contract: Contract): Promise<void> {
+    if (!ObjectId.isValid(contract.propertyId)) return
+    const apartment = await this.apartmentRepository.findOne({
+      where: { _id: new ObjectId(contract.propertyId) },
+    })
+    if (!apartment) return
+    apartment.status = 'rented'
+    const reservation = apartment.rentalReservation
+    if (
+      reservation &&
+      reservation.applicationId === contract.rentalApplicationId
+    ) {
+      reservation.contractId = contract._id.toHexString()
+      reservation.leaseActivatedAt = new Date()
+    }
+    await this.apartmentRepository.save(apartment)
+  }
+
   // ── Tạo draft từ application snapshot — không mở payment/signing ──
 
   async createDraftFromApplication(
@@ -231,6 +255,7 @@ export class ContractsService {
     contract.startDate = startDate
     contract.endDate = endDate
     contract.durationMonths = input.packageSnapshot.durationMonths
+    contract.paymentCycleMonths = input.paymentCycleMonths ?? 1
     contract.monthlyRent = input.packageSnapshot.monthlyRent
     contract.deposit = input.packageSnapshot.resolvedDepositAmount
     contract.paymentDay = 1
@@ -250,6 +275,7 @@ export class ContractsService {
     contract.depositTxHash = null
     contract.depositAgreementCode = null
     contract.packageSnapshot = input.packageSnapshot
+    contract.feeSnapshot = input.feeSnapshot ?? null
     contract.executionPolicySnapshot =
       input.executionPolicySnapshot ??
       input.packageSnapshot.defaultExecutionPolicy ??
@@ -625,7 +651,7 @@ export class ContractsService {
       contract.tenantId,
       contract.landlordId,
       canonicalHash,
-      contract.monthlyRent.toString(),
+      resolveEffectiveCommercial(contract).monthlyRent.toString(),
       contract.startDate.toISOString(),
     ]
     if (contract.depositId && contract.depositHash) {
@@ -657,6 +683,10 @@ export class ContractsService {
 
     const saved = await this.contractRepository.save(contract)
     if (this.paymentsService) await this.paymentsService.generateSchedule(saved)
+    if (this.paymentsService)
+      await this.paymentsService.generatePlatformFeeInvoices(saved)
+    await this.moveInSettlementsService?.createForContract(saved)
+    await this.projectApartmentRental(saved)
     return saved
   }
 
@@ -721,6 +751,15 @@ export class ContractsService {
     if (contract.editorContent) {
       sanitizeTipTapContent(contract.editorContent)
     }
+    const effectiveCommercial =
+      contract.commercialDraft ?? resolveEffectiveCommercial(contract)
+    contract.effectiveCommercial = { ...effectiveCommercial }
+    contract.effectiveCommercialRevision = contract.commercialRevision ?? 0
+    const effectiveEndDate = new Date(contract.startDate)
+    effectiveEndDate.setMonth(
+      effectiveEndDate.getMonth() + effectiveCommercial.durationMonths
+    )
+    contract.endDate = effectiveEndDate
     const templateRef =
       contract.contractTemplateRef ??
       (contract.termsRef?.key.startsWith('VN_') ? contract.termsRef : undefined)
@@ -1142,7 +1181,7 @@ export class ContractsService {
         contract.tenantId,
         contract.landlordId,
         contract.contractHash,
-        contract.monthlyRent.toString(),
+        resolveEffectiveCommercial(contract).monthlyRent.toString(),
         contract.startDate.toISOString(),
       ]
       if (depositIdToUse && depositHashToUse) {
@@ -1171,6 +1210,11 @@ export class ContractsService {
 
     if (saved.status === 'active' && this.paymentsService) {
       await this.paymentsService.generateSchedule(saved)
+      await this.paymentsService.generatePlatformFeeInvoices(saved)
+    }
+    if (saved.status === 'active') {
+      await this.moveInSettlementsService?.createForContract(saved)
+      await this.projectApartmentRental(saved)
     }
     return saved
   }
