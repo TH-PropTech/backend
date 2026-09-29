@@ -2,11 +2,13 @@ import { registerAs } from '@nestjs/config'
 
 export default registerAs('smartCA', () => {
   const env = (process.env.SMARTCA_ENV || 'production').toLowerCase()
+  const isMock = env === 'mock'
   const isTest = env === 'test'
 
   return {
     // Active environment label
-    environment: isTest ? 'test' : 'production',
+    environment: isMock ? 'mock' : isTest ? 'test' : 'production',
+    isMock,
 
     // VNPT SmartCA Signing API base URL
     // Test: https://rmgateway.vnptit.vn  |  Prod: https://gwsca.vnpt.vn

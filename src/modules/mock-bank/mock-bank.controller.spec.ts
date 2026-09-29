@@ -26,4 +26,25 @@ describe('MockBankController', () => {
     const controller = new MockBankController({} as never)
     expect(() => controller.wallet({})).toThrow('USER_ID_REQUIRED')
   })
+
+  it('redirects a verified VNPay return to the canonical workspace result', async () => {
+    const service = {
+      handleVnpayDepositReturn: jest.fn().mockResolvedValue({
+        status: 'succeeded',
+        redirectUrl: 'http://localhost:3000/contracts/contract-1?payment=vnpay',
+      }),
+    }
+    const response = { redirect: jest.fn() }
+    const controller = new MockBankController(service as never)
+
+    await controller.vnpayReturn({ vnp_TxnRef: 'VNPAY-1' }, response as never)
+
+    expect(service.handleVnpayDepositReturn).toHaveBeenCalledWith({
+      vnp_TxnRef: 'VNPAY-1',
+    })
+    expect(response.redirect).toHaveBeenCalledWith(
+      302,
+      'http://localhost:3000/contracts/contract-1?payment=vnpay'
+    )
+  })
 })

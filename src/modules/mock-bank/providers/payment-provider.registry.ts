@@ -1,6 +1,7 @@
 import { Injectable, ServiceUnavailableException } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { MockBankAdapter } from './mock-bank.adapter'
+import { VnpayAdapter } from './vnpay.adapter'
 import type {
   PaymentProviderName,
   ProviderAccountLink,
@@ -11,13 +12,15 @@ import type {
 export class PaymentProviderRegistry {
   constructor(
     private readonly configService: ConfigService,
-    private readonly mockBankAdapter: MockBankAdapter
+    private readonly mockBankAdapter: MockBankAdapter,
+    private readonly vnpayAdapter: VnpayAdapter
   ) {}
 
   async createPaymentIntent(input: {
     amount: number
     description: string
     customerRef: string
+    txRef: string
   }): Promise<ProviderPaymentIntent> {
     return this.activeAdapter().createPaymentIntent(input)
   }
@@ -34,12 +37,26 @@ export class PaymentProviderRegistry {
     }
   }
 
-  private activeAdapter(): MockBankAdapter {
-    this.assertMockProvider()
-    return this.mockBankAdapter
+  assertVnpayProvider(): void {
+    if (this.providerName() !== 'vnpay') {
+      throw new ServiceUnavailableException('VNPAY_PROVIDER_NOT_CONFIGURED')
+    }
   }
 
-  private providerName(): PaymentProviderName {
+  private activeAdapter(): MockBankAdapter | VnpayAdapter {
+    switch (this.providerName()) {
+      case 'mock-bank':
+        return this.mockBankAdapter
+      case 'vnpay':
+        return this.vnpayAdapter
+      default:
+        throw new ServiceUnavailableException(
+          'BANK_PROVIDER_ADAPTER_NOT_CONFIGURED'
+        )
+    }
+  }
+
+  providerName(): PaymentProviderName {
     return (
       this.configService.get<PaymentProviderName>(
         'rentalFlow.paymentProvider'

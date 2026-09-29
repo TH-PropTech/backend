@@ -8,7 +8,12 @@ import {
 } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { InjectRepository } from '@nestjs/typeorm'
-import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
+import {
+  createHash,
+  createHmac,
+  randomBytes,
+  timingSafeEqual,
+} from 'node:crypto'
 import { MongoRepository, Repository } from 'typeorm'
 import { DepositAgreementsService } from '../contracts/deposit-agreements.service'
 import { evaluatePayDeposit } from '../contracts/flow/flow-guards'
@@ -20,10 +25,12 @@ import { ObjectId } from 'mongodb'
 import { PaymentProviderRegistry } from './providers/payment-provider.registry'
 import type { PaymentProviderName } from './providers/payment-provider.port'
 import { LedgerOutboxService } from '../fabric/ledger-outbox.service'
+import { VnpayCallbackVerifier } from './providers/vnpay-callback.verifier'
 
 const CALLBACK_WINDOW_MS = 5 * 60 * 1000
 
 export type MockPaymentInit = {
+  provider: PaymentProviderName
   txRef: string
   amount: number
   description: string
@@ -31,6 +38,13 @@ export type MockPaymentInit = {
   deepLink: string
   expiresAt: Date
   status: 'pending'
+}
+
+type VnpayQuery = Record<string, string | string[] | undefined>
+
+export type VnpayPaymentReturn = {
+  status: 'succeeded' | 'failed'
+  redirectUrl: string
 }
 
 export type CallbackHeaders = {
@@ -57,14 +71,14 @@ export class MockBankService {
     private readonly walletRepository: MongoRepository<MockWallet>,
     private readonly providerRegistry: PaymentProviderRegistry,
     private readonly configService: ConfigService,
-    private readonly ledgerOutboxService: LedgerOutboxService
+    private readonly ledgerOutboxService: LedgerOutboxService,
+    private readonly vnpayCallbackVerifier: VnpayCallbackVerifier
   ) {}
 
   async initDepositPayment(
     depositAgreementId: string,
     currentUserId: string
   ): Promise<MockPaymentInit> {
-    this.assertMockProvider()
     const agreement = await this.depositAgreementsService.getAgreement(
       depositAgreementId,
       currentUserId,
@@ -105,7 +119,8 @@ export class MockBankService {
       agreement.amount,
       `Deposit ${agreement.agreementCode}`,
       agreement._id.toString(),
-      'deposit'
+      'deposit',
+      agreement.linkedLeaseContractId ?? null
     )
     await this.depositAgreementsService.markPaymentPending(
       agreement._id.toString(),
@@ -148,38 +163,61 @@ export class MockBankService {
     if (attempt.status === 'succeeded') {
       return { status: 'succeeded', txRef: attempt.txRef, replayed: true }
     }
-    attempt.status = 'succeeded'
-    attempt.processedAt = new Date()
-    attempt.callbackDigest = this.callbackDigest(body, headers)
-    await this.attemptRepository.save(attempt)
+    await this.settleDepositAttempt(
+      attempt,
+      this.callbackDigest(body, headers),
+      this.secret()
+    )
+    return { status: 'succeeded', txRef: attempt.txRef, replayed: false }
+  }
 
-    const depositHash = this.receiptHash({
-      type: 'deposit',
-      agreementId: attempt.paymentId,
-      paymentAttemptId: attempt._id.toString(),
+  async handleVnpayDepositReturn(
+    query: VnpayQuery
+  ): Promise<VnpayPaymentReturn> {
+    this.providerRegistry.assertVnpayProvider()
+    const txRef = query.vnp_TxnRef
+    if (typeof txRef !== 'string')
+      throw new BadRequestException('INVALID_VNPAY_CALLBACK')
+    const attempt = await this.attemptRepository.findOne({ where: { txRef } })
+    if (
+      !attempt ||
+      attempt.provider !== 'vnpay' ||
+      attempt.paymentType !== 'deposit'
+    ) {
+      throw new NotFoundException('PAYMENT_ATTEMPT_NOT_FOUND')
+    }
+    const verified = this.vnpayCallbackVerifier.verify(query, {
+      secret: this.vnpaySecret(),
       txRef: attempt.txRef,
       amount: attempt.amount,
     })
-    const agreement = await this.depositAgreementsService.recordDepositPaid(
-      attempt.paymentId,
-      attempt._id.toString(),
-      depositHash
+    if (!verified.succeeded) {
+      return {
+        status: 'failed',
+        redirectUrl: this.vnpayClientReturnUrl(attempt.contractId, 'failed'),
+      }
+    }
+    if (attempt.status === 'succeeded') {
+      return {
+        status: 'succeeded',
+        redirectUrl: this.vnpayClientReturnUrl(attempt.contractId, 'succeeded'),
+      }
+    }
+    if (
+      attempt.status !== 'pending' ||
+      attempt.expiresAt.getTime() < Date.now()
+    ) {
+      throw new ConflictException('PAYMENT_ATTEMPT_NOT_PENDING')
+    }
+    await this.settleDepositAttempt(
+      attempt,
+      this.vnpayCallbackDigest(query),
+      this.vnpaySecret()
     )
-    await this.ledgerOutboxService.enqueue({
-      aggregateType: 'deposit',
-      aggregateId: agreement._id.toHexString(),
-      eventType: 'deposit.paid',
-      action: 'recordDeposit',
-      args: [
-        agreement._id.toHexString(),
-        agreement._id.toHexString(),
-        agreement.applicationId,
-        agreement.amount.toString(),
-        depositHash,
-      ],
-      metadata: { details: { paymentAttemptId: attempt._id.toString() } },
-    })
-    return { status: 'succeeded', txRef: attempt.txRef, replayed: false }
+    return {
+      status: 'succeeded',
+      redirectUrl: this.vnpayClientReturnUrl(attempt.contractId, 'succeeded'),
+    }
   }
 
   async handleRentCallback(
@@ -333,17 +371,21 @@ export class MockBankService {
     amount: number,
     description: string,
     paymentId: string,
-    paymentType: 'deposit' | 'rent'
+    paymentType: 'deposit' | 'rent',
+    contractId: string | null = null
   ): Promise<MockPaymentInit> {
+    const txRef = `${this.providerRegistry.providerName().toUpperCase()}-${randomBytes(12).toString('hex')}`
     const intent = await this.providerRegistry.createPaymentIntent({
       amount,
       description,
       customerRef: userId,
+      txRef,
     })
     const attempt = this.attemptRepository.create({
       provider: intent.provider,
       txRef: intent.txRef,
       paymentId,
+      contractId,
       paymentType,
       userId,
       amount,
@@ -351,6 +393,7 @@ export class MockBankService {
       expiresAt: intent.expiresAt,
       processedAt: null,
       callbackDigest: null,
+      providerPaymentUrl: intent.redirectUrl,
     })
     await this.attemptRepository.save(attempt)
     return this.toPaymentInit(attempt, description, intent.redirectUrl)
@@ -359,9 +402,11 @@ export class MockBankService {
   private toPaymentInit(
     attempt: PaymentAttempt,
     description: string,
-    deepLink = `mockbank://pay?txRef=${encodeURIComponent(attempt.txRef)}&amount=${attempt.amount}`
+    deepLink = attempt.providerPaymentUrl ??
+      `mockbank://pay?txRef=${encodeURIComponent(attempt.txRef)}&amount=${attempt.amount}`
   ): MockPaymentInit {
     return {
+      provider: attempt.provider,
       txRef: attempt.txRef,
       amount: attempt.amount,
       description,
@@ -456,5 +501,67 @@ export class MockBankService {
 
   private assertMockProvider(): void {
     this.providerRegistry.assertMockProvider()
+  }
+
+  private async settleDepositAttempt(
+    attempt: PaymentAttempt,
+    callbackDigest: string,
+    receiptSecret: string
+  ): Promise<void> {
+    attempt.status = 'succeeded'
+    attempt.processedAt = new Date()
+    attempt.callbackDigest = callbackDigest
+    await this.attemptRepository.save(attempt)
+    const depositHash = createHmac('sha256', receiptSecret)
+      .update(
+        JSON.stringify({
+          type: 'deposit',
+          agreementId: attempt.paymentId,
+          paymentAttemptId: attempt._id.toString(),
+          txRef: attempt.txRef,
+          amount: attempt.amount,
+        })
+      )
+      .digest('hex')
+    const agreement = await this.depositAgreementsService.recordDepositPaid(
+      attempt.paymentId,
+      attempt._id.toString(),
+      depositHash
+    )
+    await this.ledgerOutboxService.enqueue({
+      aggregateType: 'deposit',
+      aggregateId: agreement._id.toHexString(),
+      eventType: 'deposit.paid',
+      action: 'recordDeposit',
+      args: [
+        agreement._id.toHexString(),
+        agreement._id.toHexString(),
+        agreement.applicationId,
+        agreement.amount.toString(),
+        depositHash,
+      ],
+      metadata: { details: { paymentAttemptId: attempt._id.toString() } },
+    })
+  }
+
+  private vnpaySecret(): string {
+    return this.configService.getOrThrow<string>('rentalFlow.vnpayHashSecret')
+  }
+
+  private vnpayCallbackDigest(query: VnpayQuery): string {
+    return createHash('sha256').update(JSON.stringify(query)).digest('hex')
+  }
+
+  private vnpayClientReturnUrl(
+    contractId: string | null,
+    result: 'succeeded' | 'failed'
+  ): string {
+    const url = new URL(
+      this.configService.getOrThrow<string>('rentalFlow.vnpayClientReturnUrl')
+    )
+    if (contractId) url.pathname = `/contracts/${contractId}`
+    url.searchParams.set('payment', 'vnpay')
+    url.searchParams.set('result', result)
+    return url.toString()
   }
 }

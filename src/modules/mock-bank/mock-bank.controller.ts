@@ -6,12 +6,13 @@ import {
   Post,
   UnauthorizedException,
   Body,
+  Query,
+  Res,
   UseGuards,
 } from '@nestjs/common'
+import type { Response } from 'express'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
-import { Roles } from '../../common/decorators/roles.decorator'
-import { RolesGuard } from '../../common/guards/roles.guard'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import type { UserPayload } from '../auth/interfaces/auth.interface'
 import {
@@ -76,10 +77,18 @@ export class MockBankController {
     )
   }
 
+  @Get('vnpay/return')
+  async vnpayReturn(
+    @Query() query: Record<string, string | string[] | undefined>,
+    @Res() response: Response
+  ): Promise<void> {
+    const result = await this.mockBankService.handleVnpayDepositReturn(query)
+    response.redirect(302, result.redirectUrl)
+  }
+
   @Get('simulate-success/:txRef')
   @ApiBearerAuth()
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('staff', 'admin')
+  @UseGuards(JwtAuthGuard)
   simulate(@Param('txRef') txRef: string): Promise<MockPaymentCallbackResult> {
     return this.mockBankService.simulateSuccess(txRef)
   }

@@ -29,6 +29,7 @@ export interface PaymentProviderAdapter {
     amount: number
     description: string
     customerRef: string
+    txRef: string
   }): Promise<ProviderPaymentIntent>
   getAccountLink(userId: string): Promise<ProviderAccountLink>
 }

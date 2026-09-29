@@ -24,6 +24,9 @@ export class PaymentAttempt {
   @Column()
   paymentId!: string
 
+  @Column({ nullable: true })
+  contractId!: string | null
+
   @Column({ type: 'string' })
   paymentType!: 'deposit' | 'rent'
 
@@ -44,6 +47,9 @@ export class PaymentAttempt {
 
   @Column({ nullable: true })
   callbackDigest!: string | null
+
+  @Column({ nullable: true })
+  providerPaymentUrl!: string | null
 
   @CreateDateColumn()
   createdAt!: Date

@@ -43,6 +43,10 @@ export const configuration = (): {
     paymentProvider: 'mock-bank' | 'vnpay' | 'momo' | 'sepay' | 'techcombank'
     mockBankBaseUrl: string
     mockBankSecret: string
+    vnpayGatewayUrl: string
+    vnpayReturnUrl: string
+    vnpayHashSecret: string
+    vnpayClientReturnUrl: string
   }
   fabric: {
     enabled: boolean
@@ -104,6 +108,15 @@ export const configuration = (): {
       | 'techcombank',
     mockBankBaseUrl: process.env.MOCK_BANK_BASE_URL ?? 'http://localhost:3001',
     mockBankSecret: process.env.MOCK_BANK_SECRET ?? '',
+    vnpayGatewayUrl:
+      process.env.VNPAY_GATEWAY_URL ??
+      'http://localhost:8888/order/create_payment_for_transaction',
+    vnpayReturnUrl:
+      process.env.VNPAY_RETURN_URL ??
+      'http://localhost:3001/api/v1/bank/vnpay/return',
+    vnpayHashSecret: process.env.VNPAY_HASH_SECRET ?? '',
+    vnpayClientReturnUrl:
+      process.env.VNPAY_CLIENT_RETURN_URL ?? 'http://localhost:3000',
   },
   fabric: {
     enabled: process.env.FABRIC_ENABLED === 'true',
