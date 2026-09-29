@@ -47,6 +47,34 @@ export const envValidationSchema = Joi.object({
       then: Joi.required(),
       otherwise: Joi.optional().allow(''),
     }),
+  VNPAY_GATEWAY_URL: Joi.string()
+    .uri({ scheme: ['http', 'https'] })
+    .when('PAYMENT_PROVIDER', {
+      is: 'vnpay',
+      then: Joi.required(),
+      otherwise: Joi.optional().allow(''),
+    }),
+  VNPAY_RETURN_URL: Joi.string()
+    .uri({ scheme: ['http', 'https'] })
+    .when('PAYMENT_PROVIDER', {
+      is: 'vnpay',
+      then: Joi.required(),
+      otherwise: Joi.optional().allow(''),
+    }),
+  VNPAY_HASH_SECRET: Joi.string()
+    .min(32)
+    .when('PAYMENT_PROVIDER', {
+      is: 'vnpay',
+      then: Joi.required(),
+      otherwise: Joi.optional().allow(''),
+    }),
+  VNPAY_CLIENT_RETURN_URL: Joi.string()
+    .uri({ scheme: ['http', 'https'] })
+    .when('PAYMENT_PROVIDER', {
+      is: 'vnpay',
+      then: Joi.required(),
+      otherwise: Joi.optional().allow(''),
+    }),
   FABRIC_ENABLED: Joi.boolean().default(false),
   FABRIC_MSP_ID: Joi.string().when('FABRIC_ENABLED', {
     is: true,

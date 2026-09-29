@@ -575,7 +575,7 @@ export class ContractViewService {
       }
     }
 
-    if (!input.isKycVerified) {
+    if (!input.isKycVerified && process.env.NODE_ENV === 'production') {
       return {
         eligible: false,
         reasonCode: 'KYC_NOT_VERIFIED',

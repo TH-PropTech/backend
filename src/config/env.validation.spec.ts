@@ -54,4 +54,25 @@ describe('envValidationSchema eKYC configuration', () => {
     })
     expect(rejected.error?.message).toContain('PAYMENT_PROVIDER')
   })
+
+  it('requires a complete VNPay configuration when VNPay is selected', () => {
+    const rejected = envValidationSchema.validate({
+      ...baseEnvironment,
+      EKYC_SERVICE_URL: 'https://ekyc.example.com',
+      PAYMENT_PROVIDER: 'vnpay',
+    })
+    expect(rejected.error?.message).toContain('VNPAY_GATEWAY_URL')
+
+    const accepted = envValidationSchema.validate({
+      ...baseEnvironment,
+      EKYC_SERVICE_URL: 'https://ekyc.example.com',
+      PAYMENT_PROVIDER: 'vnpay',
+      VNPAY_GATEWAY_URL:
+        'http://localhost:8888/order/create_payment_for_transaction',
+      VNPAY_RETURN_URL: 'http://localhost:3001/api/v1/bank/vnpay/return',
+      VNPAY_HASH_SECRET: 'a'.repeat(32),
+      VNPAY_CLIENT_RETURN_URL: 'http://localhost:3000',
+    })
+    expect(accepted.error).toBeUndefined()
+  })
 })

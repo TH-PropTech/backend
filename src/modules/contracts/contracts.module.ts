@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common'
+import { ConfigService } from '@nestjs/config'
 import { TypeOrmModule } from '@nestjs/typeorm'
 import { Contract } from './schemas/contract.schema'
 import { SigningGrant } from './schemas/signing-grant.schema'
@@ -18,6 +19,7 @@ import { ContractViewService } from './contract-view.service'
 import { SmartOtpModule } from '../smart-otp/smart-otp.module'
 import { SmartCaSigningSession } from './smartca/smartca-signing-session.schema'
 import { SmartCaProvider } from './smartca/smartca.provider'
+import { MockSmartCaProvider } from './smartca/mock-smartca.provider'
 import { SmartCaSigningService } from './smartca/smartca-signing.service'
 import { SmartCaCallbackGuard } from './smartca/smartca-callback.guard'
 import { ContractTemplate } from './legal/contract-template.schema'
@@ -72,7 +74,18 @@ import { DepositConfirmationResolver } from './deposit-confirmation.resolver'
     ContractArtifactService,
     ContractDocumentProjector,
     ContractViewService,
-    SmartCaProvider,
+    MockSmartCaProvider,
+    {
+      provide: SmartCaProvider,
+      inject: [ConfigService, MockSmartCaProvider],
+      useFactory: (
+        cfg: ConfigService,
+        mock: MockSmartCaProvider
+      ): SmartCaProvider | MockSmartCaProvider => {
+        const isMock = cfg.get<{ isMock?: boolean }>('smartCA')?.isMock
+        return isMock ? mock : new SmartCaProvider(cfg)
+      },
+    },
     SmartCaSigningService,
     SmartCaCallbackGuard,
     ContractTemplateGovernanceService,

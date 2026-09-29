@@ -130,6 +130,7 @@ describe('MockBankService', () => {
     }
     const providerRegistry = {
       assertMockProvider: jest.fn(),
+      providerName: jest.fn().mockReturnValue('mock-bank'),
       getAccountLink: jest.fn().mockResolvedValue({
         provider: 'mock-bank',
         externalAccountRef: `mock-account:${tenantId}`,
@@ -151,7 +152,8 @@ describe('MockBankService', () => {
       walletRepository as never,
       providerRegistry as never,
       configService as never,
-      ledgerOutboxService as never
+      ledgerOutboxService as never,
+      {} as never
     )
     return {
       service,

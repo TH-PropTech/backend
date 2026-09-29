@@ -197,8 +197,14 @@ export class DepositAgreementsService {
   ): Promise<DepositAgreement> {
     const agreement = await this.findById(id)
     this.assertTenant(agreement, tenantId)
-    if (agreement.status !== 'accepted' || !agreement.tenantConsent) {
+    if (
+      !['accepted', 'payment-pending'].includes(agreement.status) ||
+      !agreement.tenantConsent
+    ) {
       throw new ConflictException('DEPOSIT_CONSENT_REQUIRED')
+    }
+    if (agreement.status === 'payment-pending') {
+      return agreement
     }
     agreement.status = 'payment-pending'
     return this.repository.save(agreement)

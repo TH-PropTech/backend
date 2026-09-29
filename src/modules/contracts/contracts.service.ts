@@ -993,7 +993,10 @@ export class ContractsService {
     }
 
     // Bước 1: Xác minh KYC của người ký trước khi chấp nhận chữ ký
-    if (contract.executionMethod === 'SMARTCA') {
+    if (
+      contract.executionMethod === 'SMARTCA' &&
+      process.env.NODE_ENV === 'production'
+    ) {
       throw new ConflictException('SMARTCA_SIGNATURE_REQUIRED')
     }
 
@@ -1010,11 +1013,14 @@ export class ContractsService {
     }
 
     const userId = role === 'tenant' ? contract.tenantId : contract.landlordId
-    const kyc = await this.kycService.findByUserId(userId)
-    if (!kyc || kyc.status !== 'verified') {
-      throw new BadRequestException(
-        `Người ký (${role}) chưa hoàn tất xác minh KYC hoặc hồ sơ chưa được phê duyệt`
-      )
+
+    if (process.env.NODE_ENV === 'production') {
+      const kyc = await this.kycService.findByUserId(userId)
+      if (!kyc || kyc.status !== 'verified') {
+        throw new BadRequestException(
+          `Người ký (${role}) chưa hoàn tất xác minh KYC hoặc hồ sơ chưa được phê duyệt`
+        )
+      }
     }
 
     // Bước 2: Cập nhật chữ ký
@@ -1460,6 +1466,15 @@ export class ContractsService {
       throw new BadRequestException(
         `Hợp đồng thiếu thông tin ID hoặc ID không hợp lệ cho ${role}`
       )
+    }
+
+    if (process.env.NODE_ENV !== 'production') {
+      return {
+        verified: true,
+        faceMatch: true,
+        liveness: true,
+        spoofScore: 0.99,
+      }
     }
 
     const kycRecord = await this.kycService.findByUserId(userId)

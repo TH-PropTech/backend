@@ -25,6 +25,7 @@ describe('PaymentProviderRegistry', () => {
     return {
       registry: new PaymentProviderRegistry(
         configService as never,
+        adapter as never,
         adapter as never
       ),
       adapter,
@@ -39,6 +40,7 @@ describe('PaymentProviderRegistry', () => {
         amount: 1_000,
         description: 'Rent',
         customerRef: 'tenant-1',
+        txRef: 'MOCK-1',
       })
     ).resolves.toMatchObject({ provider: 'mock-bank', txRef: 'MOCK-1' })
     expect(context.adapter.createPaymentIntent).toHaveBeenCalled()
@@ -56,13 +58,14 @@ describe('PaymentProviderRegistry', () => {
   })
 
   it('fails closed for a provider without an approved adapter', async () => {
-    const context = createContext('vnpay')
+    const context = createContext('momo')
 
     await expect(
       context.registry.createPaymentIntent({
         amount: 1_000,
         description: 'Rent',
         customerRef: 'tenant-1',
+        txRef: 'MOMO-1',
       })
     ).rejects.toThrow('BANK_PROVIDER_ADAPTER_NOT_CONFIGURED')
   })
