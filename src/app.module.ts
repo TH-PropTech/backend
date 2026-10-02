@@ -49,6 +49,7 @@ import { OperationsModule } from './modules/operations/operations.module'
 import { RentalFlowConfigModule } from './modules/rental-flow-config/rental-flow-config.module'
 import { PropertyOwnershipTransferModule } from './modules/property-ownership-transfer/property-ownership-transfer.module'
 import { PlatformFeesModule } from './modules/platform-fees/platform-fees.module'
+import { RentalTransactionsModule } from './modules/rental-transactions/rental-transactions.module'
 
 @Module({
   imports: [
@@ -122,6 +123,7 @@ import { PlatformFeesModule } from './modules/platform-fees/platform-fees.module
     RentalFlowConfigModule,
     PropertyOwnershipTransferModule,
     PlatformFeesModule,
+    RentalTransactionsModule,
   ],
 })
 export class AppModule {}

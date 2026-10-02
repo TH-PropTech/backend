@@ -135,6 +135,38 @@ describe('LedgerProjectionService', () => {
     )
   })
 
+  it('projects terminal failure to contract, deposit and payment read models', async () => {
+    const contractId = new ObjectId()
+    const depositId = new ObjectId()
+    const paymentId = new ObjectId()
+    const contract = { _id: contractId, ledgerStatus: 'pending' }
+    const deposit = { _id: depositId, ledgerStatus: 'pending' }
+    const payment = { _id: paymentId, ledgerStatus: 'pending' }
+    contractRepo.findOne.mockResolvedValue(contract)
+    depositRepo.findOne.mockResolvedValue(deposit)
+    paymentRepo.findOne.mockResolvedValue(payment)
+
+    await service.projectFailure({
+      aggregateType: 'contract',
+      aggregateId: contractId.toHexString(),
+    })
+    await service.projectFailure({
+      aggregateType: 'deposit',
+      aggregateId: depositId.toHexString(),
+    })
+    await service.projectFailure({
+      aggregateType: 'payment',
+      aggregateId: paymentId.toHexString(),
+    })
+
+    expect(contract.ledgerStatus).toBe('failed')
+    expect(deposit.ledgerStatus).toBe('failed')
+    expect(payment.ledgerStatus).toBe('failed')
+    expect(contractRepo.save).toHaveBeenCalledWith(contract)
+    expect(depositRepo.save).toHaveBeenCalledWith(deposit)
+    expect(paymentRepo.save).toHaveBeenCalledWith(payment)
+  })
+
   it('handles missing or unsupported aggregate gracefully without error', async () => {
     const event = {
       _id: new ObjectId(),

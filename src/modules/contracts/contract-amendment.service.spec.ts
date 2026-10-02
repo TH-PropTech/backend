@@ -235,6 +235,22 @@ describe('ContractAmendmentService', () => {
         args: [contractId.toHexString(), amendment.contentHash],
       })
     )
+    const enqueueMock = ledgerOutboxService.enqueue
+    if (!enqueueMock) {
+      throw new Error('Expected ledger outbox enqueue mock')
+    }
+    const enqueueCalls = enqueueMock.mock.calls as unknown as ReadonlyArray<
+      readonly unknown[]
+    >
+    const amendmentEvent = enqueueCalls[0]?.[0] as
+      | {
+          metadata?: { minimumAbiVersion?: number; waitingCode?: string }
+        }
+      | undefined
+    expect(amendmentEvent?.metadata?.minimumAbiVersion).toBe(2)
+    expect(amendmentEvent?.metadata?.waitingCode).toBe(
+      'CHAINCODE_UPGRADE_REQUIRED'
+    )
   })
 
   it('rejects a pending amendment without changing the governing commercial terms', async () => {

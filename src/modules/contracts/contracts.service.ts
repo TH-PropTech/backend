@@ -38,7 +38,10 @@ import type { RentalPackageSnapshot } from '../apartments/rental-package.util'
 import type { RentalExecutionPolicyRef } from '../rental-flow-config/rental-execution-policy.util'
 import { BiometricEvidenceService } from '../kyc/biometric-evidence.service'
 import { SmartOtpService } from '../smart-otp/services/smart-otp.service'
-import { requireCanonicalArtifactReference } from './contract-artifact.service'
+import {
+  ContractArtifactService,
+  requireCanonicalArtifactReference,
+} from './contract-artifact.service'
 import {
   buildSignedContractLedgerEvidence,
   hashSignedContractLedgerEvidence,
@@ -54,6 +57,9 @@ import { evaluateLockContent, isDepositGateOpen } from './flow/flow-guards'
 import { FlowNotificationService } from './flow/flow-notification.service'
 import { resolveEffectiveCommercial } from './commercial/resolve-effective-commercial'
 import { MoveInSettlementsService } from '../move-in-settlements/move-in-settlements.service'
+import { ContractLayoutService } from './layout/contract-layout.service'
+import { RentalTransactionEventService } from '../rental-transactions/rental-transaction-event.service'
+import type { RentalTransactionActorRole } from '../rental-transactions/schemas/rental-transaction-event.schema'
 
 // ── Interfaces ──
 
@@ -118,6 +124,18 @@ interface ChainVerifyResult {
   recordedAt?: string
 }
 
+type IntegrityLayerStatus =
+  | 'valid'
+  | 'mismatch'
+  | 'not-recorded'
+  | 'unavailable'
+
+interface IntegrityLayer {
+  status: IntegrityLayerStatus
+  hash: string | null
+  reason?: string | null
+}
+
 // ── Service ──
 
 export type SmartCaSignatureRecordInput = {
@@ -169,8 +187,84 @@ export class ContractsService {
     @Optional()
     private readonly flowNotificationService?: FlowNotificationService,
     @Optional()
-    private readonly moveInSettlementsService?: MoveInSettlementsService
+    private readonly moveInSettlementsService?: MoveInSettlementsService,
+    @Optional() private readonly layoutService?: ContractLayoutService,
+    @Optional() private readonly artifactService?: ContractArtifactService,
+    @Optional()
+    private readonly transactionEventService?: RentalTransactionEventService
   ) {}
+
+  private async recordTransactionEvent(input: {
+    contractId: string
+    applicationId?: string | null
+    eventType: string
+    actorRole: RentalTransactionActorRole
+    actorId?: string | null
+    reasonCode?: string | null
+    refs?: Record<string, string>
+    transitionKey: string
+  }): Promise<void> {
+    if (!this.transactionEventService) return
+    try {
+      await this.transactionEventService.record({
+        transactionKey: input.applicationId ?? input.contractId,
+        applicationId: input.applicationId ?? null,
+        contractId: input.contractId,
+        eventType: input.eventType,
+        actorRole: input.actorRole,
+        actorId: input.actorId ?? null,
+        reasonCode: input.reasonCode ?? null,
+        refs: { contractId: input.contractId, ...(input.refs ?? {}) },
+        transitionKey: input.transitionKey,
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      this.logger.warn(
+        `Rental transaction audit failed for contract [${input.contractId}] event [${input.eventType}]: ${message}`
+      )
+    }
+  }
+
+  private buildCreateContractArgs(input: {
+    contractId: string
+    contractCode: string
+    tenantId: string
+    landlordId: string
+    contractHash: string
+    monthlyRent: string
+    startDate: string
+    depositId?: string | null | undefined
+    depositHash?: string | null | undefined
+    evidenceJson?: string | undefined
+  }): { args: string[]; argsVersion: 1 | 2 } {
+    const argsVersion = this.fabricService.getChaincodeAbiVersion()
+    const baseArgs = [
+      input.contractId,
+      input.contractCode,
+      input.tenantId,
+      input.landlordId,
+      input.contractHash,
+      input.monthlyRent,
+      input.startDate,
+    ]
+
+    if (argsVersion === 1) {
+      if (input.depositId && input.depositHash) {
+        baseArgs.push(input.depositId, input.depositHash)
+      }
+      return { args: baseArgs, argsVersion }
+    }
+
+    return {
+      args: [
+        ...baseArgs,
+        input.depositId ?? '',
+        input.depositHash ?? '',
+        input.evidenceJson ?? '',
+      ],
+      argsVersion,
+    }
+  }
 
   // ── Private helpers ──
 
@@ -512,6 +606,15 @@ export class ContractsService {
     }
     contract.executionMethod = 'SMARTCA'
 
+    await this.recordTransactionEvent({
+      contractId: input.contractId,
+      applicationId: contract.rentalApplicationId ?? null,
+      eventType: 'contract.signed',
+      actorRole: input.role,
+      actorId: input.signerId,
+      transitionKey: `contract:${input.contractId}:signed:${input.role}:${input.providerTransactionId}`,
+    })
+
     if (
       !this.hasValidSmartCaSignature(contract, 'tenant') ||
       !this.hasValidSmartCaSignature(contract, 'landlord')
@@ -588,6 +691,7 @@ export class ContractsService {
 
     contract.status = 'active'
     contract.ledgerStatus = 'pending'
+    contract.activationFailure = null
     const canonicalReference = requireCanonicalArtifactReference(contract)
     const canonicalHash = canonicalReference.artifactHash
     const tenantSignature = contract.tenantSignature
@@ -645,30 +749,30 @@ export class ContractsService {
       }
     }
 
-    const contractArgs = [
-      contract._id.toHexString(),
-      contract.contractCode,
-      contract.tenantId,
-      contract.landlordId,
-      canonicalHash,
-      resolveEffectiveCommercial(contract).monthlyRent.toString(),
-      contract.startDate.toISOString(),
-    ]
-    if (contract.depositId && contract.depositHash) {
-      contractArgs.push(contract.depositId, contract.depositHash)
-    }
-    contractArgs.push(JSON.stringify(ledgerEvidence))
+    const createContractPayload = this.buildCreateContractArgs({
+      contractId: contract._id.toHexString(),
+      contractCode: contract.contractCode,
+      tenantId: contract.tenantId,
+      landlordId: contract.landlordId,
+      contractHash: canonicalHash,
+      monthlyRent: resolveEffectiveCommercial(contract).monthlyRent.toString(),
+      startDate: contract.startDate.toISOString(),
+      depositId: contract.depositId,
+      depositHash: contract.depositHash,
+      evidenceJson: JSON.stringify(ledgerEvidence),
+    })
     await this.ledgerOutboxService.enqueue({
       aggregateType: 'contract',
       aggregateId: contract._id.toHexString(),
       eventType: 'contract.activated',
       action: 'createContract',
-      args: contractArgs,
+      args: createContractPayload.args,
       dependencyKey: contract.depositId
         ? `deposit:${contract.depositId}:deposit.paid`
         : null,
       metadata: {
         contractId: contract._id.toHexString(),
+        argsVersion: createContractPayload.argsVersion,
         details: {
           contractHash: contract.contractHash,
           artifactHash: canonicalReference.artifactHash,
@@ -682,6 +786,13 @@ export class ContractsService {
     })
 
     const saved = await this.contractRepository.save(contract)
+    await this.recordTransactionEvent({
+      contractId: saved._id.toHexString(),
+      applicationId: saved.rentalApplicationId ?? null,
+      eventType: 'contract.activated',
+      actorRole: 'system',
+      transitionKey: `contract:${saved._id.toHexString()}:activated`,
+    })
     if (this.paymentsService) await this.paymentsService.generateSchedule(saved)
     if (this.paymentsService)
       await this.paymentsService.generatePlatformFeeInvoices(saved)
@@ -770,14 +881,44 @@ export class ContractsService {
             templateRef.version
           )
         : undefined
+    const layoutLegalProfile = template?.legalProfile
+    const layout =
+      this.layoutService && layoutLegalProfile
+        ? await this.layoutService.findPublishedForContract(
+            layoutLegalProfile,
+            templateRef?.key ?? null
+          )
+        : null
+    if (layout) {
+      contract.layoutProfileRef = {
+        profileKey: layout.profileKey,
+        version: layout.version,
+        contentHash: layout.contentHash,
+        supplementaryClauses: (layout.supplementaryClauses ?? []).map(
+          clause => ({ ...clause })
+        ),
+      }
+    }
+    // A layout snapshot opts the contract into the v3 payload. Without a
+    // published layout, preserve the v2 canonical-artifact contract path.
+    contract.hashSchemaVersion = layout
+      ? CONTRACT_CONTENT_HASH_SCHEMA_VERSION
+      : 2
     contract.contentLockedHash = hashCanonicalContractPayload(
       buildCanonicalContractPayload(contract, template)
     )
     contract.contentLockedAt = new Date()
-    contract.hashSchemaVersion = CONTRACT_CONTENT_HASH_SCHEMA_VERSION
     contract.contentRevision = (contract.contentRevision ?? 0) + 1
     contract.status = 'awaiting-signature'
     const locked = await this.contractRepository.save(contract)
+    await this.recordTransactionEvent({
+      contractId,
+      applicationId: locked.rentalApplicationId ?? null,
+      eventType: 'contract.content-locked',
+      actorRole: isStaff ? 'staff' : 'landlord',
+      actorId,
+      transitionKey: `contract:${contractId}:content-locked`,
+    })
     await this.flowNotificationService?.notifyForContract(contractId)
     return locked
   }
@@ -1148,6 +1289,7 @@ export class ContractsService {
 
       contract.status = 'active'
       contract.ledgerStatus = 'pending'
+      contract.activationFailure = null
 
       if (
         contract.rentalApplicationId &&
@@ -1181,28 +1323,29 @@ export class ContractsService {
       contract.contractHash = this.buildContractHash(contract, snapshot)
 
       // Đẩy hash lên Hyperledger Fabric
-      const contractArgs = [
+      const createContractPayload = this.buildCreateContractArgs({
         contractId,
-        contract.contractCode,
-        contract.tenantId,
-        contract.landlordId,
-        contract.contractHash,
-        resolveEffectiveCommercial(contract).monthlyRent.toString(),
-        contract.startDate.toISOString(),
-      ]
-      if (depositIdToUse && depositHashToUse) {
-        contractArgs.push(depositIdToUse, depositHashToUse)
-      }
+        contractCode: contract.contractCode,
+        tenantId: contract.tenantId,
+        landlordId: contract.landlordId,
+        contractHash: contract.contractHash,
+        monthlyRent:
+          resolveEffectiveCommercial(contract).monthlyRent.toString(),
+        startDate: contract.startDate.toISOString(),
+        depositId: depositIdToUse,
+        depositHash: depositHashToUse,
+      })
 
       await this.ledgerOutboxService.enqueue({
         aggregateType: 'contract',
         aggregateId: contractId,
         eventType: 'contract.activated',
         action: 'createContract',
-        args: contractArgs,
+        args: createContractPayload.args,
         dependencyKey,
         metadata: {
           contractId,
+          argsVersion: createContractPayload.argsVersion,
           details: { contractHash: contract.contractHash },
         },
       })
@@ -1213,6 +1356,16 @@ export class ContractsService {
     }
 
     const saved = await this.contractRepository.save(contract)
+
+    if (saved.status === 'active') {
+      await this.recordTransactionEvent({
+        contractId: saved._id.toHexString(),
+        applicationId: saved.rentalApplicationId ?? null,
+        eventType: 'contract.activated',
+        actorRole: 'system',
+        transitionKey: `contract:${saved._id.toHexString()}:activated`,
+      })
+    }
 
     if (saved.status === 'active' && this.paymentsService) {
       await this.paymentsService.generateSchedule(saved)
@@ -1244,6 +1397,25 @@ export class ContractsService {
       return this.activateSmartCaContract(contract)
     }
     return this.signContract(contractId, 'tenant')
+  }
+
+  /**
+   * Cổng khôi phục cho `RETRY_ACTIVATION`: đi qua cùng kiểm tra nghiệp vụ như
+   * luồng thường (`activateAfterDeposit`) thay vì tự kiểm tra một cách rời
+   * rạc. Khác với `activateAfterDeposit` (được gọi đầu cơ từ callback thanh
+   * toán và phải im lặng khi chưa đủ điều kiện), hành động khôi phục do staff
+   * chủ động gọi nên phải từ chối rõ ràng khi cổng kích hoạt chưa sẵn sàng.
+   */
+  async retryActivation(contractId: string): Promise<Contract> {
+    const contract = await this.findOne(contractId)
+    if (
+      contract.status !== 'fully-signed-pending-deposit' ||
+      !contract.signedByTenant ||
+      !contract.signedByLandlord
+    ) {
+      throw new ConflictException('ACTIVATION_NOT_READY')
+    }
+    return this.activateAfterDeposit(contractId)
   }
 
   async activatePendingForDepositAgreement(
@@ -1388,6 +1560,11 @@ export class ContractsService {
     onChain: ChainVerifyResult | null
     semanticHash: string | null
     artifactHash: string | null
+    layers: {
+      offChain: IntegrityLayer
+      artifact: IntegrityLayer
+      onChain: IntegrityLayer
+    }
     signatureIntegrity: 'valid' | 'invalid' | 'not-available'
     amendmentChainIntegrity: 'valid' | 'invalid' | 'not-available'
   }> {
@@ -1400,6 +1577,32 @@ export class ContractsService {
     )
     const mongoMatch = currentHash === contract.contractHash
 
+    const offChainLayer: IntegrityLayer = {
+      status: mongoMatch ? 'valid' : 'mismatch',
+      hash: contract.contractHash ?? null,
+    }
+    let artifactLayer: IntegrityLayer = {
+      status: contract.artifactRef ? 'unavailable' : 'not-recorded',
+      hash: contract.artifactRef?.artifactHash ?? null,
+    }
+    if (contract.artifactRef && this.artifactService) {
+      try {
+        const resolved =
+          await this.artifactService.resolveCanonicalArtifact(contract)
+        artifactLayer = {
+          status: 'valid',
+          hash: resolved.artifact.artifactHash,
+        }
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error)
+        artifactLayer = {
+          status: reason.includes('HASH_MISMATCH') ? 'mismatch' : 'unavailable',
+          hash: contract.artifactRef.artifactHash,
+          reason,
+        }
+      }
+    }
+
     let onChain: ChainVerifyResult | null = null
     let verificationStatus:
       | 'valid'
@@ -1407,6 +1610,15 @@ export class ContractsService {
       | 'not-recorded'
       | 'unavailable' = 'not-recorded'
     let isValid: boolean | null = null
+    let onChainLayer: IntegrityLayer = {
+      status:
+        !contract.blockchainAddress || contract.ledgerStatus !== 'confirmed'
+          ? 'not-recorded'
+          : mongoMatch
+            ? 'unavailable'
+            : 'mismatch',
+      hash: null,
+    }
 
     if (!mongoMatch) {
       verificationStatus = 'invalid'
@@ -1430,9 +1642,18 @@ export class ContractsService {
         if (onChain && onChain.valid === true) {
           verificationStatus = 'valid'
           isValid = true
+          onChainLayer = {
+            status: 'valid',
+            hash: onChain.onChainHash ?? currentHash,
+          }
         } else {
           verificationStatus = 'invalid'
           isValid = false
+          onChainLayer = {
+            status: 'mismatch',
+            hash: onChain?.onChainHash ?? null,
+            reason: onChain?.reason ?? 'HASH_MISMATCH',
+          }
         }
       } catch (error) {
         const errMsg = error instanceof Error ? error.message : String(error)
@@ -1441,7 +1662,16 @@ export class ContractsService {
         )
         verificationStatus = 'unavailable'
         isValid = null
+        onChainLayer = { status: 'unavailable', hash: null, reason: errMsg }
       }
+    }
+
+    if (artifactLayer.status === 'mismatch') {
+      verificationStatus = 'invalid'
+      isValid = false
+    } else if (artifactLayer.status === 'unavailable' && isValid === true) {
+      verificationStatus = 'unavailable'
+      isValid = null
     }
 
     let amendmentChainIntegrity: 'valid' | 'invalid' | 'not-available' =
@@ -1479,6 +1709,11 @@ export class ContractsService {
       onChain,
       semanticHash: contract.contentLockedHash ?? null,
       artifactHash: contract.artifactRef?.artifactHash ?? null,
+      layers: {
+        offChain: offChainLayer,
+        artifact: artifactLayer,
+        onChain: onChainLayer,
+      },
       signatureIntegrity:
         contract.tenantSignature && contract.landlordSignature
           ? contract.tenantSignature.artifactHash ===
@@ -1532,15 +1767,6 @@ export class ContractsService {
       throw new BadRequestException(
         `Hợp đồng thiếu thông tin ID hoặc ID không hợp lệ cho ${role}`
       )
-    }
-
-    if (process.env.NODE_ENV !== 'production') {
-      return {
-        verified: true,
-        faceMatch: true,
-        liveness: true,
-        spoofScore: 0.99,
-      }
     }
 
     const kycRecord = await this.kycService.findByUserId(userId)

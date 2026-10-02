@@ -23,6 +23,7 @@ import { LegalTermsService } from '../legal-terms/legal-terms.service'
 import { RentalFlowConfigResolver } from '../rental-flow-config/rental-flow-config-resolver.service'
 import { RentalExecutionPoliciesService } from '../rental-flow-config/rental-execution-policies.service'
 import { OwnershipTransferResolver } from '../property-ownership-transfer/ownership-transfer.resolver'
+import { RentalTransactionEventService } from '../rental-transactions/rental-transaction-event.service'
 import {
   getDefaultRentalExecutionPolicyRef,
   type RentalExecutionPolicyRef,
@@ -75,7 +76,9 @@ export class RentalApplicationsService {
     @Optional()
     private readonly ownershipTransferResolver?: OwnershipTransferResolver,
     @Optional() private readonly bookingsService?: BookingsService,
-    @Optional() private readonly platformFeesService?: PlatformFeesService
+    @Optional() private readonly platformFeesService?: PlatformFeesService,
+    @Optional()
+    private readonly transactionEventService?: RentalTransactionEventService
   ) {}
 
   async getContext(
@@ -467,6 +470,13 @@ export class RentalApplicationsService {
         actorTimestamp: null,
       })
     )
+    await this.recordTransactionEvent({
+      applicationId: created._id.toHexString(),
+      eventType: 'application.submitted',
+      actorRole: 'tenant',
+      actorId: tenantId,
+      transitionKey: `application:${created._id.toHexString()}:submitted`,
+    })
     return this.withContractHandoff(this.withFeeVisibility(created, 'tenant'))
   }
 
@@ -636,6 +646,17 @@ export class RentalApplicationsService {
       typeof repositoryWithCas.update === 'function'
         ? application
         : await this.repository.save(application)
+    await this.recordTransactionEvent({
+      applicationId: savedDecision._id.toHexString(),
+      eventType:
+        dto.status === 'accepted'
+          ? 'application.accepted'
+          : 'application.rejected',
+      actorRole: 'landlord',
+      actorId: landlordId,
+      reasonCode: savedDecision.reasonCode ?? null,
+      transitionKey: `application:${savedDecision._id.toHexString()}:decided:${dto.status}`,
+    })
     if (dto.status === 'rejected')
       return this.withFeeVisibility(savedDecision, 'landlord')
     const provisioned = await this.provisionAcceptedApplication(savedDecision)
@@ -699,6 +720,19 @@ export class RentalApplicationsService {
       application.provisioningStatus = 'ready'
       application.provisioningErrorCode = null
       const saved = await this.repository.save(application)
+      await this.recordTransactionEvent({
+        applicationId: saved._id.toHexString(),
+        contractId: saved.contractId ?? null,
+        eventType: 'application.provisioned',
+        actorRole: 'system',
+        refs: {
+          applicationId: saved._id.toHexString(),
+          ...(saved.depositAgreementId
+            ? { depositAgreementId: saved.depositAgreementId }
+            : {}),
+        },
+        transitionKey: `application:${saved._id.toHexString()}:provisioning:ready`,
+      })
       if (this.notificationsService) {
         try {
           await this.notificationsService.createNotification(
@@ -722,7 +756,45 @@ export class RentalApplicationsService {
           ? error.message.slice(0, 120)
           : 'PROVISIONING_FAILED'
       await this.repository.save(application)
+      await this.recordTransactionEvent({
+        applicationId: application._id.toHexString(),
+        eventType: 'application.provisioning-failed',
+        actorRole: 'system',
+        reasonCode: application.provisioningErrorCode ?? null,
+        transitionKey: `application:${application._id.toHexString()}:provisioning:failed`,
+      })
       throw error
+    }
+  }
+
+  private async recordTransactionEvent(input: {
+    applicationId: string
+    contractId?: string | null
+    eventType: string
+    actorRole: 'tenant' | 'landlord' | 'staff' | 'admin' | 'system' | 'provider'
+    actorId?: string | null
+    reasonCode?: string | null
+    refs?: Record<string, string>
+    transitionKey: string
+  }): Promise<void> {
+    if (!this.transactionEventService) return
+    try {
+      await this.transactionEventService.record({
+        transactionKey: input.applicationId,
+        applicationId: input.applicationId,
+        contractId: input.contractId ?? null,
+        eventType: input.eventType,
+        actorRole: input.actorRole,
+        actorId: input.actorId ?? null,
+        reasonCode: input.reasonCode ?? null,
+        refs: { applicationId: input.applicationId, ...(input.refs ?? {}) },
+        transitionKey: input.transitionKey,
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      this.logger.warn(
+        `Rental transaction audit failed for application [${input.applicationId}] event [${input.eventType}]: ${message}`
+      )
     }
   }
 

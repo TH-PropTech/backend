@@ -90,6 +90,12 @@ export class DepositAgreement {
   depositHash!: string | null
 
   @Column({ nullable: true })
+  receiptCode?: string | null
+
+  @Column({ nullable: true })
+  receiptHash?: string | null
+
+  @Column({ nullable: true })
   ledgerStatus?: string | null
 
   @Column({ nullable: true })

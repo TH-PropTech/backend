@@ -48,6 +48,10 @@ import { ContractArtifactService } from './contract-artifact.service'
 import type { PublicServiceChecklist } from './legal/public-service-checklist'
 import { ContractViewService } from './contract-view.service'
 import { LedgerAuditQueryService } from '../fabric/ledger-audit-query.service'
+import {
+  LedgerEvidenceDto,
+  LedgerEvidenceQueryService,
+} from '../fabric/ledger-evidence-query.service'
 import { SmartOtpService } from '../smart-otp/services/smart-otp.service'
 import { OtpActionType } from '../smart-otp/enums/otp-action-type.enum'
 import type { ContractViewDto } from './dto/contract-view.dto'
@@ -247,6 +251,7 @@ export class ContractsController {
     private readonly artifactService: ContractArtifactService,
     private readonly contractViewService: ContractViewService,
     private readonly ledgerAuditQueryService: LedgerAuditQueryService,
+    private readonly ledgerEvidenceQueryService: LedgerEvidenceQueryService,
     private readonly smartOtpService: SmartOtpService,
     private readonly smartCaSigningService: SmartCaSigningService,
     @Optional()
@@ -276,6 +281,26 @@ export class ContractsController {
       user.roles?.some(role => ['staff', 'admin'].includes(role)) ?? false
     await this.contractsService.findOneForUser(id, user._id ?? '', isStaff)
     return this.ledgerAuditQueryService.getContractEvents(id)
+  }
+
+  /** Lấy bằng chứng ledger đã làm sạch theo toàn bộ aggregate của hợp đồng */
+  @Get(':id/ledger-evidence')
+  @Roles('admin', 'staff', 'landlord', 'tenant')
+  async getContractLedgerEvidence(
+    @Param('id') id: string,
+    @CurrentUser() user: UserPayload
+  ): Promise<LedgerEvidenceDto> {
+    const isStaff =
+      user.roles?.some(role => ['staff', 'admin'].includes(role)) ?? false
+    const contract = await this.contractsService.findOneForUser(
+      id,
+      user._id ?? '',
+      isStaff
+    )
+    return this.ledgerEvidenceQueryService.getContractLedgerEvidence(
+      id,
+      contract
+    )
   }
 
   /** Khởi tạo Smart OTP challenge cho ký hợp đồng */
@@ -654,6 +679,23 @@ export class ContractsController {
     onChain: unknown
     semanticHash: string | null
     artifactHash: string | null
+    layers: {
+      offChain: {
+        status: 'valid' | 'mismatch' | 'not-recorded' | 'unavailable'
+        hash: string | null
+        reason?: string | null
+      }
+      artifact: {
+        status: 'valid' | 'mismatch' | 'not-recorded' | 'unavailable'
+        hash: string | null
+        reason?: string | null
+      }
+      onChain: {
+        status: 'valid' | 'mismatch' | 'not-recorded' | 'unavailable'
+        hash: string | null
+        reason?: string | null
+      }
+    }
     signatureIntegrity: 'valid' | 'invalid' | 'not-available'
     amendmentChainIntegrity: 'valid' | 'invalid' | 'not-available'
   }> {

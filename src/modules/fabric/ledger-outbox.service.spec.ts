@@ -14,9 +14,11 @@ describe('LedgerOutboxService', () => {
   }
   let fabricService: {
     submitTransaction: jest.Mock
+    getChaincodeAbiVersion: jest.Mock
   }
   let projectionService: {
     projectResult: jest.Mock
+    projectFailure: jest.Mock
   }
 
   beforeEach(() => {
@@ -34,9 +36,11 @@ describe('LedgerOutboxService', () => {
         blockNumber: null,
         networkMode: 'fabric',
       }),
+      getChaincodeAbiVersion: jest.fn(() => 2),
     }
     projectionService = {
       projectResult: jest.fn().mockResolvedValue(undefined),
+      projectFailure: jest.fn().mockResolvedValue(undefined),
     }
     service = new LedgerOutboxService(
       repository as never,
@@ -166,17 +170,18 @@ describe('LedgerOutboxService', () => {
         status: 'pending',
         attempts: 0,
         nextRetryAt: new Date(Date.now() - 1000),
-        dependencyKey: 'deposit:dep-1:paid',
+        dependencyKey: 'contract:contract-1:contract.activated',
       } as LedgerOutbox
 
       repository.find.mockResolvedValue([pendingEvent])
       // Prerequisite is not confirmed
       repository.findOne.mockResolvedValue(null)
 
-      const claimed = await service.claimNext(30000)
-      expect(claimed).toBeNull()
+      const processed = await service.processPending(1)
+      expect(processed).toBe(0)
       expect(pendingEvent.attempts).toBe(0)
       expect(pendingEvent.status).toBe('pending')
+      expect(fabricService.submitTransaction).not.toHaveBeenCalled()
     })
 
     it('marks event terminally failed if dependency failed terminally', async () => {
@@ -253,6 +258,33 @@ describe('LedgerOutboxService', () => {
   })
 
   describe('5. error handling & classification', () => {
+    it('keeps an amendment event pending until the chaincode supports ABI v2', async () => {
+      const event = {
+        _id: new ObjectId(),
+        status: 'pending',
+        attempts: 0,
+        nextRetryAt: new Date(Date.now() - 1000),
+        dependencyKey: null,
+        payload: {
+          action: 'recordContractAmendment',
+          args: ['contract-1', 'hash-1'],
+          metadata: {
+            minimumAbiVersion: 2,
+            waitingCode: 'CHAINCODE_UPGRADE_REQUIRED',
+          },
+        },
+      } as unknown as LedgerOutbox
+      repository.find.mockResolvedValue([event])
+      repository.findOne.mockResolvedValue(event)
+      fabricService.getChaincodeAbiVersion.mockReturnValue(1)
+
+      await expect(service.processPending(1)).resolves.toBe(0)
+
+      expect(event.status).toBe('pending')
+      expect(event.errorCode).toBe('CHAINCODE_UPGRADE_REQUIRED')
+      expect(fabricService.submitTransaction).not.toHaveBeenCalled()
+    })
+
     it('keeps a Fabric event retryable when the gateway is unavailable and never projects confirmation', async () => {
       const event = {
         _id: new ObjectId(),
@@ -296,6 +328,7 @@ describe('LedgerOutboxService', () => {
       expect(event.status).toBe('failed')
       expect(event.errorCode).toBe('TERMINAL_CONFLICT')
       expect(event.nextRetryAt).toBeNull()
+      expect(projectionService.projectFailure).toHaveBeenCalledWith(event)
     })
 
     it('schedules exponential backoff for transient error under 5 attempts', async () => {
@@ -314,6 +347,26 @@ describe('LedgerOutboxService', () => {
       expect(event.status).toBe('pending')
       expect(event.attempts).toBe(2)
       expect(event.nextRetryAt).not.toBeNull()
+    })
+
+    it('projects aggregate failure when transient attempts are exhausted', async () => {
+      const eventId = new ObjectId()
+      const event = {
+        _id: eventId,
+        status: 'processing',
+        claimToken: 'token-1',
+        attempts: 4,
+        aggregateType: 'contract',
+        aggregateId: new ObjectId().toHexString(),
+      } as LedgerOutbox
+      repository.findOne.mockResolvedValue(event)
+
+      await service.fail(eventId, 'token-1', new Error('Gateway timeout'))
+
+      expect(event.status).toBe('failed')
+      expect(event.errorCode).toBe('ATTEMPTS_EXHAUSTED')
+      expect(event.nextRetryAt).toBeNull()
+      expect(projectionService.projectFailure).toHaveBeenCalledWith(event)
     })
   })
 

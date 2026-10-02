@@ -24,11 +24,14 @@ export class PaymentAttempt {
   @Column()
   paymentId!: string
 
+  @Column('json', { nullable: true })
+  paymentIds?: string[] | null
+
   @Column({ nullable: true })
   contractId!: string | null
 
   @Column({ type: 'string' })
-  paymentType!: 'deposit' | 'rent'
+  paymentType!: 'deposit' | 'rent' | 'settlement' | 'invoice'
 
   @Column()
   userId!: string

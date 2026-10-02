@@ -22,6 +22,74 @@ describe('MockBankController', () => {
     )
   })
 
+  it('maps settlement init and callback to the settlement service flow', async () => {
+    const service = {
+      initSettlementPayment: jest
+        .fn()
+        .mockResolvedValue({ purpose: 'SETTLEMENT' }),
+      handleSettlementCallback: jest
+        .fn()
+        .mockResolvedValue({ status: 'succeeded' }),
+    }
+    const controller = new MockBankController(service as never)
+
+    await controller.initSettlement(
+      { settlementId: '507f1f77bcf86cd799439011' },
+      'tenant-1'
+    )
+    await controller.callbackSettlement(
+      { txRef: 'tx-1', amount: 100, status: 'success' },
+      {
+        'x-bank-timestamp': '1000',
+        'x-bank-nonce': 'nonce',
+        'x-bank-signature': 'signature',
+      }
+    )
+
+    expect(service.initSettlementPayment).toHaveBeenCalledWith(
+      '507f1f77bcf86cd799439011',
+      'tenant-1'
+    )
+    expect(service.handleSettlementCallback).toHaveBeenCalledWith(
+      { txRef: 'tx-1', amount: 100, status: 'success' },
+      { timestamp: '1000', nonce: 'nonce', signature: 'signature' }
+    )
+  })
+
+  it('maps invoice init and callback to the invoice service flow', async () => {
+    const service = {
+      initInvoicePayment: jest
+        .fn()
+        .mockResolvedValue({ purpose: 'PLATFORM_FEE' }),
+      handleInvoiceCallback: jest
+        .fn()
+        .mockResolvedValue({ status: 'succeeded' }),
+    }
+    const controller = new MockBankController(service as never)
+
+    await controller.initInvoice(
+      { paymentId: '507f1f77bcf86cd799439011' },
+      'landlord-1'
+    )
+    await controller.callbackInvoice(
+      { txRef: 'tx-invoice', amount: 100, status: 'success' },
+      {
+        'x-bank-timestamp': '1000',
+        'x-bank-nonce': 'nonce',
+        'x-bank-signature': 'signature',
+      }
+    )
+
+    expect(service.initInvoicePayment).toHaveBeenCalledWith(
+      '507f1f77bcf86cd799439011',
+      'landlord-1'
+    )
+    expect(service.handleInvoiceCallback).toHaveBeenCalledWith(
+      { txRef: 'tx-invoice', amount: 100, status: 'success' },
+      { timestamp: '1000', nonce: 'nonce', signature: 'signature' }
+    )
+  })
+
   it('rejects wallet access when the JWT has no user id', () => {
     const controller = new MockBankController({} as never)
     expect(() => controller.wallet({})).toThrow('USER_ID_REQUIRED')

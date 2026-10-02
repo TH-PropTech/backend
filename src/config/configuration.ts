@@ -50,6 +50,8 @@ export const configuration = (): {
   }
   fabric: {
     enabled: boolean
+    explorerTxUrlTemplate: string | undefined
+    outboxPollIntervalMs: number
     mspId: string
     channelName: string
     chaincodeName: string
@@ -58,6 +60,20 @@ export const configuration = (): {
     certPath: string
     keyPath: string
     tlsCertPath: string
+  }
+  rentalOps: {
+    schedulerEnabled: boolean
+    depositAgreementTtlHours: number
+    stuckThresholds: {
+      provisioningFailedMinutes: number
+      depositAttemptExpiredMinutes: number
+      depositUnpaidHours: number
+      signedPendingDepositHours: number
+      activationFailureMinutes: number
+      ledgerFailedTerminalMinutes: number
+      settlementOverdueHours: number
+      handoverOverdueHours: number
+    }
   }
 } => ({
   app: {
@@ -120,6 +136,11 @@ export const configuration = (): {
   },
   fabric: {
     enabled: process.env.FABRIC_ENABLED === 'true',
+    explorerTxUrlTemplate:
+      process.env.FABRIC_EXPLORER_TX_URL_TEMPLATE || undefined,
+    outboxPollIntervalMs: Number(
+      process.env.FABRIC_OUTBOX_POLL_INTERVAL_MS ?? 5000
+    ),
     mspId: process.env.FABRIC_MSP_ID ?? 'Org1MSP',
     channelName: process.env.FABRIC_CHANNEL_NAME ?? 'proptech-channel',
     chaincodeName: process.env.FABRIC_CHAINCODE_NAME ?? 'proptech',
@@ -129,6 +150,38 @@ export const configuration = (): {
     certPath: process.env.FABRIC_CERT_PATH ?? '',
     keyPath: process.env.FABRIC_KEY_PATH ?? '',
     tlsCertPath: process.env.FABRIC_TLS_CERT_PATH ?? '',
+  },
+  rentalOps: {
+    schedulerEnabled: process.env.RENTAL_SCHEDULER_ENABLED === 'true',
+    depositAgreementTtlHours: Number(
+      process.env.DEPOSIT_AGREEMENT_TTL_HOURS ?? 72
+    ),
+    stuckThresholds: {
+      provisioningFailedMinutes: Number(
+        process.env.RENTAL_STUCK_PROVISIONING_FAILED_MINUTES ?? 30
+      ),
+      depositAttemptExpiredMinutes: Number(
+        process.env.RENTAL_STUCK_DEPOSIT_ATTEMPT_EXPIRED_MINUTES ?? 15
+      ),
+      depositUnpaidHours: Number(
+        process.env.RENTAL_STUCK_DEPOSIT_UNPAID_HOURS ?? 24
+      ),
+      signedPendingDepositHours: Number(
+        process.env.RENTAL_STUCK_SIGNED_PENDING_DEPOSIT_HOURS ?? 24
+      ),
+      activationFailureMinutes: Number(
+        process.env.RENTAL_STUCK_ACTIVATION_FAILURE_MINUTES ?? 15
+      ),
+      ledgerFailedTerminalMinutes: Number(
+        process.env.RENTAL_STUCK_LEDGER_FAILED_TERMINAL_MINUTES ?? 15
+      ),
+      settlementOverdueHours: Number(
+        process.env.RENTAL_STUCK_SETTLEMENT_OVERDUE_HOURS ?? 24
+      ),
+      handoverOverdueHours: Number(
+        process.env.RENTAL_STUCK_HANDOVER_OVERDUE_HOURS ?? 24
+      ),
+    },
   },
 })
 

@@ -1,6 +1,36 @@
 import { ObjectId } from 'mongodb'
 import { ConflictException } from '@nestjs/common'
+import { createHash } from 'node:crypto'
 import { MockBankService } from './mock-bank.service'
+import { RentalTransactionEventService } from '../rental-transactions/rental-transaction-event.service'
+import type { RentalTransactionEvent } from '../rental-transactions/schemas/rental-transaction-event.schema'
+
+function createInMemoryTransactionEventService(): {
+  service: RentalTransactionEventService
+  events: RentalTransactionEvent[]
+} {
+  const events: RentalTransactionEvent[] = []
+  const repository = {
+    findOne: jest.fn(({ where }: { where: { transitionKey: string } }) =>
+      Promise.resolve(
+        events.find(event => event.transitionKey === where.transitionKey) ??
+          null
+      )
+    ),
+    create: jest.fn(
+      (input: Partial<RentalTransactionEvent>) =>
+        ({ ...input }) as RentalTransactionEvent
+    ),
+    save: jest.fn((event: RentalTransactionEvent) => {
+      events.push(event)
+      return Promise.resolve(event)
+    }),
+  }
+  return {
+    service: new RentalTransactionEventService(repository as never),
+    events,
+  }
+}
 
 describe('MockBankService', () => {
   const paymentId = new ObjectId().toString()
@@ -11,7 +41,8 @@ describe('MockBankService', () => {
     provider: 'mock-bank'
     txRef: string
     paymentId: string
-    paymentType: 'deposit' | 'rent'
+    paymentType: 'deposit' | 'rent' | 'settlement' | 'invoice'
+    paymentIds?: string[] | null
     userId: string
     amount: number
     status: 'pending' | 'succeeded'
@@ -30,6 +61,16 @@ describe('MockBankService', () => {
     txRef: string | null
     paidAt: Date | null
     ledgerStatus: 'not-required' | 'pending'
+    type?: 'rent' | 'platform-fee'
+    payerId?: string | null
+    payerRole?: 'tenant' | 'landlord' | null
+    payeeRole?: 'landlord' | 'platform' | null
+    amountBeforeVat?: number | null
+    vatAmount?: number | null
+    invoiceCode?: string | null
+    receiptCode?: string | null
+    receiptHash?: string | null
+    dueDate?: Date
   }
 
   function createContext(): {
@@ -42,6 +83,7 @@ describe('MockBankService', () => {
       save: jest.Mock
     }
     paymentRepository: { findOne: jest.Mock; save: jest.Mock }
+    settlementRepository: { findOne: jest.Mock; save: jest.Mock }
     walletRepository: {
       findOne: jest.Mock
       create: jest.Mock
@@ -87,13 +129,22 @@ describe('MockBankService', () => {
     }
     const attemptRepository = {
       findOne: jest.fn().mockResolvedValue(attempt),
-      create: jest.fn((input: unknown): unknown => input),
+      create: jest.fn((input: object): unknown => ({
+        _id: new ObjectId(),
+        ...input,
+      })),
       save: jest.fn(
         (input: unknown): Promise<unknown> => Promise.resolve(input)
       ),
     }
     const paymentRepository = {
       findOne: jest.fn().mockResolvedValue(payment),
+      save: jest.fn(
+        (input: unknown): Promise<unknown> => Promise.resolve(input)
+      ),
+    }
+    const settlementRepository = {
+      findOne: jest.fn(),
       save: jest.fn(
         (input: unknown): Promise<unknown> => Promise.resolve(input)
       ),
@@ -153,7 +204,8 @@ describe('MockBankService', () => {
       providerRegistry as never,
       configService as never,
       ledgerOutboxService as never,
-      {} as never
+      {} as never,
+      settlementRepository as never
     )
     return {
       service,
@@ -161,6 +213,7 @@ describe('MockBankService', () => {
       payment,
       attemptRepository,
       paymentRepository,
+      settlementRepository,
       walletRepository,
       providerRegistry,
       configService,
@@ -179,6 +232,70 @@ describe('MockBankService', () => {
     expect(attemptRepository.save).toHaveBeenCalledWith(
       expect.objectContaining({ paymentType: 'rent', amount: 2_000_000 })
     )
+  })
+
+  it('allows only the configured payer to initialize a platform invoice', async () => {
+    const context = createContext()
+    context.payment.type = 'platform-fee'
+    context.payment.payerId = 'landlord-1'
+    context.payment.payerRole = 'landlord'
+    context.payment.payeeRole = 'platform'
+    context.payment.invoiceCode = 'INV-2609-000001'
+    context.payment.dueDate = new Date('2026-10-05T00:00:00.000Z')
+
+    await expect(
+      context.service.initInvoicePayment(paymentId, tenantId)
+    ).rejects.toThrow('PAYMENT_ACCESS_DENIED')
+
+    const result = await context.service.initInvoicePayment(
+      paymentId,
+      'landlord-1'
+    )
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        invoiceCode: 'INV-2609-000001',
+        purpose: 'PLATFORM_FEE',
+      })
+    )
+    expect(result.payer.role).toBe('landlord')
+    expect(result.payee.role).toBe('platform')
+    expect(context.attemptRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({ paymentType: 'invoice', paymentId })
+    )
+  })
+
+  it('settles an invoice callback and replays without paying twice', async () => {
+    const context = createContext()
+    context.attempt.paymentType = 'invoice'
+    context.payment.type = 'platform-fee'
+    const body = {
+      txRef: context.attempt.txRef,
+      amount: context.attempt.amount,
+      status: 'success' as const,
+    }
+    const timestamp = Date.now().toString()
+    const headers = {
+      timestamp,
+      nonce: 'invoice-nonce',
+      signature: context.service.signCallback(body, timestamp, 'invoice-nonce'),
+    }
+
+    const first = await context.service.handleInvoiceCallback(body, headers)
+    expect(first.replayed).toBe(false)
+    expect(context.payment.status).toBe('paid')
+    expect(context.ledgerOutboxService.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        aggregateId: paymentId,
+        action: 'recordPayment',
+        dependencyKey: 'contract:contract-1:contract.activated',
+      })
+    )
+
+    context.attempt.status = 'succeeded'
+    const replay = await context.service.handleInvoiceCallback(body, headers)
+    expect(replay.replayed).toBe(true)
+    expect(context.paymentRepository.save).toHaveBeenCalledTimes(1)
   })
 
   it('rejects landlord deposit initialization before creating an attempt', async () => {
@@ -228,10 +345,243 @@ describe('MockBankService', () => {
 
     expect(result.txRef).toBe('MOCK-DEPOSIT-1')
     expect(result.deepLink).toContain('MOCK-DEPOSIT-1')
+    expect(result).toEqual(
+      expect.objectContaining({
+        invoiceCode: 'DPA-1',
+        purpose: 'DEPOSIT',
+        total: depositAttempt.amount,
+        currency: 'VND',
+        simulation: true,
+        qrFormat: 'simulated',
+      })
+    )
+    expect(result.lines).toEqual([
+      expect.objectContaining({
+        kind: 'deposit',
+        amount: depositAttempt.amount,
+        paymentId: '507f1f77bcf86cd799439011',
+      }),
+    ])
     expect(context.providerRegistry.createPaymentIntent).not.toHaveBeenCalled()
     expect(
       context.depositAgreementsService.markPaymentPending
     ).not.toHaveBeenCalled()
+  })
+
+  it('returns the latest deposit payment request without creating a new attempt', async () => {
+    const context = createContext()
+    const agreementId = '507f1f77bcf86cd799439011'
+    context.depositAgreementsService.getAgreement.mockResolvedValue({
+      _id: new ObjectId(agreementId),
+      agreementCode: 'DPA-REQUEST-1',
+      tenantId,
+      landlordId: 'landlord-1',
+      amount: 2_000_000,
+      status: 'payment-pending',
+    })
+    context.attempt.paymentId = agreementId
+    context.attempt.paymentType = 'deposit'
+
+    const result = await context.service.getDepositPaymentRequest(
+      agreementId,
+      tenantId,
+      false
+    )
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        invoiceCode: 'DPA-REQUEST-1',
+        transferContent: 'TH DPA REQUEST 1',
+      })
+    )
+    expect(result?.deepLink).toContain(context.attempt.txRef)
+    expect(context.attemptRepository.findOne).toHaveBeenCalledWith({
+      where: { paymentId: agreementId, paymentType: 'deposit' },
+      order: { createdAt: 'DESC' },
+    })
+    expect(context.providerRegistry.createPaymentIntent).not.toHaveBeenCalled()
+  })
+
+  it('returns null when a payment has no request attempt yet', async () => {
+    const context = createContext()
+    context.attemptRepository.findOne.mockResolvedValueOnce(null)
+
+    const result = await context.service.getPaymentRequest(
+      paymentId,
+      tenantId,
+      false
+    )
+
+    expect(result).toBeNull()
+  })
+
+  it('initializes settlement payment with only unpaid line ids', async () => {
+    const context = createContext()
+    const settlementId = new ObjectId().toHexString()
+    const paidPaymentId = new ObjectId().toHexString()
+    const unpaidPaymentId = new ObjectId().toHexString()
+    context.settlementRepository.findOne.mockResolvedValue({
+      _id: new ObjectId(settlementId),
+      contractId: 'contract-1',
+      tenantId,
+      landlordId: 'landlord-1',
+      lines: [
+        {
+          kind: 'FIRST_RENT',
+          amount: 1_000_000,
+          paymentId: paidPaymentId,
+          paidAt: new Date(),
+        },
+        {
+          kind: 'DEPOSIT_TOPUP',
+          amount: 2_000_000,
+          paymentId: unpaidPaymentId,
+          paidAt: null,
+        },
+      ],
+      dueAt: new Date('2026-10-05T00:00:00.000Z'),
+      status: 'partially-paid',
+    })
+    context.paymentRepository.findOne.mockImplementation(
+      ({ where }: { where: { _id: ObjectId } }) =>
+        Promise.resolve({
+          ...context.payment,
+          _id: where._id,
+          amount:
+            where._id.toHexString() === unpaidPaymentId ? 2_000_000 : 1_000_000,
+          type: 'deposit-topup',
+        })
+    )
+
+    const result = await context.service.initSettlementPayment(
+      settlementId,
+      tenantId
+    )
+
+    expect(result.total).toBe(2_000_000)
+    expect(result.lines).toHaveLength(1)
+    expect(context.attemptRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        paymentType: 'settlement',
+        paymentIds: [unpaidPaymentId],
+        amount: 2_000_000,
+      })
+    )
+  })
+
+  it('settles each unpaid settlement line once and replays safely', async () => {
+    const context = createContext()
+    const settlementId = new ObjectId().toHexString()
+    const paidPaymentId = new ObjectId().toHexString()
+    const unpaidPaymentId = new ObjectId().toHexString()
+    const paidAt = new Date()
+    const settlement = {
+      _id: new ObjectId(settlementId),
+      contractId: 'contract-1',
+      tenantId,
+      landlordId: 'landlord-1',
+      lines: [
+        {
+          kind: 'FIRST_RENT',
+          amount: 1_000_000,
+          paymentId: paidPaymentId,
+          paidAt,
+        },
+        {
+          kind: 'DEPOSIT_TOPUP',
+          amount: 2_000_000,
+          paymentId: unpaidPaymentId,
+          paidAt: null,
+        },
+      ],
+      status: 'partially-paid' as 'partially-paid' | 'paid',
+    }
+    const paidPayment = {
+      ...context.payment,
+      _id: new ObjectId(paidPaymentId),
+      amount: 1_000_000,
+      status: 'paid' as const,
+      paidAt,
+    }
+    const unpaidPayment = {
+      ...context.payment,
+      _id: new ObjectId(unpaidPaymentId),
+      amount: 2_000_000,
+      status: 'unpaid' as 'unpaid' | 'paid',
+    }
+    context.attempt.paymentType = 'settlement'
+    context.attempt.paymentId = settlementId
+    context.attempt.paymentIds = [paidPaymentId, unpaidPaymentId]
+    context.attempt.amount = 3_000_000
+    context.settlementRepository.findOne.mockResolvedValue(settlement)
+    context.paymentRepository.findOne.mockImplementation(
+      ({ where }: { where: { _id: ObjectId } }) =>
+        Promise.resolve(
+          where._id.toHexString() === paidPaymentId
+            ? paidPayment
+            : unpaidPayment
+        )
+    )
+    const body = {
+      txRef: context.attempt.txRef,
+      amount: context.attempt.amount,
+      status: 'success' as const,
+    }
+    const timestamp = Date.now().toString()
+    const headers = {
+      timestamp,
+      nonce: 'settlement-nonce',
+      signature: context.service.signCallback(
+        body,
+        timestamp,
+        'settlement-nonce'
+      ),
+    }
+
+    const first = await context.service.handleSettlementCallback(body, headers)
+
+    expect(first.replayed).toBe(false)
+    expect(paidPayment.paidAt).toBe(paidAt)
+    expect(unpaidPayment.status).toBe('paid')
+    expect(settlement.status).toBe('paid')
+    expect(context.paymentRepository.save).toHaveBeenCalledTimes(1)
+    expect(context.ledgerOutboxService.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        aggregateId: unpaidPaymentId,
+        action: 'recordPayment',
+        dependencyKey: 'contract:contract-1:contract.activated',
+      })
+    )
+
+    context.attempt.status = 'succeeded'
+    const replay = await context.service.handleSettlementCallback(body, headers)
+    expect(replay.replayed).toBe(true)
+    expect(context.paymentRepository.save).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects a settlement callback whose amount differs from the attempt', async () => {
+    const context = createContext()
+    context.attempt.paymentType = 'settlement'
+    const body = {
+      txRef: context.attempt.txRef,
+      amount: context.attempt.amount - 1,
+      status: 'success' as const,
+    }
+    const timestamp = Date.now().toString()
+    const headers = {
+      timestamp,
+      nonce: 'settlement-wrong-amount',
+      signature: context.service.signCallback(
+        body,
+        timestamp,
+        'settlement-wrong-amount'
+      ),
+    }
+
+    await expect(
+      context.service.handleSettlementCallback(body, headers)
+    ).rejects.toThrow('BANK_AMOUNT_MISMATCH')
+    expect(context.settlementRepository.save).not.toHaveBeenCalled()
   })
 
   it('expires a stale deposit attempt before creating a replacement', async () => {
@@ -306,10 +656,28 @@ describe('MockBankService', () => {
     const first = await service.handleRentCallback(body, headers)
     expect(first.replayed).toBe(false)
     expect(payment.status).toBe('paid')
+    expect(payment.receiptCode).toMatch(/^RCP-[A-Z2-7]{11}$/)
+    expect(payment.receiptHash).toBe(
+      createHash('sha256')
+        .update(
+          JSON.stringify({
+            receiptCode: payment.receiptCode,
+            paymentId: payment._id.toHexString(),
+            contractId: payment.contractId,
+            type: payment.type ?? 'rent',
+            amount: payment.amount,
+            vat: payment.vatAmount ?? 0,
+            paidAt: payment.paidAt?.toISOString(),
+            txRef: payment.txRef,
+          })
+        )
+        .digest('hex')
+    )
     expect(paymentRepository.save).toHaveBeenCalled()
     expect(ledgerOutboxService.enqueue).toHaveBeenCalledWith(
       expect.objectContaining({
         action: 'recordPayment',
+        dependencyKey: 'contract:contract-1:contract.activated',
         args: [
           payment._id.toHexString(),
           expect.any(String),
@@ -323,6 +691,34 @@ describe('MockBankService', () => {
     const second = await service.handleRentCallback(body, headers)
     expect(second.replayed).toBe(true)
     expect(attemptRepository.save).toHaveBeenCalledTimes(1)
+  })
+
+  it('records exactly one payment.succeeded transaction event across a replayed rent callback', async () => {
+    const context = createContext()
+    const { service, attempt } = context
+    const body = {
+      txRef: attempt.txRef,
+      amount: attempt.amount,
+      status: 'success' as const,
+    }
+    const timestamp = Date.now().toString()
+    const headers = {
+      timestamp,
+      nonce: 'nonce-audit',
+      signature: service.signCallback(body, timestamp, 'nonce-audit'),
+    }
+    const { service: transactionEventService, events } =
+      createInMemoryTransactionEventService()
+    Reflect.set(service, 'transactionEventService', transactionEventService)
+
+    await service.handleRentCallback(body, headers)
+    await service.handleRentCallback(body, headers)
+
+    expect(attempt.status).toBe('succeeded')
+    const succeededEvents = events.filter(
+      event => event.eventType === 'payment.succeeded'
+    )
+    expect(succeededEvents).toHaveLength(1)
   })
 
   it('records a paid deposit and enqueues one hashed deposit ledger event', async () => {
@@ -355,8 +751,19 @@ describe('MockBankService', () => {
     ).toHaveBeenCalledWith(
       context.attempt.paymentId,
       context.attempt._id.toString(),
-      expect.stringMatching(/^[a-f0-9]{64}$/)
+      expect.stringMatching(/^[a-f0-9]{64}$/),
+      expect.anything()
     )
+    const receiptCall = context.depositAgreementsService.recordDepositPaid.mock
+      .calls[0] as unknown[]
+    const receipt = receiptCall[3] as {
+      receiptCode: string
+      receiptHash: string
+      paidAt: Date
+    }
+    expect(receipt.receiptCode).toMatch(/^RCP-[A-Z2-7]{11}$/)
+    expect(receipt.receiptHash).toMatch(/^[a-f0-9]{64}$/)
+    expect(receipt.paidAt).toBeInstanceOf(Date)
     expect(context.ledgerOutboxService.enqueue).toHaveBeenCalledWith(
       expect.objectContaining({
         action: 'recordDeposit',
@@ -367,6 +774,33 @@ describe('MockBankService', () => {
           String(agreement.amount),
           expect.stringMatching(/^[a-f0-9]{64}$/),
         ],
+      })
+    )
+  })
+
+  it('allows contract participants to read a receipt and rejects third parties', async () => {
+    const context = createContext()
+    context.payment.status = 'paid'
+    context.payment.paidAt = new Date('2026-09-30T00:00:00.000Z')
+    context.payment.txRef = 'MOCK-RECEIPT-1'
+    context.payment.receiptCode = 'RCP-ABCDEFGHIJK'
+    context.payment.receiptHash = 'a'.repeat(64)
+
+    await expect(
+      context.service.getPaymentReceipt(paymentId, 'stranger', false)
+    ).rejects.toThrow('PAYMENT_ACCESS_DENIED')
+
+    const receipt = await context.service.getPaymentReceipt(
+      paymentId,
+      tenantId,
+      false
+    )
+    expect(receipt).toEqual(
+      expect.objectContaining({
+        receiptCode: 'RCP-ABCDEFGHIJK',
+        receiptHash: 'a'.repeat(64),
+        amount: context.payment.amount,
+        txRef: 'MOCK-RECEIPT-1',
       })
     )
   })

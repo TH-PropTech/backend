@@ -2,12 +2,46 @@ import { ObjectId } from 'mongodb'
 import { MoveInSettlementsService } from './move-in-settlements.service'
 import type { Contract } from '../contracts/schemas/contract.schema'
 import type { Payment } from '../payments/schemas/payment.schema'
+import { RentalTransactionEventService } from '../rental-transactions/rental-transaction-event.service'
+import type { RentalTransactionEvent } from '../rental-transactions/schemas/rental-transaction-event.schema'
+
+function createInMemoryTransactionEventService(): {
+  service: RentalTransactionEventService
+  events: RentalTransactionEvent[]
+} {
+  const events: RentalTransactionEvent[] = []
+  const repository = {
+    findOne: jest.fn(({ where }: { where: { transitionKey: string } }) =>
+      Promise.resolve(
+        events.find(event => event.transitionKey === where.transitionKey) ??
+          null
+      )
+    ),
+    create: jest.fn(
+      (input: Partial<RentalTransactionEvent>) =>
+        ({ ...input }) as RentalTransactionEvent
+    ),
+    save: jest.fn((event: RentalTransactionEvent) => {
+      events.push(event)
+      return Promise.resolve(event)
+    }),
+  }
+  return {
+    service: new RentalTransactionEventService(repository as never),
+    events,
+  }
+}
 
 describe('MoveInSettlementsService', () => {
   function setup(): {
     service: MoveInSettlementsService
     settlementRepo: Record<'findOne' | 'find' | 'create' | 'save', jest.Mock>
-    paymentRepo: { find: jest.Mock }
+    paymentRepo: {
+      find: jest.Mock
+      findOne: jest.Mock
+      create: jest.Mock
+      save: jest.Mock
+    }
     notifications: { createNotification: jest.Mock }
   } {
     const settlementRepo = {
@@ -21,7 +55,15 @@ describe('MoveInSettlementsService', () => {
         })
       ),
     }
-    const paymentRepo = { find: jest.fn() }
+    const paymentRepo = {
+      find: jest.fn(),
+      findOne: jest.fn().mockResolvedValue(null),
+      create: jest.fn((value: Record<string, unknown>) => ({
+        ...value,
+        _id: new ObjectId(),
+      })),
+      save: jest.fn((value: unknown) => Promise.resolve(value)),
+    }
     const notifications = {
       createNotification: jest.fn().mockResolvedValue(undefined),
     }
@@ -69,7 +111,11 @@ describe('MoveInSettlementsService', () => {
     )
 
     expect(result?.lines).toEqual([
-      { kind: 'DEPOSIT_TOPUP', amount: 14_000_000, paymentId: null },
+      {
+        kind: 'DEPOSIT_TOPUP',
+        amount: 14_000_000,
+        paymentId: expect.any(String) as string,
+      },
       {
         kind: 'FIRST_RENT',
         amount: 30_000_000,
@@ -79,6 +125,54 @@ describe('MoveInSettlementsService', () => {
     expect(result?.total).toBe(44_000_000)
     expect(result?.statementHash).toMatch(/^[a-f0-9]{64}$/)
     expect(settlementRepo.save).toHaveBeenCalledTimes(1)
+    expect(paymentRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'deposit-topup',
+        amount: 14_000_000,
+        payerId: 'tenant',
+      })
+    )
+  })
+
+  it('records exactly one settlement.created transaction event when creation is retried for the same contract', async () => {
+    const { service, settlementRepo, paymentRepo } = setup()
+    const { service: transactionEventService, events } =
+      createInMemoryTransactionEventService()
+    Reflect.set(service, 'transactionEventService', transactionEventService)
+    const firstPayment = {
+      _id: new ObjectId(),
+      amount: 30_000_000,
+      periodKey: '2030-01',
+    } as Payment
+    paymentRepo.find.mockResolvedValue([firstPayment])
+    const contract = {
+      _id: new ObjectId(),
+      tenantId: 'tenant',
+      landlordId: 'landlord',
+      deposit: 20_000_000,
+      startDate: new Date('2030-02-01T00:00:00.000Z'),
+      packageSnapshot: {
+        resolvedHoldingDepositAmount: 6_000_000,
+        settlementPolicy: { firstPaymentDueOffsetDays: 3 },
+      },
+    } as Contract
+
+    const created = await service.createForContract(
+      contract,
+      new Date('2030-01-01T00:00:00.000Z')
+    )
+    // Simulate a retried provisioning call for the same contract: the
+    // settlement already exists, so the repository now reports it.
+    settlementRepo.findOne.mockResolvedValue(created)
+    await service.createForContract(
+      contract,
+      new Date('2030-01-01T00:00:00.000Z')
+    )
+
+    const createdEvents = events.filter(
+      event => event.eventType === 'settlement.created'
+    )
+    expect(createdEvents).toHaveLength(1)
   })
 
   it('reuses an existing settlement and skips legacy contracts without a policy or fee', async () => {

@@ -1,5 +1,6 @@
 import { connect } from '@hyperledger/fabric-gateway'
 import { FabricService } from './fabric.service'
+import { BlockchainLog } from './schemas/blockchain-log.schema'
 
 jest.mock('@hyperledger/fabric-gateway', () => ({
   connect: jest.fn(),
@@ -131,12 +132,68 @@ describe('FabricService', () => {
         })
       )
     })
+
+    it('rebuilds read and verify results from persisted simulation logs after restart', async () => {
+      configService.get.mockImplementation((key: string) =>
+        key === 'fabric.enabled' ? false : undefined
+      )
+      const contractHash = 'a'.repeat(64)
+      const writer = new FabricService(
+        logRepository as never,
+        configService as never
+      )
+      await writer.onModuleInit()
+      await writer.submitTransaction('createContract', ['c-1'], {
+        contractId: 'c-1',
+        details: { contractHash },
+      })
+
+      const persistedLog = Object.assign(new BlockchainLog(), {
+        action: 'createContract',
+        contractId: 'c-1',
+        paymentId: null,
+        txHash: 'sim_persisted',
+        blockNumber: null,
+        network: 'Simulation (Offline)',
+        networkMode: 'simulation' as const,
+        status: 'confirmed' as const,
+        details: { contractHash },
+      })
+      logRepository.find.mockResolvedValue([persistedLog])
+      const reader = new FabricService(
+        logRepository as never,
+        configService as never
+      )
+      await reader.onModuleInit()
+
+      await expect(
+        reader.evaluateTransaction('readContract', ['c-1'])
+      ).resolves.toEqual(
+        expect.objectContaining({
+          contractId: 'c-1',
+          contractHash,
+          networkMode: 'simulation',
+        })
+      )
+      await expect(
+        reader.evaluateTransaction('verifyContract', ['c-1', contractHash])
+      ).resolves.toEqual(
+        expect.objectContaining({ valid: true, isValid: true })
+      )
+      await expect(
+        reader.evaluateTransaction('verifyContract', ['c-1', 'b'.repeat(64)])
+      ).resolves.toEqual(
+        expect.objectContaining({ valid: false, isValid: false })
+      )
+    })
   })
 
   describe('2. fabric / connected mode', () => {
     it('connects to gateway and evaluates healthcheck on init', async () => {
       setupValidConfig()
-      const evaluateTransaction = jest.fn().mockResolvedValue(Buffer.from('[]'))
+      const evaluateTransaction = jest
+        .fn()
+        .mockResolvedValue(Buffer.from(JSON.stringify({ abiVersion: 2 })))
       const getContract = jest.fn().mockReturnValue({ evaluateTransaction })
       const getNetwork = jest.fn().mockReturnValue({ getContract })
       const mockGateway = {
@@ -157,7 +214,37 @@ describe('FabricService', () => {
       expect(status.ready).toBe(true)
       expect(status.channel).toBe('proptech-channel')
       expect(status.chaincode).toBe('proptech')
-      expect(evaluateTransaction).toHaveBeenCalledWith('getAllContracts')
+      expect(status.chaincodeAbiVersion).toBe(2)
+      expect(evaluateTransaction).toHaveBeenCalledWith('getChaincodeInfo')
+    })
+
+    it('falls back to ABI v1 when deployed chaincode lacks getChaincodeInfo', async () => {
+      setupValidConfig()
+      const evaluateTransaction = jest
+        .fn()
+        .mockRejectedValueOnce(
+          new Error('function getChaincodeInfo does not exist')
+        )
+        .mockResolvedValueOnce(Buffer.from('[]'))
+      const getContract = jest.fn().mockReturnValue({ evaluateTransaction })
+      const getNetwork = jest.fn().mockReturnValue({ getContract })
+      mockConnect.mockReturnValue({ getNetwork, close: jest.fn() })
+
+      const service = new FabricService(
+        logRepository as never,
+        configService as never
+      )
+      await service.onModuleInit()
+
+      expect(service.getStatus()).toEqual(
+        expect.objectContaining({
+          ready: true,
+          connectionState: 'connected',
+          chaincodeAbiVersion: 1,
+        })
+      )
+      expect(evaluateTransaction).toHaveBeenNthCalledWith(1, 'getChaincodeInfo')
+      expect(evaluateTransaction).toHaveBeenNthCalledWith(2, 'getAllContracts')
     })
 
     it('submits transaction and returns authentic txId from chaincode response', async () => {

@@ -12,6 +12,7 @@ import { LedgerOutboxService } from './ledger-outbox.service'
 import { LedgerAuditQueryService } from './ledger-audit-query.service'
 import { LedgerProjectionService } from './ledger-projection.service'
 import { LedgerOutboxWorker } from './ledger-outbox.worker'
+import { LedgerEvidenceQueryService } from './ledger-evidence-query.service'
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { LedgerOutboxWorker } from './ledger-outbox.worker'
     LedgerAuditQueryService,
     LedgerProjectionService,
     LedgerOutboxWorker,
+    LedgerEvidenceQueryService,
   ],
   exports: [
     FabricService,
@@ -38,6 +40,7 @@ import { LedgerOutboxWorker } from './ledger-outbox.worker'
     LedgerAuditQueryService,
     LedgerProjectionService,
     LedgerOutboxWorker,
+    LedgerEvidenceQueryService,
     TypeOrmModule,
   ],
 })

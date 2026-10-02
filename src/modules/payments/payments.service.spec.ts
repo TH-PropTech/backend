@@ -6,6 +6,35 @@ import { Payment } from './schemas/payment.schema'
 import { PaymentsService } from './payments.service'
 import type { NotificationsService } from '../notifications/notifications.service'
 import type { LedgerOutboxService } from '../fabric/ledger-outbox.service'
+import { RentalTransactionEventService } from '../rental-transactions/rental-transaction-event.service'
+import type { RentalTransactionEvent } from '../rental-transactions/schemas/rental-transaction-event.schema'
+
+function createInMemoryTransactionEventService(): {
+  service: RentalTransactionEventService
+  events: RentalTransactionEvent[]
+} {
+  const events: RentalTransactionEvent[] = []
+  const repository = {
+    findOne: jest.fn(({ where }: { where: { transitionKey: string } }) =>
+      Promise.resolve(
+        events.find(event => event.transitionKey === where.transitionKey) ??
+          null
+      )
+    ),
+    create: jest.fn(
+      (input: Partial<RentalTransactionEvent>) =>
+        ({ ...input }) as RentalTransactionEvent
+    ),
+    save: jest.fn((event: RentalTransactionEvent) => {
+      events.push(event)
+      return Promise.resolve(event)
+    }),
+  }
+  return {
+    service: new RentalTransactionEventService(repository as never),
+    events,
+  }
+}
 
 describe('PaymentsService', () => {
   const paymentRepository = {
@@ -131,6 +160,78 @@ describe('PaymentsService', () => {
     ).rejects.toThrow(ForbiddenException)
   })
 
+  it('normalizes legacy rent invoices to tenant payer and landlord payee', async () => {
+    const legacy = {
+      tenantId: 'tenant-1',
+      landlordId: 'landlord-1',
+      payerId: null,
+      payerRole: null,
+      payeeRole: null,
+    } as Payment
+    contractRepository.findOne.mockResolvedValue({
+      tenantId: 'tenant-1',
+      landlordId: 'landlord-1',
+    })
+    paymentRepository.find.mockResolvedValue([legacy])
+
+    const payments = await service.getByContract(
+      '507f1f77bcf86cd799439011',
+      'tenant-1',
+      false
+    )
+
+    expect(payments[0]).toEqual(
+      expect.objectContaining({
+        payerId: 'tenant-1',
+        payerRole: 'tenant',
+        payeeRole: 'landlord',
+      })
+    )
+  })
+
+  it('returns a platform-fee invoice only to its payer or staff', async () => {
+    const rent = {
+      tenantId: 'tenant-1',
+      landlordId: 'landlord-1',
+      type: 'rent',
+    } as Payment
+    const landlordFee = {
+      tenantId: 'tenant-1',
+      landlordId: 'landlord-1',
+      payerId: 'landlord-1',
+      payerRole: 'landlord',
+      payeeRole: 'platform',
+      type: 'platform-fee',
+    } as Payment
+    contractRepository.findOne.mockResolvedValue({
+      tenantId: 'tenant-1',
+      landlordId: 'landlord-1',
+    })
+    paymentRepository.find.mockResolvedValue([rent, landlordFee])
+
+    const tenantPayments = await service.getByContract(
+      '507f1f77bcf86cd799439011',
+      'tenant-1',
+      false
+    )
+    const landlordPayments = await service.getByContract(
+      '507f1f77bcf86cd799439011',
+      'landlord-1',
+      false
+    )
+
+    expect(tenantPayments).toEqual([expect.objectContaining({ type: 'rent' })])
+    expect(landlordPayments).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: 'rent' }),
+        expect.objectContaining({
+          type: 'platform-fee',
+          payerId: 'landlord-1',
+        }),
+      ])
+    )
+  })
+
   it('confirms an unpaid payment once and records the actor', async () => {
     const payment: Payment = {
       _id: new ObjectId(),
@@ -163,6 +264,7 @@ describe('PaymentsService', () => {
     expect(ledgerOutboxService.enqueue).toHaveBeenCalledWith(
       expect.objectContaining({
         action: 'recordPayment',
+        dependencyKey: 'contract:contract-1:contract.activated',
         args: [
           payment._id.toHexString(),
           'contract-1',
@@ -244,5 +346,50 @@ describe('PaymentsService', () => {
       service.processReminders(new Date('2030-02-10T00:00:00.000Z'))
     ).resolves.toEqual({ overdue: 1, reminders: 0 })
     expect(overduePayment.status).toBe('overdue')
+  })
+
+  it('records exactly one fee.issued transaction event when invoice generation is retried', async () => {
+    const { service: transactionEventService, events } =
+      createInMemoryTransactionEventService()
+    Reflect.set(service, 'transactionEventService', transactionEventService)
+    const contract = {
+      _id: new ObjectId(),
+      tenantId: 'tenant-1',
+      landlordId: 'landlord-1',
+      feeSnapshot: {
+        scheduleId: 'fee-v1',
+        version: 1,
+        contentHash: 'a'.repeat(64),
+        quote: [
+          {
+            feeKind: 'TENANT_SERVICE' as const,
+            payerRole: 'tenant' as const,
+            amountBeforeVat: 200_000,
+            vatAmount: 20_000,
+            amount: 220_000,
+          },
+        ],
+      },
+    } as unknown as Contract
+    paymentRepository.create.mockImplementation(
+      (value: Payment): Payment => value
+    )
+    paymentRepository.save.mockImplementation(
+      (value: Payment): Promise<Payment> =>
+        Promise.resolve({ ...value, _id: value._id ?? new ObjectId() })
+    )
+
+    paymentRepository.findOne.mockResolvedValueOnce(null)
+    const [created] = await service.generatePlatformFeeInvoices(contract)
+
+    // Retry: the invoice now exists, so the service must reuse it and must
+    // not emit a second fee.issued event for the same invoice.
+    paymentRepository.findOne.mockResolvedValueOnce(created)
+    await service.generatePlatformFeeInvoices(contract)
+
+    const issuedEvents = events.filter(
+      event => event.eventType === 'fee.issued'
+    )
+    expect(issuedEvents).toHaveLength(1)
   })
 })

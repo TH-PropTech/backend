@@ -2,6 +2,7 @@ import {
   ForbiddenException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
   Optional,
 } from '@nestjs/common'
@@ -17,9 +18,12 @@ import { reminderDateKey, vietnamDateKey } from './payment-reminder.util'
 import { Payment } from './schemas/payment.schema'
 import { OwnershipTransferResolver } from '../property-ownership-transfer/ownership-transfer.resolver'
 import { resolveEffectiveCommercial } from '../contracts/commercial/resolve-effective-commercial'
+import { RentalTransactionEventService } from '../rental-transactions/rental-transaction-event.service'
 
 @Injectable()
 export class PaymentsService {
+  private readonly logger = new Logger(PaymentsService.name)
+
   constructor(
     @InjectRepository(Payment)
     private readonly paymentRepository: Repository<Payment>,
@@ -28,8 +32,39 @@ export class PaymentsService {
     private readonly notificationsService?: NotificationsService,
     @Optional() private readonly ledgerOutboxService?: LedgerOutboxService,
     @Optional()
-    private readonly ownershipTransferResolver?: OwnershipTransferResolver
+    private readonly ownershipTransferResolver?: OwnershipTransferResolver,
+    @Optional()
+    private readonly transactionEventService?: RentalTransactionEventService
   ) {}
+
+  private async recordTransactionEvent(input: {
+    contractId: string
+    eventType: string
+    actorRole: 'tenant' | 'landlord' | 'staff' | 'admin' | 'system' | 'provider'
+    actorId?: string | null
+    reasonCode?: string | null
+    refs?: Record<string, string>
+    transitionKey: string
+  }): Promise<void> {
+    if (!this.transactionEventService) return
+    try {
+      await this.transactionEventService.record({
+        transactionKey: input.contractId,
+        contractId: input.contractId,
+        eventType: input.eventType,
+        actorRole: input.actorRole,
+        actorId: input.actorId ?? null,
+        reasonCode: input.reasonCode ?? null,
+        refs: { contractId: input.contractId, ...(input.refs ?? {}) },
+        transitionKey: input.transitionKey,
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      this.logger.warn(
+        `Rental transaction audit failed for payments event [${input.eventType}]: ${message}`
+      )
+    }
+  }
 
   async generateSchedule(contract: Contract): Promise<Payment[]> {
     const contractId = contract._id.toString()
@@ -126,7 +161,15 @@ export class PaymentsService {
         periodKey,
         ledgerStatus: 'pending',
       })
-      created.push(await this.paymentRepository.save(invoice))
+      const saved = await this.paymentRepository.save(invoice)
+      await this.recordTransactionEvent({
+        contractId: contract._id.toHexString(),
+        eventType: 'fee.issued',
+        actorRole: 'system',
+        refs: { paymentId: saved._id.toHexString() },
+        transitionKey: `fee:${saved._id.toHexString()}:issued`,
+      })
+      created.push(saved)
     }
     return created
   }
@@ -152,7 +195,17 @@ export class PaymentsService {
     payment.waivedBy = actorId
     payment.waivedAt = new Date()
     payment.waiveReason = reason.trim()
-    return this.paymentRepository.save(payment)
+    const saved = await this.paymentRepository.save(payment)
+    await this.recordTransactionEvent({
+      contractId: saved.contractId,
+      eventType: 'fee.waived',
+      actorRole: 'staff',
+      actorId,
+      reasonCode: saved.waiveReason ?? null,
+      refs: { paymentId: saved._id.toHexString() },
+      transitionKey: `fee:${saved._id.toHexString()}:waived`,
+    })
+    return saved
   }
 
   async getByContract(
@@ -177,10 +230,23 @@ export class PaymentsService {
     if (!canAccess) {
       throw new ForbiddenException('PAYMENT_ACCESS_DENIED')
     }
-    return this.paymentRepository.find({
-      where: { contractId, type: 'rent' },
+    const payments = await this.paymentRepository.find({
+      where: { contractId },
       order: { dueDate: 'ASC' },
     })
+    return payments
+      .filter(
+        payment =>
+          payment.type !== 'platform-fee' ||
+          isStaff ||
+          (payment.payerId ?? payment.tenantId) === actorId
+      )
+      .map(payment => ({
+        ...payment,
+        payerId: payment.payerId ?? payment.tenantId,
+        payerRole: payment.payerRole ?? 'tenant',
+        payeeRole: payment.payeeRole ?? 'landlord',
+      }))
   }
 
   async confirmPayment(
@@ -223,6 +289,7 @@ export class PaymentsService {
           contractId: payment.contractId,
           details: { confirmedBy: actorId },
         },
+        dependencyKey: `contract:${payment.contractId}:contract.activated`,
       })
     }
     return saved

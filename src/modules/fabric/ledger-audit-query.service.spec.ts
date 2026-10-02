@@ -125,4 +125,28 @@ describe('LedgerAuditQueryService', () => {
     expect(events).toHaveLength(1)
     expect(events[0]!.networkMode).toBe('fabric')
   })
+
+  it('marks failed ledger events terminal and describes manual recovery', async () => {
+    const outboxId = new ObjectId('507f1f77bcf86cd799439044')
+    outboxRepo.find.mockResolvedValue([
+      {
+        _id: outboxId,
+        aggregateType: 'contract',
+        aggregateId: 'contract-failed',
+        eventType: 'contract.activated',
+        status: 'failed',
+        errorCode: 'ATTEMPTS_EXHAUSTED',
+        txHash: null,
+        createdAt: new Date('2026-09-14T08:00:00Z'),
+        updatedAt: new Date('2026-09-14T08:00:00Z'),
+      } as LedgerOutbox,
+    ])
+    logRepo.find.mockResolvedValue([])
+
+    const events = await service.getContractEvents('contract-failed')
+
+    expect(events[0]!.retryable).toBe(false)
+    expect(events[0]!.description).toContain('retry thủ công')
+    expect(events[0]!.description).not.toContain('tự động thử lại')
+  })
 })

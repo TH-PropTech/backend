@@ -43,6 +43,10 @@ import { FlowNotificationService } from './flow/flow-notification.service'
 import { NotificationsModule } from '../notifications/notifications.module'
 import { MoveInSettlementsModule } from '../move-in-settlements/move-in-settlements.module'
 import { MoveInSettlement } from '../move-in-settlements/schemas/move-in-settlement.schema'
+import { ContractLayoutProfile } from './layout/contract-layout-profile.schema'
+import { ContractLayoutAudit } from './layout/contract-layout-audit.schema'
+import { ContractLayoutService } from './layout/contract-layout.service'
+import { ContractLayoutsController } from './layout/contract-layouts.controller'
 
 @Module({
   imports: [
@@ -58,6 +62,8 @@ import { MoveInSettlement } from '../move-in-settlements/schemas/move-in-settlem
       ContractAmendment,
       Payment,
       MoveInSettlement,
+      ContractLayoutProfile,
+      ContractLayoutAudit,
     ]),
     PoliciesModule,
     FabricModule,
@@ -74,6 +80,7 @@ import { MoveInSettlement } from '../move-in-settlements/schemas/move-in-settlem
     ContractTemplatesController,
     ContractCommercialEditorController,
     ContractAmendmentController,
+    ContractLayoutsController,
   ],
   providers: [
     ContractsService,
@@ -104,6 +111,7 @@ import { MoveInSettlement } from '../move-in-settlements/schemas/move-in-settlem
       useClass: MongoGridFsArtifactStorage,
     },
     FlowNotificationService,
+    ContractLayoutService,
   ],
   exports: [
     ContractsService,

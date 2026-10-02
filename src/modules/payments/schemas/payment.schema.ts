@@ -126,6 +126,18 @@ export class Payment {
   @Column({ nullable: true })
   governingAmendmentHash?: string | null
 
+  @Column({ nullable: true })
+  settlementId?: string | null
+
+  @Column({ nullable: true })
+  invoiceCode?: string | null
+
+  @Column({ nullable: true })
+  receiptCode?: string | null
+
+  @Column({ nullable: true })
+  receiptHash?: string | null
+
   @CreateDateColumn()
   createdAt!: Date
 

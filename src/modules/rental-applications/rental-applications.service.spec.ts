@@ -20,6 +20,35 @@ import {
   computeRentalExecutionPolicyHash,
   getDefaultRentalExecutionPolicyRef,
 } from '../rental-flow-config/rental-execution-policy.util'
+import { RentalTransactionEventService } from '../rental-transactions/rental-transaction-event.service'
+import type { RentalTransactionEvent } from '../rental-transactions/schemas/rental-transaction-event.schema'
+
+function createInMemoryTransactionEventService(): {
+  service: RentalTransactionEventService
+  events: RentalTransactionEvent[]
+} {
+  const events: RentalTransactionEvent[] = []
+  const repository = {
+    findOne: jest.fn(({ where }: { where: { transitionKey: string } }) =>
+      Promise.resolve(
+        events.find(event => event.transitionKey === where.transitionKey) ??
+          null
+      )
+    ),
+    create: jest.fn(
+      (input: Partial<RentalTransactionEvent>) =>
+        ({ ...input }) as RentalTransactionEvent
+    ),
+    save: jest.fn((event: RentalTransactionEvent) => {
+      events.push(event)
+      return Promise.resolve(event)
+    }),
+  }
+  return {
+    service: new RentalTransactionEventService(repository as never),
+    events,
+  }
+}
 
 function application(
   overrides: Partial<RentalApplication> = {}
@@ -132,7 +161,8 @@ describe('RentalApplicationsService', () => {
     apartments.findOne.mockResolvedValue(apartment)
     repository.findOne.mockResolvedValue(null)
     repository.create.mockImplementation(
-      (value: unknown) => value as RentalApplication
+      (value: unknown) =>
+        ({ _id: new ObjectId(), ...(value as object) }) as RentalApplication
     )
     repository.save.mockImplementation((value: unknown) =>
       Promise.resolve(value as RentalApplication)
@@ -193,7 +223,8 @@ describe('RentalApplicationsService', () => {
     apartments.findOne.mockResolvedValue(apartment)
     repository.findOne.mockResolvedValue(null)
     repository.create.mockImplementation(
-      (value: unknown) => value as RentalApplication
+      (value: unknown) =>
+        ({ _id: new ObjectId(), ...(value as object) }) as RentalApplication
     )
     repository.save.mockImplementation((value: unknown) =>
       Promise.resolve(value as RentalApplication)
@@ -422,7 +453,8 @@ describe('RentalApplicationsService', () => {
     })
     repository.findOne.mockResolvedValue(null)
     repository.create.mockImplementation(
-      (value: unknown) => value as RentalApplication
+      (value: unknown) =>
+        ({ _id: new ObjectId(), ...(value as object) }) as RentalApplication
     )
     repository.save.mockImplementation(value => Promise.resolve(value))
 
@@ -687,7 +719,8 @@ describe('RentalApplicationsService', () => {
     apartments.findOne.mockResolvedValue(apartment)
     repository.findOne.mockResolvedValue(null)
     repository.create.mockImplementation(
-      (value: unknown) => value as RentalApplication
+      (value: unknown) =>
+        ({ _id: new ObjectId(), ...(value as object) }) as RentalApplication
     )
     repository.save.mockImplementation(value => Promise.resolve(value))
 
@@ -838,7 +871,8 @@ describe('RentalApplicationsService', () => {
       apartments.findOne.mockResolvedValue(apartment)
       repository.findOne.mockResolvedValue(null)
       repository.create.mockImplementation(
-        (value: unknown) => value as RentalApplication
+        (value: unknown) =>
+          ({ _id: new ObjectId(), ...(value as object) }) as RentalApplication
       )
       repository.save.mockImplementation(value => Promise.resolve(value))
 
@@ -858,5 +892,66 @@ describe('RentalApplicationsService', () => {
       expect(result).toBeDefined()
       expect(result.occupants).toBe(3)
     })
+  })
+})
+
+describe('RentalApplicationsService transaction audit', () => {
+  it('records exactly one application.provisioned event even if provisioning runs twice for the same application', async () => {
+    const repository = {
+      create: jest.fn(),
+      find: jest.fn(),
+      findOne: jest.fn(),
+      save: jest.fn((value: unknown) => Promise.resolve(value)),
+    }
+    const apartments = {
+      findOne: jest.fn().mockResolvedValue({ title: 'Apartment' }),
+      reserveRentalApplication: jest.fn().mockResolvedValue(true),
+    }
+    const depositAgreementsService = {
+      createFromApplicationSnapshot: jest.fn().mockResolvedValue({
+        _id: new ObjectId(),
+      }),
+    }
+    const contractsService = {
+      createDraftFromApplication: jest.fn().mockResolvedValue({
+        _id: new ObjectId(),
+      }),
+    }
+    const { service: transactionEventService, events } =
+      createInMemoryTransactionEventService()
+    const service = new RentalApplicationsService(
+      repository as unknown as Repository<RentalApplication>,
+      apartments as unknown as ApartmentsService,
+      undefined,
+      depositAgreementsService as never,
+      contractsService as never,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      transactionEventService
+    )
+
+    const app = application({ packageSnapshot: {} as never })
+    const provisionOnce = async (): Promise<void> => {
+      await (
+        service as unknown as {
+          provisionAcceptedApplication: (
+            application: RentalApplication
+          ) => Promise<RentalApplication>
+        }
+      ).provisionAcceptedApplication(app)
+    }
+
+    await provisionOnce()
+    await provisionOnce()
+
+    const provisionedEvents = events.filter(
+      event => event.eventType === 'application.provisioned'
+    )
+    expect(provisionedEvents).toHaveLength(1)
   })
 })

@@ -8,6 +8,7 @@ import type { ContractsService } from './contracts.service'
 import type { ContractArtifactService } from './contract-artifact.service'
 import type { ContractViewService } from './contract-view.service'
 import type { LedgerAuditQueryService } from '../fabric/ledger-audit-query.service'
+import type { LedgerEvidenceQueryService } from '../fabric/ledger-evidence-query.service'
 import type { SmartOtpService } from '../smart-otp/services/smart-otp.service'
 import type { SmartCaSigningService } from './smartca/smartca-signing.service'
 import type { DepositAgreementsService } from './deposit-agreements.service'
@@ -37,6 +38,9 @@ describe('ContractsController', () => {
   const ledgerAuditQueryService = {
     getContractEvents: jest.fn(),
   }
+  const ledgerEvidenceQueryService = {
+    getContractLedgerEvidence: jest.fn(),
+  }
   const smartOtpService = {
     initiateOtpSession: jest.fn(),
     verifyOtpSignature: jest.fn(),
@@ -56,6 +60,7 @@ describe('ContractsController', () => {
     artifactService as unknown as ContractArtifactService,
     contractViewService as unknown as ContractViewService,
     ledgerAuditQueryService as unknown as LedgerAuditQueryService,
+    ledgerEvidenceQueryService as unknown as LedgerEvidenceQueryService,
     smartOtpService as unknown as SmartOtpService,
     smartCaSigningService as unknown as SmartCaSigningService,
     depositAgreementsService as unknown as DepositAgreementsService
@@ -107,6 +112,46 @@ describe('ContractsController', () => {
       'tenant-1',
       false
     )
+  })
+
+  it('scopes ledger evidence to the authenticated contract participant', async () => {
+    const contract = { _id: 'contract-1', depositAgreementId: null }
+    service.findOneForUser.mockResolvedValue(contract)
+    ledgerEvidenceQueryService.getContractLedgerEvidence.mockResolvedValue({
+      networkMode: 'simulation',
+      connectionState: 'disabled',
+      explorerAvailable: false,
+      events: [],
+    })
+
+    const result = await controller.getContractLedgerEvidence('contract-1', {
+      _id: 'tenant-1',
+      roles: ['tenant'],
+    })
+
+    expect(result.explorerAvailable).toBe(false)
+    expect(service.findOneForUser).toHaveBeenCalledWith(
+      'contract-1',
+      'tenant-1',
+      false
+    )
+    expect(
+      ledgerEvidenceQueryService.getContractLedgerEvidence
+    ).toHaveBeenCalledWith('contract-1', contract)
+  })
+
+  it('propagates forbidden access when a stranger requests ledger evidence', async () => {
+    service.findOneForUser.mockRejectedValue(new ForbiddenException())
+
+    await expect(
+      controller.getContractLedgerEvidence('contract-1', {
+        _id: 'stranger-1',
+        roles: ['tenant'],
+      })
+    ).rejects.toThrow(ForbiddenException)
+    expect(
+      ledgerEvidenceQueryService.getContractLedgerEvidence
+    ).not.toHaveBeenCalled()
   })
 
   it('passes the requested public-service purpose and JWT scope', async () => {

@@ -60,7 +60,7 @@ export class LedgerAuditQueryService {
           outbox.blockNumber > 0
             ? outbox.blockNumber
             : null,
-        retryable: outbox.status === 'failed',
+        retryable: false,
         displayCode: `LEDGER_${outbox.status.toUpperCase()}`,
         description: this.getOutboxDescription(outbox),
       })
@@ -91,7 +91,7 @@ export class LedgerAuditQueryService {
             ? null
             : log.blockNumber,
 
-        retryable: log.status === 'failed',
+        retryable: false,
         displayCode: `LOG_${(log.status || 'CONFIRMED').toUpperCase()}`,
         description: this.getLogDescription(log),
       })
@@ -123,7 +123,7 @@ export class LedgerAuditQueryService {
       case 'confirmed':
         return 'Giao dịch đã được đồng bộ thành công vào sổ cái Blockchain'
       case 'failed':
-        return 'Đồng bộ sổ cái tạm thời thất bại, đang trong hàng đợi tự động thử lại'
+        return 'Đồng bộ sổ cái thất bại vĩnh viễn; cần nhân viên hoặc quản trị viên xử lý hoặc retry thủ công'
       default:
         return 'Đang theo dõi tiến trình đồng bộ sổ cái'
     }

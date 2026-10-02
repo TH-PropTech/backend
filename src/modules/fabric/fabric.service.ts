@@ -26,7 +26,7 @@ const utf8Decoder = new TextDecoder()
  * Hàm read-only rẻ nhất trên chaincode, dùng để xác nhận peer thực sự sống
  * lúc khởi động. Phải tồn tại trong blockchain/chaincode/lib/proptech-contract.js.
  */
-const FABRIC_HEALTHCHECK_FN = 'getAllContracts'
+const FABRIC_HEALTHCHECK_FN = 'getChaincodeInfo'
 
 export type FabricMode = 'simulation' | 'fabric'
 export type FabricConnectionState = 'disabled' | 'connected' | 'unavailable'
@@ -37,6 +37,7 @@ export interface FabricStatus {
   ready: boolean
   channel?: string | undefined
   chaincode?: string | undefined
+  chaincodeAbiVersion: 1 | 2
   lastCheckedAt: string
   errorCode?: string | null
 }
@@ -50,6 +51,7 @@ export class FabricService implements OnModuleInit, OnModuleDestroy {
   private connectionState: FabricConnectionState = 'disabled'
   private ready = false
   private errorCode: string | null = null
+  private chaincodeAbiVersion: 1 | 2 = 2
   private lastCheckedAt: string = new Date().toISOString()
   private readonly simulationState = new Map<string, Record<string, unknown>>()
 
@@ -204,7 +206,20 @@ export class FabricService implements OnModuleInit, OnModuleDestroy {
       // 5. Health check thật qua query read-only
       const network = this.gateway.getNetwork(this.channelName)
       const contract = network.getContract(this.chaincodeName)
-      await contract.evaluateTransaction(FABRIC_HEALTHCHECK_FN)
+      try {
+        const infoBuffer = await contract.evaluateTransaction(
+          FABRIC_HEALTHCHECK_FN
+        )
+        this.chaincodeAbiVersion = this.parseChaincodeAbiVersion(infoBuffer)
+      } catch (error) {
+        if (!this.isMissingChaincodeInfoError(error)) throw error
+
+        await contract.evaluateTransaction('getAllContracts')
+        this.chaincodeAbiVersion = 1
+        this.logger.warn(
+          'Fabric chaincode does not expose getChaincodeInfo; using ABI v1 compatibility mode.'
+        )
+      }
 
       this.connectionState = 'connected'
       this.ready = true
@@ -236,6 +251,24 @@ export class FabricService implements OnModuleInit, OnModuleDestroy {
         `Failed to initialize Fabric connection: ${this.errorCode}. Connection state: unavailable.`
       )
     }
+  }
+
+  private parseChaincodeAbiVersion(result: Uint8Array): 1 | 2 {
+    const decoded = utf8Decoder.decode(result).trim()
+    if (!decoded) return 2
+    try {
+      const info = JSON.parse(decoded) as { abiVersion?: unknown }
+      return info.abiVersion === 1 ? 1 : 2
+    } catch {
+      return 2
+    }
+  }
+
+  private isMissingChaincodeInfoError(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error)
+    return /getChaincodeInfo.*(does not exist|not found|unknown)|function.*not found/i.test(
+      message
+    )
   }
 
   /**
@@ -312,16 +345,41 @@ export class FabricService implements OnModuleInit, OnModuleDestroy {
       log.networkMode = 'simulation'
       log.status = 'confirmed'
       log.eventType = action
-      log.details = metadata.details ?? {}
+      const details: Record<string, unknown> = { ...(metadata.details ?? {}) }
+      if (
+        action === 'createContract' &&
+        typeof details.contractHash !== 'string'
+      ) {
+        const hashArgument = args.find(argument =>
+          /^[a-f0-9]{64}$/i.test(argument)
+        )
+        if (hashArgument) details.contractHash = hashArgument
+      }
+      log.details = details
       await this.logRepository.save(log)
 
-      this.simulationState.set(`${action}:${args[0] ?? ''}`, {
+      const simulationRecord: Record<string, unknown> = {
         action,
         args,
         txHash,
         networkMode: 'simulation',
         status: 'confirmed',
-      })
+        ...(typeof details.contractHash === 'string'
+          ? { contractHash: details.contractHash }
+          : {}),
+      }
+      const aggregateId = args[0] ?? ''
+      this.simulationState.set(`${action}:${aggregateId}`, simulationRecord)
+      if (action === 'createContract' && aggregateId) {
+        this.simulationState.set(
+          `readContract:${aggregateId}`,
+          simulationRecord
+        )
+        this.simulationState.set(
+          `verifyContract:${aggregateId}`,
+          simulationRecord
+        )
+      }
 
       return {
         txHash,
@@ -405,14 +463,20 @@ export class FabricService implements OnModuleInit, OnModuleDestroy {
 
     if (this.mode === 'simulation') {
       const state = this.simulationState.get(`${action}:${args[0] ?? ''}`)
-      return (
-        state ?? {
-          action,
-          args,
-          networkMode: 'simulation',
-          status: 'not-found',
-        }
-      )
+      const persistedState =
+        state ??
+        (action === 'readContract' || action === 'verifyContract'
+          ? await this.loadSimulationState(args[0] ?? '')
+          : null)
+      if (persistedState) {
+        return this.projectSimulationResult(action, args, persistedState)
+      }
+      return {
+        action,
+        args,
+        networkMode: 'simulation',
+        status: 'not-found',
+      }
     }
 
     if (this.connectionState !== 'connected' || !this.gateway) {
@@ -439,6 +503,45 @@ export class FabricService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  private async loadSimulationState(
+    contractId: string
+  ): Promise<Record<string, unknown> | null> {
+    if (!contractId) return null
+    const logs = await this.logRepository.find({
+      where: { contractId },
+      order: { createdAt: 'DESC' },
+    })
+    const log = logs.find(
+      item =>
+        item.networkMode === 'simulation' &&
+        item.status === 'confirmed' &&
+        typeof item.details?.contractHash === 'string'
+    )
+    if (!log || typeof log.details.contractHash !== 'string') return null
+    return {
+      action: 'createContract',
+      contractId,
+      contractHash: log.details.contractHash,
+      txHash: log.txHash,
+      networkMode: 'simulation',
+      status: 'confirmed',
+    }
+  }
+
+  private projectSimulationResult(
+    action: string,
+    args: string[],
+    state: Record<string, unknown>
+  ): Record<string, unknown> {
+    if (action !== 'verifyContract') return state
+    const contractHash = state.contractHash
+    const valid =
+      typeof contractHash === 'string' &&
+      typeof args[1] === 'string' &&
+      contractHash === args[1]
+    return { ...state, valid, isValid: valid }
+  }
+
   /**
    * Get truthful status of the blockchain service
    */
@@ -449,8 +552,13 @@ export class FabricService implements OnModuleInit, OnModuleDestroy {
       ready: this.ready,
       channel: this.channelName || undefined,
       chaincode: this.chaincodeName || undefined,
+      chaincodeAbiVersion: this.chaincodeAbiVersion,
       lastCheckedAt: this.lastCheckedAt,
       errorCode: this.errorCode,
     }
+  }
+
+  getChaincodeAbiVersion(): 1 | 2 {
+    return this.chaincodeAbiVersion
   }
 }

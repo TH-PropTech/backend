@@ -3,6 +3,7 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
   Optional,
   ServiceUnavailableException,
@@ -20,6 +21,7 @@ import {
   CONTRACT_ARTIFACT_STORAGE,
   type ContractArtifactStorage,
 } from './contract-artifact.storage'
+import { RentalTransactionEventService } from '../rental-transactions/rental-transaction-event.service'
 
 export type ContractArtifactFormat = 'pdf' | 'docx'
 
@@ -60,6 +62,8 @@ export interface ContractArtifactRenderer {
 
 @Injectable()
 export class ContractArtifactService {
+  private readonly logger = new Logger(ContractArtifactService.name)
+
   constructor(
     @InjectTypeOrmRepository(Contract)
     private readonly contractRepository: Repository<Contract>,
@@ -71,7 +75,9 @@ export class ContractArtifactService {
     private readonly storage?: ContractArtifactStorage,
     @Optional()
     @InjectTypeOrmRepository(ContractAmendment)
-    private readonly amendmentRepository?: Repository<ContractAmendment>
+    private readonly amendmentRepository?: Repository<ContractAmendment>,
+    @Optional()
+    private readonly transactionEventService?: RentalTransactionEventService
   ) {}
 
   async lockAmendmentArtifact(
@@ -300,7 +306,40 @@ export class ContractArtifactService {
     }
     contract.contractHash = saved.artifactHash
     await this.contractRepository.save(contract)
+    await this.recordTransactionEvent({
+      contractId,
+      eventType: 'contract.artifact-locked',
+      actorRole: isStaff ? 'staff' : 'landlord',
+      actorId,
+      transitionKey: `contract:${contractId}:artifact-locked`,
+    })
     return saved
+  }
+
+  private async recordTransactionEvent(input: {
+    contractId: string
+    eventType: string
+    actorRole: 'tenant' | 'landlord' | 'staff' | 'admin' | 'system' | 'provider'
+    actorId?: string | null
+    transitionKey: string
+  }): Promise<void> {
+    if (!this.transactionEventService) return
+    try {
+      await this.transactionEventService.record({
+        transactionKey: input.contractId,
+        contractId: input.contractId,
+        eventType: input.eventType,
+        actorRole: input.actorRole,
+        actorId: input.actorId ?? null,
+        refs: { contractId: input.contractId },
+        transitionKey: input.transitionKey,
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      this.logger.warn(
+        `Rental transaction audit failed for contract artifact [${input.contractId}] event [${input.eventType}]: ${message}`
+      )
+    }
   }
 
   async resolveCanonicalArtifact(
