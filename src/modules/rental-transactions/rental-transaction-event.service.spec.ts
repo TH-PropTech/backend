@@ -52,6 +52,49 @@ describe('RentalTransactionEventService', () => {
     expect(repository.save).toHaveBeenCalledWith(event)
   })
 
+  it('drops every ref key outside the safe allowlist, even newly invented sensitive keys', async () => {
+    const event = await service.record({
+      transactionKey: 'application-2',
+      transitionKey: 'application-2:signed:tenant',
+      eventType: 'contract.signed',
+      actorRole: 'tenant',
+      reasonCode: 'VALIDATION_FAILED',
+      refs: {
+        applicationId: 'application-2',
+        otpCode: '123456',
+        smartCaSad: 'abcd',
+        bankAccountNumber: '0123456789012',
+        biometricTemplate: 'base64-face-vector',
+        rawContractContent: '<html>full contract body</html>',
+      },
+    })
+
+    expect(event.refs).toEqual({ applicationId: 'application-2' })
+    const serialized = JSON.stringify(event)
+    expect(serialized).not.toContain('otpCode')
+    expect(serialized).not.toContain('smartCaSad')
+    expect(serialized).not.toContain('bankAccountNumber')
+    expect(serialized).not.toContain('biometricTemplate')
+    expect(serialized).not.toContain('rawContractContent')
+    expect(serialized).not.toContain('0123456789012')
+    expect(serialized).not.toContain('base64-face-vector')
+    expect(serialized).not.toContain('<html>')
+  })
+
+  it('strips newlines and caps the length of a reasonCode supplied by a caller', async () => {
+    const longReason = `line-one\nline-two ${'x'.repeat(300)}`
+    const event = await service.record({
+      transactionKey: 'application-3',
+      transitionKey: 'application-3:activation-failed',
+      eventType: 'contract.activation-failed',
+      actorRole: 'system',
+      reasonCode: longReason,
+    })
+
+    expect(event.reasonCode).not.toContain('\n')
+    expect((event.reasonCode ?? '').length).toBeLessThanOrEqual(160)
+  })
+
   it('returns the existing event for duplicate transition keys', async () => {
     const existing = { _id: new ObjectId(), transitionKey: 'same-key' }
     repository.findOne.mockResolvedValue(existing)

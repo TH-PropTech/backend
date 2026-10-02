@@ -1,4 +1,12 @@
-import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common'
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { RolesGuard } from '../../common/guards/roles.guard'
@@ -10,6 +18,7 @@ import {
   RentalTransactionTimelineEvent,
   StuckRentalTransaction,
 } from './rental-transactions.service'
+import { RecoverRentalTransactionDto } from './dto/recover-rental-transaction.dto'
 
 @ApiTags('rental-transactions')
 @ApiBearerAuth()
@@ -42,5 +51,16 @@ export class RentalTransactionsController {
       ...(page ? { page: Number(page) } : {}),
       ...(limit ? { limit: Number(limit) } : {}),
     })
+  }
+
+  @Post(':contractId/recover')
+  @Roles('staff', 'admin')
+  recover(
+    @Param('contractId') contractId: string,
+    @Body() dto: RecoverRentalTransactionDto,
+    @CurrentUser() user: UserPayload
+  ): ReturnType<RentalTransactionsService['recover']> {
+    const role = user.roles?.includes('admin') ? 'admin' : 'staff'
+    return this.service.recover(contractId, { id: user._id ?? '', role }, dto)
   }
 }

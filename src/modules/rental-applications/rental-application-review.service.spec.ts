@@ -207,7 +207,8 @@ describe('RentalApplicationsService review-to-contract flow', () => {
     })
     repository.findOne.mockResolvedValue(null)
     repository.create.mockImplementation(
-      (value: unknown) => value as RentalApplication
+      (value: unknown) =>
+        ({ _id: new ObjectId(), ...(value as object) }) as RentalApplication
     )
     repository.save.mockImplementation((value: unknown) =>
       Promise.resolve(value as RentalApplication)
@@ -259,7 +260,8 @@ describe('RentalApplicationsService review-to-contract flow', () => {
     })
     repository.findOne.mockResolvedValue(null)
     repository.create.mockImplementation(
-      (value: unknown) => value as RentalApplication
+      (value: unknown) =>
+        ({ _id: new ObjectId(), ...(value as object) }) as RentalApplication
     )
     repository.save.mockImplementation((value: unknown) =>
       Promise.resolve(value as RentalApplication)

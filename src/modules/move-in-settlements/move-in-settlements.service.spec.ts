@@ -2,6 +2,35 @@ import { ObjectId } from 'mongodb'
 import { MoveInSettlementsService } from './move-in-settlements.service'
 import type { Contract } from '../contracts/schemas/contract.schema'
 import type { Payment } from '../payments/schemas/payment.schema'
+import { RentalTransactionEventService } from '../rental-transactions/rental-transaction-event.service'
+import type { RentalTransactionEvent } from '../rental-transactions/schemas/rental-transaction-event.schema'
+
+function createInMemoryTransactionEventService(): {
+  service: RentalTransactionEventService
+  events: RentalTransactionEvent[]
+} {
+  const events: RentalTransactionEvent[] = []
+  const repository = {
+    findOne: jest.fn(({ where }: { where: { transitionKey: string } }) =>
+      Promise.resolve(
+        events.find(event => event.transitionKey === where.transitionKey) ??
+          null
+      )
+    ),
+    create: jest.fn(
+      (input: Partial<RentalTransactionEvent>) =>
+        ({ ...input }) as RentalTransactionEvent
+    ),
+    save: jest.fn((event: RentalTransactionEvent) => {
+      events.push(event)
+      return Promise.resolve(event)
+    }),
+  }
+  return {
+    service: new RentalTransactionEventService(repository as never),
+    events,
+  }
+}
 
 describe('MoveInSettlementsService', () => {
   function setup(): {
@@ -103,6 +132,47 @@ describe('MoveInSettlementsService', () => {
         payerId: 'tenant',
       })
     )
+  })
+
+  it('records exactly one settlement.created transaction event when creation is retried for the same contract', async () => {
+    const { service, settlementRepo, paymentRepo } = setup()
+    const { service: transactionEventService, events } =
+      createInMemoryTransactionEventService()
+    Reflect.set(service, 'transactionEventService', transactionEventService)
+    const firstPayment = {
+      _id: new ObjectId(),
+      amount: 30_000_000,
+      periodKey: '2030-01',
+    } as Payment
+    paymentRepo.find.mockResolvedValue([firstPayment])
+    const contract = {
+      _id: new ObjectId(),
+      tenantId: 'tenant',
+      landlordId: 'landlord',
+      deposit: 20_000_000,
+      startDate: new Date('2030-02-01T00:00:00.000Z'),
+      packageSnapshot: {
+        resolvedHoldingDepositAmount: 6_000_000,
+        settlementPolicy: { firstPaymentDueOffsetDays: 3 },
+      },
+    } as Contract
+
+    const created = await service.createForContract(
+      contract,
+      new Date('2030-01-01T00:00:00.000Z')
+    )
+    // Simulate a retried provisioning call for the same contract: the
+    // settlement already exists, so the repository now reports it.
+    settlementRepo.findOne.mockResolvedValue(created)
+    await service.createForContract(
+      contract,
+      new Date('2030-01-01T00:00:00.000Z')
+    )
+
+    const createdEvents = events.filter(
+      event => event.eventType === 'settlement.created'
+    )
+    expect(createdEvents).toHaveLength(1)
   })
 
   it('reuses an existing settlement and skips legacy contracts without a policy or fee', async () => {

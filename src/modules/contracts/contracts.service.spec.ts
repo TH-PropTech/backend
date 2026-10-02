@@ -11,6 +11,37 @@ import type { KycService } from '../kyc/kyc.service'
 import { ObjectId } from 'mongodb'
 import { ContractsService } from './contracts.service'
 import type { Contract } from './schemas/contract.schema'
+import { RentalTransactionEventService } from '../rental-transactions/rental-transaction-event.service'
+import type { RentalTransactionEvent } from '../rental-transactions/schemas/rental-transaction-event.schema'
+
+/** Minimal in-memory repository stand-in matching the finder/create/save shape
+ * RentalTransactionEventService relies on, so tests exercise its real
+ * dedup-by-transitionKey logic instead of a fully mocked `record()`. */
+function createInMemoryTransactionEventService(): {
+  service: RentalTransactionEventService
+  events: RentalTransactionEvent[]
+} {
+  const events: RentalTransactionEvent[] = []
+  const repository = {
+    findOne: jest.fn(
+      ({ where }: { where: { transitionKey: string } }) =>
+        Promise.resolve(
+          events.find(event => event.transitionKey === where.transitionKey) ??
+            null
+        ) as unknown
+    ),
+    create: jest.fn(
+      (input: Partial<RentalTransactionEvent>) =>
+        ({ ...input }) as RentalTransactionEvent
+    ),
+    save: jest.fn((event: RentalTransactionEvent) => {
+      events.push(event)
+      return Promise.resolve(event)
+    }),
+  }
+  const service = new RentalTransactionEventService(repository as never)
+  return { service, events }
+}
 
 describe('ContractsService application draft factory', () => {
   it('creates a non-active draft from the immutable package snapshot and reuses it', async () => {
@@ -1034,6 +1065,34 @@ describe('ContractsService activation', () => {
     expect(context.contractRepository.save).toHaveBeenCalledTimes(
       savesAfterActivation
     )
+  })
+
+  it('records exactly one contract.activated transaction event when the second signature is processed twice', async () => {
+    const context = createSmartCaActivationContext()
+    const { service: transactionEventService, events } =
+      createInMemoryTransactionEventService()
+    Reflect.set(
+      context.service,
+      'transactionEventService',
+      transactionEventService
+    )
+
+    await context.service.recordSmartCaSignature(
+      smartCaEvidence('tenant', 'tx-t')
+    )
+    await context.service.recordSmartCaSignature(
+      smartCaEvidence('landlord', 'tx-l')
+    )
+    // Duplicate delivery of the same second (landlord) signature, e.g. a
+    // retried webhook.
+    await context.service.recordSmartCaSignature(
+      smartCaEvidence('landlord', 'tx-l')
+    )
+
+    const activatedEvents = events.filter(
+      event => event.eventType === 'contract.activated'
+    )
+    expect(activatedEvents).toHaveLength(1)
   })
 })
 

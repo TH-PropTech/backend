@@ -6,6 +6,35 @@ import { Payment } from './schemas/payment.schema'
 import { PaymentsService } from './payments.service'
 import type { NotificationsService } from '../notifications/notifications.service'
 import type { LedgerOutboxService } from '../fabric/ledger-outbox.service'
+import { RentalTransactionEventService } from '../rental-transactions/rental-transaction-event.service'
+import type { RentalTransactionEvent } from '../rental-transactions/schemas/rental-transaction-event.schema'
+
+function createInMemoryTransactionEventService(): {
+  service: RentalTransactionEventService
+  events: RentalTransactionEvent[]
+} {
+  const events: RentalTransactionEvent[] = []
+  const repository = {
+    findOne: jest.fn(({ where }: { where: { transitionKey: string } }) =>
+      Promise.resolve(
+        events.find(event => event.transitionKey === where.transitionKey) ??
+          null
+      )
+    ),
+    create: jest.fn(
+      (input: Partial<RentalTransactionEvent>) =>
+        ({ ...input }) as RentalTransactionEvent
+    ),
+    save: jest.fn((event: RentalTransactionEvent) => {
+      events.push(event)
+      return Promise.resolve(event)
+    }),
+  }
+  return {
+    service: new RentalTransactionEventService(repository as never),
+    events,
+  }
+}
 
 describe('PaymentsService', () => {
   const paymentRepository = {
@@ -317,5 +346,50 @@ describe('PaymentsService', () => {
       service.processReminders(new Date('2030-02-10T00:00:00.000Z'))
     ).resolves.toEqual({ overdue: 1, reminders: 0 })
     expect(overduePayment.status).toBe('overdue')
+  })
+
+  it('records exactly one fee.issued transaction event when invoice generation is retried', async () => {
+    const { service: transactionEventService, events } =
+      createInMemoryTransactionEventService()
+    Reflect.set(service, 'transactionEventService', transactionEventService)
+    const contract = {
+      _id: new ObjectId(),
+      tenantId: 'tenant-1',
+      landlordId: 'landlord-1',
+      feeSnapshot: {
+        scheduleId: 'fee-v1',
+        version: 1,
+        contentHash: 'a'.repeat(64),
+        quote: [
+          {
+            feeKind: 'TENANT_SERVICE' as const,
+            payerRole: 'tenant' as const,
+            amountBeforeVat: 200_000,
+            vatAmount: 20_000,
+            amount: 220_000,
+          },
+        ],
+      },
+    } as unknown as Contract
+    paymentRepository.create.mockImplementation(
+      (value: Payment): Payment => value
+    )
+    paymentRepository.save.mockImplementation(
+      (value: Payment): Promise<Payment> =>
+        Promise.resolve({ ...value, _id: value._id ?? new ObjectId() })
+    )
+
+    paymentRepository.findOne.mockResolvedValueOnce(null)
+    const [created] = await service.generatePlatformFeeInvoices(contract)
+
+    // Retry: the invoice now exists, so the service must reuse it and must
+    // not emit a second fee.issued event for the same invoice.
+    paymentRepository.findOne.mockResolvedValueOnce(created)
+    await service.generatePlatformFeeInvoices(contract)
+
+    const issuedEvents = events.filter(
+      event => event.eventType === 'fee.issued'
+    )
+    expect(issuedEvents).toHaveLength(1)
   })
 })

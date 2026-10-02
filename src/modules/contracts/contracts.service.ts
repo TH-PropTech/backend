@@ -58,6 +58,8 @@ import { FlowNotificationService } from './flow/flow-notification.service'
 import { resolveEffectiveCommercial } from './commercial/resolve-effective-commercial'
 import { MoveInSettlementsService } from '../move-in-settlements/move-in-settlements.service'
 import { ContractLayoutService } from './layout/contract-layout.service'
+import { RentalTransactionEventService } from '../rental-transactions/rental-transaction-event.service'
+import type { RentalTransactionActorRole } from '../rental-transactions/schemas/rental-transaction-event.schema'
 
 // ── Interfaces ──
 
@@ -187,8 +189,41 @@ export class ContractsService {
     @Optional()
     private readonly moveInSettlementsService?: MoveInSettlementsService,
     @Optional() private readonly layoutService?: ContractLayoutService,
-    @Optional() private readonly artifactService?: ContractArtifactService
+    @Optional() private readonly artifactService?: ContractArtifactService,
+    @Optional()
+    private readonly transactionEventService?: RentalTransactionEventService
   ) {}
+
+  private async recordTransactionEvent(input: {
+    contractId: string
+    applicationId?: string | null
+    eventType: string
+    actorRole: RentalTransactionActorRole
+    actorId?: string | null
+    reasonCode?: string | null
+    refs?: Record<string, string>
+    transitionKey: string
+  }): Promise<void> {
+    if (!this.transactionEventService) return
+    try {
+      await this.transactionEventService.record({
+        transactionKey: input.applicationId ?? input.contractId,
+        applicationId: input.applicationId ?? null,
+        contractId: input.contractId,
+        eventType: input.eventType,
+        actorRole: input.actorRole,
+        actorId: input.actorId ?? null,
+        reasonCode: input.reasonCode ?? null,
+        refs: { contractId: input.contractId, ...(input.refs ?? {}) },
+        transitionKey: input.transitionKey,
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      this.logger.warn(
+        `Rental transaction audit failed for contract [${input.contractId}] event [${input.eventType}]: ${message}`
+      )
+    }
+  }
 
   private buildCreateContractArgs(input: {
     contractId: string
@@ -571,6 +606,15 @@ export class ContractsService {
     }
     contract.executionMethod = 'SMARTCA'
 
+    await this.recordTransactionEvent({
+      contractId: input.contractId,
+      applicationId: contract.rentalApplicationId ?? null,
+      eventType: 'contract.signed',
+      actorRole: input.role,
+      actorId: input.signerId,
+      transitionKey: `contract:${input.contractId}:signed:${input.role}:${input.providerTransactionId}`,
+    })
+
     if (
       !this.hasValidSmartCaSignature(contract, 'tenant') ||
       !this.hasValidSmartCaSignature(contract, 'landlord')
@@ -647,6 +691,7 @@ export class ContractsService {
 
     contract.status = 'active'
     contract.ledgerStatus = 'pending'
+    contract.activationFailure = null
     const canonicalReference = requireCanonicalArtifactReference(contract)
     const canonicalHash = canonicalReference.artifactHash
     const tenantSignature = contract.tenantSignature
@@ -741,6 +786,13 @@ export class ContractsService {
     })
 
     const saved = await this.contractRepository.save(contract)
+    await this.recordTransactionEvent({
+      contractId: saved._id.toHexString(),
+      applicationId: saved.rentalApplicationId ?? null,
+      eventType: 'contract.activated',
+      actorRole: 'system',
+      transitionKey: `contract:${saved._id.toHexString()}:activated`,
+    })
     if (this.paymentsService) await this.paymentsService.generateSchedule(saved)
     if (this.paymentsService)
       await this.paymentsService.generatePlatformFeeInvoices(saved)
@@ -859,6 +911,14 @@ export class ContractsService {
     contract.contentRevision = (contract.contentRevision ?? 0) + 1
     contract.status = 'awaiting-signature'
     const locked = await this.contractRepository.save(contract)
+    await this.recordTransactionEvent({
+      contractId,
+      applicationId: locked.rentalApplicationId ?? null,
+      eventType: 'contract.content-locked',
+      actorRole: isStaff ? 'staff' : 'landlord',
+      actorId,
+      transitionKey: `contract:${contractId}:content-locked`,
+    })
     await this.flowNotificationService?.notifyForContract(contractId)
     return locked
   }
@@ -1229,6 +1289,7 @@ export class ContractsService {
 
       contract.status = 'active'
       contract.ledgerStatus = 'pending'
+      contract.activationFailure = null
 
       if (
         contract.rentalApplicationId &&
@@ -1296,6 +1357,16 @@ export class ContractsService {
 
     const saved = await this.contractRepository.save(contract)
 
+    if (saved.status === 'active') {
+      await this.recordTransactionEvent({
+        contractId: saved._id.toHexString(),
+        applicationId: saved.rentalApplicationId ?? null,
+        eventType: 'contract.activated',
+        actorRole: 'system',
+        transitionKey: `contract:${saved._id.toHexString()}:activated`,
+      })
+    }
+
     if (saved.status === 'active' && this.paymentsService) {
       await this.paymentsService.generateSchedule(saved)
       await this.paymentsService.generatePlatformFeeInvoices(saved)
@@ -1326,6 +1397,25 @@ export class ContractsService {
       return this.activateSmartCaContract(contract)
     }
     return this.signContract(contractId, 'tenant')
+  }
+
+  /**
+   * Cổng khôi phục cho `RETRY_ACTIVATION`: đi qua cùng kiểm tra nghiệp vụ như
+   * luồng thường (`activateAfterDeposit`) thay vì tự kiểm tra một cách rời
+   * rạc. Khác với `activateAfterDeposit` (được gọi đầu cơ từ callback thanh
+   * toán và phải im lặng khi chưa đủ điều kiện), hành động khôi phục do staff
+   * chủ động gọi nên phải từ chối rõ ràng khi cổng kích hoạt chưa sẵn sàng.
+   */
+  async retryActivation(contractId: string): Promise<Contract> {
+    const contract = await this.findOne(contractId)
+    if (
+      contract.status !== 'fully-signed-pending-deposit' ||
+      !contract.signedByTenant ||
+      !contract.signedByLandlord
+    ) {
+      throw new ConflictException('ACTIVATION_NOT_READY')
+    }
+    return this.activateAfterDeposit(contractId)
   }
 
   async activatePendingForDepositAgreement(

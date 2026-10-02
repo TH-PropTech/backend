@@ -1,7 +1,9 @@
 import {
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { createHash } from 'node:crypto'
@@ -10,6 +12,8 @@ import { Repository } from 'typeorm'
 import { Contract } from '../contracts/schemas/contract.schema'
 import { Payment } from '../payments/schemas/payment.schema'
 import { NotificationsService } from '../notifications/notifications.service'
+import { RentalTransactionEventService } from '../rental-transactions/rental-transaction-event.service'
+import type { RentalTransactionActorRole } from '../rental-transactions/schemas/rental-transaction-event.schema'
 import {
   MoveInSettlement,
   type SettlementLine,
@@ -17,6 +21,8 @@ import {
 
 @Injectable()
 export class MoveInSettlementsService {
+  private readonly logger = new Logger(MoveInSettlementsService.name)
+
   constructor(
     @InjectRepository(MoveInSettlement)
     private readonly settlementRepo: Repository<MoveInSettlement>,
@@ -24,8 +30,37 @@ export class MoveInSettlementsService {
     private readonly contractRepo: Repository<Contract>,
     @InjectRepository(Payment)
     private readonly paymentRepo: Repository<Payment>,
-    private readonly notifications: NotificationsService
+    private readonly notifications: NotificationsService,
+    @Optional()
+    private readonly transactionEventService?: RentalTransactionEventService
   ) {}
+
+  private async recordTransactionEvent(input: {
+    contractId: string
+    eventType: string
+    actorRole: RentalTransactionActorRole
+    actorId?: string | null
+    refs?: Record<string, string>
+    transitionKey: string
+  }): Promise<void> {
+    if (!this.transactionEventService) return
+    try {
+      await this.transactionEventService.record({
+        transactionKey: input.contractId,
+        contractId: input.contractId,
+        eventType: input.eventType,
+        actorRole: input.actorRole,
+        actorId: input.actorId ?? null,
+        refs: { contractId: input.contractId, ...(input.refs ?? {}) },
+        transitionKey: input.transitionKey,
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      this.logger.warn(
+        `Rental transaction audit failed for settlement event [${input.eventType}] on contract [${input.contractId}]: ${message}`
+      )
+    }
+  }
 
   async createForContract(
     contract: Contract,
@@ -123,6 +158,13 @@ export class MoveInSettlementsService {
     const saved = await this.settlementRepo.save(settlement)
     contract.settlementId = saved._id.toHexString()
     await this.contractRepo.save(contract)
+    await this.recordTransactionEvent({
+      contractId,
+      eventType: 'settlement.created',
+      actorRole: 'system',
+      refs: { settlementId: saved._id.toHexString() },
+      transitionKey: `settlement:${saved._id.toHexString()}:created`,
+    })
     return saved
   }
 
@@ -178,7 +220,16 @@ export class MoveInSettlementsService {
       overrideReason: input.overrideReason ?? null,
       completedAt: null,
     }
-    return this.settlementRepo.save(settlement)
+    const saved = await this.settlementRepo.save(settlement)
+    await this.recordTransactionEvent({
+      contractId: saved.contractId,
+      eventType: 'settlement.handover-recorded',
+      actorRole: input.isStaff ? 'staff' : 'landlord',
+      actorId,
+      refs: { settlementId: saved._id.toHexString() },
+      transitionKey: `settlement:${saved._id.toHexString()}:handover-recorded:${revision}`,
+    })
+    return saved
   }
 
   async confirmHandover(
@@ -203,13 +254,25 @@ export class MoveInSettlementsService {
       handover.tenantConfirmation = { at: new Date(), hash: handoverHash }
     else handover.landlordConfirmation = { at: new Date(), hash: handoverHash }
     if (discrepancyNote) handover.discrepancyNote = discrepancyNote
-    if (
+    const justCompleted =
+      !handover.completedAt &&
       handover.tenantConfirmation?.hash === handoverHash &&
       handover.landlordConfirmation?.hash === handoverHash
-    ) {
+    if (justCompleted) {
       handover.completedAt = new Date()
     }
-    return this.settlementRepo.save(settlement)
+    const saved = await this.settlementRepo.save(settlement)
+    if (justCompleted) {
+      await this.recordTransactionEvent({
+        contractId: saved.contractId,
+        eventType: 'settlement.handover-completed',
+        actorRole: role,
+        actorId,
+        refs: { settlementId: saved._id.toHexString() },
+        transitionKey: `settlement:${saved._id.toHexString()}:handover-completed`,
+      })
+    }
+    return saved
   }
 
   async processOverdue(now = new Date()): Promise<number> {

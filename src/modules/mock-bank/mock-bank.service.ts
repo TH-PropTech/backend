@@ -3,7 +3,9 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
+  Optional,
   ServiceUnavailableException,
 } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
@@ -32,6 +34,8 @@ import {
 } from './payment-request.builder'
 import type { DepositAgreement } from '../contracts/schemas/deposit-agreement.schema'
 import { MoveInSettlement } from '../move-in-settlements/schemas/move-in-settlement.schema'
+import { RentalTransactionEventService } from '../rental-transactions/rental-transaction-event.service'
+import type { RentalTransactionActorRole } from '../rental-transactions/schemas/rental-transaction-event.schema'
 
 const CALLBACK_WINDOW_MS = 5 * 60 * 1000
 
@@ -84,6 +88,8 @@ export type ReceiptView = {
 
 @Injectable()
 export class MockBankService {
+  private readonly logger = new Logger(MockBankService.name)
+
   constructor(
     private readonly depositAgreementsService: DepositAgreementsService,
     @InjectRepository(Payment)
@@ -97,8 +103,40 @@ export class MockBankService {
     private readonly ledgerOutboxService: LedgerOutboxService,
     private readonly vnpayCallbackVerifier: VnpayCallbackVerifier,
     @InjectRepository(MoveInSettlement)
-    private readonly settlementRepository: Repository<MoveInSettlement>
+    private readonly settlementRepository: Repository<MoveInSettlement>,
+    @Optional()
+    private readonly transactionEventService?: RentalTransactionEventService
   ) {}
+
+  private async recordTransactionEvent(input: {
+    transactionKey: string
+    contractId?: string | null
+    eventType: string
+    actorRole: RentalTransactionActorRole
+    actorId?: string | null
+    reasonCode?: string | null
+    refs?: Record<string, string>
+    transitionKey: string
+  }): Promise<void> {
+    if (!this.transactionEventService) return
+    try {
+      await this.transactionEventService.record({
+        transactionKey: input.transactionKey,
+        contractId: input.contractId ?? null,
+        eventType: input.eventType,
+        actorRole: input.actorRole,
+        actorId: input.actorId ?? null,
+        reasonCode: input.reasonCode ?? null,
+        refs: input.refs ?? {},
+        transitionKey: input.transitionKey,
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      this.logger.warn(
+        `Rental transaction audit failed for mock-bank event [${input.eventType}]: ${message}`
+      )
+    }
+  }
 
   async initDepositPayment(
     depositAgreementId: string,
@@ -140,6 +178,15 @@ export class MockBankService {
         }
         existingAttempt.status = 'expired'
         await this.attemptRepository.save(existingAttempt)
+        await this.recordTransactionEvent({
+          transactionKey:
+            agreement.linkedLeaseContractId ?? agreement._id.toHexString(),
+          contractId: agreement.linkedLeaseContractId ?? null,
+          eventType: 'payment-attempt.expired',
+          actorRole: 'system',
+          refs: { paymentId: agreement._id.toHexString() },
+          transitionKey: `payment-attempt:${existingAttempt._id.toHexString()}:expired`,
+        })
       }
     }
     const result = await this.createAttempt(
@@ -509,6 +556,14 @@ export class MockBankService {
     payment.ledgerStatus = 'pending'
     await this.paymentRepository.save(payment)
     await this.enqueuePaymentLedgerEvent(payment)
+    await this.recordTransactionEvent({
+      transactionKey: payment.contractId ?? payment._id.toHexString(),
+      contractId: payment.contractId,
+      eventType: 'payment.succeeded',
+      actorRole: 'provider',
+      refs: { paymentId: payment._id.toHexString() },
+      transitionKey: `payment:${attempt._id.toHexString()}:succeeded`,
+    })
     return { status: 'succeeded', txRef: attempt.txRef, replayed: false }
   }
 
@@ -566,6 +621,14 @@ export class MockBankService {
     attempt.processedAt = paidAt
     attempt.callbackDigest = this.callbackDigest(body, headers)
     await this.attemptRepository.save(attempt)
+    await this.recordTransactionEvent({
+      transactionKey: settlement.contractId ?? settlement._id.toHexString(),
+      contractId: settlement.contractId ?? null,
+      eventType: 'payment.succeeded',
+      actorRole: 'provider',
+      refs: { settlementId: settlement._id.toHexString() },
+      transitionKey: `payment:${attempt._id.toHexString()}:succeeded`,
+    })
     return { status: 'succeeded', txRef: attempt.txRef, replayed: false }
   }
 
@@ -610,6 +673,14 @@ export class MockBankService {
     attempt.processedAt = new Date()
     attempt.callbackDigest = this.callbackDigest(body, headers)
     await this.attemptRepository.save(attempt)
+    await this.recordTransactionEvent({
+      transactionKey: payment.contractId ?? payment._id.toHexString(),
+      contractId: payment.contractId,
+      eventType: 'payment.succeeded',
+      actorRole: 'provider',
+      refs: { paymentId: payment._id.toHexString() },
+      transitionKey: `payment:${attempt._id.toHexString()}:succeeded`,
+    })
     return { status: 'succeeded', txRef: attempt.txRef, replayed: false }
   }
 
@@ -704,6 +775,33 @@ export class MockBankService {
     return this.handleRentCallback(body, headers)
   }
 
+  /**
+   * Sweep vận hành (D10): chủ động hết hạn các attempt `pending` đã quá
+   * `expiresAt`, thay vì chỉ hết hạn lười khi người dùng khởi tạo lại.
+   * Áp dụng cho mọi paymentType (deposit/rent/settlement/invoice).
+   */
+  async expireStaleAttempts(now = new Date()): Promise<number> {
+    const pending = await this.attemptRepository.find({
+      where: { status: 'pending' },
+    })
+    let count = 0
+    for (const attempt of pending) {
+      if (attempt.expiresAt.getTime() > now.getTime()) continue
+      attempt.status = 'expired'
+      await this.attemptRepository.save(attempt)
+      await this.recordTransactionEvent({
+        transactionKey: attempt.contractId ?? attempt.paymentId,
+        contractId: attempt.contractId ?? null,
+        eventType: 'payment-attempt.expired',
+        actorRole: 'system',
+        refs: { paymentId: attempt.paymentId },
+        transitionKey: `payment-attempt:${attempt._id.toHexString()}:expired`,
+      })
+      count += 1
+    }
+    return count
+  }
+
   signCallback(
     body: PaymentCallbackDto,
     timestamp: string,
@@ -746,6 +844,15 @@ export class MockBankService {
       providerPaymentUrl: intent.redirectUrl,
     })
     await this.attemptRepository.save(attempt)
+    await this.recordTransactionEvent({
+      transactionKey: contractId ?? paymentId,
+      contractId,
+      eventType: 'payment-attempt.created',
+      actorRole: 'tenant',
+      actorId: userId,
+      refs: { paymentId },
+      transitionKey: `payment-attempt:${attempt._id.toHexString()}:created`,
+    })
     return this.toPaymentInit(attempt, description, intent.redirectUrl)
   }
 
@@ -1054,6 +1161,14 @@ export class MockBankService {
       depositHash,
       { ...receipt, paidAt }
     )
+    await this.recordTransactionEvent({
+      transactionKey: agreement.applicationId ?? agreement._id.toHexString(),
+      contractId: agreement.linkedLeaseContractId ?? null,
+      eventType: 'payment.succeeded',
+      actorRole: 'provider',
+      refs: { paymentId: agreement._id.toHexString() },
+      transitionKey: `payment:${attempt._id.toHexString()}:succeeded`,
+    })
     await this.ledgerOutboxService.enqueue({
       aggregateType: 'deposit',
       aggregateId: agreement._id.toHexString(),

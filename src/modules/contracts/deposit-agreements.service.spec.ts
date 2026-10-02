@@ -3,6 +3,35 @@ import { ConflictException, ForbiddenException } from '@nestjs/common'
 import { createHash } from 'node:crypto'
 import { DepositAgreementsService } from './deposit-agreements.service'
 import type { DepositAgreementStatus } from './schemas/deposit-agreement.schema'
+import { RentalTransactionEventService } from '../rental-transactions/rental-transaction-event.service'
+import type { RentalTransactionEvent } from '../rental-transactions/schemas/rental-transaction-event.schema'
+
+function createInMemoryTransactionEventService(): {
+  service: RentalTransactionEventService
+  events: RentalTransactionEvent[]
+} {
+  const events: RentalTransactionEvent[] = []
+  const repository = {
+    findOne: jest.fn(({ where }: { where: { transitionKey: string } }) =>
+      Promise.resolve(
+        events.find(event => event.transitionKey === where.transitionKey) ??
+          null
+      )
+    ),
+    create: jest.fn(
+      (input: Partial<RentalTransactionEvent>) =>
+        ({ ...input }) as RentalTransactionEvent
+    ),
+    save: jest.fn((event: RentalTransactionEvent) => {
+      events.push(event)
+      return Promise.resolve(event)
+    }),
+  }
+  return {
+    service: new RentalTransactionEventService(repository as never),
+    events,
+  }
+}
 
 describe('DepositAgreementsService', () => {
   const agreementId = new ObjectId().toString()
@@ -553,6 +582,30 @@ describe('DepositAgreementsService', () => {
       expect(apartmentRepository.save).toHaveBeenCalledWith(apartment)
     }
   )
+
+  it('records exactly one deposit.expired transaction event even if expire() is called twice', async () => {
+    const context = createService({
+      ...baseAgreement(),
+      status: 'payment-pending',
+    })
+    const { service: transactionEventService, events } =
+      createInMemoryTransactionEventService()
+    Reflect.set(
+      context.service,
+      'transactionEventService',
+      transactionEventService
+    )
+
+    const first = await context.service.expire(agreementId)
+    expect(first.status).toBe('expired')
+    // Second call hits the already-expired guard and returns early.
+    await context.service.expire(agreementId)
+
+    const expiredEvents = events.filter(
+      event => event.eventType === 'deposit.expired'
+    )
+    expect(expiredEvents).toHaveLength(1)
+  })
 
   it('does not release a reservation or close a paid deposit', async () => {
     const propertyId = new ObjectId().toHexString()

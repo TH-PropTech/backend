@@ -2,6 +2,7 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
   Optional,
 } from '@nestjs/common'
@@ -21,9 +22,13 @@ import { DepositAgreement } from './schemas/deposit-agreement.schema'
 import { LedgerOutboxService } from '../fabric/ledger-outbox.service'
 import { ContractsService } from './contracts.service'
 import { OwnershipTransferResolver } from '../property-ownership-transfer/ownership-transfer.resolver'
+import { RentalTransactionEventService } from '../rental-transactions/rental-transaction-event.service'
+import type { RentalTransactionActorRole } from '../rental-transactions/schemas/rental-transaction-event.schema'
 
 @Injectable()
 export class DepositAgreementsService {
+  private readonly logger = new Logger(DepositAgreementsService.name)
+
   constructor(
     @InjectRepository(DepositAgreement)
     private readonly repository: Repository<DepositAgreement>,
@@ -39,7 +44,9 @@ export class DepositAgreementsService {
     @InjectRepository(Contract)
     private readonly contractRepository?: Repository<Contract>,
     @Optional()
-    private readonly flowNotificationService?: FlowNotificationService
+    private readonly flowNotificationService?: FlowNotificationService,
+    @Optional()
+    private readonly transactionEventService?: RentalTransactionEventService
   ) {}
 
   async reviseSecurityDepositBeforeConsent(
@@ -259,6 +266,13 @@ export class DepositAgreementsService {
       contentHash: agreement.contentHash,
     }
     const saved = await this.repository.save(agreement)
+    await this.recordTransactionEvent({
+      agreement: saved,
+      eventType: 'deposit.consented',
+      actorRole: 'tenant',
+      actorId: tenantId,
+      transitionKey: `deposit:${saved._id.toHexString()}:consented`,
+    })
     await this.notifyFlow(saved)
     return saved
   }
@@ -322,8 +336,38 @@ export class DepositAgreementsService {
     }
     agreement.status = 'expired'
     const saved = await this.repository.save(agreement)
+    await this.recordTransactionEvent({
+      agreement: saved,
+      eventType: 'deposit.expired',
+      actorRole: 'system',
+      transitionKey: `deposit:${saved._id.toHexString()}:expired`,
+    })
     await this.releaseReservation(saved)
     return saved
+  }
+
+  /**
+   * Sweep vận hành (D10): hết hạn các thỏa thuận cọc còn `draft`/`accepted`
+   * quá `ttlHours`. Tái sử dụng `expire()` hiện có cho từng bản ghi nên vẫn
+   * đi qua cùng kiểm tra nghiệp vụ và cùng sự kiện audit.
+   */
+  async expireStale(ttlHours: number, now = new Date()): Promise<number> {
+    const cutoff = new Date(now.getTime() - ttlHours * 60 * 60 * 1000)
+    const candidates = await this.repository.find({
+      where: [{ status: 'draft' }, { status: 'accepted' }],
+    })
+    let count = 0
+    for (const agreement of candidates) {
+      if (
+        !agreement.createdAt ||
+        agreement.createdAt.getTime() > cutoff.getTime()
+      ) {
+        continue
+      }
+      await this.expire(agreement._id.toHexString())
+      count += 1
+    }
+    return count
   }
 
   async recordDepositPaid(
@@ -356,6 +400,13 @@ export class DepositAgreementsService {
     agreement.receiptHash = receipt?.receiptHash ?? null
     agreement.ledgerStatus = 'pending'
     const saved = await this.repository.save(agreement)
+    await this.recordTransactionEvent({
+      agreement: saved,
+      eventType: 'deposit.paid',
+      actorRole: 'tenant',
+      transitionKey: `deposit:${saved._id.toHexString()}:paid`,
+      refs: { paymentId: paymentAttemptId },
+    })
     await this.recordContractDepositPaidAt(saved)
     await this.enqueueDepositLedgerEvent(saved)
     await this.projectApartmentDepositPaid(saved)
@@ -384,6 +435,13 @@ export class DepositAgreementsService {
       note,
     }
     const saved = await this.repository.save(agreement)
+    await this.recordTransactionEvent({
+      agreement: saved,
+      eventType: 'deposit.paid',
+      actorRole: 'staff',
+      actorId: staffId,
+      transitionKey: `deposit:${saved._id.toHexString()}:paid`,
+    })
     await this.recordContractDepositPaidAt(saved)
     await this.enqueueDepositLedgerEvent(saved)
     await this.projectApartmentDepositPaid(saved)
@@ -422,20 +480,68 @@ export class DepositAgreementsService {
         agreement._id.toHexString()
       )
     } catch (error) {
-      if (!this.contractRepository) return
       const message =
         error instanceof Error ? error.message : 'ACTIVATION_FAILED'
       const code = message.split(':', 1)[0] || 'ACTIVATION_FAILED'
-      await this.contractRepository.update(
-        { depositAgreementId: agreement._id.toHexString() },
-        {
-          activationFailure: {
-            code,
-            message: message.slice(0, 120),
-            at: new Date(),
-            attempts: 1,
-          },
-        }
+      if (this.contractRepository) {
+        await this.contractRepository.update(
+          { depositAgreementId: agreement._id.toHexString() },
+          {
+            activationFailure: {
+              code,
+              message: message.slice(0, 120),
+              at: new Date(),
+              attempts: 1,
+            },
+          }
+        )
+      }
+      await this.recordTransactionEvent({
+        agreement,
+        eventType: 'contract.activation-failed',
+        actorRole: 'system',
+        reasonCode: message.slice(0, 120),
+        transitionKey: `deposit:${agreement._id.toHexString()}:activation-failed`,
+      })
+    }
+  }
+
+  private async recordTransactionEvent(input: {
+    agreement: DepositAgreement
+    contractId?: string | null
+    eventType: string
+    actorRole: RentalTransactionActorRole
+    actorId?: string | null
+    reasonCode?: string | null
+    refs?: Record<string, string>
+    transitionKey: string
+  }): Promise<void> {
+    if (!this.transactionEventService) return
+    const transactionKey =
+      input.agreement.applicationId ?? input.agreement._id.toHexString()
+    try {
+      await this.transactionEventService.record({
+        transactionKey,
+        applicationId: input.agreement.applicationId ?? null,
+        contractId:
+          input.contractId ?? input.agreement.linkedLeaseContractId ?? null,
+        eventType: input.eventType,
+        actorRole: input.actorRole,
+        actorId: input.actorId ?? null,
+        reasonCode: input.reasonCode ?? null,
+        refs: {
+          depositAgreementId: input.agreement._id.toHexString(),
+          ...(input.agreement.applicationId
+            ? { applicationId: input.agreement.applicationId }
+            : {}),
+          ...(input.refs ?? {}),
+        },
+        transitionKey: input.transitionKey,
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      this.logger.warn(
+        `Rental transaction audit failed for deposit agreement [${input.agreement._id.toHexString()}] event [${input.eventType}]: ${message}`
       )
     }
   }

@@ -396,6 +396,38 @@ export class ContractAmendmentService {
     amendment.projectionAppliedAt = new Date()
   }
 
+  /**
+   * Sweep vận hành (D10): áp dụng mọi phụ lục `effective` đã tới ngày hiệu
+   * lực trên toàn bộ hợp đồng, thay vì chỉ lười áp dụng khi `list()` được
+   * gọi cho một hợp đồng cụ thể. Tái sử dụng `applyDueAmendments(contract)`
+   * hiện có cho từng hợp đồng nên không trùng lặp nghiệp vụ.
+   */
+  async applyAllDueAmendments(now = new Date()): Promise<number> {
+    const dueAmendments = await this.amendmentRepository.find({
+      where: { status: 'effective' },
+    })
+    const contractIds = new Set(
+      dueAmendments
+        .filter(
+          amendment =>
+            !amendment.projectionAppliedAt &&
+            amendment.effectiveFrom.getTime() <= now.getTime()
+        )
+        .map(amendment => amendment.contractId)
+    )
+    let processed = 0
+    for (const contractId of contractIds) {
+      if (!ObjectId.isValid(contractId)) continue
+      const contract = await this.contractRepository.findOne({
+        where: { _id: new ObjectId(contractId) },
+      })
+      if (!contract) continue
+      await this.applyDueAmendments(contract)
+      processed += 1
+    }
+    return processed
+  }
+
   private async applyDueAmendments(contract: Contract): Promise<void> {
     const amendments = await this.amendmentRepository.find({
       where: { contractId: contract._id.toHexString(), status: 'effective' },

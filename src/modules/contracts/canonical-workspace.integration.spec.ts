@@ -302,7 +302,10 @@ describe('canonical contract workspace integration', () => {
       {} as never,
       {
         findOne: jest.fn().mockResolvedValue(null),
-        create: jest.fn((value: Record<string, unknown>) => value),
+        create: jest.fn((value: Record<string, unknown>) => ({
+          _id: new ObjectId('507f1f77bcf86cd799439018'),
+          ...value,
+        })),
         save: jest.fn((value: unknown) => Promise.resolve(value)),
       } as never,
       {} as never,

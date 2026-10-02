@@ -1,9 +1,13 @@
 import {
+  BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
+import { ModuleRef } from '@nestjs/core'
 import { InjectRepository } from '@nestjs/typeorm'
 import { ObjectId } from 'mongodb'
 import { Repository } from 'typeorm'
@@ -16,6 +20,16 @@ import {
   RentalTransactionActorRole,
   RentalTransactionEvent,
 } from './schemas/rental-transaction-event.schema'
+import {
+  RentalRecoveryAction,
+  RENTAL_RECOVERY_ACTIONS,
+} from './dto/recover-rental-transaction.dto'
+import { RentalTransactionEventService } from './rental-transaction-event.service'
+import { ContractsService } from '../contracts/contracts.service'
+import { DepositAgreementsService } from '../contracts/deposit-agreements.service'
+import { MockBankService } from '../mock-bank/mock-bank.service'
+import { RentalApplicationsService } from '../rental-applications/rental-applications.service'
+import { LedgerOutboxService } from '../fabric/ledger-outbox.service'
 
 export interface RentalTransactionTimelineEvent {
   id: string
@@ -36,6 +50,18 @@ export interface StuckRentalTransaction {
   suggestedAction: string
 }
 
+export interface RecoverRentalTransactionInput {
+  action: RentalRecoveryAction
+  reason: string
+}
+
+export interface RecoverRentalTransactionResult {
+  contractId: string
+  action: RentalRecoveryAction
+  transitionKey: string
+  status: string
+}
+
 type Actor = { id: string; roles: string[] }
 
 @Injectable()
@@ -53,8 +79,117 @@ export class RentalTransactionsService {
     private readonly outboxRepository: Repository<LedgerOutbox>,
     @InjectRepository(MoveInSettlement)
     private readonly settlementRepository: Repository<MoveInSettlement>,
-    private readonly configService: ConfigService
+    private readonly configService: ConfigService,
+    @Optional() private readonly moduleRef?: ModuleRef,
+    @Optional()
+    private readonly transactionEventService?: RentalTransactionEventService
   ) {}
+
+  async recover(
+    contractId: string,
+    actor: { id: string; role: 'staff' | 'admin' },
+    input: RecoverRentalTransactionInput
+  ): Promise<RecoverRentalTransactionResult> {
+    if (!ObjectId.isValid(contractId)) {
+      throw new NotFoundException('RENTAL_TRANSACTION_NOT_FOUND')
+    }
+    const reason = input.reason.trim()
+    if (reason.length < 5) {
+      throw new BadRequestException('RECOVERY_REASON_REQUIRED')
+    }
+    if (!RENTAL_RECOVERY_ACTIONS.includes(input.action)) {
+      throw new BadRequestException('RECOVERY_ACTION_NOT_ALLOWED')
+    }
+
+    const contract = await this.contractRepository.findOne({
+      where: { _id: new ObjectId(contractId) },
+    })
+    if (!contract) throw new NotFoundException('CONTRACT_NOT_FOUND')
+
+    let status = String(contract.status ?? 'unknown')
+    switch (input.action) {
+      case 'RETRY_ACTIVATION': {
+        const contractsService = this.resolveService(ContractsService)
+        const recovered = await contractsService.retryActivation(contractId)
+        status = String(recovered.status ?? 'unknown')
+        break
+      }
+      case 'REISSUE_DEPOSIT_REQUEST': {
+        if (!contract.depositAgreementId) {
+          throw new ConflictException('DEPOSIT_AGREEMENT_NOT_FOUND')
+        }
+        const bankService = this.resolveService(MockBankService)
+        await bankService.initDepositPayment(
+          contract.depositAgreementId,
+          contract.tenantId
+        )
+        status = 'payment-pending'
+        break
+      }
+      case 'EXPIRE_DEPOSIT': {
+        if (!contract.depositAgreementId) {
+          throw new ConflictException('DEPOSIT_AGREEMENT_NOT_FOUND')
+        }
+        const depositService = this.resolveService(DepositAgreementsService)
+        const expired = await depositService.expire(contract.depositAgreementId)
+        status = expired.status
+        break
+      }
+      case 'RETRY_PROVISIONING': {
+        if (!contract.rentalApplicationId) {
+          throw new ConflictException('RENTAL_APPLICATION_NOT_FOUND')
+        }
+        const applicationsService = this.resolveService(
+          RentalApplicationsService
+        )
+        const retried = await applicationsService.retryProvisioning(
+          contract.rentalApplicationId,
+          actor.id
+        )
+        status = retried.provisioningStatus ?? 'unknown'
+        break
+      }
+      case 'RETRY_LEDGER': {
+        const outboxService = this.resolveService(LedgerOutboxService)
+        const failed = await this.outboxRepository.find({
+          where: {
+            aggregateType: 'contract',
+            aggregateId: contractId,
+            status: 'failed',
+          },
+        })
+        const event = failed[0]
+        if (!event?._id) throw new NotFoundException('LEDGER_EVENT_NOT_FOUND')
+        const retried = await outboxService.retryTerminal(
+          event._id.toHexString(),
+          actor.role
+        )
+        status = retried.status
+        break
+      }
+    }
+
+    const transitionKey = `recovery:${contractId}:${input.action}:${reason}`
+    await this.transactionEventService?.record({
+      transactionKey: contractId,
+      transitionKey,
+      applicationId: contract.rentalApplicationId ?? null,
+      contractId,
+      eventType: `recovery.${input.action.toLowerCase()}`,
+      actorRole: actor.role,
+      actorId: actor.id,
+      reasonCode: input.action,
+      refs: { contractId, status },
+    })
+
+    return { contractId, action: input.action, transitionKey, status }
+  }
+
+  private resolveService<T>(token: new (...args: never[]) => T): T {
+    const service = this.moduleRef?.get(token, { strict: false })
+    if (!service) throw new ConflictException('RECOVERY_SERVICE_UNAVAILABLE')
+    return service
+  }
 
   async getTimeline(
     applicationId: string,

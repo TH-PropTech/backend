@@ -4,6 +4,8 @@ import { RentalTransactionEvent } from './schemas/rental-transaction-event.schem
 import { RentalTransactionEventService } from './rental-transaction-event.service'
 import { RentalTransactionsService } from './rental-transactions.service'
 import { RentalTransactionsController } from './rental-transactions.controller'
+import { RedisModule } from '../redis/redis.module'
+import { RentalOpsScheduler } from './rental-ops.scheduler'
 import { RentalApplication } from '../rental-applications/schemas/rental-application.schema'
 import { Contract } from '../contracts/schemas/contract.schema'
 import { DepositAgreement } from '../contracts/schemas/deposit-agreement.schema'
@@ -21,9 +23,14 @@ import { MoveInSettlement } from '../move-in-settlements/schemas/move-in-settlem
       LedgerOutbox,
       MoveInSettlement,
     ]),
+    RedisModule,
   ],
   controllers: [RentalTransactionsController],
-  providers: [RentalTransactionEventService, RentalTransactionsService],
+  providers: [
+    RentalTransactionEventService,
+    RentalTransactionsService,
+    RentalOpsScheduler,
+  ],
   exports: [RentalTransactionEventService, RentalTransactionsService],
 })
 export class RentalTransactionsModule {}

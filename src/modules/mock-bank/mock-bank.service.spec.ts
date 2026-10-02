@@ -2,6 +2,35 @@ import { ObjectId } from 'mongodb'
 import { ConflictException } from '@nestjs/common'
 import { createHash } from 'node:crypto'
 import { MockBankService } from './mock-bank.service'
+import { RentalTransactionEventService } from '../rental-transactions/rental-transaction-event.service'
+import type { RentalTransactionEvent } from '../rental-transactions/schemas/rental-transaction-event.schema'
+
+function createInMemoryTransactionEventService(): {
+  service: RentalTransactionEventService
+  events: RentalTransactionEvent[]
+} {
+  const events: RentalTransactionEvent[] = []
+  const repository = {
+    findOne: jest.fn(({ where }: { where: { transitionKey: string } }) =>
+      Promise.resolve(
+        events.find(event => event.transitionKey === where.transitionKey) ??
+          null
+      )
+    ),
+    create: jest.fn(
+      (input: Partial<RentalTransactionEvent>) =>
+        ({ ...input }) as RentalTransactionEvent
+    ),
+    save: jest.fn((event: RentalTransactionEvent) => {
+      events.push(event)
+      return Promise.resolve(event)
+    }),
+  }
+  return {
+    service: new RentalTransactionEventService(repository as never),
+    events,
+  }
+}
 
 describe('MockBankService', () => {
   const paymentId = new ObjectId().toString()
@@ -100,7 +129,10 @@ describe('MockBankService', () => {
     }
     const attemptRepository = {
       findOne: jest.fn().mockResolvedValue(attempt),
-      create: jest.fn((input: unknown): unknown => input),
+      create: jest.fn((input: object): unknown => ({
+        _id: new ObjectId(),
+        ...input,
+      })),
       save: jest.fn(
         (input: unknown): Promise<unknown> => Promise.resolve(input)
       ),
@@ -659,6 +691,34 @@ describe('MockBankService', () => {
     const second = await service.handleRentCallback(body, headers)
     expect(second.replayed).toBe(true)
     expect(attemptRepository.save).toHaveBeenCalledTimes(1)
+  })
+
+  it('records exactly one payment.succeeded transaction event across a replayed rent callback', async () => {
+    const context = createContext()
+    const { service, attempt } = context
+    const body = {
+      txRef: attempt.txRef,
+      amount: attempt.amount,
+      status: 'success' as const,
+    }
+    const timestamp = Date.now().toString()
+    const headers = {
+      timestamp,
+      nonce: 'nonce-audit',
+      signature: service.signCallback(body, timestamp, 'nonce-audit'),
+    }
+    const { service: transactionEventService, events } =
+      createInMemoryTransactionEventService()
+    Reflect.set(service, 'transactionEventService', transactionEventService)
+
+    await service.handleRentCallback(body, headers)
+    await service.handleRentCallback(body, headers)
+
+    expect(attempt.status).toBe('succeeded')
+    const succeededEvents = events.filter(
+      event => event.eventType === 'payment.succeeded'
+    )
+    expect(succeededEvents).toHaveLength(1)
   })
 
   it('records a paid deposit and enqueues one hashed deposit ledger event', async () => {
