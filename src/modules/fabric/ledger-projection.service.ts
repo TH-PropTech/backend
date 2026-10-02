@@ -15,6 +15,12 @@ export interface ProjectionResultInput {
   confirmedAt?: Date
 }
 
+export interface ProjectionFailureEvent {
+  aggregateType: string
+  aggregateId: string
+  _id?: ObjectId
+}
+
 @Injectable()
 export class LedgerProjectionService {
   private readonly logger = new Logger(LedgerProjectionService.name)
@@ -120,6 +126,73 @@ export class LedgerProjectionService {
       const errMsg = error instanceof Error ? error.message : String(error)
       this.logger.error(
         `Failed to project ledger confirmation for aggregate [${event.aggregateId}]: ${errMsg}`
+      )
+      throw error
+    }
+  }
+
+  async projectFailure(event: ProjectionFailureEvent): Promise<void> {
+    if (!ObjectId.isValid(event.aggregateId)) {
+      this.logger.warn(
+        `Invalid aggregateId [${event.aggregateId}] for failure projection event [${event._id?.toString()}]`
+      )
+      return
+    }
+
+    const objId = new ObjectId(event.aggregateId)
+
+    try {
+      switch (event.aggregateType) {
+        case 'contract': {
+          const contract = await this.contractRepository.findOne({
+            where: { _id: objId },
+          })
+          if (contract) {
+            contract.ledgerStatus = 'failed'
+            await this.contractRepository.save(contract)
+          }
+          break
+        }
+        case 'deposit': {
+          const deposit = await this.depositAgreementRepository.findOne({
+            where: { _id: objId },
+          })
+          if (deposit) {
+            deposit.ledgerStatus = 'failed'
+            await this.depositAgreementRepository.save(deposit)
+          }
+          break
+        }
+        case 'payment': {
+          const payment = await this.paymentRepository.findOne({
+            where: { _id: objId },
+          })
+          if (payment) {
+            payment.ledgerStatus = 'failed'
+            await this.paymentRepository.save(payment)
+          }
+          break
+        }
+        case 'contract-amendment': {
+          if (!this.amendmentRepository) break
+          const amendment = await this.amendmentRepository.findOne({
+            where: { _id: objId },
+          })
+          if (amendment) {
+            amendment.ledgerStatus = 'failed'
+            await this.amendmentRepository.save(amendment)
+          }
+          break
+        }
+        default:
+          this.logger.debug(
+            `No failure projection handler for aggregateType [${event.aggregateType}]`
+          )
+      }
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error)
+      this.logger.error(
+        `Failed to project terminal ledger failure for aggregate [${event.aggregateId}]: ${errMsg}`
       )
       throw error
     }

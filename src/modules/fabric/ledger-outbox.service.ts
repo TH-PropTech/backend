@@ -3,6 +3,7 @@ import {
   Logger,
   ForbiddenException,
   BadRequestException,
+  Optional,
 } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { createHash, randomUUID } from 'node:crypto'
@@ -11,6 +12,7 @@ import { ObjectId } from 'mongodb'
 import { FabricService } from './fabric.service'
 import { LedgerProjectionService } from './ledger-projection.service'
 import { LedgerOutbox } from './schemas/ledger-outbox.schema'
+import { RentalTransactionEventService } from '../rental-transactions/rental-transaction-event.service'
 
 export type LedgerEventInput = {
   aggregateType: string
@@ -39,7 +41,9 @@ export class LedgerOutboxService {
     @InjectRepository(LedgerOutbox)
     private readonly repository: Repository<LedgerOutbox>,
     private readonly fabricService: FabricService,
-    private readonly projectionService: LedgerProjectionService
+    private readonly projectionService: LedgerProjectionService,
+    @Optional()
+    private readonly transactionEventService?: RentalTransactionEventService
   ) {}
 
   async enqueue(input: LedgerEventInput): Promise<LedgerOutbox> {
@@ -80,7 +84,9 @@ export class LedgerOutboxService {
       blockNumber: null,
       errorCode: null,
     })
-    return this.repository.save(event)
+    const savedEvent = await this.repository.save(event)
+    await this.recordTransactionEvent(savedEvent, 'ledger.enqueued')
+    return savedEvent
   }
 
   /**
@@ -221,6 +227,7 @@ export class LedgerOutboxService {
       event.lastError = `Prerequisite event [${event.dependencyKey}] failed terminally`
       event.nextRetryAt = null
       await this.repository.save(event)
+      await this.projectFailureIfTerminal(event)
       this.logger.error(
         `Event [${event._id?.toString()}] marked failed because dependency [${event.dependencyKey}] failed`
       )
@@ -285,6 +292,7 @@ export class LedgerOutboxService {
     event.errorCode = null
 
     await this.repository.save(event)
+    await this.recordTransactionEvent(event, 'ledger.confirmed')
 
     return true
   }
@@ -350,6 +358,54 @@ export class LedgerOutboxService {
     }
 
     await this.repository.save(event)
+    await this.projectFailureIfTerminal(event)
+    await this.recordTransactionEvent(
+      event,
+      event.status === 'failed' ? 'ledger.failed' : 'ledger.retry-scheduled'
+    )
+  }
+
+  private async recordTransactionEvent(
+    event: LedgerOutbox,
+    eventType: string
+  ): Promise<void> {
+    if (!this.transactionEventService || !event._id) return
+    try {
+      await this.transactionEventService.record({
+        transactionKey: event.aggregateId,
+        transitionKey: `ledger:${event._id.toString()}:${eventType}`,
+        contractId:
+          event.aggregateType === 'contract' ? event.aggregateId : null,
+        eventType,
+        actorRole: 'system',
+        reasonCode: event.errorCode ?? null,
+        refs: {
+          outboxId: event._id.toString(),
+          status: event.status,
+        },
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      this.logger.warn(
+        `Rental transaction audit failed for ledger event [${event._id.toString()}]: ${message}`
+      )
+    }
+  }
+
+  private async projectFailureIfTerminal(event: LedgerOutbox): Promise<void> {
+    if (event.status !== 'failed') return
+
+    try {
+      await this.projectionService.projectFailure(event)
+    } catch (projectionError) {
+      const message =
+        projectionError instanceof Error
+          ? projectionError.message
+          : String(projectionError)
+      this.logger.error(
+        `Terminal ledger state persisted but failure projection failed for event [${event._id?.toString()}]: ${message}`
+      )
+    }
   }
 
   /**
@@ -411,6 +467,16 @@ export class LedgerOutboxService {
       const event = await this.claimNext()
       if (!event) break
 
+      if (this.requiresChaincodeUpgrade(event)) {
+        event.status = 'pending'
+        event.claimToken = null
+        event.claimedAt = null
+        event.leaseExpiresAt = null
+        event.errorCode = 'CHAINCODE_UPGRADE_REQUIRED'
+        await this.repository.save(event)
+        continue
+      }
+
       try {
         const result = await this.fabricService.submitTransaction(
           event.payload.action,
@@ -425,6 +491,15 @@ export class LedgerOutboxService {
       }
     }
     return processed
+  }
+
+  private requiresChaincodeUpgrade(event: LedgerOutbox): boolean {
+    const minimumAbiVersion = event.payload.metadata?.minimumAbiVersion
+    if (minimumAbiVersion !== 2) return false
+    if (typeof this.fabricService.getChaincodeAbiVersion !== 'function') {
+      return false
+    }
+    return this.fabricService.getChaincodeAbiVersion() < minimumAbiVersion
   }
 
   private sanitizeError(error: unknown): string {
