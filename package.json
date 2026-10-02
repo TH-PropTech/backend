@@ -55,6 +55,7 @@
     "class-validator": "^0.14.2",
     "cloudinary": "^2.11.0",
     "dotenv": "^16.6.1",
+    "express": "^5.2.1",
     "ioredis": "^5.11.1",
     "joi": "^17.13.3",
     "mongodb": "^6.16.0",
