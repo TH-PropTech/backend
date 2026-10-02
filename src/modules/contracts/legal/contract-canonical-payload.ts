@@ -7,7 +7,7 @@ import type { ContractTemplate } from './contract-template.schema'
 import { canonicalizeTipTapContent } from './tiptap-content'
 import { resolveEffectiveCommercial } from '../commercial/resolve-effective-commercial'
 
-export const CONTRACT_CONTENT_HASH_SCHEMA_VERSION = 2
+export const CONTRACT_CONTENT_HASH_SCHEMA_VERSION = 3
 
 export type ContractCanonicalPayload = {
   hashSchemaVersion: number
@@ -43,9 +43,23 @@ export type ContractCanonicalPayload = {
   }
   addendaIds: string[]
   amendmentId: string | null
+  layout: {
+    contentHash: string
+    supplementaryClauses: Array<{
+      id: string
+      title: string
+      content: string
+      enabled: true
+    }>
+  } | null
 }
 
-export function buildCanonicalContractPayload(
+type ContractCanonicalPayloadBase = Omit<
+  ContractCanonicalPayload,
+  'hashSchemaVersion' | 'layout'
+>
+
+function buildCanonicalContractPayloadBase(
   contract: Contract,
   template?: Pick<
     ContractTemplate,
@@ -56,7 +70,7 @@ export function buildCanonicalContractPayload(
     | 'citationIds'
   >,
   amendmentId: string | null = null
-): ContractCanonicalPayload {
+): ContractCanonicalPayloadBase {
   const editorContent = contract.editorContent
     ? canonicalizeTipTapContent(contract.editorContent)
     : null
@@ -70,7 +84,6 @@ export function buildCanonicalContractPayload(
     citationIds: [...clause.citationIds].sort(),
   }))
   return {
-    hashSchemaVersion: CONTRACT_CONTENT_HASH_SCHEMA_VERSION,
     contractId: contract._id?.toHexString() ?? null,
     contractCode: contract.contractCode,
     templateRef:
@@ -100,6 +113,77 @@ export function buildCanonicalContractPayload(
     addendaIds: [...(commercial.addendaIds ?? [])].sort(),
     amendmentId,
   }
+}
+
+export function buildCanonicalContractPayloadV2(
+  contract: Contract,
+  template?: Pick<
+    ContractTemplate,
+    | 'legalProfile'
+    | 'schemaVersion'
+    | 'clauses'
+    | 'annexDefinitions'
+    | 'citationIds'
+  >,
+  amendmentId: string | null = null
+): ContractCanonicalPayload {
+  return {
+    ...buildCanonicalContractPayloadBase(contract, template, amendmentId),
+    hashSchemaVersion: 2,
+    layout: null,
+  }
+}
+
+export function buildCanonicalContractPayloadV3(
+  contract: Contract,
+  template?: Pick<
+    ContractTemplate,
+    | 'legalProfile'
+    | 'schemaVersion'
+    | 'clauses'
+    | 'annexDefinitions'
+    | 'citationIds'
+  >,
+  amendmentId: string | null = null
+): ContractCanonicalPayload {
+  const supplementaryClauses = (
+    contract.layoutProfileRef?.supplementaryClauses ?? []
+  )
+    .filter(clause => clause.enabled)
+    .map(clause => ({
+      id: clause.id,
+      title: clause.title,
+      content: clause.content,
+      enabled: true as const,
+    }))
+  return {
+    ...buildCanonicalContractPayloadBase(contract, template, amendmentId),
+    hashSchemaVersion: CONTRACT_CONTENT_HASH_SCHEMA_VERSION,
+    layout: {
+      contentHash: contract.layoutProfileRef?.contentHash ?? '',
+      supplementaryClauses,
+    },
+  }
+}
+
+export function buildCanonicalContractPayload(
+  contract: Contract,
+  template?: Pick<
+    ContractTemplate,
+    | 'legalProfile'
+    | 'schemaVersion'
+    | 'clauses'
+    | 'annexDefinitions'
+    | 'citationIds'
+  >,
+  amendmentId: string | null = null
+): ContractCanonicalPayload {
+  const hashSchemaVersion =
+    contract.hashSchemaVersion ??
+    (contract.layoutProfileRef ? CONTRACT_CONTENT_HASH_SCHEMA_VERSION : 2)
+  return hashSchemaVersion >= CONTRACT_CONTENT_HASH_SCHEMA_VERSION
+    ? buildCanonicalContractPayloadV3(contract, template, amendmentId)
+    : buildCanonicalContractPayloadV2(contract, template, amendmentId)
 }
 
 export function canonicalizeContractPayload(

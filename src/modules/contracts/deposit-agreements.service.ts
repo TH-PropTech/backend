@@ -329,7 +329,8 @@ export class DepositAgreementsService {
   async recordDepositPaid(
     id: string,
     paymentAttemptId: string,
-    depositHash?: string
+    depositHash?: string,
+    receipt?: { receiptCode: string; receiptHash: string; paidAt: Date }
   ): Promise<DepositAgreement> {
     const agreement = await this.findById(id)
     if (
@@ -348,9 +349,11 @@ export class DepositAgreementsService {
       throw new ConflictException('DEPOSIT_NOT_PAYMENT_PENDING')
     }
     agreement.status = 'paid'
-    agreement.paidAt = new Date()
+    agreement.paidAt = receipt?.paidAt ?? new Date()
     agreement.paymentAttemptId = paymentAttemptId
     agreement.depositHash = depositHash || this.calculateDepositHash(agreement)
+    agreement.receiptCode = receipt?.receiptCode ?? null
+    agreement.receiptHash = receipt?.receiptHash ?? null
     agreement.ledgerStatus = 'pending'
     const saved = await this.repository.save(agreement)
     await this.recordContractDepositPaidAt(saved)

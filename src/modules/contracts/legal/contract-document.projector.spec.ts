@@ -101,4 +101,30 @@ describe('ContractDocumentProjector', () => {
       contentType: 'application/pdf',
     })
   })
+
+  it('projects an optional layout while preserving the fallback document', () => {
+    const result = ContractDocumentProjector.projectDocument(
+      mockContract as Contract,
+      undefined,
+      {
+        profileKey: 'standard',
+        version: 2,
+        blocks: [
+          { blockId: 'HEADER', order: 1, title: 'Header', visible: true },
+        ],
+        supplementaryClauses: [
+          { id: 'extra', title: 'Extra', content: 'Visible', enabled: true },
+          { id: 'off', title: 'Off', content: 'Hidden', enabled: false },
+        ],
+      }
+    )
+
+    expect(result.layout).toEqual(
+      expect.objectContaining({ profileKey: 'standard', version: 2 })
+    )
+    expect(result.supplementaryClauses).toEqual([
+      { id: 'extra', title: 'Extra', content: 'Visible', enabled: true },
+    ])
+    expect(result.sections).toHaveLength(12)
+  })
 })

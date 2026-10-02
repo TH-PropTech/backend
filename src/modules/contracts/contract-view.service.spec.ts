@@ -18,6 +18,7 @@ describe('ContractViewService', () => {
   let depositAgreementRepo: jest.Mocked<Repository<DepositAgreement>>
   let kycService: jest.Mocked<KycService>
   let artifactService: { resolveCanonicalArtifact: jest.Mock }
+  let ledgerQueryService: { getContractEvents: jest.Mock }
   let ownershipTransferResolver: {
     resolveContractAccess: jest.Mock
   }
@@ -103,6 +104,7 @@ describe('ContractViewService', () => {
     depositAgreementRepo = module.get(getRepositoryToken(DepositAgreement))
     kycService = module.get(KycService)
     artifactService = module.get(ContractArtifactService)
+    ledgerQueryService = module.get(LedgerAuditQueryService)
     ownershipTransferResolver = module.get(OwnershipTransferResolver)
     ownershipTransferResolver.resolveContractAccess.mockImplementation(
       (
@@ -693,6 +695,45 @@ describe('ContractViewService', () => {
     expect(view.ledger.txHash).toBeNull()
     expect(view.ledger.onChainValid).toBeNull()
     expect(view.ledger.connectionState).toBeDefined()
+  })
+
+  it('projects failed ledger status as failed-terminal when the latest event is not retryable', async () => {
+    const failedContract = {
+      ...mockContract,
+      status: 'active',
+      ledgerStatus: 'failed',
+      ledgerNetworkMode: 'fabric' as const,
+      blockchainAddress: null,
+    }
+    contractRepo.findOne.mockResolvedValue(failedContract as Contract)
+    kycService.findByUserId.mockResolvedValue({
+      status: 'verified',
+      idCardNumber: '079123456789',
+    } as KycRecord)
+    ledgerQueryService.getContractEvents.mockResolvedValue([
+      {
+        id: 'outbox-failed',
+        category: 'ledger',
+        eventType: 'contract.activated',
+        status: 'failed',
+        occurredAt: new Date().toISOString(),
+        actorRole: 'system',
+        networkMode: 'fabric',
+        txHash: null,
+        blockNumber: null,
+        retryable: false,
+        displayCode: 'LEDGER_FAILED',
+        description: 'Cần retry thủ công',
+      },
+    ])
+
+    const view = await service.getForActor(
+      validContractId,
+      'user-tenant-1',
+      false
+    )
+
+    expect(view.ledger.status).toBe('failed-terminal')
   })
 
   it('exposes canEditContent=true and canLockContent=true for staff on unlocked draft contracts', async () => {

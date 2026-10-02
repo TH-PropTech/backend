@@ -308,12 +308,15 @@ describe('canonical contract workspace integration', () => {
       {} as never,
       {
         assertMockProvider: jest.fn(),
+        providerName: jest.fn().mockReturnValue('mock-bank'),
         createPaymentIntent: jest.fn().mockResolvedValue({
           provider: 'mock-bank',
           txRef: 'TX-FLOW-1',
           expiresAt: new Date(Date.now() + 15 * 60_000),
         }),
       } as never,
+      {} as never,
+      {} as never,
       {} as never,
       {} as never
     )

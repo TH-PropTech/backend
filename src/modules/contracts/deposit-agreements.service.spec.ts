@@ -419,14 +419,24 @@ describe('DepositAgreementsService', () => {
       ...baseAgreement(),
       status: 'payment-pending',
     })
+    const paidAt = new Date('2026-09-30T00:00:00.000Z')
     const first = await context.service.recordDepositPaid(
       agreementId,
-      'attempt-1'
+      'attempt-1',
+      undefined,
+      {
+        receiptCode: 'RCP-ABCDEFGHIJK',
+        receiptHash: 'a'.repeat(64),
+        paidAt,
+      }
     )
     expect(first.status).toBe('paid')
     expect(first.paymentAttemptId).toBe('attempt-1')
     expect(first.depositHash).toHaveLength(64)
     expect(first.ledgerStatus).toBe('pending')
+    expect(first.paidAt).toBe(paidAt)
+    expect(first.receiptCode).toBe('RCP-ABCDEFGHIJK')
+    expect(first.receiptHash).toBe('a'.repeat(64))
     expect(context.outboxService.enqueue).toHaveBeenCalledWith(
       expect.objectContaining({
         aggregateType: 'deposit',

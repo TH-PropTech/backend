@@ -214,6 +214,26 @@ export class ContractDocumentViewDto {
   @ApiProperty({ type: ContractCanonicalArtifactDto, nullable: true })
   canonicalArtifact!: ContractCanonicalArtifactDto | null
 
+  @ApiProperty({ nullable: true, required: false })
+  layout?: {
+    profileKey: string
+    version: number
+    blocks: Array<{
+      blockId: string
+      order: number
+      title: string
+      visible: boolean
+    }>
+  } | null
+
+  @ApiProperty({ type: [Object], required: false })
+  supplementaryClauses?: Array<{
+    id: string
+    title: string
+    content: string
+    enabled: boolean
+  }>
+
   @ApiProperty({ enum: ['not-locked', 'valid', 'mismatch', 'unavailable'] })
   integrity!: 'not-locked' | 'valid' | 'mismatch' | 'unavailable'
 }

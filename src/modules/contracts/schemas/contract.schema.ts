@@ -332,6 +332,19 @@ export class Contract {
   @Column({ nullable: true })
   hashSchemaVersion?: number | null
 
+  @Column('json', { nullable: true })
+  layoutProfileRef?: {
+    profileKey: string
+    version: number
+    contentHash: string
+    supplementaryClauses?: Array<{
+      id: string
+      title: string
+      content: string
+      enabled: boolean
+    }>
+  } | null
+
   @Column({ nullable: true })
   artifactRef?: {
     artifactId: string

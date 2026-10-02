@@ -296,6 +296,44 @@ describe('ContractsService contract content', () => {
     expect(replay.contentLockedHash).toBe(locked.contentLockedHash)
   })
 
+  it('snapshots a matching published layout and upgrades only that lock to v3', async () => {
+    const { service, contract } = createContentService()
+    contract.editorContent = validContent
+    contract.contentRevision = 1
+    contract.contractTemplateRef = {
+      key: 'lease-vn',
+      version: 1,
+      contentHash: 'a'.repeat(64),
+    }
+    Reflect.set(service, 'templateGovernanceService', {
+      getPublishedVersion: jest.fn().mockResolvedValue({
+        legalProfile: 'PRIVATE_CIVIL_APARTMENT_LEASE',
+      }),
+    })
+    Reflect.set(service, 'layoutService', {
+      findPublishedForContract: jest.fn().mockResolvedValue({
+        profileKey: 'standard',
+        version: 2,
+        contentHash: 'b'.repeat(64),
+      }),
+    })
+
+    const locked = await service.lockContractContent(
+      contract._id.toString(),
+      'staff-1',
+      1,
+      true
+    )
+
+    expect(locked.hashSchemaVersion).toBe(3)
+    expect(locked.layoutProfileRef).toEqual({
+      profileKey: 'standard',
+      version: 2,
+      contentHash: 'b'.repeat(64),
+      supplementaryClauses: [],
+    })
+  })
+
   it('asks the flow notifier to check stages once content is newly locked', async () => {
     const { service, contract } = createContentService()
     const notifier = { notifyForContract: jest.fn() }
@@ -581,6 +619,9 @@ describe('ContractsService activation', () => {
     )
     Reflect.set(service, 'paymentsService', paymentsService)
     Reflect.set(service, 'logger', { log: jest.fn() })
+    Reflect.set(service, 'fabricService', {
+      getChaincodeAbiVersion: jest.fn(() => 1),
+    })
 
     const result = await service.signContract(
       contract._id.toHexString(),
@@ -595,8 +636,27 @@ describe('ContractsService activation', () => {
         eventType: 'contract.activated',
         action: 'createContract',
         dependencyKey: 'deposit:507f1f77bcf86cd799439099:deposit.paid',
+        args: [
+          contract._id.toHexString(),
+          'HD-1',
+          'tenant-1',
+          'landlord-1',
+          expect.any(String),
+          '10000000',
+          '2030-01-01T00:00:00.000Z',
+          '507f1f77bcf86cd799439099',
+          'd'.repeat(64),
+        ],
       })
     )
+    const enqueueMock = ledgerOutboxService.enqueue
+    const enqueueCalls = enqueueMock.mock.calls as unknown as ReadonlyArray<
+      readonly unknown[]
+    >
+    const activationEvent = enqueueCalls[0]?.[0] as
+      | { metadata?: { argsVersion?: number } }
+      | undefined
+    expect(activationEvent?.metadata?.argsVersion).toBe(1)
     expect(paymentsService.generateSchedule).toHaveBeenCalledWith(contract)
   })
 
@@ -776,6 +836,9 @@ describe('ContractsService activation', () => {
     Reflect.set(service, 'ledgerOutboxService', ledgerOutboxService)
     Reflect.set(service, 'paymentsService', paymentsService)
     Reflect.set(service, 'apartmentRepository', { findOne: jest.fn() })
+    Reflect.set(service, 'fabricService', {
+      getChaincodeAbiVersion: jest.fn(() => 2),
+    })
     return {
       service,
       contract,
@@ -858,8 +921,14 @@ describe('ContractsService activation', () => {
       const ledgerEvent = context.ledgerOutboxService.enqueue.mock
         .calls[0]?.[0] as {
         args?: string[]
-        metadata?: { details?: Record<string, unknown> }
+        metadata?: { argsVersion?: number; details?: Record<string, unknown> }
       }
+      expect(ledgerEvent.args).toHaveLength(10)
+      expect(ledgerEvent.args?.slice(7, 9)).toEqual([
+        '507f1f77bcf86cd799439099',
+        'd'.repeat(64),
+      ])
+      expect(ledgerEvent.metadata?.argsVersion).toBe(2)
       const evidenceArgument = ledgerEvent.args?.[ledgerEvent.args.length - 1]
       expect(evidenceArgument).toBeDefined()
       const parsedEvidence = JSON.parse(evidenceArgument ?? '{}') as {
@@ -1005,6 +1074,8 @@ describe('ContractsService verifyIntegrity 4-state', () => {
     const result = await service.verifyIntegrity(contract._id.toHexString())
     expect(result.verificationStatus).toBe('not-recorded')
     expect(result.isValid).toBeNull()
+    expect(result.layers.offChain.status).toBe('valid')
+    expect(result.layers.artifact.status).toBe('not-recorded')
   })
 
   it('returns valid with isValid=true when on-chain verifyContract passes', async () => {
@@ -1062,6 +1133,94 @@ describe('ContractsService verifyIntegrity 4-state', () => {
     const result = await service.verifyIntegrity(contract._id.toHexString())
     expect(result.verificationStatus).toBe('unavailable')
     expect(result.isValid).toBeNull()
+  })
+
+  it('returns valid only when the locked SmartCA artifact bytes still match GridFS metadata', async () => {
+    const artifactHash = 'a'.repeat(64)
+    const contract = {
+      _id: new ObjectId('507f1f77bcf86cd799439011'),
+      contractHash: 'matching-hash',
+      contentLockedHash: 'semantic-hash',
+      blockchainAddress: 'tx-on-chain-123',
+      ledgerStatus: 'confirmed',
+      appliedPolicies: {},
+      artifactRef: {
+        artifactId: 'artifact-1',
+        revision: 1,
+        templateKey: 'lease-vn',
+        templateVersion: 1,
+        hashSchemaVersion: 2,
+        artifactHash,
+        canonicalContentHash: 'semantic-hash',
+        rendererVersion: 'pdf-v1',
+        sourceSchemaVersion: 2,
+        byteLength: 10,
+        amendmentId: null,
+        contentType: 'application/pdf' as const,
+        lockedAt: new Date(),
+      },
+    } as unknown as Contract
+    const service = Object.create(
+      ContractsService.prototype
+    ) as ContractsService
+    jest.spyOn(service, 'findOne').mockResolvedValue(contract)
+    Reflect.set(service, 'buildContractHash', () => 'matching-hash')
+    Reflect.set(service, 'fabricService', {
+      evaluateTransaction: jest.fn().mockResolvedValue({ valid: true }),
+    })
+    Reflect.set(service, 'artifactService', {
+      resolveCanonicalArtifact: jest.fn().mockResolvedValue({
+        reference: contract.artifactRef,
+        artifact: { artifactHash },
+        bytes: Buffer.from('%PDF-1.7'),
+      }),
+    })
+
+    const result = await service.verifyIntegrity(contract._id.toHexString())
+
+    expect(result.isValid).toBe(true)
+    expect(result.layers.offChain.status).toBe('valid')
+    expect(result.layers.artifact.status).toBe('valid')
+    expect(result.layers.artifact.hash).toBe(artifactHash)
+    expect(result.layers.onChain.status).toBe('valid')
+  })
+
+  it('marks artifact mismatch invalid even when the on-chain hash still matches', async () => {
+    const contract = {
+      _id: new ObjectId('507f1f77bcf86cd799439011'),
+      contractHash: 'matching-hash',
+      contentLockedHash: 'semantic-hash',
+      blockchainAddress: 'tx-on-chain-123',
+      ledgerStatus: 'confirmed',
+      appliedPolicies: {},
+      artifactRef: {
+        artifactId: 'artifact-1',
+        revision: 1,
+        artifactHash: 'a'.repeat(64),
+        canonicalContentHash: 'semantic-hash',
+        contentType: 'application/pdf' as const,
+        lockedAt: new Date(),
+      },
+    } as unknown as Contract
+    const service = Object.create(
+      ContractsService.prototype
+    ) as ContractsService
+    jest.spyOn(service, 'findOne').mockResolvedValue(contract)
+    Reflect.set(service, 'buildContractHash', () => 'matching-hash')
+    Reflect.set(service, 'fabricService', {
+      evaluateTransaction: jest.fn().mockResolvedValue({ valid: true }),
+    })
+    Reflect.set(service, 'artifactService', {
+      resolveCanonicalArtifact: jest
+        .fn()
+        .mockRejectedValue(new Error('CONTRACT_ARTIFACT_HASH_MISMATCH')),
+    })
+
+    const result = await service.verifyIntegrity(contract._id.toHexString())
+
+    expect(result.verificationStatus).toBe('invalid')
+    expect(result.isValid).toBe(false)
+    expect(result.layers.artifact.status).toBe('mismatch')
   })
 })
 

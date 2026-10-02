@@ -6,6 +6,7 @@ import {
 } from './lease-template.manifest'
 import { resolveLegalProfile, LegalProfile } from './legal-profile.resolver'
 import type { ContractTemplate } from './contract-template.schema'
+import type { ContractLayoutProfile } from '../layout/contract-layout-profile.schema'
 import {
   ContractDocumentSectionDto,
   ContractDocumentAnnexDto,
@@ -29,6 +30,10 @@ export class ContractDocumentProjector {
       | 'clauses'
       | 'annexDefinitions'
       | 'citationIds'
+    >,
+    layout?: Pick<
+      ContractLayoutProfile,
+      'profileKey' | 'version' | 'blocks' | 'supplementaryClauses'
     >
   ): ContractDocumentViewDto {
     const isLocked = Boolean(
@@ -139,6 +144,21 @@ export class ContractDocumentProjector {
       sections,
       annexes,
       canonicalArtifact,
+      layout: layout
+        ? {
+            profileKey: layout.profileKey,
+            version: layout.version,
+            blocks: layout.blocks.map(block => ({
+              blockId: block.blockId,
+              order: block.order,
+              title: block.title,
+              visible: block.visible,
+            })),
+          }
+        : null,
+      supplementaryClauses: layout
+        ? layout.supplementaryClauses.filter(clause => clause.enabled)
+        : [],
       integrity,
     }
   }

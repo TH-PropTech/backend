@@ -451,6 +451,8 @@ export class ContractAmendmentService {
           sequence: amendment.sequence,
           effectiveFrom: amendment.effectiveFrom.toISOString(),
           predecessorId: amendment.predecessorId,
+          minimumAbiVersion: 2,
+          waitingCode: 'CHAINCODE_UPGRADE_REQUIRED',
           details: { contentHash: amendment.contentHash },
         },
       })
