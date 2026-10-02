@@ -7,7 +7,12 @@ describe('MoveInSettlementsService', () => {
   function setup(): {
     service: MoveInSettlementsService
     settlementRepo: Record<'findOne' | 'find' | 'create' | 'save', jest.Mock>
-    paymentRepo: { find: jest.Mock }
+    paymentRepo: {
+      find: jest.Mock
+      findOne: jest.Mock
+      create: jest.Mock
+      save: jest.Mock
+    }
     notifications: { createNotification: jest.Mock }
   } {
     const settlementRepo = {
@@ -21,7 +26,15 @@ describe('MoveInSettlementsService', () => {
         })
       ),
     }
-    const paymentRepo = { find: jest.fn() }
+    const paymentRepo = {
+      find: jest.fn(),
+      findOne: jest.fn().mockResolvedValue(null),
+      create: jest.fn((value: Record<string, unknown>) => ({
+        ...value,
+        _id: new ObjectId(),
+      })),
+      save: jest.fn((value: unknown) => Promise.resolve(value)),
+    }
     const notifications = {
       createNotification: jest.fn().mockResolvedValue(undefined),
     }
@@ -69,7 +82,11 @@ describe('MoveInSettlementsService', () => {
     )
 
     expect(result?.lines).toEqual([
-      { kind: 'DEPOSIT_TOPUP', amount: 14_000_000, paymentId: null },
+      {
+        kind: 'DEPOSIT_TOPUP',
+        amount: 14_000_000,
+        paymentId: expect.any(String) as string,
+      },
       {
         kind: 'FIRST_RENT',
         amount: 30_000_000,
@@ -79,6 +96,13 @@ describe('MoveInSettlementsService', () => {
     expect(result?.total).toBe(44_000_000)
     expect(result?.statementHash).toMatch(/^[a-f0-9]{64}$/)
     expect(settlementRepo.save).toHaveBeenCalledTimes(1)
+    expect(paymentRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'deposit-topup',
+        amount: 14_000_000,
+        payerId: 'tenant',
+      })
+    )
   })
 
   it('reuses an existing settlement and skips legacy contracts without a policy or fee', async () => {

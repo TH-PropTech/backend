@@ -47,12 +47,31 @@ export class MoveInSettlementsService {
     const firstRent = payments.sort((a, b) =>
       (a.periodKey ?? '').localeCompare(b.periodKey ?? '')
     )[0]
+    const dueAt = new Date(contract.startDate)
+    dueAt.setDate(dueAt.getDate() - (policy?.firstPaymentDueOffsetDays ?? 3))
+    const minimumDue = new Date(activatedAt)
+    minimumDue.setDate(minimumDue.getDate() + 1)
+    if (dueAt < minimumDue) dueAt.setTime(minimumDue.getTime())
     const lines: SettlementLine[] = []
     const holding =
       contract.packageSnapshot?.resolvedHoldingDepositAmount ?? contract.deposit
     const topUp = Math.max(0, contract.deposit - holding)
-    if (topUp > 0)
-      lines.push({ kind: 'DEPOSIT_TOPUP', amount: topUp, paymentId: null })
+    if (topUp > 0) {
+      const topUpPayment = await this.createSettlementPayment({
+        contract,
+        contractId,
+        amount: topUp,
+        dueAt,
+        type: 'deposit-topup',
+        periodKey: 'SETTLEMENT:DEPOSIT_TOPUP',
+        description: 'Move-in security deposit top-up',
+      })
+      lines.push({
+        kind: 'DEPOSIT_TOPUP',
+        amount: topUp,
+        paymentId: topUpPayment._id.toHexString(),
+      })
+    }
     if (firstRent)
       lines.push({
         kind: 'FIRST_RENT',
@@ -60,21 +79,29 @@ export class MoveInSettlementsService {
         paymentId: firstRent._id.toHexString(),
       })
     if (tenantFee && tenantFee.amount > 0) {
-      const feeInvoice = await this.paymentRepo.findOne({
+      const existingFeeInvoice = await this.paymentRepo.findOne({
         where: { contractId, type: 'platform-fee', feeKind: 'TENANT_SERVICE' },
       })
+      const feeInvoice =
+        existingFeeInvoice ??
+        (await this.createSettlementPayment({
+          contract,
+          contractId,
+          amount: tenantFee.amount,
+          dueAt,
+          type: 'platform-fee',
+          periodKey: 'SETTLEMENT:TENANT_SERVICE',
+          description: 'Tenant move-in service fee',
+          feeKind: 'TENANT_SERVICE',
+          payeeRole: 'platform',
+        }))
       lines.push({
         kind: 'TENANT_SERVICE_FEE',
         amount: tenantFee.amount,
-        paymentId: feeInvoice?._id.toHexString() ?? null,
+        paymentId: feeInvoice._id.toHexString(),
       })
     }
     if (!lines.length) return null
-    const dueAt = new Date(contract.startDate)
-    dueAt.setDate(dueAt.getDate() - (policy?.firstPaymentDueOffsetDays ?? 3))
-    const minimumDue = new Date(activatedAt)
-    minimumDue.setDate(minimumDue.getDate() + 1)
-    if (dueAt < minimumDue) dueAt.setTime(minimumDue.getTime())
     const total = lines.reduce((sum, line) => sum + line.amount, 0)
     const canonical = JSON.stringify({
       contractId,
@@ -209,6 +236,40 @@ export class MoveInSettlementsService {
       count += 1
     }
     return count
+  }
+
+  private async createSettlementPayment(input: {
+    contract: Contract
+    contractId: string
+    amount: number
+    dueAt: Date
+    type: 'deposit-topup' | 'platform-fee'
+    periodKey: string
+    description: string
+    feeKind?: 'TENANT_SERVICE'
+    payeeRole?: 'landlord' | 'platform'
+  }): Promise<Payment> {
+    const payment = this.paymentRepo.create({
+      contractId: input.contractId,
+      tenantId: input.contract.tenantId,
+      landlordId: input.contract.landlordId,
+      payerId: input.contract.tenantId,
+      payerRole: 'tenant',
+      payeeRole: input.payeeRole ?? 'landlord',
+      amount: input.amount,
+      amountBeforeVat: input.amount,
+      vatAmount: 0,
+      description: input.description,
+      dueDate: input.dueAt,
+      paidAt: null,
+      status: 'unpaid',
+      txHash: null,
+      type: input.type,
+      feeKind: input.feeKind ?? null,
+      periodKey: input.periodKey,
+      ledgerStatus: 'not-required',
+    })
+    return this.paymentRepo.save(payment)
   }
 
   private async find(id: string): Promise<MoveInSettlement> {
