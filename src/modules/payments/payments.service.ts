@@ -177,10 +177,23 @@ export class PaymentsService {
     if (!canAccess) {
       throw new ForbiddenException('PAYMENT_ACCESS_DENIED')
     }
-    return this.paymentRepository.find({
-      where: { contractId, type: 'rent' },
+    const payments = await this.paymentRepository.find({
+      where: { contractId },
       order: { dueDate: 'ASC' },
     })
+    return payments
+      .filter(
+        payment =>
+          payment.type !== 'platform-fee' ||
+          isStaff ||
+          (payment.payerId ?? payment.tenantId) === actorId
+      )
+      .map(payment => ({
+        ...payment,
+        payerId: payment.payerId ?? payment.tenantId,
+        payerRole: payment.payerRole ?? 'tenant',
+        payeeRole: payment.payeeRole ?? 'landlord',
+      }))
   }
 
   async confirmPayment(
@@ -223,6 +236,7 @@ export class PaymentsService {
           contractId: payment.contractId,
           details: { confirmedBy: actorId },
         },
+        dependencyKey: `contract:${payment.contractId}:contract.activated`,
       })
     }
     return saved

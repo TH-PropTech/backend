@@ -131,6 +131,78 @@ describe('PaymentsService', () => {
     ).rejects.toThrow(ForbiddenException)
   })
 
+  it('normalizes legacy rent invoices to tenant payer and landlord payee', async () => {
+    const legacy = {
+      tenantId: 'tenant-1',
+      landlordId: 'landlord-1',
+      payerId: null,
+      payerRole: null,
+      payeeRole: null,
+    } as Payment
+    contractRepository.findOne.mockResolvedValue({
+      tenantId: 'tenant-1',
+      landlordId: 'landlord-1',
+    })
+    paymentRepository.find.mockResolvedValue([legacy])
+
+    const payments = await service.getByContract(
+      '507f1f77bcf86cd799439011',
+      'tenant-1',
+      false
+    )
+
+    expect(payments[0]).toEqual(
+      expect.objectContaining({
+        payerId: 'tenant-1',
+        payerRole: 'tenant',
+        payeeRole: 'landlord',
+      })
+    )
+  })
+
+  it('returns a platform-fee invoice only to its payer or staff', async () => {
+    const rent = {
+      tenantId: 'tenant-1',
+      landlordId: 'landlord-1',
+      type: 'rent',
+    } as Payment
+    const landlordFee = {
+      tenantId: 'tenant-1',
+      landlordId: 'landlord-1',
+      payerId: 'landlord-1',
+      payerRole: 'landlord',
+      payeeRole: 'platform',
+      type: 'platform-fee',
+    } as Payment
+    contractRepository.findOne.mockResolvedValue({
+      tenantId: 'tenant-1',
+      landlordId: 'landlord-1',
+    })
+    paymentRepository.find.mockResolvedValue([rent, landlordFee])
+
+    const tenantPayments = await service.getByContract(
+      '507f1f77bcf86cd799439011',
+      'tenant-1',
+      false
+    )
+    const landlordPayments = await service.getByContract(
+      '507f1f77bcf86cd799439011',
+      'landlord-1',
+      false
+    )
+
+    expect(tenantPayments).toEqual([expect.objectContaining({ type: 'rent' })])
+    expect(landlordPayments).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: 'rent' }),
+        expect.objectContaining({
+          type: 'platform-fee',
+          payerId: 'landlord-1',
+        }),
+      ])
+    )
+  })
+
   it('confirms an unpaid payment once and records the actor', async () => {
     const payment: Payment = {
       _id: new ObjectId(),
@@ -163,6 +235,7 @@ describe('PaymentsService', () => {
     expect(ledgerOutboxService.enqueue).toHaveBeenCalledWith(
       expect.objectContaining({
         action: 'recordPayment',
+        dependencyKey: 'contract:contract-1:contract.activated',
         args: [
           payment._id.toHexString(),
           'contract-1',
