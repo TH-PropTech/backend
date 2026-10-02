@@ -75,4 +75,40 @@ describe('envValidationSchema eKYC configuration', () => {
     })
     expect(accepted.error).toBeUndefined()
   })
+
+  it('accepts valid Fabric and rental operations settings', () => {
+    const result = envValidationSchema.validate({
+      ...baseEnvironment,
+      EKYC_SERVICE_URL: 'https://ekyc.example.com',
+      FABRIC_EXPLORER_TX_URL_TEMPLATE: 'https://explorer.example/tx/{txId}',
+      FABRIC_OUTBOX_POLL_INTERVAL_MS: 1000,
+      RENTAL_SCHEDULER_ENABLED: true,
+      DEPOSIT_AGREEMENT_TTL_HOURS: 48,
+      RENTAL_STUCK_LEDGER_FAILED_TERMINAL_MINUTES: 30,
+    })
+
+    expect(result.error).toBeUndefined()
+    const value = result.value as {
+      FABRIC_OUTBOX_POLL_INTERVAL_MS: number
+      DEPOSIT_AGREEMENT_TTL_HOURS: number
+    }
+    expect(value.FABRIC_OUTBOX_POLL_INTERVAL_MS).toBe(1000)
+    expect(value.DEPOSIT_AGREEMENT_TTL_HOURS).toBe(48)
+  })
+
+  it('rejects malformed Explorer templates and non-positive operational thresholds', () => {
+    const result = envValidationSchema.validate({
+      ...baseEnvironment,
+      EKYC_SERVICE_URL: 'https://ekyc.example.com',
+      FABRIC_EXPLORER_TX_URL_TEMPLATE: 'https://explorer.example/tx',
+      FABRIC_OUTBOX_POLL_INTERVAL_MS: 50,
+      DEPOSIT_AGREEMENT_TTL_HOURS: 0,
+      RENTAL_STUCK_HANDOVER_OVERDUE_HOURS: 0,
+    })
+
+    expect(result.error).toBeDefined()
+    expect(result.error?.message).toMatch(
+      /FABRIC_EXPLORER_TX_URL_TEMPLATE|FABRIC_OUTBOX_POLL_INTERVAL_MS|DEPOSIT_AGREEMENT_TTL_HOURS/
+    )
+  })
 })

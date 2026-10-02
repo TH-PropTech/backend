@@ -76,6 +76,15 @@ export const envValidationSchema = Joi.object({
       otherwise: Joi.optional().allow(''),
     }),
   FABRIC_ENABLED: Joi.boolean().default(false),
+  FABRIC_EXPLORER_TX_URL_TEMPLATE: Joi.string()
+    .pattern(/^\S*\{txId\}\S*$/)
+    .allow('')
+    .optional(),
+  FABRIC_OUTBOX_POLL_INTERVAL_MS: Joi.number()
+    .integer()
+    .min(100)
+    .max(600000)
+    .default(5000),
   FABRIC_MSP_ID: Joi.string().when('FABRIC_ENABLED', {
     is: true,
     then: Joi.required(),
@@ -116,4 +125,50 @@ export const envValidationSchema = Joi.object({
     then: Joi.required(),
     otherwise: Joi.optional().allow(''),
   }),
+  RENTAL_SCHEDULER_ENABLED: Joi.boolean().default(false),
+  DEPOSIT_AGREEMENT_TTL_HOURS: Joi.number()
+    .integer()
+    .min(1)
+    .max(720)
+    .default(72),
+  RENTAL_STUCK_PROVISIONING_FAILED_MINUTES: Joi.number()
+    .integer()
+    .min(1)
+    .max(10080)
+    .default(30),
+  RENTAL_STUCK_DEPOSIT_ATTEMPT_EXPIRED_MINUTES: Joi.number()
+    .integer()
+    .min(1)
+    .max(10080)
+    .default(15),
+  RENTAL_STUCK_DEPOSIT_UNPAID_HOURS: Joi.number()
+    .integer()
+    .min(1)
+    .max(8760)
+    .default(24),
+  RENTAL_STUCK_SIGNED_PENDING_DEPOSIT_HOURS: Joi.number()
+    .integer()
+    .min(1)
+    .max(8760)
+    .default(24),
+  RENTAL_STUCK_ACTIVATION_FAILURE_MINUTES: Joi.number()
+    .integer()
+    .min(1)
+    .max(10080)
+    .default(15),
+  RENTAL_STUCK_LEDGER_FAILED_TERMINAL_MINUTES: Joi.number()
+    .integer()
+    .min(1)
+    .max(10080)
+    .default(15),
+  RENTAL_STUCK_SETTLEMENT_OVERDUE_HOURS: Joi.number()
+    .integer()
+    .min(1)
+    .max(8760)
+    .default(24),
+  RENTAL_STUCK_HANDOVER_OVERDUE_HOURS: Joi.number()
+    .integer()
+    .min(1)
+    .max(8760)
+    .default(24),
 })
