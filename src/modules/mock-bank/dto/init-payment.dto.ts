@@ -10,6 +10,16 @@ export class InitRentPaymentDto {
   paymentId!: string
 }
 
+export class InitSettlementPaymentDto {
+  @IsMongoId()
+  settlementId!: string
+}
+
+export class InitInvoicePaymentDto {
+  @IsMongoId()
+  paymentId!: string
+}
+
 export class PaymentCallbackDto {
   @IsString()
   txRef!: string

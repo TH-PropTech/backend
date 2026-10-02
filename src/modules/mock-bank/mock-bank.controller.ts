@@ -17,7 +17,9 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import type { UserPayload } from '../auth/interfaces/auth.interface'
 import {
   InitDepositPaymentDto,
+  InitInvoicePaymentDto,
   InitRentPaymentDto,
+  InitSettlementPaymentDto,
   PaymentCallbackDto,
 } from './dto/init-payment.dto'
 import {
@@ -25,6 +27,7 @@ import {
   type MockPaymentCallbackResult,
   type MockPaymentInit,
 } from './mock-bank.service'
+import type { PaymentRequestView } from './payment-request.builder'
 import type { PaymentProviderName } from './providers/payment-provider.port'
 
 @ApiTags('mock-bank')
@@ -38,7 +41,7 @@ export class MockBankController {
   initDeposit(
     @Body() dto: InitDepositPaymentDto,
     @CurrentUser('id') userId: string
-  ): Promise<MockPaymentInit> {
+  ): Promise<PaymentRequestView> {
     return this.mockBankService.initDepositPayment(
       dto.depositAgreementId,
       userId
@@ -53,6 +56,26 @@ export class MockBankController {
     @CurrentUser('id') userId: string
   ): Promise<MockPaymentInit> {
     return this.mockBankService.initRentPayment(dto.paymentId, userId)
+  }
+
+  @Post('settlement/init')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  initSettlement(
+    @Body() dto: InitSettlementPaymentDto,
+    @CurrentUser('id') userId: string
+  ): Promise<PaymentRequestView> {
+    return this.mockBankService.initSettlementPayment(dto.settlementId, userId)
+  }
+
+  @Post('invoice/init')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  initInvoice(
+    @Body() dto: InitInvoicePaymentDto,
+    @CurrentUser('id') userId: string
+  ): Promise<PaymentRequestView> {
+    return this.mockBankService.initInvoicePayment(dto.paymentId, userId)
   }
 
   @Post('deposit-callback')
@@ -72,6 +95,28 @@ export class MockBankController {
     @Headers() headers: Record<string, string>
   ): Promise<MockPaymentCallbackResult> {
     return this.mockBankService.handleRentCallback(
+      body,
+      this.callbackHeaders(headers)
+    )
+  }
+
+  @Post('settlement-callback')
+  callbackSettlement(
+    @Body() body: PaymentCallbackDto,
+    @Headers() headers: Record<string, string>
+  ): Promise<MockPaymentCallbackResult> {
+    return this.mockBankService.handleSettlementCallback(
+      body,
+      this.callbackHeaders(headers)
+    )
+  }
+
+  @Post('invoice-callback')
+  callbackInvoice(
+    @Body() body: PaymentCallbackDto,
+    @Headers() headers: Record<string, string>
+  ): Promise<MockPaymentCallbackResult> {
+    return this.mockBankService.handleInvoiceCallback(
       body,
       this.callbackHeaders(headers)
     )
