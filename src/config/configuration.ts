@@ -1,3 +1,63 @@
+export const SELECTABLE_PAYMENT_PROVIDERS = [
+  'mock-bank',
+  'vnpay',
+  'momo',
+  'zalopay',
+] as const
+export type SelectablePaymentProvider =
+  (typeof SELECTABLE_PAYMENT_PROVIDERS)[number]
+
+export type PaymentsConfig = {
+  enabledProviders: SelectablePaymentProvider[]
+  gatewayTimeoutMs: number
+  attemptTtlMinutes: number
+  clientReturnUrl: string
+  mobileReturnUrl: string
+  vnpay: {
+    tmnCode: string
+    hashSecret: string
+    payUrl: string
+    returnUrl: string
+  }
+  momo: {
+    partnerCode: string
+    accessKey: string
+    secretKey: string
+    endpoint: string
+    returnUrl: string
+    ipnUrl: string
+  }
+  zalopay: {
+    appId: string
+    key1: string
+    key2: string
+    endpoint: string
+    returnUrl: string
+    callbackUrl: string
+  }
+}
+
+/** Env value with surrounding whitespace removed; blank counts as unset. */
+function envOr(name: string, fallback: string): string {
+  const value = process.env[name]?.trim()
+  return value ? value : fallback
+}
+
+/** CSV allow-list; falls back to the legacy single PAYMENT_PROVIDER, then mock-bank. */
+export function parseEnabledProviders(
+  csv: string | undefined,
+  legacy: string | undefined
+): SelectablePaymentProvider[] {
+  const raw = csv?.trim() ? csv : (legacy ?? 'mock-bank')
+  const names = raw
+    .split(',')
+    .map(name => name.trim())
+    .filter((name): name is SelectablePaymentProvider =>
+      (SELECTABLE_PAYMENT_PROVIDERS as readonly string[]).includes(name)
+    )
+  return names.length > 0 ? [...new Set(names)] : ['mock-bank']
+}
+
 export type AppEnvironment =
   | 'local'
   | 'development'
@@ -40,13 +100,9 @@ export const configuration = (): {
   }
   rentalFlow: {
     enabled: boolean
-    paymentProvider: 'mock-bank' | 'vnpay' | 'momo' | 'sepay' | 'techcombank'
     mockBankBaseUrl: string
     mockBankSecret: string
-    vnpayGatewayUrl: string
-    vnpayReturnUrl: string
-    vnpayHashSecret: string
-    vnpayClientReturnUrl: string
+    payments: PaymentsConfig
   }
   fabric: {
     enabled: boolean
@@ -139,23 +195,69 @@ export const configuration = (): {
   },
   rentalFlow: {
     enabled: process.env.RENTAL_FLOW_V4_ENABLED === 'true',
-    paymentProvider: (process.env.PAYMENT_PROVIDER ?? 'mock-bank') as
-      | 'mock-bank'
-      | 'vnpay'
-      | 'momo'
-      | 'sepay'
-      | 'techcombank',
     mockBankBaseUrl: process.env.MOCK_BANK_BASE_URL ?? 'http://localhost:3001',
     mockBankSecret: process.env.MOCK_BANK_SECRET ?? '',
-    vnpayGatewayUrl:
-      process.env.VNPAY_GATEWAY_URL ??
-      'http://localhost:8888/order/create_payment_for_transaction',
-    vnpayReturnUrl:
-      process.env.VNPAY_RETURN_URL ??
-      'http://localhost:3001/api/v1/bank/vnpay/return',
-    vnpayHashSecret: process.env.VNPAY_HASH_SECRET ?? '',
-    vnpayClientReturnUrl:
-      process.env.VNPAY_CLIENT_RETURN_URL ?? 'http://localhost:3000',
+    payments: {
+      enabledProviders: parseEnabledProviders(
+        process.env.PAYMENT_PROVIDERS_ENABLED,
+        process.env.PAYMENT_PROVIDER
+      ),
+      gatewayTimeoutMs: Number(envOr('PAYMENT_GATEWAY_TIMEOUT_MS', '10000')),
+      attemptTtlMinutes: Number(envOr('PAYMENT_ATTEMPT_TTL_MINUTES', '15')),
+      clientReturnUrl:
+        envOr('PAYMENT_CLIENT_RETURN_URL', '') ||
+        envOr('VNPAY_CLIENT_RETURN_URL', 'http://localhost:3000'),
+      mobileReturnUrl: envOr(
+        'PAYMENT_MOBILE_RETURN_URL',
+        'thproptech://payment-result'
+      ),
+      vnpay: {
+        tmnCode: envOr('VNPAY_TMN_CODE', ''),
+        hashSecret: envOr('VNPAY_HASH_SECRET', ''),
+        payUrl: envOr(
+          'VNPAY_PAY_URL',
+          'https://sandbox.vnpayment.vn/paymentv2/vpcpay.html'
+        ),
+        returnUrl: envOr(
+          'VNPAY_RETURN_URL',
+          'http://localhost:3001/api/v1/bank/vnpay/return'
+        ),
+      },
+      momo: {
+        partnerCode: envOr('MOMO_PARTNER_CODE', ''),
+        accessKey: envOr('MOMO_ACCESS_KEY', ''),
+        secretKey: envOr('MOMO_SECRET_KEY', ''),
+        endpoint: envOr(
+          'MOMO_ENDPOINT',
+          'https://test-payment.momo.vn/v2/gateway/api/create'
+        ),
+        returnUrl: envOr(
+          'MOMO_RETURN_URL',
+          'http://localhost:3001/api/v1/bank/momo/return'
+        ),
+        ipnUrl: envOr(
+          'MOMO_IPN_URL',
+          'http://localhost:3001/api/v1/bank/momo/ipn'
+        ),
+      },
+      zalopay: {
+        appId: envOr('ZALOPAY_APP_ID', ''),
+        key1: envOr('ZALOPAY_KEY1', ''),
+        key2: envOr('ZALOPAY_KEY2', ''),
+        endpoint: envOr(
+          'ZALOPAY_ENDPOINT',
+          'https://sb-openapi.zalopay.vn/v2/create'
+        ),
+        returnUrl: envOr(
+          'ZALOPAY_RETURN_URL',
+          'http://localhost:3001/api/v1/bank/zalopay/return'
+        ),
+        callbackUrl: envOr(
+          'ZALOPAY_CALLBACK_URL',
+          'http://localhost:3001/api/v1/bank/zalopay/callback'
+        ),
+      },
+    },
   },
   fabric: {
     enabled: process.env.FABRIC_ENABLED === 'true',

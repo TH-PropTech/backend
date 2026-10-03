@@ -1,4 +1,5 @@
 import Joi from 'joi'
+import { parseEnabledProviders } from './configuration'
 
 type FabricEnvironment = Record<string, unknown>
 
@@ -108,6 +109,59 @@ function validateFabricConfiguration(
   return value
 }
 
+const PROVIDER_CSV_PATTERN =
+  /^\s*(mock-bank|vnpay|momo|zalopay)(\s*,\s*(mock-bank|vnpay|momo|zalopay))*\s*$/
+const HTTP_URL = Joi.string()
+  .uri({ scheme: ['http', 'https'] })
+  .allow('')
+  .optional()
+const HTTPS_URL = Joi.string()
+  .uri({ scheme: ['https'] })
+  .allow('')
+  .optional()
+
+/** Keys each gateway needs once it is enabled; values are never echoed. */
+const GATEWAY_REQUIRED_KEYS = {
+  vnpay: ['VNPAY_TMN_CODE', 'VNPAY_HASH_SECRET'],
+  momo: ['MOMO_PARTNER_CODE', 'MOMO_ACCESS_KEY', 'MOMO_SECRET_KEY'],
+  zalopay: ['ZALOPAY_APP_ID', 'ZALOPAY_KEY1', 'ZALOPAY_KEY2'],
+} as const
+const GATEWAY_NOTIFY_URL_KEYS = {
+  momo: 'MOMO_IPN_URL',
+  zalopay: 'ZALOPAY_CALLBACK_URL',
+} as const
+
+function validateEnabledGateways(
+  env: Record<string, unknown>,
+  helpers: Joi.CustomHelpers
+): Record<string, unknown> | Joi.ErrorReport {
+  const enabled = parseEnabledProviders(
+    env.PAYMENT_PROVIDERS_ENABLED as string | undefined,
+    env.PAYMENT_PROVIDER as string | undefined
+  )
+  for (const provider of enabled) {
+    if (provider === 'mock-bank') continue
+    const missing = GATEWAY_REQUIRED_KEYS[provider].filter(
+      key => typeof env[key] !== 'string' || env[key] === ''
+    )
+    if (missing.length > 0) {
+      return helpers.message({
+        custom: `${provider} is enabled but ${missing.join(', ')} is not set`,
+      })
+    }
+    if (provider !== 'vnpay' && env.NODE_ENV === 'production') {
+      const notifyKey = GATEWAY_NOTIFY_URL_KEYS[provider]
+      const notifyUrl = env[notifyKey]
+      if (typeof notifyUrl !== 'string' || !notifyUrl.startsWith('https://')) {
+        return helpers.message({
+          custom: `${notifyKey} must be an https URL in production`,
+        })
+      }
+    }
+  }
+  return env
+}
+
 export const envValidationSchema = Joi.object({
   NODE_ENV: Joi.string()
     .valid('local', 'development', 'test', 'staging', 'production')
@@ -145,8 +199,27 @@ export const envValidationSchema = Joi.object({
   SMARTCA_TEST_CALLBACK_SECRET: Joi.string().allow('').optional(),
   RENTAL_FLOW_V4_ENABLED: Joi.boolean().default(false),
   PAYMENT_PROVIDER: Joi.string()
-    .valid('mock-bank', 'vnpay', 'momo', 'sepay', 'techcombank')
+    .valid('mock-bank', 'vnpay', 'momo', 'zalopay', 'sepay', 'techcombank')
     .default('mock-bank'),
+  PAYMENT_PROVIDERS_ENABLED: Joi.string()
+    .pattern(PROVIDER_CSV_PATTERN)
+    .allow('')
+    .optional(),
+  PAYMENT_GATEWAY_TIMEOUT_MS: Joi.number()
+    .integer()
+    .min(1000)
+    .max(60000)
+    .default(10000),
+  PAYMENT_ATTEMPT_TTL_MINUTES: Joi.number()
+    .integer()
+    .min(5)
+    .max(60)
+    .default(15),
+  PAYMENT_CLIENT_RETURN_URL: HTTP_URL,
+  PAYMENT_MOBILE_RETURN_URL: Joi.string()
+    .uri({ scheme: ['thproptech', 'exp', 'http', 'https'] })
+    .allow('')
+    .optional(),
   MOCK_BANK_BASE_URL: Joi.string().uri().default('http://localhost:3001'),
   MOCK_BANK_SECRET: Joi.string()
     .min(32)
@@ -155,34 +228,23 @@ export const envValidationSchema = Joi.object({
       then: Joi.required(),
       otherwise: Joi.optional().allow(''),
     }),
-  VNPAY_GATEWAY_URL: Joi.string()
-    .uri({ scheme: ['http', 'https'] })
-    .when('PAYMENT_PROVIDER', {
-      is: 'vnpay',
-      then: Joi.required(),
-      otherwise: Joi.optional().allow(''),
-    }),
-  VNPAY_RETURN_URL: Joi.string()
-    .uri({ scheme: ['http', 'https'] })
-    .when('PAYMENT_PROVIDER', {
-      is: 'vnpay',
-      then: Joi.required(),
-      otherwise: Joi.optional().allow(''),
-    }),
-  VNPAY_HASH_SECRET: Joi.string()
-    .min(32)
-    .when('PAYMENT_PROVIDER', {
-      is: 'vnpay',
-      then: Joi.required(),
-      otherwise: Joi.optional().allow(''),
-    }),
-  VNPAY_CLIENT_RETURN_URL: Joi.string()
-    .uri({ scheme: ['http', 'https'] })
-    .when('PAYMENT_PROVIDER', {
-      is: 'vnpay',
-      then: Joi.required(),
-      otherwise: Joi.optional().allow(''),
-    }),
+  VNPAY_TMN_CODE: Joi.string().allow('').optional(),
+  VNPAY_HASH_SECRET: Joi.string().allow('').optional(),
+  VNPAY_PAY_URL: HTTPS_URL,
+  VNPAY_RETURN_URL: HTTP_URL,
+  VNPAY_CLIENT_RETURN_URL: HTTP_URL,
+  MOMO_PARTNER_CODE: Joi.string().allow('').optional(),
+  MOMO_ACCESS_KEY: Joi.string().allow('').optional(),
+  MOMO_SECRET_KEY: Joi.string().allow('').optional(),
+  MOMO_ENDPOINT: HTTPS_URL,
+  MOMO_RETURN_URL: HTTP_URL,
+  MOMO_IPN_URL: HTTP_URL,
+  ZALOPAY_APP_ID: Joi.string().allow('').optional(),
+  ZALOPAY_KEY1: Joi.string().allow('').optional(),
+  ZALOPAY_KEY2: Joi.string().allow('').optional(),
+  ZALOPAY_ENDPOINT: HTTPS_URL,
+  ZALOPAY_RETURN_URL: HTTP_URL,
+  ZALOPAY_CALLBACK_URL: HTTP_URL,
   FABRIC_ENABLED: Joi.boolean().default(false),
   FABRIC_EXPLORER_TX_URL_TEMPLATE: Joi.string()
     .pattern(/^\S*\{txId\}\S*$/)
@@ -323,4 +385,6 @@ export const envValidationSchema = Joi.object({
     .min(1)
     .max(8760)
     .default(24),
-}).custom(validateFabricConfiguration)
+})
+  .custom(validateFabricConfiguration)
+  .custom(validateEnabledGateways)

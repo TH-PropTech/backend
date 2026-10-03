@@ -1,64 +1,56 @@
-import {
-  Injectable,
-  Optional,
-  ServiceUnavailableException,
-} from '@nestjs/common'
+import { Injectable } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
+import { randomBytes } from 'node:crypto'
+import type { PaymentsConfig } from '../../../config/configuration'
 import type {
+  PaymentIntentInput,
   PaymentProviderAdapter,
   ProviderAccountLink,
   ProviderPaymentIntent,
 } from './payment-provider.port'
+import { formatVnTimestamp, hmacHex } from './gateway.util'
+import { vnpayCanonicalQuery } from './vnpay-callback.verifier'
 
-type FetchResponse = { ok: boolean; json(): Promise<unknown> }
-type Fetcher = (url: string, init: RequestInit) => Promise<FetchResponse>
-
-/** Token dùng để inject custom fetcher (chủ yếu cho test). */
-export const VNPAY_FETCHER = 'VNPAY_FETCHER'
-
+/** Builds and signs VNPAY 2.1.0 payment URLs locally (no bridge service). */
 @Injectable()
 export class VnpayAdapter implements PaymentProviderAdapter {
   readonly name = 'vnpay' as const
-  private readonly _fetcher: Fetcher
 
-  constructor(
-    private readonly configService: ConfigService,
-    @Optional() fetcher?: Fetcher
-  ) {
-    this._fetcher = fetcher ?? globalThis.fetch
+  constructor(private readonly configService: ConfigService) {}
+
+  newTxRef(): string {
+    return `VNPAY-${randomBytes(12).toString('hex')}`
   }
 
-  async createPaymentIntent(input: {
-    amount: number
-    description: string
-    customerRef: string
-    txRef: string
-  }): Promise<ProviderPaymentIntent> {
-    const response = await this._fetcher(
-      this.configService.getOrThrow<string>('rentalFlow.vnpayGatewayUrl'),
-      {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          transactionId: input.txRef,
-          amount: input.amount,
-          returnUrl: this.configService.getOrThrow<string>(
-            'rentalFlow.vnpayReturnUrl'
-          ),
-          language: 'vn',
-        }),
-      }
+  createPaymentIntent(
+    input: PaymentIntentInput
+  ): Promise<ProviderPaymentIntent> {
+    const config = this.configService.getOrThrow<PaymentsConfig['vnpay']>(
+      'rentalFlow.payments.vnpay'
     )
-    const body: unknown = response.ok ? await response.json() : null
-    if (!isPaymentUrlResponse(body)) {
-      throw new ServiceUnavailableException('VNPAY_GATEWAY_UNAVAILABLE')
+    const params: Record<string, string> = {
+      vnp_Version: '2.1.0',
+      vnp_Command: 'pay',
+      vnp_TmnCode: config.tmnCode,
+      vnp_Amount: String(input.amount * 100),
+      vnp_CurrCode: 'VND',
+      vnp_TxnRef: input.txRef,
+      vnp_OrderInfo: input.description,
+      vnp_OrderType: 'other',
+      vnp_Locale: 'vn',
+      vnp_ReturnUrl: config.returnUrl,
+      vnp_IpAddr: normalizeIp(input.clientIp),
+      vnp_CreateDate: formatVnTimestamp(new Date()),
+      vnp_ExpireDate: formatVnTimestamp(input.expiresAt),
     }
-    return {
+    const query = vnpayCanonicalQuery(params)
+    const secureHash = hmacHex('sha512', config.hashSecret, query)
+    return Promise.resolve({
       provider: this.name,
       txRef: input.txRef,
-      redirectUrl: body.paymentUrl,
-      expiresAt: new Date(Date.now() + 15 * 60 * 1000),
-    }
+      redirectUrl: `${config.payUrl}?${query}&vnp_SecureHash=${secureHash}`,
+      expiresAt: input.expiresAt,
+    })
   }
 
   getAccountLink(userId: string): Promise<ProviderAccountLink> {
@@ -71,19 +63,8 @@ export class VnpayAdapter implements PaymentProviderAdapter {
   }
 }
 
-function isPaymentUrlResponse(value: unknown): value is { paymentUrl: string } {
-  if (
-    typeof value !== 'object' ||
-    value === null ||
-    !('paymentUrl' in value) ||
-    typeof value.paymentUrl !== 'string'
-  ) {
-    return false
-  }
-  try {
-    const url = new URL(value.paymentUrl)
-    return url.protocol === 'https:'
-  } catch {
-    return false
-  }
+/** VNPAY expects an IPv4-looking address; map loopback/IPv4-mapped forms. */
+function normalizeIp(ip: string | undefined): string {
+  if (!ip || ip === '::1') return '127.0.0.1'
+  return ip.startsWith('::ffff:') ? ip.slice('::ffff:'.length) : ip
 }

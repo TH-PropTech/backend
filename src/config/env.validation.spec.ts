@@ -55,25 +55,85 @@ describe('envValidationSchema eKYC configuration', () => {
     expect(rejected.error?.message).toContain('PAYMENT_PROVIDER')
   })
 
-  it('requires a complete VNPay configuration when VNPay is selected', () => {
-    const rejected = envValidationSchema.validate({
-      ...baseEnvironment,
-      EKYC_SERVICE_URL: 'https://ekyc.example.com',
-      PAYMENT_PROVIDER: 'vnpay',
-    })
-    expect(rejected.error?.message).toContain('VNPAY_GATEWAY_URL')
+  const gatewayEnvironment = {
+    VNPAY_TMN_CODE: 'TESTTMN1',
+    VNPAY_HASH_SECRET: 'vnpay-test-secret',
+    MOMO_PARTNER_CODE: 'MOMOTEST',
+    MOMO_ACCESS_KEY: 'momo-access',
+    MOMO_SECRET_KEY: 'momo-secret',
+    ZALOPAY_APP_ID: '2553',
+    ZALOPAY_KEY1: 'zalo-key1',
+    ZALOPAY_KEY2: 'zalo-key2',
+  }
 
-    const accepted = envValidationSchema.validate({
+  it('defaults to mock-bank only when no gateway is enabled', () => {
+    const result = envValidationSchema.validate({
+      ...baseEnvironment,
+      EKYC_SERVICE_URL: 'https://ekyc.example.com',
+    })
+    expect(result.error).toBeUndefined()
+  })
+
+  it.each([
+    ['vnpay', 'VNPAY_HASH_SECRET'],
+    ['momo', 'MOMO_SECRET_KEY'],
+    ['zalopay', 'ZALOPAY_KEY2'],
+  ])(
+    'rejects enabled %s without %s and never echoes secrets',
+    (provider, missingKey) => {
+      const result = envValidationSchema.validate({
+        ...baseEnvironment,
+        ...gatewayEnvironment,
+        EKYC_SERVICE_URL: 'https://ekyc.example.com',
+        PAYMENT_PROVIDERS_ENABLED: provider,
+        [missingKey]: '',
+      })
+      expect(result.error?.message).toContain(missingKey)
+      for (const secret of Object.values(gatewayEnvironment)) {
+        expect(result.error?.message).not.toContain(secret)
+      }
+    }
+  )
+
+  it('applies the legacy PAYMENT_PROVIDER when the allow-list is unset', () => {
+    const result = envValidationSchema.validate({
       ...baseEnvironment,
       EKYC_SERVICE_URL: 'https://ekyc.example.com',
       PAYMENT_PROVIDER: 'vnpay',
-      VNPAY_GATEWAY_URL:
-        'http://localhost:8888/order/create_payment_for_transaction',
-      VNPAY_RETURN_URL: 'http://localhost:3001/api/v1/bank/vnpay/return',
-      VNPAY_HASH_SECRET: 'a'.repeat(32),
-      VNPAY_CLIENT_RETURN_URL: 'http://localhost:3000',
     })
-    expect(accepted.error).toBeUndefined()
+    expect(result.error?.message).toContain('VNPAY_TMN_CODE')
+  })
+
+  it('accepts all three gateways when fully configured', () => {
+    const result = envValidationSchema.validate({
+      ...baseEnvironment,
+      ...gatewayEnvironment,
+      EKYC_SERVICE_URL: 'https://ekyc.example.com',
+      PAYMENT_PROVIDERS_ENABLED: 'mock-bank, vnpay,momo,zalopay',
+    })
+    expect(result.error).toBeUndefined()
+  })
+
+  it('rejects unknown names in the allow-list', () => {
+    const result = envValidationSchema.validate({
+      ...baseEnvironment,
+      EKYC_SERVICE_URL: 'https://ekyc.example.com',
+      PAYMENT_PROVIDERS_ENABLED: 'vnpay,paypal',
+    })
+    expect(result.error?.message).toContain('PAYMENT_PROVIDERS_ENABLED')
+  })
+
+  it('requires https notify URLs for MoMo and ZaloPay in production', () => {
+    const result = envValidationSchema.validate({
+      ...baseEnvironment,
+      ...gatewayEnvironment,
+      NODE_ENV: 'production',
+      EKYC_SERVICE_URL: 'https://ekyc.example.com',
+      KYC_MEDIA_ENCRYPTION_KEY: 'a'.repeat(64),
+      PAYMENT_PROVIDERS_ENABLED: 'momo',
+      MOMO_IPN_URL: 'http://api.example.com/api/v1/bank/momo/ipn',
+    })
+    expect(result.error?.message).toContain('MOMO_IPN_URL')
   })
 
   it('accepts valid Fabric and rental operations settings', () => {

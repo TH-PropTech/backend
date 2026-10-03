@@ -310,17 +310,20 @@ describe('canonical contract workspace integration', () => {
       } as never,
       {} as never,
       {
-        assertMockProvider: jest.fn(),
-        providerName: jest.fn().mockReturnValue('mock-bank'),
-        createPaymentIntent: jest.fn().mockResolvedValue({
-          provider: 'mock-bank',
-          txRef: 'TX-FLOW-1',
-          expiresAt: new Date(Date.now() + 15 * 60_000),
+        isEnabled: jest.fn().mockReturnValue(true),
+        get: jest.fn().mockReturnValue({
+          name: 'mock-bank',
+          newTxRef: jest.fn().mockReturnValue('TX-FLOW-1'),
+          createPaymentIntent: jest.fn().mockResolvedValue({
+            provider: 'mock-bank',
+            txRef: 'TX-FLOW-1',
+            expiresAt: new Date(Date.now() + 15 * 60_000),
+          }),
         }),
       } as never,
+      { get: jest.fn() } as never,
       {} as never,
-      {} as never,
-      {} as never,
+      contractRepository as never,
       {} as never
     )
     const contractsService = new ContractsService(
