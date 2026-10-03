@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common'
 import { ObjectId } from 'mongodb'
 import { ConflictException } from '@nestjs/common'
 import { createHash } from 'node:crypto'
@@ -81,9 +82,11 @@ describe('MockBankService', () => {
       findOne: jest.Mock
       create: jest.Mock
       save: jest.Mock
+      update: jest.Mock
     }
     paymentRepository: { findOne: jest.Mock; save: jest.Mock }
     settlementRepository: { findOne: jest.Mock; save: jest.Mock }
+    contractRepository: { findOne: jest.Mock }
     walletRepository: {
       findOne: jest.Mock
       create: jest.Mock
@@ -91,7 +94,8 @@ describe('MockBankService', () => {
       manager: { findOneAndUpdate: jest.Mock }
     }
     providerRegistry: {
-      assertMockProvider: jest.Mock
+      isEnabled: jest.Mock
+      get: jest.Mock
       getAccountLink: jest.Mock
       createPaymentIntent: jest.Mock
     }
@@ -136,6 +140,7 @@ describe('MockBankService', () => {
       save: jest.fn(
         (input: unknown): Promise<unknown> => Promise.resolve(input)
       ),
+      update: jest.fn().mockResolvedValue({ affected: 1 }),
     }
     const paymentRepository = {
       findOne: jest.fn().mockResolvedValue(payment),
@@ -149,6 +154,7 @@ describe('MockBankService', () => {
         (input: unknown): Promise<unknown> => Promise.resolve(input)
       ),
     }
+    const contractRepository = { findOne: jest.fn().mockResolvedValue(null) }
     const depositAgreementsService = {
       getAgreement: jest.fn(),
       markPaymentPending: jest.fn(),
@@ -179,21 +185,26 @@ describe('MockBankService', () => {
             : 'test'
       ),
     }
-    const providerRegistry = {
-      assertMockProvider: jest.fn(),
-      providerName: jest.fn().mockReturnValue('mock-bank'),
-      getAccountLink: jest.fn().mockResolvedValue({
-        provider: 'mock-bank',
-        externalAccountRef: `mock-account:${tenantId}`,
-        status: 'linked',
-        simulation: true,
-      }),
+    const mockAdapter = {
+      name: 'mock-bank' as const,
+      newTxRef: jest.fn().mockReturnValue('MOCK-1'),
       createPaymentIntent: jest.fn().mockResolvedValue({
         provider: 'mock-bank',
         txRef: 'MOCK-1',
         redirectUrl: 'mockbank://pay?txRef=MOCK-1&amount=2000000',
         expiresAt: new Date(Date.now() + 60_000),
       }),
+    }
+    const providerRegistry = {
+      isEnabled: jest.fn().mockReturnValue(true),
+      get: jest.fn().mockReturnValue(mockAdapter),
+      getAccountLink: jest.fn().mockResolvedValue({
+        provider: 'mock-bank',
+        externalAccountRef: `mock-account:${tenantId}`,
+        status: 'linked',
+        simulation: true,
+      }),
+      createPaymentIntent: mockAdapter.createPaymentIntent,
     }
     const ledgerOutboxService = { enqueue: jest.fn().mockResolvedValue({}) }
     const service = new MockBankService(
@@ -204,8 +215,8 @@ describe('MockBankService', () => {
       providerRegistry as never,
       configService as never,
       ledgerOutboxService as never,
-      {} as never,
-      settlementRepository as never
+      settlementRepository as never,
+      contractRepository as never
     )
     return {
       service,
@@ -214,6 +225,7 @@ describe('MockBankService', () => {
       attemptRepository,
       paymentRepository,
       settlementRepository,
+      contractRepository,
       walletRepository,
       providerRegistry,
       configService,
@@ -224,6 +236,7 @@ describe('MockBankService', () => {
 
   it('creates a rent payment attempt from server-side invoice data', async () => {
     const { service, attemptRepository } = createContext()
+    attemptRepository.findOne.mockResolvedValueOnce(null)
 
     const result = await service.initRentPayment(paymentId, tenantId)
 
@@ -247,6 +260,7 @@ describe('MockBankService', () => {
       context.service.initInvoicePayment(paymentId, tenantId)
     ).rejects.toThrow('PAYMENT_ACCESS_DENIED')
 
+    context.attemptRepository.findOne.mockResolvedValueOnce(null)
     const result = await context.service.initInvoicePayment(
       paymentId,
       'landlord-1'
@@ -315,6 +329,93 @@ describe('MockBankService', () => {
     ).rejects.toThrow('PAYMENT_ACCESS_DENIED')
     expect(context.providerRegistry.createPaymentIntent).not.toHaveBeenCalled()
     expect(context.attemptRepository.save).not.toHaveBeenCalled()
+  })
+
+  it('uses the application contract for a deposit attempt before the agreement is linked', async () => {
+    const context = createContext()
+    context.depositAgreementsService.getAgreement.mockResolvedValue({
+      _id: new ObjectId('507f1f77bcf86cd799439011'),
+      applicationId: 'application-1',
+      linkedLeaseContractId: null,
+      agreementCode: 'DPA-1',
+      tenantId,
+      amount: 2_000_000,
+      status: 'accepted',
+      tenantConsent: { consentedAt: new Date(), contentHash: 'hash' },
+    })
+    context.contractRepository.findOne.mockResolvedValue({
+      _id: new ObjectId('507f1f77bcf86cd799439012'),
+    })
+    context.attemptRepository.findOne.mockResolvedValueOnce(null)
+
+    await context.service.initDepositPayment('deposit-1', tenantId)
+
+    expect(context.contractRepository.findOne).toHaveBeenCalledWith({
+      where: { rentalApplicationId: 'application-1' },
+    })
+    expect(context.attemptRepository.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        contractId: '507f1f77bcf86cd799439012',
+      })
+    )
+  })
+
+  it('returns the canonical deposit state only to the attempt owner', async () => {
+    const context = createContext()
+    context.attempt.paymentType = 'deposit'
+    context.attempt.status = 'succeeded'
+    context.depositAgreementsService.getAgreement.mockResolvedValue({
+      status: 'paid',
+    })
+
+    await expect(
+      context.service.getGatewayPaymentResult(context.attempt.txRef, tenantId)
+    ).resolves.toEqual(
+      expect.objectContaining({
+        txRef: context.attempt.txRef,
+        targetPaid: true,
+        paymentType: 'deposit',
+      })
+    )
+    expect(context.attemptRepository.findOne).toHaveBeenCalledWith({
+      where: { txRef: context.attempt.txRef, userId: tenantId },
+    })
+  })
+
+  it('does not reveal a payment result when the owner does not match', async () => {
+    const context = createContext()
+    context.attemptRepository.findOne.mockResolvedValueOnce(null)
+
+    await expect(
+      context.service.getGatewayPaymentResult(
+        context.attempt.txRef,
+        'other-user'
+      )
+    ).rejects.toThrow('PAYMENT_ATTEMPT_NOT_FOUND')
+    expect(context.depositAgreementsService.getAgreement).not.toHaveBeenCalled()
+    expect(context.paymentRepository.findOne).not.toHaveBeenCalled()
+  })
+
+  it('reads paid rent from the payment record', async () => {
+    const context = createContext()
+    context.payment.status = 'paid'
+
+    await expect(
+      context.service.getGatewayPaymentResult(context.attempt.txRef, tenantId)
+    ).resolves.toMatchObject({ paymentType: 'rent', targetPaid: true })
+  })
+
+  it('reads settlement state only for the paying tenant', async () => {
+    const context = createContext()
+    context.attempt.paymentType = 'settlement'
+    context.settlementRepository.findOne.mockResolvedValue({
+      status: 'paid',
+      tenantId,
+    })
+
+    await expect(
+      context.service.getGatewayPaymentResult(context.attempt.txRef, tenantId)
+    ).resolves.toMatchObject({ paymentType: 'settlement', targetPaid: true })
   })
 
   it('reuses a live deposit attempt once the agreement is payment-pending', async () => {
@@ -453,6 +554,7 @@ describe('MockBankService', () => {
         })
     )
 
+    context.attemptRepository.findOne.mockResolvedValueOnce(null)
     const result = await context.service.initSettlementPayment(
       settlementId,
       tenantId
@@ -857,6 +959,10 @@ describe('MockBankService', () => {
       amount: context.attempt.amount,
     }
     context.attempt.paymentType = 'deposit'
+    context.depositAgreementsService.getAgreement.mockResolvedValue({
+      status: 'payment-pending',
+      paymentAttemptId: null,
+    })
     context.depositAgreementsService.recordDepositPaid.mockResolvedValue(
       agreement
     )
@@ -993,12 +1099,231 @@ describe('MockBankService', () => {
 
   it('fails closed when an unimplemented external provider is selected', async () => {
     const context = createContext()
-    context.providerRegistry.assertMockProvider.mockImplementation(() => {
-      throw new Error('BANK_PROVIDER_ADAPTER_NOT_CONFIGURED')
+    context.providerRegistry.get.mockImplementation(() => {
+      throw new BadRequestException('PAYMENT_PROVIDER_NOT_ENABLED')
     })
 
     await expect(
-      context.service.initRentPayment(paymentId, tenantId)
-    ).rejects.toThrow('BANK_PROVIDER_ADAPTER_NOT_CONFIGURED')
+      context.service.initRentPayment(paymentId, tenantId, {
+        provider: 'techcombank',
+      })
+    ).rejects.toThrow('PAYMENT_PROVIDER_NOT_ENABLED')
+    expect(context.attemptRepository.save).not.toHaveBeenCalled()
+  })
+
+  describe('settleVerifiedAttempt (gateway dispatcher)', () => {
+    const success = { succeeded: true, providerTransactionId: 'GW-1' }
+
+    it('replays an already-succeeded attempt without side effects', async () => {
+      const context = createContext()
+      context.attempt.status = 'succeeded'
+
+      await expect(
+        context.service.settleVerifiedAttempt(
+          context.attempt as never,
+          success,
+          'digest'
+        )
+      ).resolves.toBe('replayed')
+      expect(context.attemptRepository.update).not.toHaveBeenCalled()
+      expect(context.paymentRepository.save).not.toHaveBeenCalled()
+    })
+
+    it('marks a pending attempt failed on a verified unsuccessful result', async () => {
+      const context = createContext()
+
+      await expect(
+        context.service.settleVerifiedAttempt(
+          context.attempt as never,
+          { succeeded: false, providerTransactionId: null },
+          'digest'
+        )
+      ).resolves.toBe('failed')
+      expect(context.attemptRepository.save).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'failed' })
+      )
+      expect(context.paymentRepository.save).not.toHaveBeenCalled()
+    })
+
+    it('settles exactly once when IPN and browser return race', async () => {
+      const context = createContext()
+      context.attemptRepository.update
+        .mockResolvedValueOnce({ affected: 1 })
+        .mockResolvedValueOnce({ affected: 0 })
+      const first = { ...context.attempt }
+      const second = { ...context.attempt }
+
+      const outcomes = await Promise.all([
+        context.service.settleVerifiedAttempt(first as never, success, 'a'),
+        context.service.settleVerifiedAttempt(second as never, success, 'b'),
+      ])
+
+      expect(outcomes.sort()).toEqual(['replayed', 'settled'])
+      expect(context.paymentRepository.save).toHaveBeenCalledTimes(1)
+      expect(context.paymentRepository.save).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'paid', txRef: 'MOCK-RENT-1' })
+      )
+      expect(first).toMatchObject({
+        status: 'succeeded',
+        providerTransactionId: 'GW-1',
+      })
+    })
+
+    it('settles a late success on an expired attempt while the target is unpaid', async () => {
+      const context = createContext()
+      context.attempt.status = 'expired' as never
+
+      await expect(
+        context.service.settleVerifiedAttempt(
+          context.attempt as never,
+          success,
+          'digest'
+        )
+      ).resolves.toBe('settled')
+      expect(context.paymentRepository.save).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'paid' })
+      )
+    })
+
+    it('records duplicate-paid instead of paying a target settled elsewhere', async () => {
+      const context = createContext()
+      const events = { record: jest.fn().mockResolvedValue(undefined) }
+      Object.assign(context.service, { transactionEventService: events })
+      context.attempt.status = 'expired' as never
+      context.payment.status = 'paid'
+      Object.assign(context.payment, { txRef: 'ZALOPAY-OTHER' })
+
+      await expect(
+        context.service.settleVerifiedAttempt(
+          context.attempt as never,
+          success,
+          'digest'
+        )
+      ).resolves.toBe('duplicate-paid')
+      expect(context.paymentRepository.save).not.toHaveBeenCalled()
+      expect(context.ledgerOutboxService.enqueue).not.toHaveBeenCalled()
+      expect(context.attempt.status).toBe('succeeded')
+      expect(events.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          eventType: 'payment-attempt.duplicate-paid',
+          refs: expect.objectContaining({
+            txRef: 'MOCK-RENT-1',
+            amount: '2000000',
+          }) as unknown,
+        })
+      )
+    })
+
+    it('releases the lock when settlement throws', async () => {
+      const context = createContext()
+      context.paymentRepository.findOne.mockResolvedValue(null)
+
+      await expect(
+        context.service.settleVerifiedAttempt(
+          context.attempt as never,
+          success,
+          'digest'
+        )
+      ).rejects.toThrow('PAYMENT_NOT_FOUND')
+      expect(context.attemptRepository.update).toHaveBeenLastCalledWith(
+        expect.objectContaining({ status: 'processing' }),
+        { status: 'pending' }
+      )
+    })
+  })
+
+  describe('createAttempt reuse and gateway switching', () => {
+    it('reuses a live same-provider attempt without calling the gateway', async () => {
+      const context = createContext()
+
+      const result = await context.service.initRentPayment(paymentId, tenantId)
+
+      expect(result.txRef).toBe('MOCK-RENT-1')
+      expect(
+        context.providerRegistry.createPaymentIntent
+      ).not.toHaveBeenCalled()
+      expect(context.attemptRepository.save).not.toHaveBeenCalled()
+    })
+
+    it('expires the live attempt and creates a new one when the provider changes', async () => {
+      const context = createContext()
+      const vnpayAdapter = {
+        name: 'vnpay' as const,
+        newTxRef: jest.fn().mockReturnValue('VNPAY-new'),
+        createPaymentIntent: jest.fn().mockResolvedValue({
+          provider: 'vnpay',
+          txRef: 'VNPAY-new',
+          redirectUrl: 'https://sandbox.vnpayment.vn/pay?x=1',
+          expiresAt: new Date(Date.now() + 60_000),
+        }),
+      }
+      context.providerRegistry.get.mockReturnValue(vnpayAdapter)
+
+      const result = await context.service.initRentPayment(
+        paymentId,
+        tenantId,
+        { provider: 'vnpay', clientChannel: 'mobile', clientIp: '10.0.0.1' }
+      )
+
+      expect(result).toMatchObject({
+        provider: 'vnpay',
+        txRef: 'VNPAY-new',
+        deepLink: 'https://sandbox.vnpayment.vn/pay?x=1',
+      })
+      expect(context.attemptRepository.save).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({ txRef: 'MOCK-RENT-1', status: 'expired' })
+      )
+      expect(context.attemptRepository.save).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          provider: 'vnpay',
+          txRef: 'VNPAY-new',
+          clientChannel: 'mobile',
+          status: 'pending',
+        })
+      )
+      expect(vnpayAdapter.createPaymentIntent).toHaveBeenCalledWith(
+        expect.objectContaining({ txRef: 'VNPAY-new', clientIp: '10.0.0.1' })
+      )
+    })
+
+    it('writes nothing when the gateway rejects the create request', async () => {
+      const context = createContext()
+      context.attemptRepository.findOne.mockResolvedValueOnce(null)
+      context.providerRegistry.createPaymentIntent.mockRejectedValueOnce(
+        new Error('PAYMENT_GATEWAY_UNAVAILABLE')
+      )
+
+      await expect(
+        context.service.initRentPayment(paymentId, tenantId)
+      ).rejects.toThrow('PAYMENT_GATEWAY_UNAVAILABLE')
+      expect(context.attemptRepository.save).not.toHaveBeenCalled()
+    })
+
+    it('does not mark the deposit payment-pending when the gateway fails', async () => {
+      const context = createContext()
+      context.depositAgreementsService.getAgreement.mockResolvedValue({
+        _id: new ObjectId('507f1f77bcf86cd799439011'),
+        agreementCode: 'DPA-1',
+        tenantId,
+        landlordId: 'landlord-1',
+        amount: 5_000_000,
+        status: 'accepted',
+        tenantConsent: { consentedAt: new Date(), contentHash: 'hash' },
+      })
+      context.attemptRepository.findOne.mockResolvedValueOnce(null)
+      context.providerRegistry.createPaymentIntent.mockRejectedValueOnce(
+        new Error('PAYMENT_GATEWAY_UNAVAILABLE')
+      )
+
+      await expect(
+        context.service.initDepositPayment('deposit-1', tenantId)
+      ).rejects.toThrow('PAYMENT_GATEWAY_UNAVAILABLE')
+      expect(
+        context.depositAgreementsService.markPaymentPending
+      ).not.toHaveBeenCalled()
+      expect(context.attemptRepository.save).not.toHaveBeenCalled()
+    })
   })
 })

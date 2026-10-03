@@ -9,6 +9,15 @@ import {
 } from 'typeorm'
 import type { PaymentProviderName } from '../../mock-bank/providers/payment-provider.port'
 
+export type PaymentAttemptStatus =
+  | 'pending'
+  | 'processing'
+  | 'succeeded'
+  | 'failed'
+  | 'expired'
+
+export type PaymentClientChannel = 'web' | 'mobile'
+
 @Entity('payment_attempts')
 @Index(['provider', 'txRef'], { unique: true })
 export class PaymentAttempt {
@@ -40,7 +49,8 @@ export class PaymentAttempt {
   amount!: number
 
   @Column({ type: 'string', default: 'pending' })
-  status!: 'pending' | 'succeeded' | 'failed' | 'expired'
+  /** `processing` is a transient settlement lock (see MockBankService). */
+  status!: PaymentAttemptStatus
 
   @Column()
   expiresAt!: Date
@@ -53,6 +63,13 @@ export class PaymentAttempt {
 
   @Column({ nullable: true })
   providerPaymentUrl!: string | null
+
+  /** Gateway-side id: vnp_TransactionNo | MoMo transId | zp_trans_id. */
+  @Column({ nullable: true })
+  providerTransactionId?: string | null
+
+  @Column({ type: 'string', nullable: true })
+  clientChannel?: PaymentClientChannel | null
 
   @CreateDateColumn()
   createdAt!: Date

@@ -11,10 +11,16 @@ import { MockBankAdapter } from './providers/mock-bank.adapter'
 import { PaymentProviderRegistry } from './providers/payment-provider.registry'
 import { VnpayAdapter } from './providers/vnpay.adapter'
 import { VnpayCallbackVerifier } from './providers/vnpay-callback.verifier'
+import { MomoAdapter } from './providers/momo.adapter'
+import { MomoCallbackVerifier } from './providers/momo-callback.verifier'
+import { ZalopayAdapter } from './providers/zalopay.adapter'
+import { ZalopayCallbackVerifier } from './providers/zalopay-callback.verifier'
+import { GatewayCallbackService } from './gateway-callback.service'
 import { FabricModule } from '../fabric/fabric.module'
 import { PaymentRequestsController } from './payment-requests.controller'
 import { MoveInSettlement } from '../move-in-settlements/schemas/move-in-settlement.schema'
 import { MoveInSettlementsModule } from '../move-in-settlements/move-in-settlements.module'
+import { Contract } from '../contracts/schemas/contract.schema'
 
 @Module({
   imports: [
@@ -27,6 +33,7 @@ import { MoveInSettlementsModule } from '../move-in-settlements/move-in-settleme
       PaymentAttempt,
       MockWallet,
       MoveInSettlement,
+      Contract,
     ]),
   ],
   controllers: [MockBankController, PaymentRequestsController],
@@ -35,7 +42,12 @@ import { MoveInSettlementsModule } from '../move-in-settlements/move-in-settleme
     MockBankAdapter,
     VnpayAdapter,
     VnpayCallbackVerifier,
+    MomoAdapter,
+    MomoCallbackVerifier,
+    ZalopayAdapter,
+    ZalopayCallbackVerifier,
     PaymentProviderRegistry,
+    GatewayCallbackService,
   ],
   exports: [MockBankService],
 })

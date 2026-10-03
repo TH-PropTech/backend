@@ -1,56 +1,36 @@
+import { Injectable } from '@nestjs/common'
+import { ConfigService } from '@nestjs/config'
+import type { PaymentsConfig } from '../../../config/configuration'
 import {
-  BadRequestException,
-  ConflictException,
-  Injectable,
-} from '@nestjs/common'
-import { createHmac, timingSafeEqual } from 'node:crypto'
+  GatewayVerificationError,
+  type GatewayCallbackKind,
+  type GatewayVerdict,
+  type GatewayVerifier,
+} from './payment-provider.port'
+import {
+  asRecord,
+  hmacHex,
+  parseVndAmount,
+  sameSignature,
+  stringField,
+} from './gateway.util'
 
-type VnpayQuery = Record<string, string | string[] | undefined>
-
-@Injectable()
-export class VnpayCallbackVerifier {
-  verify(
-    query: VnpayQuery,
-    expected: { secret: string; txRef: string; amount: number }
-  ): { txRef: string; amount: number; succeeded: boolean } {
-    const signature = getQueryValue(query, 'vnp_SecureHash')
-    const txRef = getQueryValue(query, 'vnp_TxnRef')
-    const amountMinor = getQueryValue(query, 'vnp_Amount')
-    const responseCode = getQueryValue(query, 'vnp_ResponseCode')
-    if (!signature || !txRef || !amountMinor || !responseCode) {
-      throw new BadRequestException('INVALID_VNPAY_CALLBACK')
-    }
-    const expectedSignature = createHmac('sha512', expected.secret)
-      .update(canonicalQuery(query))
-      .digest('hex')
-    if (!sameSignature(signature, expectedSignature)) {
-      throw new BadRequestException('INVALID_VNPAY_SIGNATURE')
-    }
-    if (txRef !== expected.txRef) {
-      throw new ConflictException('VNPAY_TRANSACTION_MISMATCH')
-    }
-    if (!/^\d+$/.test(amountMinor)) {
-      throw new BadRequestException('INVALID_VNPAY_AMOUNT')
-    }
-    const minor = Number(amountMinor)
-    if (!Number.isSafeInteger(minor) || minor / 100 !== expected.amount) {
-      throw new ConflictException('VNPAY_AMOUNT_MISMATCH')
-    }
-    return { txRef, amount: expected.amount, succeeded: responseCode === '00' }
-  }
-}
-
-function getQueryValue(query: VnpayQuery, key: string): string | null {
-  const value = query[key]
-  return typeof value === 'string' ? value : null
-}
-
-function canonicalQuery(query: VnpayQuery): string {
-  return Object.entries(query)
-    .filter(([key]) => key !== 'vnp_SecureHash' && key !== 'vnp_SecureHashType')
-    .map(([key]) => [key, getQueryValue(query, key)] as const)
+/**
+ * VNPAY signing input: `vnp_*` fields (minus the hash fields) sorted by ASCII
+ * key, each value URL-encoded with spaces as `+`, joined by `&`. Used for
+ * both outgoing payment URLs and incoming return/IPN verification.
+ */
+export function vnpayCanonicalQuery(params: Record<string, unknown>): string {
+  return Object.keys(params)
+    .filter(
+      key =>
+        key.startsWith('vnp_') &&
+        key !== 'vnp_SecureHash' &&
+        key !== 'vnp_SecureHashType'
+    )
+    .map(key => [key, stringField(params, key)] as const)
     .filter((entry): entry is readonly [string, string] => entry[1] !== null)
-    .sort(([left], [right]) => left.localeCompare(right))
+    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
     .map(
       ([key, value]) =>
         `${encodeURIComponent(key)}=${encodeURIComponent(value).replace(/%20/g, '+')}`
@@ -58,11 +38,59 @@ function canonicalQuery(query: VnpayQuery): string {
     .join('&')
 }
 
-function sameSignature(received: string, expected: string): boolean {
-  const actualBuffer = Buffer.from(received, 'utf8')
-  const expectedBuffer = Buffer.from(expected, 'utf8')
-  return (
-    actualBuffer.length === expectedBuffer.length &&
-    timingSafeEqual(actualBuffer, expectedBuffer)
-  )
+@Injectable()
+export class VnpayCallbackVerifier implements GatewayVerifier {
+  readonly name = 'vnpay' as const
+
+  constructor(private readonly configService: ConfigService) {}
+
+  extractTxRef(payload: unknown): string | null {
+    const query = asRecord(payload)
+    return query ? stringField(query, 'vnp_TxnRef') : null
+  }
+
+  /** IPN and browser return share one format and one signature scheme. */
+  verify(
+    payload: unknown,
+    _kind: GatewayCallbackKind,
+    expected: { txRef: string; amount: number }
+  ): GatewayVerdict {
+    const query = asRecord(payload)
+    const signature = query && stringField(query, 'vnp_SecureHash')
+    const txRef = query && stringField(query, 'vnp_TxnRef')
+    const amountMinor = query && stringField(query, 'vnp_Amount')
+    const responseCode = query && stringField(query, 'vnp_ResponseCode')
+    if (!query || !signature || !txRef || !amountMinor || !responseCode) {
+      throw new GatewayVerificationError('invalid-payload')
+    }
+    const config = this.configService.getOrThrow<PaymentsConfig['vnpay']>(
+      'rentalFlow.payments.vnpay'
+    )
+    const expectedSignature = hmacHex(
+      'sha512',
+      config.hashSecret,
+      vnpayCanonicalQuery(query)
+    )
+    if (!sameSignature(signature, expectedSignature)) {
+      throw new GatewayVerificationError('invalid-signature')
+    }
+    if (stringField(query, 'vnp_TmnCode') !== config.tmnCode) {
+      throw new GatewayVerificationError('merchant-mismatch')
+    }
+    if (txRef !== expected.txRef) {
+      throw new GatewayVerificationError('unknown-reference')
+    }
+    const minor = parseVndAmount(amountMinor)
+    if (minor === null || minor !== expected.amount * 100) {
+      throw new GatewayVerificationError('amount-mismatch')
+    }
+    return {
+      txRef,
+      amount: expected.amount,
+      succeeded:
+        responseCode === '00' &&
+        stringField(query, 'vnp_TransactionStatus') === '00',
+      providerTransactionId: stringField(query, 'vnp_TransactionNo'),
+    }
+  }
 }

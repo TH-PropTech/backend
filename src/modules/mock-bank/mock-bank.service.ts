@@ -20,19 +20,27 @@ import { MongoRepository, Repository } from 'typeorm'
 import { DepositAgreementsService } from '../contracts/deposit-agreements.service'
 import { evaluatePayDeposit } from '../contracts/flow/flow-guards'
 import { Payment } from '../payments/schemas/payment.schema'
-import { PaymentAttempt } from '../payments/schemas/payment-attempt.schema'
+import {
+  PaymentAttempt,
+  type PaymentAttemptStatus,
+  type PaymentClientChannel,
+} from '../payments/schemas/payment-attempt.schema'
 import { MockWallet } from './schemas/mock-wallet.schema'
 import type { PaymentCallbackDto } from './dto/init-payment.dto'
 import { ObjectId } from 'mongodb'
 import { PaymentProviderRegistry } from './providers/payment-provider.registry'
-import type { PaymentProviderName } from './providers/payment-provider.port'
+import type {
+  GatewayVerdict,
+  PaymentProviderName,
+} from './providers/payment-provider.port'
+import type { PaymentsConfig } from '../../config/configuration'
 import { LedgerOutboxService } from '../fabric/ledger-outbox.service'
-import { VnpayCallbackVerifier } from './providers/vnpay-callback.verifier'
 import {
   buildPaymentRequest,
   type PaymentRequestView,
 } from './payment-request.builder'
 import type { DepositAgreement } from '../contracts/schemas/deposit-agreement.schema'
+import { Contract } from '../contracts/schemas/contract.schema'
 import { MoveInSettlement } from '../move-in-settlements/schemas/move-in-settlement.schema'
 import { MoveInSettlementsService } from '../move-in-settlements/move-in-settlements.service'
 import { RentalTransactionEventService } from '../rental-transactions/rental-transaction-event.service'
@@ -51,12 +59,36 @@ export type MockPaymentInit = {
   status: 'pending'
 }
 
-type VnpayQuery = Record<string, string | string[] | undefined>
-
-export type VnpayPaymentReturn = {
-  status: 'succeeded' | 'failed'
-  redirectUrl: string
+export type GatewayPaymentResult = {
+  txRef: string
+  provider: PaymentProviderName
+  paymentType: 'deposit' | 'rent' | 'settlement' | 'invoice'
+  attemptStatus: PaymentAttemptStatus
+  targetPaid: boolean
+  contractId: string | null
 }
+
+export type PaymentInitOptions = {
+  provider?: PaymentProviderName | undefined
+  clientChannel?: PaymentClientChannel | undefined
+  clientIp?: string | undefined
+}
+
+type PaymentType = PaymentAttempt['paymentType']
+
+/** Outcome of applying a verified provider result to an attempt. */
+export type SettlementOutcome =
+  | 'settled'
+  | 'replayed'
+  | 'failed'
+  | 'duplicate-paid'
+
+/** Statuses a verified success may still settle from (late success, D4). */
+const SETTLEABLE_STATUSES: PaymentAttemptStatus[] = [
+  'pending',
+  'expired',
+  'failed',
+]
 
 export type CallbackHeaders = {
   timestamp: string
@@ -102,9 +134,10 @@ export class MockBankService {
     private readonly providerRegistry: PaymentProviderRegistry,
     private readonly configService: ConfigService,
     private readonly ledgerOutboxService: LedgerOutboxService,
-    private readonly vnpayCallbackVerifier: VnpayCallbackVerifier,
     @InjectRepository(MoveInSettlement)
     private readonly settlementRepository: Repository<MoveInSettlement>,
+    @InjectRepository(Contract)
+    private readonly contractRepository: Repository<Contract>,
     @Optional()
     private readonly transactionEventService?: RentalTransactionEventService,
     @Optional()
@@ -143,7 +176,8 @@ export class MockBankService {
 
   async initDepositPayment(
     depositAgreementId: string,
-    currentUserId: string
+    currentUserId: string,
+    options: PaymentInitOptions = {}
   ): Promise<PaymentRequestView> {
     const agreement = await this.depositAgreementsService.getAgreement(
       depositAgreementId,
@@ -160,51 +194,72 @@ export class MockBankService {
     if (agreement.tenantId !== currentUserId) {
       throw new ForbiddenException('PAYMENT_ACCESS_DENIED')
     }
-    if (agreement.status === 'payment-pending') {
-      const existingAttempt = await this.attemptRepository.findOne({
-        where: {
-          paymentId: agreement._id.toHexString(),
-          paymentType: 'deposit',
-          userId: currentUserId,
-          status: 'pending',
-        },
-      })
-      if (existingAttempt) {
-        if (existingAttempt.expiresAt.getTime() > Date.now()) {
-          return this.toDepositPaymentRequest(
-            agreement,
-            this.toPaymentInit(
-              existingAttempt,
-              `Deposit ${agreement.agreementCode}`
-            )
-          )
-        }
-        existingAttempt.status = 'expired'
-        await this.attemptRepository.save(existingAttempt)
-        await this.recordTransactionEvent({
-          transactionKey:
-            agreement.linkedLeaseContractId ?? agreement._id.toHexString(),
-          contractId: agreement.linkedLeaseContractId ?? null,
-          eventType: 'payment-attempt.expired',
-          actorRole: 'system',
-          refs: { paymentId: agreement._id.toHexString() },
-          transitionKey: `payment-attempt:${existingAttempt._id.toHexString()}:expired`,
-        })
-      }
+    const contract =
+      !agreement.linkedLeaseContractId && agreement.applicationId
+        ? await this.contractRepository.findOne({
+            where: { rentalApplicationId: agreement.applicationId },
+          })
+        : null
+    const { payment, reused } = await this.createAttempt({
+      userId: agreement.tenantId,
+      amount: agreement.amount,
+      description: `Deposit ${agreement.agreementCode}`,
+      paymentId: agreement._id.toString(),
+      paymentType: 'deposit',
+      contractId:
+        agreement.linkedLeaseContractId ?? contract?._id.toHexString() ?? null,
+      options,
+    })
+    if (!reused) {
+      await this.depositAgreementsService.markPaymentPending(
+        agreement._id.toString(),
+        currentUserId
+      )
     }
-    const result = await this.createAttempt(
-      agreement.tenantId,
-      agreement.amount,
-      `Deposit ${agreement.agreementCode}`,
-      agreement._id.toString(),
-      'deposit',
-      agreement.linkedLeaseContractId ?? null
-    )
-    await this.depositAgreementsService.markPaymentPending(
-      agreement._id.toString(),
-      currentUserId
-    )
-    return this.toDepositPaymentRequest(agreement, result)
+    return this.toDepositPaymentRequest(agreement, payment)
+  }
+
+  async getGatewayPaymentResult(
+    txRef: string,
+    userId: string
+  ): Promise<GatewayPaymentResult> {
+    const attempt = await this.attemptRepository.findOne({
+      where: { txRef, userId },
+    })
+    if (!attempt) throw new NotFoundException('PAYMENT_ATTEMPT_NOT_FOUND')
+
+    let targetPaid: boolean
+    if (attempt.paymentType === 'deposit') {
+      const agreement = await this.depositAgreementsService.getAgreement(
+        attempt.paymentId,
+        userId,
+        false
+      )
+      targetPaid =
+        agreement.status === 'paid' ||
+        agreement.status === 'applied-to-lease-security'
+    } else if (attempt.paymentType === 'settlement') {
+      const settlement = await this.findSettlement(attempt.paymentId)
+      if (settlement.tenantId !== userId) {
+        throw new ForbiddenException('PAYMENT_ACCESS_DENIED')
+      }
+      targetPaid = settlement.status === 'paid'
+    } else {
+      const payment = await this.findPayment(attempt.paymentId)
+      if ((payment.payerId ?? payment.tenantId) !== userId) {
+        throw new ForbiddenException('PAYMENT_ACCESS_DENIED')
+      }
+      targetPaid = payment.status === 'paid'
+    }
+
+    return {
+      txRef: attempt.txRef,
+      provider: attempt.provider,
+      paymentType: attempt.paymentType,
+      attemptStatus: attempt.status,
+      targetPaid,
+      contractId: attempt.contractId ?? null,
+    }
   }
 
   async getDepositPaymentRequest(
@@ -347,9 +402,9 @@ export class MockBankService {
 
   async initRentPayment(
     paymentId: string,
-    currentUserId: string
+    currentUserId: string,
+    options: PaymentInitOptions = {}
   ): Promise<MockPaymentInit> {
-    this.assertMockProvider()
     if (!ObjectId.isValid(paymentId))
       throw new NotFoundException('PAYMENT_NOT_FOUND')
     const payment = await this.paymentRepository.findOne({
@@ -361,20 +416,23 @@ export class MockBankService {
     }
     if (payment.status === 'paid')
       throw new ConflictException('PAYMENT_ALREADY_PAID')
-    return this.createAttempt(
-      payment.tenantId,
-      payment.amount,
-      payment.description,
-      payment._id.toString(),
-      'rent'
-    )
+    const { payment: init } = await this.createAttempt({
+      userId: payment.tenantId,
+      amount: payment.amount,
+      description: payment.description,
+      paymentId: payment._id.toString(),
+      paymentType: 'rent',
+      contractId: payment.contractId ?? null,
+      options,
+    })
+    return init
   }
 
   async initInvoicePayment(
     paymentId: string,
-    currentUserId: string
+    currentUserId: string,
+    options: PaymentInitOptions = {}
   ): Promise<PaymentRequestView> {
-    this.assertMockProvider()
     const invoice = await this.findPayment(paymentId)
     if ((invoice.payerId ?? invoice.tenantId) !== currentUserId) {
       throw new ForbiddenException('PAYMENT_ACCESS_DENIED')
@@ -382,22 +440,23 @@ export class MockBankService {
     if (invoice.status === 'paid' || invoice.status === 'waived') {
       throw new ConflictException('PAYMENT_ALREADY_PAID')
     }
-    const payment = await this.createAttempt(
-      currentUserId,
-      invoice.amount,
-      invoice.description,
-      invoice._id.toHexString(),
-      'invoice',
-      invoice.contractId
-    )
+    const { payment } = await this.createAttempt({
+      userId: currentUserId,
+      amount: invoice.amount,
+      description: invoice.description,
+      paymentId: invoice._id.toHexString(),
+      paymentType: 'invoice',
+      contractId: invoice.contractId,
+      options,
+    })
     return this.toInvoicePaymentRequest(invoice, payment)
   }
 
   async initSettlementPayment(
     settlementId: string,
-    currentUserId: string
+    currentUserId: string,
+    options: PaymentInitOptions = {}
   ): Promise<PaymentRequestView> {
-    this.assertMockProvider()
     const settlement = await this.findSettlement(settlementId)
     if (settlement.tenantId !== currentUserId) {
       throw new ForbiddenException('PAYMENT_ACCESS_DENIED')
@@ -417,15 +476,16 @@ export class MockBankService {
     if (!payable.length) throw new ConflictException('SETTLEMENT_NOT_PAYABLE')
     const amount = payable.reduce((sum, payment) => sum + payment.amount, 0)
     const description = `Settlement ${settlement._id.toHexString()}`
-    const payment = await this.createAttempt(
-      settlement.tenantId,
+    const { payment } = await this.createAttempt({
+      userId: settlement.tenantId,
       amount,
       description,
-      settlement._id.toHexString(),
-      'settlement',
-      settlement.contractId,
-      payable.map(item => item._id.toHexString())
-    )
+      paymentId: settlement._id.toHexString(),
+      paymentType: 'settlement',
+      contractId: settlement.contractId,
+      paymentIds: payable.map(item => item._id.toHexString()),
+      options,
+    })
     return buildPaymentRequest({
       payment,
       invoiceCode: `STL-${settlement._id.toHexString().slice(-8)}`,
@@ -454,111 +514,189 @@ export class MockBankService {
     body: PaymentCallbackDto,
     headers: CallbackHeaders
   ): Promise<MockPaymentCallbackResult> {
-    this.assertMockProvider()
-    const attempt = await this.verifyCallback(body, headers, 'deposit')
-    if (attempt.status === 'succeeded') {
-      return { status: 'succeeded', txRef: attempt.txRef, replayed: true }
-    }
-    await this.settleDepositAttempt(
-      attempt,
-      this.callbackDigest(body, headers),
-      this.secret()
-    )
-    return { status: 'succeeded', txRef: attempt.txRef, replayed: false }
-  }
-
-  async handleVnpayDepositReturn(
-    query: VnpayQuery
-  ): Promise<VnpayPaymentReturn> {
-    this.providerRegistry.assertVnpayProvider()
-    const txRef = query.vnp_TxnRef
-    if (typeof txRef !== 'string')
-      throw new BadRequestException('INVALID_VNPAY_CALLBACK')
-    const attempt = await this.attemptRepository.findOne({ where: { txRef } })
-    if (
-      !attempt ||
-      attempt.provider !== 'vnpay' ||
-      attempt.paymentType !== 'deposit'
-    ) {
-      throw new NotFoundException('PAYMENT_ATTEMPT_NOT_FOUND')
-    }
-    const verified = this.vnpayCallbackVerifier.verify(query, {
-      secret: this.vnpaySecret(),
-      txRef: attempt.txRef,
-      amount: attempt.amount,
-    })
-    if (!verified.succeeded) {
-      return {
-        status: 'failed',
-        redirectUrl: this.vnpayClientReturnUrl(attempt.contractId, 'failed'),
-      }
-    }
-    if (attempt.status === 'succeeded') {
-      return {
-        status: 'succeeded',
-        redirectUrl: this.vnpayClientReturnUrl(attempt.contractId, 'succeeded'),
-      }
-    }
-    if (
-      attempt.status !== 'pending' ||
-      attempt.expiresAt.getTime() < Date.now()
-    ) {
-      throw new ConflictException('PAYMENT_ATTEMPT_NOT_PENDING')
-    }
-    await this.settleDepositAttempt(
-      attempt,
-      this.vnpayCallbackDigest(query),
-      this.vnpaySecret()
-    )
-    return {
-      status: 'succeeded',
-      redirectUrl: this.vnpayClientReturnUrl(attempt.contractId, 'succeeded'),
-    }
+    return this.handleMockCallback(body, headers, 'deposit')
   }
 
   async handleRentCallback(
     body: PaymentCallbackDto,
     headers: CallbackHeaders
   ): Promise<MockPaymentCallbackResult> {
-    this.assertMockProvider()
-    const attempt = await this.verifyCallback(body, headers, 'rent')
-    if (attempt.status === 'succeeded') {
-      return { status: 'succeeded', txRef: attempt.txRef, replayed: true }
-    }
-    attempt.status = 'succeeded'
-    attempt.processedAt = new Date()
-    attempt.callbackDigest = this.callbackDigest(body, headers)
-    await this.attemptRepository.save(attempt)
+    return this.handleMockCallback(body, headers, 'rent')
+  }
 
-    const payment = await this.paymentRepository.findOne({
-      where: { _id: new ObjectId(attempt.paymentId) },
-    })
-    if (!payment) throw new NotFoundException('PAYMENT_NOT_FOUND')
-    payment.status = 'paid'
-    payment.paidAt = new Date()
-    payment.txRef = attempt.txRef
-    Object.assign(
-      payment,
-      this.createReceipt(
-        payment._id.toHexString(),
-        payment.contractId,
-        payment.type ?? 'rent',
-        payment.amount,
-        payment.vatAmount ?? 0,
-        payment.paidAt,
-        attempt.txRef
-      )
+  async handleSettlementCallback(
+    body: PaymentCallbackDto,
+    headers: CallbackHeaders
+  ): Promise<MockPaymentCallbackResult> {
+    return this.handleMockCallback(body, headers, 'settlement')
+  }
+
+  async handleInvoiceCallback(
+    body: PaymentCallbackDto,
+    headers: CallbackHeaders
+  ): Promise<MockPaymentCallbackResult> {
+    return this.handleMockCallback(body, headers, 'invoice')
+  }
+
+  /**
+   * Single settlement entry for every provider (D4). Callers must have
+   * verified the provider signature, reference and amount first.
+   *
+   * - already succeeded → `replayed`, no side effect
+   * - verified failure → pending attempt marked `failed`
+   * - success while the target was already paid by another attempt →
+   *   `duplicate-paid` event for staff; no second payment transition
+   * - otherwise the matching deposit/rent/settlement/invoice path runs once,
+   *   guarded by a conditional `processing` lock against concurrent
+   *   IPN + browser-return delivery.
+   */
+  async settleVerifiedAttempt(
+    attempt: PaymentAttempt,
+    verdict: Pick<GatewayVerdict, 'succeeded' | 'providerTransactionId'>,
+    callbackDigest: string
+  ): Promise<SettlementOutcome> {
+    if (attempt.status === 'succeeded') return 'replayed'
+    if (!verdict.succeeded) {
+      if (attempt.status === 'pending') {
+        attempt.status = 'failed'
+        attempt.processedAt = new Date()
+        attempt.callbackDigest = callbackDigest
+        await this.attemptRepository.save(attempt)
+        await this.recordAttemptEvent(attempt, 'payment-attempt.failed')
+      }
+      return 'failed'
+    }
+    const previousStatus = attempt.status
+    if (!SETTLEABLE_STATUSES.includes(previousStatus)) return 'replayed'
+    const locked = await this.attemptRepository.update(
+      {
+        _id: attempt._id,
+        status: { $in: SETTLEABLE_STATUSES },
+      } as never,
+      { status: 'processing' }
     )
-    payment.paymentHash = this.receiptHash({
-      type: 'rent',
-      paymentId: payment._id.toString(),
-      contractId: payment.contractId,
+    if (!locked.affected) return 'replayed'
+    attempt.status = 'processing'
+    attempt.providerTransactionId = verdict.providerTransactionId
+    try {
+      if (await this.isTargetPaidElsewhere(attempt)) {
+        await this.markDuplicatePaid(attempt, callbackDigest)
+        return 'duplicate-paid'
+      }
+      await this.settleByType(attempt, callbackDigest)
+      return 'settled'
+    } catch (error) {
+      await this.attemptRepository.update(
+        { _id: attempt._id, status: 'processing' } as never,
+        { status: previousStatus }
+      )
+      attempt.status = previousStatus
+      throw error
+    }
+  }
+
+  private async handleMockCallback(
+    body: PaymentCallbackDto,
+    headers: CallbackHeaders,
+    paymentType: PaymentType
+  ): Promise<MockPaymentCallbackResult> {
+    this.assertMockProvider()
+    const attempt = await this.verifyCallback(body, headers, paymentType)
+    const outcome = await this.settleVerifiedAttempt(
+      attempt,
+      { succeeded: true, providerTransactionId: null },
+      this.callbackDigest(body, headers)
+    )
+    return {
+      status: 'succeeded',
       txRef: attempt.txRef,
-      amount: payment.amount,
+      replayed: outcome !== 'settled',
+    }
+  }
+
+  private async settleByType(
+    attempt: PaymentAttempt,
+    callbackDigest: string
+  ): Promise<void> {
+    const receiptSecret = this.receiptSecret(attempt.provider)
+    switch (attempt.paymentType) {
+      case 'deposit':
+        return this.settleDepositAttempt(attempt, callbackDigest, receiptSecret)
+      case 'settlement':
+        return this.settleSettlementAttempt(
+          attempt,
+          callbackDigest,
+          receiptSecret
+        )
+      case 'invoice':
+        return this.settleInvoiceAttempt(attempt, callbackDigest, receiptSecret)
+      default:
+        return this.settleRentAttempt(attempt, callbackDigest, receiptSecret)
+    }
+  }
+
+  /** True when the payment target was already settled by another attempt. */
+  private async isTargetPaidElsewhere(
+    attempt: PaymentAttempt
+  ): Promise<boolean> {
+    if (attempt.paymentType === 'deposit') {
+      const agreement = await this.depositAgreementsService.getAgreement(
+        attempt.paymentId,
+        attempt.userId,
+        true
+      )
+      return (
+        (agreement.status === 'paid' ||
+          agreement.status === 'applied-to-lease-security') &&
+        agreement.paymentAttemptId !== attempt._id.toString()
+      )
+    }
+    if (attempt.paymentType === 'settlement') {
+      const settlement = await this.findSettlement(attempt.paymentId)
+      return settlement.status === 'paid'
+    }
+    const payment = await this.findPayment(attempt.paymentId)
+    return (
+      (payment.status === 'paid' || payment.status === 'waived') &&
+      payment.txRef !== attempt.txRef
+    )
+  }
+
+  private async markDuplicatePaid(
+    attempt: PaymentAttempt,
+    callbackDigest: string
+  ): Promise<void> {
+    await this.markAttemptSucceeded(attempt, callbackDigest)
+    this.logger.warn(
+      `Duplicate payment provider=${attempt.provider} txRef=${attempt.txRef} target=${attempt.paymentType}:${attempt.paymentId}`
+    )
+    await this.recordTransactionEvent({
+      transactionKey: attempt.contractId ?? attempt.paymentId,
+      contractId: attempt.contractId ?? null,
+      eventType: 'payment-attempt.duplicate-paid',
+      actorRole: 'provider',
+      reasonCode: 'DUPLICATE_PROVIDER_PAYMENT',
+      refs: {
+        paymentId: attempt.paymentId,
+        txRef: attempt.txRef,
+        provider: attempt.provider,
+        amount: String(attempt.amount),
+      },
+      transitionKey: `payment-attempt:${attempt._id.toHexString()}:duplicate-paid`,
     })
-    payment.ledgerStatus = 'pending'
-    await this.paymentRepository.save(payment)
-    await this.enqueuePaymentLedgerEvent(payment)
+  }
+
+  private async settleRentAttempt(
+    attempt: PaymentAttempt,
+    callbackDigest: string,
+    receiptSecret: string
+  ): Promise<void> {
+    await this.markAttemptSucceeded(attempt, callbackDigest)
+    const payment = await this.findPayment(attempt.paymentId)
+    await this.markPaymentPaid(payment, attempt, new Date(), receiptSecret, {
+      receiptType: 'rent',
+      hashType: 'rent',
+    })
     await this.recordTransactionEvent({
       transactionKey: payment.contractId ?? payment._id.toHexString(),
       contractId: payment.contractId,
@@ -567,49 +705,23 @@ export class MockBankService {
       refs: { paymentId: payment._id.toHexString() },
       transitionKey: `payment:${attempt._id.toHexString()}:succeeded`,
     })
-    return { status: 'succeeded', txRef: attempt.txRef, replayed: false }
   }
 
-  async handleSettlementCallback(
-    body: PaymentCallbackDto,
-    headers: CallbackHeaders
-  ): Promise<MockPaymentCallbackResult> {
-    this.assertMockProvider()
-    const attempt = await this.verifyCallback(body, headers, 'settlement')
-    if (attempt.status === 'succeeded') {
-      return { status: 'succeeded', txRef: attempt.txRef, replayed: true }
-    }
+  private async settleSettlementAttempt(
+    attempt: PaymentAttempt,
+    callbackDigest: string,
+    receiptSecret: string
+  ): Promise<void> {
     const settlement = await this.findSettlement(attempt.paymentId)
     const paidAt = new Date()
     const paymentIds = attempt.paymentIds ?? []
     for (const paymentId of paymentIds) {
       const payment = await this.findPayment(paymentId)
       if (payment.status === 'paid' || payment.status === 'waived') continue
-      payment.status = 'paid'
-      payment.paidAt = paidAt
-      payment.txRef = attempt.txRef
-      Object.assign(
-        payment,
-        this.createReceipt(
-          payment._id.toHexString(),
-          payment.contractId,
-          payment.type ?? 'rent',
-          payment.amount,
-          payment.vatAmount ?? 0,
-          paidAt,
-          attempt.txRef
-        )
-      )
-      payment.paymentHash = this.receiptHash({
-        type: payment.type ?? 'rent',
-        paymentId: payment._id.toHexString(),
-        contractId: payment.contractId,
-        txRef: attempt.txRef,
-        amount: payment.amount,
+      await this.markPaymentPaid(payment, attempt, paidAt, receiptSecret, {
+        receiptType: 'rent',
+        hashType: payment.type ?? 'rent',
       })
-      payment.ledgerStatus = 'pending'
-      await this.paymentRepository.save(payment)
-      await this.enqueuePaymentLedgerEvent(payment)
     }
     const wasPaid = settlement.status === 'paid'
     settlement.lines = settlement.lines.map(line =>
@@ -634,10 +746,7 @@ export class MockBankService {
         )
       }
     }
-    attempt.status = 'succeeded'
-    attempt.processedAt = paidAt
-    attempt.callbackDigest = this.callbackDigest(body, headers)
-    await this.attemptRepository.save(attempt)
+    await this.markAttemptSucceeded(attempt, callbackDigest, paidAt)
     await this.recordTransactionEvent({
       transactionKey: settlement.contractId ?? settlement._id.toHexString(),
       contractId: settlement.contractId ?? null,
@@ -646,50 +755,22 @@ export class MockBankService {
       refs: { settlementId: settlement._id.toHexString() },
       transitionKey: `payment:${attempt._id.toHexString()}:succeeded`,
     })
-    return { status: 'succeeded', txRef: attempt.txRef, replayed: false }
   }
 
-  async handleInvoiceCallback(
-    body: PaymentCallbackDto,
-    headers: CallbackHeaders
-  ): Promise<MockPaymentCallbackResult> {
-    this.assertMockProvider()
-    const attempt = await this.verifyCallback(body, headers, 'invoice')
-    if (attempt.status === 'succeeded') {
-      return { status: 'succeeded', txRef: attempt.txRef, replayed: true }
-    }
+  private async settleInvoiceAttempt(
+    attempt: PaymentAttempt,
+    callbackDigest: string,
+    receiptSecret: string
+  ): Promise<void> {
     const payment = await this.findPayment(attempt.paymentId)
     if (payment.status !== 'paid' && payment.status !== 'waived') {
-      payment.status = 'paid'
-      payment.paidAt = new Date()
-      payment.txRef = attempt.txRef
-      Object.assign(
-        payment,
-        this.createReceipt(
-          payment._id.toHexString(),
-          payment.contractId,
-          payment.type ?? 'platform-fee',
-          payment.amount,
-          payment.vatAmount ?? 0,
-          payment.paidAt,
-          attempt.txRef
-        )
-      )
-      payment.paymentHash = this.receiptHash({
-        type: payment.type ?? 'platform-fee',
-        paymentId: payment._id.toHexString(),
-        contractId: payment.contractId,
-        txRef: attempt.txRef,
-        amount: payment.amount,
+      const type = payment.type ?? 'platform-fee'
+      await this.markPaymentPaid(payment, attempt, new Date(), receiptSecret, {
+        receiptType: type,
+        hashType: type,
       })
-      payment.ledgerStatus = 'pending'
-      await this.paymentRepository.save(payment)
-      await this.enqueuePaymentLedgerEvent(payment)
     }
-    attempt.status = 'succeeded'
-    attempt.processedAt = new Date()
-    attempt.callbackDigest = this.callbackDigest(body, headers)
-    await this.attemptRepository.save(attempt)
+    await this.markAttemptSucceeded(attempt, callbackDigest)
     await this.recordTransactionEvent({
       transactionKey: payment.contractId ?? payment._id.toHexString(),
       contractId: payment.contractId,
@@ -698,7 +779,55 @@ export class MockBankService {
       refs: { paymentId: payment._id.toHexString() },
       transitionKey: `payment:${attempt._id.toHexString()}:succeeded`,
     })
-    return { status: 'succeeded', txRef: attempt.txRef, replayed: false }
+  }
+
+  private async markAttemptSucceeded(
+    attempt: PaymentAttempt,
+    callbackDigest: string,
+    processedAt = new Date()
+  ): Promise<void> {
+    attempt.status = 'succeeded'
+    attempt.processedAt = processedAt
+    attempt.callbackDigest = callbackDigest
+    await this.attemptRepository.save(attempt)
+  }
+
+  /** Shared paid transition for rent/invoice/settlement payments. */
+  private async markPaymentPaid(
+    payment: Payment,
+    attempt: PaymentAttempt,
+    paidAt: Date,
+    receiptSecret: string,
+    types: { receiptType: string; hashType: string }
+  ): Promise<void> {
+    payment.status = 'paid'
+    payment.paidAt = paidAt
+    payment.txRef = attempt.txRef
+    Object.assign(
+      payment,
+      this.createReceipt(
+        payment._id.toHexString(),
+        payment.contractId,
+        payment.type ?? types.receiptType,
+        payment.amount,
+        payment.vatAmount ?? 0,
+        paidAt,
+        attempt.txRef
+      )
+    )
+    payment.paymentHash = this.receiptHash(
+      {
+        type: types.hashType,
+        paymentId: payment._id.toHexString(),
+        contractId: payment.contractId,
+        txRef: attempt.txRef,
+        amount: payment.amount,
+      },
+      receiptSecret
+    )
+    payment.ledgerStatus = 'pending'
+    await this.paymentRepository.save(payment)
+    await this.enqueuePaymentLedgerEvent(payment)
   }
 
   async getWallet(userId: string): Promise<{
@@ -804,16 +933,7 @@ export class MockBankService {
     let count = 0
     for (const attempt of pending) {
       if (attempt.expiresAt.getTime() > now.getTime()) continue
-      attempt.status = 'expired'
-      await this.attemptRepository.save(attempt)
-      await this.recordTransactionEvent({
-        transactionKey: attempt.contractId ?? attempt.paymentId,
-        contractId: attempt.contractId ?? null,
-        eventType: 'payment-attempt.expired',
-        actorRole: 'system',
-        refs: { paymentId: attempt.paymentId },
-        transitionKey: `payment-attempt:${attempt._id.toHexString()}:expired`,
-      })
+      await this.expireAttempt(attempt)
       count += 1
     }
     return count
@@ -829,48 +949,114 @@ export class MockBankService {
       .digest('hex')
   }
 
-  private async createAttempt(
-    userId: string,
-    amount: number,
-    description: string,
-    paymentId: string,
-    paymentType: 'deposit' | 'rent' | 'settlement' | 'invoice',
-    contractId: string | null = null,
-    paymentIds: string[] | null = null
-  ): Promise<MockPaymentInit> {
-    const txRef = `${this.providerRegistry.providerName().toUpperCase()}-${randomBytes(12).toString('hex')}`
-    const intent = await this.providerRegistry.createPaymentIntent({
-      amount,
-      description,
-      customerRef: userId,
-      txRef,
+  /**
+   * Creates (or reuses) the live attempt for one payment target (D6):
+   * same provider + unexpired → reuse without a gateway call; otherwise the
+   * live attempt is expired and a new one is created on the chosen provider.
+   * Nothing is persisted when the gateway rejects the create request.
+   */
+  private async createAttempt(input: {
+    userId: string
+    amount: number
+    description: string
+    paymentId: string
+    paymentType: PaymentType
+    contractId?: string | null
+    paymentIds?: string[] | null
+    options: PaymentInitOptions
+  }): Promise<{ payment: MockPaymentInit; reused: boolean }> {
+    const adapter = this.providerRegistry.get(input.options.provider)
+    const live = await this.attemptRepository.findOne({
+      where: {
+        paymentId: input.paymentId,
+        paymentType: input.paymentType,
+        userId: input.userId,
+        status: 'pending',
+      },
+    })
+    if (live) {
+      if (
+        live.provider === adapter.name &&
+        live.expiresAt.getTime() > Date.now()
+      ) {
+        return {
+          payment: this.toPaymentInit(live, input.description),
+          reused: true,
+        }
+      }
+      await this.expireAttempt(live)
+    }
+    const contractId = input.contractId ?? null
+    const configuredTtl = this.configService.get<number>(
+      'rentalFlow.payments.attemptTtlMinutes'
+    )
+    const ttlMinutes =
+      typeof configuredTtl === 'number' && configuredTtl > 0
+        ? configuredTtl
+        : 15
+    const intent = await adapter.createPaymentIntent({
+      amount: input.amount,
+      description: input.description,
+      customerRef: input.userId,
+      txRef: adapter.newTxRef(),
+      expiresAt: new Date(Date.now() + ttlMinutes * 60 * 1000),
+      clientIp: input.options.clientIp,
     })
     const attempt = this.attemptRepository.create({
       provider: intent.provider,
       txRef: intent.txRef,
-      paymentId,
-      paymentIds,
+      paymentId: input.paymentId,
+      paymentIds: input.paymentIds ?? null,
       contractId,
-      paymentType,
-      userId,
-      amount,
+      paymentType: input.paymentType,
+      userId: input.userId,
+      amount: input.amount,
       status: 'pending',
       expiresAt: intent.expiresAt,
       processedAt: null,
       callbackDigest: null,
       providerPaymentUrl: intent.redirectUrl,
+      providerTransactionId: null,
+      clientChannel: input.options.clientChannel ?? 'web',
     })
     await this.attemptRepository.save(attempt)
     await this.recordTransactionEvent({
-      transactionKey: contractId ?? paymentId,
+      transactionKey: contractId ?? input.paymentId,
       contractId,
       eventType: 'payment-attempt.created',
       actorRole: 'tenant',
-      actorId: userId,
-      refs: { paymentId },
+      actorId: input.userId,
+      refs: { paymentId: input.paymentId },
       transitionKey: `payment-attempt:${attempt._id.toHexString()}:created`,
     })
-    return this.toPaymentInit(attempt, description, intent.redirectUrl)
+    return {
+      payment: this.toPaymentInit(
+        attempt,
+        input.description,
+        intent.redirectUrl
+      ),
+      reused: false,
+    }
+  }
+
+  private async expireAttempt(attempt: PaymentAttempt): Promise<void> {
+    attempt.status = 'expired'
+    await this.attemptRepository.save(attempt)
+    await this.recordAttemptEvent(attempt, 'payment-attempt.expired')
+  }
+
+  private async recordAttemptEvent(
+    attempt: PaymentAttempt,
+    eventType: 'payment-attempt.expired' | 'payment-attempt.failed'
+  ): Promise<void> {
+    await this.recordTransactionEvent({
+      transactionKey: attempt.contractId ?? attempt.paymentId,
+      contractId: attempt.contractId ?? null,
+      eventType,
+      actorRole: 'system',
+      refs: { paymentId: attempt.paymentId },
+      transitionKey: `payment-attempt:${attempt._id.toHexString()}:${eventType.split('.')[1]}`,
+    })
   }
 
   private toPaymentInit(
@@ -1031,8 +1217,11 @@ export class MockBankService {
     return payment
   }
 
-  private receiptHash(payload: Record<string, string | number>): string {
-    return createHmac('sha256', this.secret())
+  private receiptHash(
+    payload: Record<string, string | number | null>,
+    secret: string
+  ): string {
+    return createHmac('sha256', secret)
       .update(JSON.stringify(payload))
       .digest('hex')
   }
@@ -1138,8 +1327,32 @@ export class MockBankService {
     return secret
   }
 
+  /** Mock Bank simulation endpoints only work while mock-bank is enabled. */
   private assertMockProvider(): void {
-    this.providerRegistry.assertMockProvider()
+    if (!this.providerRegistry.isEnabled('mock-bank')) {
+      throw new ServiceUnavailableException(
+        'BANK_PROVIDER_ADAPTER_NOT_CONFIGURED'
+      )
+    }
+  }
+
+  /**
+   * HMAC key for internal receipt/deposit hashes, per settling provider
+   * (keeps the historical Mock Bank and VNPAY behaviour).
+   */
+  private receiptSecret(provider: PaymentProviderName): string {
+    const payments = this.configService.get<PaymentsConfig>(
+      'rentalFlow.payments'
+    )
+    const secret =
+      provider === 'vnpay'
+        ? payments?.vnpay.hashSecret
+        : provider === 'momo'
+          ? payments?.momo.secretKey
+          : provider === 'zalopay'
+            ? payments?.zalopay.key2
+            : undefined
+    return secret || this.secret()
   }
 
   private async settleDepositAttempt(
@@ -1200,26 +1413,5 @@ export class MockBankService {
       ],
       metadata: { details: { paymentAttemptId: attempt._id.toString() } },
     })
-  }
-
-  private vnpaySecret(): string {
-    return this.configService.getOrThrow<string>('rentalFlow.vnpayHashSecret')
-  }
-
-  private vnpayCallbackDigest(query: VnpayQuery): string {
-    return createHash('sha256').update(JSON.stringify(query)).digest('hex')
-  }
-
-  private vnpayClientReturnUrl(
-    contractId: string | null,
-    result: 'succeeded' | 'failed'
-  ): string {
-    const url = new URL(
-      this.configService.getOrThrow<string>('rentalFlow.vnpayClientReturnUrl')
-    )
-    if (contractId) url.pathname = `/contracts/${contractId}`
-    url.searchParams.set('payment', 'vnpay')
-    url.searchParams.set('result', result)
-    return url.toString()
   }
 }

@@ -70,13 +70,16 @@ test/                   # Supertest e2e setup
 
 Copy `.env.example` to `.env`.
 
-| Variable               | Purpose                                                                               |
-| ---------------------- | ------------------------------------------------------------------------------------- |
-| `APP_PORT`             | API port, default `3001`                                                              |
-| `APP_CORS_ORIGINS`     | Comma-separated frontend origins                                                      |
-| `DATABASE_URL`         | MongoDB connection URI; use the hosted URI in shared environments                     |
-| `DATABASE_LOGGING`     | Enables TypeORM query logging                                                         |
-| `DATABASE_SYNCHRONIZE` | Local-only MongoDB entity sync switch; keep `false` in shared/production environments |
+| Variable                    | Purpose                                                                                                                                                   |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `APP_PORT`                  | API port, default `3001`                                                                                                                                  |
+| `APP_CORS_ORIGINS`          | Comma-separated frontend origins                                                                                                                          |
+| `DATABASE_URL`              | MongoDB connection URI; use the hosted URI in shared environments                                                                                         |
+| `DATABASE_LOGGING`          | Enables TypeORM query logging                                                                                                                             |
+| `DATABASE_SYNCHRONIZE`      | Local-only MongoDB entity sync switch; keep `false` in shared/production environments                                                                     |
+| `PAYMENT_PROVIDERS_ENABLED` | Gateways tenants may choose: `mock-bank,vnpay,momo,zalopay` (default `mock-bank`). Listing one makes its `VNPAY_*` / `MOMO_*` / `ZALOPAY_*` keys required |
+
+> **Breaking:** `VNPAY_GATEWAY_URL` (the local `:8888` VNPAY bridge) is gone. The backend now signs VNPAY URLs itself, so set `VNPAY_TMN_CODE` and `VNPAY_HASH_SECRET` instead. See `.env.example` for tunnel setup when testing gateway IPN callbacks locally.
 
 ## API Contract
 

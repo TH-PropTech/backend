@@ -1,5 +1,7 @@
 import { Injectable } from '@nestjs/common'
+import { randomBytes } from 'node:crypto'
 import type {
+  PaymentIntentInput,
   PaymentProviderAdapter,
   ProviderAccountLink,
   ProviderPaymentIntent,
@@ -9,18 +11,18 @@ import type {
 export class MockBankAdapter implements PaymentProviderAdapter {
   readonly name = 'mock-bank' as const
 
-  createPaymentIntent(input: {
-    amount: number
-    description: string
-    customerRef: string
-    txRef: string
-  }): Promise<ProviderPaymentIntent> {
-    const expiresAt = new Date(Date.now() + 15 * 60 * 1000)
+  newTxRef(): string {
+    return `MOCK-BANK-${randomBytes(12).toString('hex')}`
+  }
+
+  createPaymentIntent(
+    input: PaymentIntentInput
+  ): Promise<ProviderPaymentIntent> {
     return Promise.resolve({
       provider: this.name,
       txRef: input.txRef,
       redirectUrl: `mockbank://pay?txRef=${encodeURIComponent(input.txRef)}&amount=${input.amount}`,
-      expiresAt,
+      expiresAt: input.expiresAt,
     })
   }
 

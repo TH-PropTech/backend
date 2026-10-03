@@ -1,118 +1,259 @@
 import { MockBankController } from './mock-bank.controller'
 
+const headers = {
+  'x-bank-timestamp': '1000',
+  'x-bank-nonce': 'nonce',
+  'x-bank-signature': 'signature',
+}
+const mappedHeaders = {
+  timestamp: '1000',
+  nonce: 'nonce',
+  signature: 'signature',
+}
+
+function createController(
+  service: object = {},
+  registry: object = {},
+  gateway: object = {}
+): MockBankController {
+  return new MockBankController(
+    service as never,
+    registry as never,
+    gateway as never
+  )
+}
+
+function fakeResponse(): {
+  redirect: jest.Mock
+  status: jest.Mock
+  json: jest.Mock
+  end: jest.Mock
+} {
+  const response = {
+    redirect: jest.fn(),
+    status: jest.fn(),
+    json: jest.fn(),
+    end: jest.fn(),
+  }
+  response.status.mockReturnValue(response)
+  return response
+}
+
 describe('MockBankController', () => {
+  it('returns a payment result through the authenticated service boundary', async () => {
+    const result = { txRef: 'MOMO-1', targetPaid: true }
+    const service = {
+      getGatewayPaymentResult: jest.fn().mockResolvedValue(result),
+    }
+
+    await expect(
+      createController(service).paymentResult('MOMO-1', 'tenant-1')
+    ).resolves.toEqual(result)
+    expect(service.getGatewayPaymentResult).toHaveBeenCalledWith(
+      'MOMO-1',
+      'tenant-1'
+    )
+  })
+
   it('maps bank headers to the service callback contract', async () => {
     const service = {
       handleRentCallback: jest.fn().mockResolvedValue({ status: 'succeeded' }),
     }
-    const controller = new MockBankController(service as never)
 
-    await controller.callbackRent(
+    await createController(service).callbackRent(
       { txRef: 'tx-1', amount: 100, status: 'success' },
-      {
-        'x-bank-timestamp': '1000',
-        'x-bank-nonce': 'nonce',
-        'x-bank-signature': 'signature',
-      }
+      headers
     )
 
     expect(service.handleRentCallback).toHaveBeenCalledWith(
       { txRef: 'tx-1', amount: 100, status: 'success' },
-      { timestamp: '1000', nonce: 'nonce', signature: 'signature' }
+      mappedHeaders
     )
   })
 
-  it('maps settlement init and callback to the settlement service flow', async () => {
+  it('forwards the chosen gateway, channel and client IP on every init', async () => {
     const service = {
-      initSettlementPayment: jest
-        .fn()
-        .mockResolvedValue({ purpose: 'SETTLEMENT' }),
-      handleSettlementCallback: jest
-        .fn()
-        .mockResolvedValue({ status: 'succeeded' }),
+      initDepositPayment: jest.fn().mockResolvedValue({}),
+      initRentPayment: jest.fn().mockResolvedValue({}),
+      initSettlementPayment: jest.fn().mockResolvedValue({}),
+      initInvoicePayment: jest.fn().mockResolvedValue({}),
     }
-    const controller = new MockBankController(service as never)
+    const controller = createController(service)
+    const choice = {
+      provider: 'momo' as const,
+      clientChannel: 'mobile' as const,
+    }
+    const options = { ...choice, clientIp: '10.0.0.9' }
 
+    await controller.initDeposit(
+      { depositAgreementId: 'dep-1', ...choice },
+      'tenant-1',
+      '10.0.0.9'
+    )
+    await controller.initRent(
+      { paymentId: 'pay-1', ...choice },
+      'tenant-1',
+      '10.0.0.9'
+    )
     await controller.initSettlement(
-      { settlementId: '507f1f77bcf86cd799439011' },
-      'tenant-1'
+      { settlementId: 'stl-1', ...choice },
+      'tenant-1',
+      '10.0.0.9'
     )
-    await controller.callbackSettlement(
-      { txRef: 'tx-1', amount: 100, status: 'success' },
-      {
-        'x-bank-timestamp': '1000',
-        'x-bank-nonce': 'nonce',
-        'x-bank-signature': 'signature',
-      }
+    await controller.initInvoice(
+      { paymentId: 'inv-1', ...choice },
+      'landlord-1',
+      '10.0.0.9'
     )
 
-    expect(service.initSettlementPayment).toHaveBeenCalledWith(
-      '507f1f77bcf86cd799439011',
-      'tenant-1'
+    expect(service.initDepositPayment).toHaveBeenCalledWith(
+      'dep-1',
+      'tenant-1',
+      options
     )
-    expect(service.handleSettlementCallback).toHaveBeenCalledWith(
-      { txRef: 'tx-1', amount: 100, status: 'success' },
-      { timestamp: '1000', nonce: 'nonce', signature: 'signature' }
+    expect(service.initRentPayment).toHaveBeenCalledWith(
+      'pay-1',
+      'tenant-1',
+      options
+    )
+    expect(service.initSettlementPayment).toHaveBeenCalledWith(
+      'stl-1',
+      'tenant-1',
+      options
+    )
+    expect(service.initInvoicePayment).toHaveBeenCalledWith(
+      'inv-1',
+      'landlord-1',
+      options
     )
   })
 
-  it('maps invoice init and callback to the invoice service flow', async () => {
+  it('maps settlement and invoice callbacks to their service flows', async () => {
     const service = {
-      initInvoicePayment: jest
-        .fn()
-        .mockResolvedValue({ purpose: 'PLATFORM_FEE' }),
-      handleInvoiceCallback: jest
-        .fn()
-        .mockResolvedValue({ status: 'succeeded' }),
+      handleSettlementCallback: jest.fn().mockResolvedValue({}),
+      handleInvoiceCallback: jest.fn().mockResolvedValue({}),
     }
-    const controller = new MockBankController(service as never)
+    const controller = createController(service)
+    const body = { txRef: 'tx-1', amount: 100, status: 'success' as const }
 
-    await controller.initInvoice(
-      { paymentId: '507f1f77bcf86cd799439011' },
-      'landlord-1'
-    )
-    await controller.callbackInvoice(
-      { txRef: 'tx-invoice', amount: 100, status: 'success' },
-      {
-        'x-bank-timestamp': '1000',
-        'x-bank-nonce': 'nonce',
-        'x-bank-signature': 'signature',
-      }
-    )
+    await controller.callbackSettlement(body, headers)
+    await controller.callbackInvoice(body, headers)
 
-    expect(service.initInvoicePayment).toHaveBeenCalledWith(
-      '507f1f77bcf86cd799439011',
-      'landlord-1'
+    expect(service.handleSettlementCallback).toHaveBeenCalledWith(
+      body,
+      mappedHeaders
     )
     expect(service.handleInvoiceCallback).toHaveBeenCalledWith(
-      { txRef: 'tx-invoice', amount: 100, status: 'success' },
-      { timestamp: '1000', nonce: 'nonce', signature: 'signature' }
+      body,
+      mappedHeaders
     )
   })
 
   it('rejects wallet access when the JWT has no user id', () => {
-    const controller = new MockBankController({} as never)
-    expect(() => controller.wallet({})).toThrow('USER_ID_REQUIRED')
+    expect(() => createController().wallet({})).toThrow('USER_ID_REQUIRED')
   })
 
-  it('redirects a verified VNPay return to the canonical workspace result', async () => {
-    const service = {
-      handleVnpayDepositReturn: jest.fn().mockResolvedValue({
-        status: 'succeeded',
-        redirectUrl: 'http://localhost:3000/contracts/contract-1?payment=vnpay',
-      }),
+  it('lists enabled providers from the registry', () => {
+    const listed = [{ provider: 'vnpay', label: 'VNPAY', simulation: false }]
+    const registry = { listProviders: jest.fn().mockReturnValue(listed) }
+
+    expect(createController({}, registry).providers()).toBe(listed)
+  })
+
+  it.each([
+    ['vnpayReturn', 'vnpay'],
+    ['momoReturn', 'momo'],
+    ['zalopayReturn', 'zalopay'],
+  ] as const)(
+    '%s redirects to the server-built client URL',
+    async (method, provider) => {
+      const gateway = {
+        handleReturn: jest
+          .fn()
+          .mockResolvedValue(
+            'http://localhost:3000/contracts/c-1?payment=succeeded'
+          ),
+      }
+      const response = fakeResponse()
+
+      await createController({}, {}, gateway)[method](
+        { q: '1' },
+        response as never
+      )
+
+      expect(gateway.handleReturn).toHaveBeenCalledWith(provider, { q: '1' })
+      expect(response.redirect).toHaveBeenCalledWith(
+        302,
+        'http://localhost:3000/contracts/c-1?payment=succeeded'
+      )
     }
-    const response = { redirect: jest.fn() }
-    const controller = new MockBankController(service as never)
+  )
 
-    await controller.vnpayReturn({ vnp_TxnRef: 'VNPAY-1' }, response as never)
+  it('answers VNPAY IPN with the raw RspCode body (no envelope)', async () => {
+    const result = { ok: true, outcome: 'settled' }
+    const gateway = {
+      handleNotify: jest.fn().mockResolvedValue(result),
+      toVnpayAck: jest
+        .fn()
+        .mockReturnValue({ RspCode: '00', Message: 'Confirm Success' }),
+    }
+    const response = fakeResponse()
 
-    expect(service.handleVnpayDepositReturn).toHaveBeenCalledWith({
-      vnp_TxnRef: 'VNPAY-1',
-    })
-    expect(response.redirect).toHaveBeenCalledWith(
-      302,
-      'http://localhost:3000/contracts/contract-1?payment=vnpay'
+    await createController({}, {}, gateway).vnpayIpn(
+      { vnp_TxnRef: 'V-1' },
+      response as never
     )
+
+    expect(gateway.handleNotify).toHaveBeenCalledWith('vnpay', {
+      vnp_TxnRef: 'V-1',
+    })
+    expect(response.status).toHaveBeenCalledWith(200)
+    expect(response.json).toHaveBeenCalledWith({
+      RspCode: '00',
+      Message: 'Confirm Success',
+    })
+  })
+
+  it('answers MoMo IPN with the mapped status code and no body', async () => {
+    const gateway = {
+      handleNotify: jest.fn().mockResolvedValue({ ok: true }),
+      toMomoStatus: jest.fn().mockReturnValue(204),
+    }
+    const response = fakeResponse()
+
+    await createController({}, {}, gateway).momoIpn(
+      { orderId: 'M-1' },
+      response as never
+    )
+
+    expect(gateway.handleNotify).toHaveBeenCalledWith('momo', {
+      orderId: 'M-1',
+    })
+    expect(response.status).toHaveBeenCalledWith(204)
+    expect(response.end).toHaveBeenCalled()
+  })
+
+  it('answers ZaloPay callback with the raw return_code body', async () => {
+    const gateway = {
+      handleNotify: jest.fn().mockResolvedValue({ ok: false }),
+      toZalopayAck: jest
+        .fn()
+        .mockReturnValue({ return_code: -1, return_message: 'mac not equal' }),
+    }
+    const response = fakeResponse()
+
+    await createController({}, {}, gateway).zalopayCallback(
+      { data: '{}', mac: 'x' },
+      response as never
+    )
+
+    expect(gateway.handleNotify).toHaveBeenCalledWith('zalopay', {
+      data: '{}',
+      mac: 'x',
+    })
+    expect(response.json).toHaveBeenCalledWith({
+      return_code: -1,
+      return_message: 'mac not equal',
+    })
   })
 })
