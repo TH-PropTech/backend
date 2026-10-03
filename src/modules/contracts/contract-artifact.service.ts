@@ -11,6 +11,7 @@ import {
 import { Inject } from '@nestjs/common'
 import { InjectRepository as InjectTypeOrmRepository } from '@nestjs/typeorm'
 import { createHash } from 'node:crypto'
+import type { Readable } from 'node:stream'
 import { ObjectId } from 'mongodb'
 import { Repository } from 'typeorm'
 import { Contract } from './schemas/contract.schema'
@@ -382,6 +383,64 @@ export class ContractArtifactService {
       throw new ConflictException('CONTRACT_ARTIFACT_HASH_MISMATCH')
     }
     return { reference, artifact, bytes }
+  }
+
+  /**
+   * PROP-399 D8: mở artifact ký chuẩn dạng stream cho gói bằng chứng. Chỉ kiểm tra metadata
+   * (tham chiếu ↔ bản ghi artifact); KHÔNG đọc bytes vào bộ nhớ — việc băm/đối chiếu bytes do
+   * lớp streaming thực hiện. `revision` vắng mặt = artifact hiện hành của hợp đồng.
+   */
+  async openCanonicalArtifactForExport(
+    contract: Contract,
+    revision?: number
+  ): Promise<{
+    artifact: ContractArtifact
+    recordedHash: string
+    open: () => Promise<Readable>
+  }> {
+    const storage = this.storage
+    if (!this.artifactRepository || !storage?.openDownloadStream) {
+      throw new ServiceUnavailableException(
+        'CONTRACT_ARTIFACT_STORAGE_UNAVAILABLE'
+      )
+    }
+    const openStream = storage.openDownloadStream.bind(storage)
+    const contractId = contract._id.toHexString()
+    const current = contract.artifactRef
+    let artifact: ContractArtifact | null
+
+    if (revision === undefined || (current && revision === current.revision)) {
+      const reference = requireCanonicalArtifactReference(contract)
+      artifact = await this.findArtifact(reference.artifactId)
+      if (!artifact) throw new NotFoundException('CONTRACT_ARTIFACT_NOT_FOUND')
+      if (
+        artifact.contractId !== contractId ||
+        artifact.revision !== reference.revision ||
+        artifact.artifactHash !== reference.artifactHash ||
+        artifact.contentType !== reference.contentType
+      ) {
+        throw new ConflictException('CONTRACT_ARTIFACT_SUPERSEDED')
+      }
+    } else {
+      const candidates = await this.artifactRepository.find({
+        where: { contractId, revision },
+      })
+      // Chỉ bản canonical của hợp đồng (bản sửa đổi có amendmentId không thuộc gói này).
+      artifact = candidates.find(candidate => !candidate.amendmentId) ?? null
+      if (!artifact) {
+        throw new NotFoundException({
+          code: 'EVIDENCE_VERSION_NOT_FOUND',
+          message: 'Không tìm thấy phiên bản artifact được yêu cầu',
+        })
+      }
+    }
+
+    const fileId = artifact.gridFsFileId
+    return {
+      artifact,
+      recordedHash: artifact.artifactHash,
+      open: () => openStream(fileId),
+    }
   }
 
   async generateDocument(

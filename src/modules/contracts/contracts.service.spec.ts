@@ -691,6 +691,71 @@ describe('ContractsService activation', () => {
     expect(paymentsService.generateSchedule).toHaveBeenCalledWith(contract)
   })
 
+  it('leaves the legacy (non-SmartCA) signContract activation unbound: it has no canonical artifact to carry a v3 governance block (PROP-399 D2)', async () => {
+    const contract = {
+      _id: new ObjectId('507f1f77bcf86cd799439011'),
+      contractCode: 'HD-LEGACY',
+      propertyId: 'property-1',
+      landlordId: 'landlord-1',
+      tenantId: 'tenant-1',
+      monthlyRent: 10_000_000,
+      deposit: 0,
+      startDate: new Date('2030-01-01T00:00:00.000Z'),
+      status: 'awaiting-signature' as const,
+      signedByTenant: true,
+      signedByLandlord: false,
+      executionPolicySnapshot: {
+        policyId: 'policy-1',
+        version: 1,
+        strategy: 'DEPOSIT_FIRST',
+        contentHash: 'policy-hash',
+      },
+    } as unknown as Contract
+    const contractRepository = {
+      findOne: jest.fn().mockResolvedValue(contract),
+      save: jest.fn(
+        (value: Contract): Promise<Contract> => Promise.resolve(value)
+      ),
+      update: jest.fn(),
+    }
+    const ledgerOutboxService = { enqueue: jest.fn().mockResolvedValue({}) }
+    const governanceService = {
+      findLatestEligibleForExecutionPolicy: jest.fn().mockResolvedValue({
+        _id: new ObjectId(),
+        version: 1,
+        manifestHash: 'c'.repeat(64),
+      }),
+    }
+    const service = Object.create(
+      ContractsService.prototype
+    ) as ContractsService
+    Reflect.set(service, 'contractRepository', contractRepository)
+    Reflect.set(service, 'policiesService', {
+      findAll: jest.fn().mockResolvedValue([]),
+    })
+    Reflect.set(service, 'kycService', {
+      findByUserId: jest.fn().mockResolvedValue({ status: 'verified' }),
+    })
+    Reflect.set(service, 'ledgerOutboxService', ledgerOutboxService)
+    Reflect.set(service, 'governanceService', governanceService)
+    Reflect.set(service, 'logger', { log: jest.fn() })
+    Reflect.set(service, 'fabricService', {
+      getChaincodeAbiVersion: jest.fn(() => 2),
+    })
+
+    await service.signContract(contract._id.toHexString(), 'landlord')
+
+    expect(
+      governanceService.findLatestEligibleForExecutionPolicy
+    ).not.toHaveBeenCalled()
+    expect(contractRepository.update).not.toHaveBeenCalled()
+    expect(contract.governanceSnapshotRef ?? null).toBeNull()
+    const enqueueCalls = ledgerOutboxService.enqueue.mock
+      .calls as unknown as ReadonlyArray<readonly unknown[]>
+    const event = enqueueCalls[0]?.[0] as { dependencyKeys?: string[] }
+    expect(event.dependencyKeys).toBeUndefined()
+  })
+
   it('rejects contract activation if positive deposit is not paid', async () => {
     const contract = {
       _id: new ObjectId('507f1f77bcf86cd799439011'),
@@ -1093,6 +1158,222 @@ describe('ContractsService activation', () => {
       event => event.eventType === 'contract.activated'
     )
     expect(activatedEvents).toHaveLength(1)
+  })
+
+  describe('governance snapshot binding (PROP-399 D2, SmartCA activation site)', () => {
+    const SNAPSHOT_ID = '507f1f77bcf86cd799439abc'
+    const MANIFEST_HASH = 'c'.repeat(64)
+    const eligibleSnapshot = {
+      _id: new ObjectId(SNAPSHOT_ID),
+      version: 3,
+      manifestHash: MANIFEST_HASH,
+    }
+
+    type EnqueueEvent = {
+      args: string[]
+      dependencyKey?: string | null
+      dependencyKeys?: string[]
+      metadata?: Record<string, unknown> & {
+        details?: Record<string, unknown>
+      }
+    }
+
+    function withGovernance(
+      options: Parameters<typeof createSmartCaActivationContext>[0] = {},
+      snapshot: unknown = eligibleSnapshot
+    ): ReturnType<typeof createSmartCaActivationContext> & {
+      governanceService: { findLatestEligibleForExecutionPolicy: jest.Mock }
+      update: jest.Mock
+    } {
+      const context = createSmartCaActivationContext({
+        depositStatus: 'paid',
+        ...options,
+      })
+      const governanceService = {
+        findLatestEligibleForExecutionPolicy: jest
+          .fn()
+          .mockResolvedValue(snapshot),
+      }
+      const update = jest.fn().mockResolvedValue({ affected: 1 })
+      Reflect.set(context.service, 'governanceService', governanceService)
+      Reflect.set(context.contractRepository, 'update', update)
+      return { ...context, governanceService, update }
+    }
+
+    async function activate(
+      context: ReturnType<typeof createSmartCaActivationContext>
+    ): Promise<EnqueueEvent> {
+      await context.service.recordSmartCaSignature(
+        smartCaEvidence('tenant', 'tx-t')
+      )
+      await context.service.recordSmartCaSignature(
+        smartCaEvidence('landlord', 'tx-l')
+      )
+      expect(context.ledgerOutboxService.enqueue).toHaveBeenCalledTimes(1)
+      return context.ledgerOutboxService.enqueue.mock
+        .calls[0]?.[0] as EnqueueEvent
+    }
+
+    it('selects the snapshot by the contract own executionPolicySnapshot (policyId + version)', async () => {
+      const context = withGovernance()
+      await activate(context)
+      expect(
+        context.governanceService.findLatestEligibleForExecutionPolicy
+      ).toHaveBeenCalledWith({ policyId: 'policy-1', version: 1 })
+    })
+
+    it('persists the immutable governanceSnapshotRef BEFORE enqueueing activation evidence', async () => {
+      const context = withGovernance()
+      await activate(context)
+
+      const expectedRef = {
+        snapshotId: SNAPSHOT_ID,
+        version: 3,
+        manifestHash: MANIFEST_HASH,
+      }
+      expect(context.contract.governanceSnapshotRef).toEqual(expectedRef)
+      expect(context.update).toHaveBeenCalledWith(
+        { _id: context.contract._id },
+        { governanceSnapshotRef: expectedRef }
+      )
+      expect(context.update.mock.invocationCallOrder[0]).toBeLessThan(
+        context.ledgerOutboxService.enqueue.mock.invocationCallOrder[0] ??
+          Number.POSITIVE_INFINITY
+      )
+    })
+
+    it('enqueues activation with both parents: deposit.paid and governance.published', async () => {
+      const context = withGovernance()
+      const event = await activate(context)
+
+      expect(event.dependencyKeys).toEqual([
+        'deposit:507f1f77bcf86cd799439099:deposit.paid',
+        `governance-snapshot:${SNAPSHOT_ID}:governance.published`,
+      ])
+      expect(event.dependencyKey ?? null).toBeNull()
+    })
+
+    it('enqueues only the governance parent when the contract has no deposit', async () => {
+      const context = withGovernance()
+      context.contract.deposit = 0
+      const event = await activate(context)
+
+      expect(event.dependencyKeys).toEqual([
+        `governance-snapshot:${SNAPSHOT_ID}:governance.published`,
+      ])
+    })
+
+    it('builds v3 evidence carrying the governance block and the v2 positional args', async () => {
+      const context = withGovernance()
+      const event = await activate(context)
+
+      expect(event.args).toHaveLength(10)
+      const evidence = JSON.parse(
+        event.args[event.args.length - 1] ?? '{}'
+      ) as {
+        schemaVersion: number
+        governance: {
+          snapshotId: string
+          version: number
+          manifestHash: string
+        }
+      }
+      expect(evidence.schemaVersion).toBe(3)
+      expect(evidence.governance).toEqual({
+        snapshotId: SNAPSHOT_ID,
+        version: 3,
+        manifestHash: MANIFEST_HASH,
+      })
+      expect(event.metadata?.details).toEqual(
+        expect.objectContaining({ evidenceSchemaVersion: 3 })
+      )
+    })
+
+    it('makes the item wait for a chaincode that supports ABI v2 and evidence v3 (CHAINCODE_UPGRADE_REQUIRED)', async () => {
+      const context = withGovernance()
+      const event = await activate(context)
+
+      expect(event.metadata).toEqual(
+        expect.objectContaining({
+          minimumAbiVersion: 2,
+          minimumEvidenceSchemaVersion: 3,
+          waitingCode: 'CHAINCODE_UPGRADE_REQUIRED',
+        })
+      )
+    })
+
+    it('never drops the governance reference on an ABI v1 chaincode: args stay v2-shaped and the item waits', async () => {
+      const context = withGovernance()
+      Reflect.set(context.service, 'fabricService', {
+        getChaincodeAbiVersion: jest.fn(() => 1),
+      })
+      const event = await activate(context)
+
+      expect(event.args).toHaveLength(10)
+      expect(event.metadata?.argsVersion).toBe(2)
+      expect(event.metadata?.minimumAbiVersion).toBe(2)
+    })
+
+    it('keeps an already-bound reference immutable and does not reselect', async () => {
+      const context = withGovernance()
+      const existing = {
+        snapshotId: 'aaaaaaaaaaaaaaaaaaaaaaaa',
+        version: 1,
+        manifestHash: 'e'.repeat(64),
+      }
+      context.contract.governanceSnapshotRef = existing
+      const event = await activate(context)
+
+      expect(
+        context.governanceService.findLatestEligibleForExecutionPolicy
+      ).not.toHaveBeenCalled()
+      expect(context.update).not.toHaveBeenCalled()
+      expect(context.contract.governanceSnapshotRef).toBe(existing)
+      expect(event.dependencyKeys).toContain(
+        'governance-snapshot:aaaaaaaaaaaaaaaaaaaaaaaa:governance.published'
+      )
+    })
+
+    it('is byte-identical to the legacy path when no eligible snapshot exists (v2, single dependencyKey, no ref)', async () => {
+      const context = withGovernance({}, null)
+      const event = await activate(context)
+
+      expect(context.contract.governanceSnapshotRef ?? null).toBeNull()
+      expect(context.update).not.toHaveBeenCalled()
+      expect(event.dependencyKey).toBe(
+        'deposit:507f1f77bcf86cd799439099:deposit.paid'
+      )
+      expect(event.dependencyKeys).toBeUndefined()
+      expect(event.metadata).not.toHaveProperty('minimumEvidenceSchemaVersion')
+      expect(event.metadata).not.toHaveProperty('waitingCode')
+      expect(event.metadata).not.toHaveProperty('minimumAbiVersion')
+      const evidence = JSON.parse(
+        event.args[event.args.length - 1] ?? '{}'
+      ) as {
+        schemaVersion: number
+        governance?: unknown
+      }
+      expect(evidence.schemaVersion).toBe(2)
+      expect(evidence.governance).toBeUndefined()
+    })
+
+    it('does not bind a contract that has no executionPolicySnapshot', async () => {
+      const context = withGovernance()
+      context.contract.executionPolicySnapshot = null
+      const event = await activate(context)
+
+      expect(
+        context.governanceService.findLatestEligibleForExecutionPolicy
+      ).not.toHaveBeenCalled()
+      expect(event.dependencyKeys).toBeUndefined()
+    })
+
+    it('behaves exactly as before when the governance service is not wired', async () => {
+      const context = createSmartCaActivationContext({ depositStatus: 'paid' })
+      const event = await activate(context)
+      expect(event.dependencyKeys).toBeUndefined()
+      expect(context.contract.governanceSnapshotRef ?? null).toBeNull()
+    })
   })
 })
 

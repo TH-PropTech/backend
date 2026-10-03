@@ -30,7 +30,16 @@ jest.mock('fs', () => {
   const actualFs = jest.requireActual<typeof import('fs')>('fs')
   return {
     ...actualFs,
-    readFileSync: jest.fn((p: string) => Buffer.from('mock-file-content:' + p)),
+    readFileSync: jest.fn((p: string) =>
+      // PROP-399 D5: identity phải là chứng chỉ X.509 hợp lệ (hạn 2126) mới được dùng để dựng gateway.
+      /cert.pem$/.test(p)
+        ? Buffer.from(
+            jest.requireActual<typeof import('./fabric-identity.fixtures')>(
+              './fabric-identity.fixtures'
+            ).TEST_IDENTITY_CERT_PEM
+          )
+        : Buffer.from('mock-file-content:' + p)
+    ),
     existsSync: jest.fn(() => true),
     statSync: jest.fn(() => ({ isDirectory: (): boolean => false })),
     readdirSync: jest.fn(() => ['test_sk']),
@@ -133,6 +142,51 @@ describe('FabricService', () => {
       )
     })
 
+    it('fills the PROP-399 blockchain-log reference fields from submit metadata (simulation)', async () => {
+      configService.get.mockImplementation((key: string) =>
+        key === 'fabric.enabled' ? false : undefined
+      )
+      const service = new FabricService(
+        logRepository as never,
+        configService as never
+      )
+      await service.onModuleInit()
+
+      await service.submitTransaction('recordHandover', ['s-1'], {
+        contractId: 'c-1',
+        settlementId: 's-1',
+        handoverRevision: 2,
+        schemaVersion: 1,
+        payloadHash: 'a'.repeat(64),
+      })
+      await service.submitTransaction('publishGovernanceSnapshot', ['g-1'], {
+        governanceSnapshotId: 'g-1',
+        schemaVersion: 1,
+        payloadHash: 'b'.repeat(64),
+      })
+
+      expect(logRepository.save).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          contractId: 'c-1',
+          settlementId: 's-1',
+          handoverRevision: 2,
+          schemaVersion: 1,
+          payloadHash: 'a'.repeat(64),
+          governanceSnapshotId: null,
+        })
+      )
+      expect(logRepository.save).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          governanceSnapshotId: 'g-1',
+          settlementId: null,
+          handoverRevision: null,
+          payloadHash: 'b'.repeat(64),
+        })
+      )
+    })
+
     it('rebuilds read and verify results from persisted simulation logs after restart', async () => {
       configService.get.mockImplementation((key: string) =>
         key === 'fabric.enabled' ? false : undefined
@@ -218,17 +272,17 @@ describe('FabricService', () => {
       expect(evaluateTransaction).toHaveBeenCalledWith('getChaincodeInfo')
     })
 
-    it('falls back to ABI v1 when deployed chaincode lacks getChaincodeInfo', async () => {
+    it('reports FABRIC_CHAINCODE_INCOMPATIBLE when the deployed chaincode lacks getChaincodeInfo, without scanning the ledger (PROP-399 6.5)', async () => {
       setupValidConfig()
       const evaluateTransaction = jest
         .fn()
-        .mockRejectedValueOnce(
+        .mockRejectedValue(
           new Error('function getChaincodeInfo does not exist')
         )
-        .mockResolvedValueOnce(Buffer.from('[]'))
       const getContract = jest.fn().mockReturnValue({ evaluateTransaction })
       const getNetwork = jest.fn().mockReturnValue({ getContract })
-      mockConnect.mockReturnValue({ getNetwork, close: jest.fn() })
+      const close = jest.fn()
+      mockConnect.mockReturnValue({ getNetwork, close })
 
       const service = new FabricService(
         logRepository as never,
@@ -238,28 +292,109 @@ describe('FabricService', () => {
 
       expect(service.getStatus()).toEqual(
         expect.objectContaining({
-          ready: true,
-          connectionState: 'connected',
-          chaincodeAbiVersion: 1,
+          ready: false,
+          connectionState: 'unavailable',
+          errorCode: 'FABRIC_CHAINCODE_INCOMPATIBLE',
         })
       )
-      expect(evaluateTransaction).toHaveBeenNthCalledWith(1, 'getChaincodeInfo')
-      expect(evaluateTransaction).toHaveBeenNthCalledWith(2, 'getAllContracts')
+      expect(evaluateTransaction).toHaveBeenCalledWith('getChaincodeInfo')
+      expect(evaluateTransaction).not.toHaveBeenCalledWith('getAllContracts')
+      expect(close).toHaveBeenCalled()
+    })
+
+    describe('supportsEvidenceSchemaVersion (PROP-399 D2 capability)', () => {
+      async function connectWith(info: Buffer | Error): Promise<FabricService> {
+        setupValidConfig()
+        const evaluateTransaction =
+          info instanceof Error
+            ? jest
+                .fn()
+                .mockRejectedValueOnce(info)
+                .mockResolvedValueOnce(Buffer.from('[]'))
+            : jest.fn().mockResolvedValue(info)
+        const getContract = jest.fn().mockReturnValue({ evaluateTransaction })
+        mockConnect.mockReturnValue({
+          getNetwork: jest.fn().mockReturnValue({ getContract }),
+          close: jest.fn(),
+        })
+        const service = new FabricService(
+          logRepository as never,
+          configService as never
+        )
+        await service.onModuleInit()
+        return service
+      }
+
+      it('is true for every version in simulation mode (no chaincode to upgrade)', async () => {
+        configService.get.mockImplementation((key: string) =>
+          key === 'fabric.enabled' ? false : undefined
+        )
+        const service = new FabricService(
+          logRepository as never,
+          configService as never
+        )
+        await service.onModuleInit()
+        expect(service.supportsEvidenceSchemaVersion(3)).toBe(true)
+      })
+
+      it('reads evidenceSchemaVersions advertised by getChaincodeInfo', async () => {
+        const service = await connectWith(
+          Buffer.from(
+            JSON.stringify({ abiVersion: 2, evidenceSchemaVersions: [2, 3] })
+          )
+        )
+        expect(service.supportsEvidenceSchemaVersion(2)).toBe(true)
+        expect(service.supportsEvidenceSchemaVersion(3)).toBe(true)
+        expect(service.supportsEvidenceSchemaVersion(4)).toBe(false)
+      })
+
+      it('assumes only v2 when the chaincode info does not advertise versions', async () => {
+        const service = await connectWith(
+          Buffer.from(JSON.stringify({ abiVersion: 2 }))
+        )
+        expect(service.supportsEvidenceSchemaVersion(2)).toBe(true)
+        expect(service.supportsEvidenceSchemaVersion(3)).toBe(false)
+      })
+
+      it('assumes only v2 for an ABI v1 chaincode without getChaincodeInfo', async () => {
+        const service = await connectWith(
+          new Error('function getChaincodeInfo does not exist')
+        )
+        expect(service.supportsEvidenceSchemaVersion(3)).toBe(false)
+      })
+
+      it('ignores malformed advertised versions', async () => {
+        const service = await connectWith(
+          Buffer.from(
+            JSON.stringify({
+              abiVersion: 2,
+              evidenceSchemaVersions: [3, 'x', -1, 1.5, null],
+            })
+          )
+        )
+        expect(service.supportsEvidenceSchemaVersion(3)).toBe(true)
+        expect(service.supportsEvidenceSchemaVersion(2)).toBe(false)
+      })
     })
 
     it('submits transaction and returns authentic txId from chaincode response', async () => {
       setupValidConfig()
-      const submitTransaction = jest
-        .fn()
-        .mockResolvedValue(
-          Buffer.from(
-            JSON.stringify({ txId: 'fabric-tx-999', blockNumber: null })
-          )
-        )
+      const submitTransaction = jest.fn().mockResolvedValue({
+        getTransactionId: () => 'fabric-tx-999',
+        getResult: () => Buffer.from(JSON.stringify({ note: 'ok' })),
+        getStatus: () =>
+          Promise.resolve({
+            successful: true,
+            code: 0,
+            blockNumber: 77n,
+            transactionId: 'fabric-tx-999',
+          }),
+      })
       const evaluateTransaction = jest.fn().mockResolvedValue(Buffer.from('[]'))
-      const getContract = jest
-        .fn()
-        .mockReturnValue({ submitTransaction, evaluateTransaction })
+      const getContract = jest.fn().mockReturnValue({
+        submitAsync: submitTransaction,
+        evaluateTransaction,
+      })
       const getNetwork = jest.fn().mockReturnValue({ getContract })
       const mockGateway = {
         getNetwork,
@@ -280,13 +415,65 @@ describe('FabricService', () => {
       expect(result.success).toBe(true)
       expect(result.networkMode).toBe('fabric')
       expect(result.txHash).toBe('fabric-tx-999')
-      expect(result.blockNumber).toBeNull()
+      expect(result.blockNumber).toBe(77)
+      expect(submitTransaction).toHaveBeenCalledWith('createContract', {
+        arguments: ['c-1', 'hash-1'],
+      })
       expect(logRepository.save).toHaveBeenCalledWith(
         expect.objectContaining({
           txHash: 'fabric-tx-999',
-          blockNumber: null,
+          blockNumber: 77,
           networkMode: 'fabric',
           status: 'confirmed',
+        })
+      )
+    })
+  })
+
+  describe('2b. PROP-399 log reference fields (fabric)', () => {
+    it('fills the reference fields on a live Fabric log and ignores malformed metadata values', async () => {
+      setupValidConfig()
+      const submitTransaction = jest.fn().mockResolvedValue({
+        getTransactionId: () => 'fabric-tx-7',
+        getResult: () => Buffer.from('{}'),
+        getStatus: () =>
+          Promise.resolve({
+            successful: true,
+            code: 0,
+            blockNumber: 5n,
+            transactionId: 'fabric-tx-7',
+          }),
+      })
+      const evaluateTransaction = jest.fn().mockResolvedValue(Buffer.from('[]'))
+      const getContract = jest.fn().mockReturnValue({
+        submitAsync: submitTransaction,
+        evaluateTransaction,
+      })
+      mockConnect.mockReturnValue({
+        getNetwork: jest.fn().mockReturnValue({ getContract }),
+        close: jest.fn(),
+      })
+      const service = new FabricService(
+        logRepository as never,
+        configService as never
+      )
+      await service.onModuleInit()
+
+      await service.submitTransaction('recordMoveInSettlement', ['s-1'], {
+        contractId: 'c-1',
+        settlementId: 's-1',
+        schemaVersion: 1,
+        payloadHash: 'not-a-hash',
+        handoverRevision: 'x',
+      } as never)
+
+      expect(logRepository.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          settlementId: 's-1',
+          schemaVersion: 1,
+          payloadHash: null,
+          handoverRevision: null,
+          txHash: 'fabric-tx-7',
         })
       )
     })

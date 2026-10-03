@@ -155,15 +155,7 @@ export class PlatformFeesService {
     contentHash: string
     quote: ReturnType<typeof calculateFeeQuote>
   } | null> {
-    const schedules = await this.scheduleRepo.find({
-      where: { status: 'published' },
-    })
-    const schedule = schedules
-      .filter(item => item.effectiveFrom && item.effectiveFrom <= new Date())
-      .sort(
-        (a, b) =>
-          (b.effectiveFrom?.getTime() ?? 0) - (a.effectiveFrom?.getTime() ?? 0)
-      )[0]
+    const schedule = await this.getEffectiveSchedule()
     if (!schedule || !schedule.contentHash) return null
     return {
       scheduleId: schedule.scheduleId,
@@ -171,6 +163,24 @@ export class PlatformFeesService {
       contentHash: schedule.contentHash,
       quote: calculateFeeQuote(schedule.rules, input),
     }
+  }
+
+  /** Biểu phí published đã có hiệu lực (effectiveFrom mới nhất ≤ now); null nếu chưa có. */
+  async getEffectiveSchedule(
+    now: Date = new Date()
+  ): Promise<PlatformFeeSchedule | null> {
+    const schedules = await this.scheduleRepo.find({
+      where: { status: 'published' },
+    })
+    return (
+      schedules
+        .filter(item => item.effectiveFrom && item.effectiveFrom <= now)
+        .sort(
+          (a, b) =>
+            (b.effectiveFrom?.getTime() ?? 0) -
+            (a.effectiveFrom?.getTime() ?? 0)
+        )[0] ?? null
+    )
   }
 
   async revenue(): Promise<{

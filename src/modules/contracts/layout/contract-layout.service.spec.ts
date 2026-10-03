@@ -83,3 +83,28 @@ describe('ContractLayoutService', () => {
     expect(profiles.remove).toHaveBeenCalledWith(saved)
   })
 })
+
+describe('ContractLayoutService.listLatestPublished (PROP-399 governance source)', () => {
+  it('returns only the highest published version per profileKey, ordered by key', async () => {
+    const rows = [
+      { profileKey: 'standard', version: 1, status: 'published' },
+      { profileKey: 'compact', version: 2, status: 'published' },
+      { profileKey: 'standard', version: 4, status: 'published' },
+    ] as ContractLayoutProfile[]
+    const profiles = { find: jest.fn().mockResolvedValue(rows) }
+    const service = new ContractLayoutService(
+      profiles as unknown as Repository<ContractLayoutProfile>,
+      {} as unknown as Repository<ContractLayoutAudit>
+    )
+
+    const latest = await service.listLatestPublished()
+
+    expect(profiles.find).toHaveBeenCalledWith({
+      where: { status: 'published' },
+    })
+    expect(latest.map(p => `${p.profileKey}@${p.version}`)).toEqual([
+      'compact@2',
+      'standard@4',
+    ])
+  })
+})

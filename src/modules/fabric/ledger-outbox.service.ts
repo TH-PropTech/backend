@@ -12,6 +12,10 @@ import { ObjectId } from 'mongodb'
 import { FabricService } from './fabric.service'
 import { LedgerProjectionService } from './ledger-projection.service'
 import { LedgerOutbox } from './schemas/ledger-outbox.schema'
+import {
+  LEDGER_SUBMIT_ACTIONS,
+  validateLedgerActionArgs,
+} from './ledger-action-args'
 import { RentalTransactionEventService } from '../rental-transactions/rental-transaction-event.service'
 
 export type LedgerEventInput = {
@@ -21,17 +25,39 @@ export type LedgerEventInput = {
   action: string
   args: string[]
   metadata?: Record<string, unknown>
+  /** Parent đơn (tương thích cũ); được chuẩn hoá vào `dependencyKeys`. */
   dependencyKey?: string | null
+  /** PROP-399 D12: mọi parent phải `confirmed` mới được claim. */
+  dependencyKeys?: string[] | null
 }
 
 const MAX_ATTEMPTS = 5
-const ALLOWED_RETRY_ACTIONS = new Set([
-  'recordDeposit',
-  'createContract',
-  'recordPayment',
-  'recordContractAmendment',
-  'terminateContract',
-])
+const DEPENDENCY_WAIT_STEP_MS = 5000
+const DEPENDENCY_WAIT_MAX_MS = 60000
+// PROP-399 D12: retry allowlist = các action outbox được phép submit.
+const ALLOWED_RETRY_ACTIONS = LEDGER_SUBMIT_ACTIONS
+
+/** Phân loại lỗi chaincode theo tiền tố `ERR_<CODE>:` (D12). */
+const CHAINCODE_ERROR_PATTERN = /\bERR_([A-Z][A-Z_]*):/
+type ChaincodeErrorClass =
+  | { terminal: true; errorCode: string }
+  | { terminal: false }
+const CHAINCODE_ERROR_CLASSES: Record<string, ChaincodeErrorClass> = {
+  CONFLICT: { terminal: true, errorCode: 'TERMINAL_CONFLICT' },
+  GOVERNANCE_MISMATCH: { terminal: true, errorCode: 'TERMINAL_CONFLICT' },
+  SCHEMA: { terminal: true, errorCode: 'TERMINAL_SCHEMA' },
+  FORBIDDEN: { terminal: true, errorCode: 'FABRIC_CHAINCODE_FORBIDDEN' },
+  NOT_FOUND: { terminal: false },
+  DEPENDENCY: { terminal: false },
+}
+
+/** PROP-399 6.6: kết quả commit status của Fabric (FabricService) — ưu tiên hơn khớp chuỗi cũ. */
+const COMMIT_RETRYABLE_MARKER = 'FABRIC_COMMIT_RETRYABLE:'
+const COMMIT_REJECTED_MARKER = 'FABRIC_COMMIT_REJECTED:'
+
+function keySegmentValid(value: unknown): boolean {
+  return typeof value === 'string' && value.length > 0 && !value.includes(':')
+}
 
 @Injectable()
 export class LedgerOutboxService {
@@ -47,6 +73,9 @@ export class LedgerOutboxService {
   ) {}
 
   async enqueue(input: LedgerEventInput): Promise<LedgerOutbox> {
+    this.assertValidKeys(input)
+    const dependencyKeys = this.normalizeDependencyKeys(input)
+
     const existing = await this.repository.findOne({
       where: {
         aggregateType: input.aggregateType,
@@ -75,7 +104,14 @@ export class LedgerOutboxService {
       nextRetryAt: new Date(),
       lastError: null,
       txHash: null,
-      dependencyKey: input.dependencyKey ?? null,
+      dependencyKey: input.dependencyKey ?? dependencyKeys[0] ?? null,
+      dependencyKeys: dependencyKeys.length > 0 ? dependencyKeys : null,
+      contractId:
+        typeof input.metadata?.contractId === 'string'
+          ? input.metadata.contractId
+          : input.aggregateType === 'contract'
+            ? input.aggregateId
+            : null,
       claimToken: null,
       claimedAt: null,
       leaseExpiresAt: null,
@@ -154,11 +190,11 @@ export class LedgerOutboxService {
         continue
       }
 
-      // Kiểm tra dependency prerequisite nếu có
-      if (candidate.dependencyKey) {
-        const isSatisfied = await this.checkDependency(candidate)
+      // Kiểm tra mọi parent prerequisite (D12); không tăng attempts khi chờ.
+      if (this.dependencyKeysOf(candidate).length > 0) {
+        const isSatisfied = await this.checkDependencies(candidate, now)
         if (!isSatisfied) {
-          // Chưa thỏa mãn hoặc dependency đã fail
+          // Chưa thỏa mãn hoặc có parent đã fail
           continue
         }
       }
@@ -166,6 +202,11 @@ export class LedgerOutboxService {
       // Claim compare-and-set
       const claimToken = randomUUID()
       const leaseExpiresAt = new Date(now.getTime() + leaseDurationMs)
+      const clearWaitMarker = candidate.errorCode === 'DEPENDENCY_PENDING'
+      if (clearWaitMarker) {
+        candidate.errorCode = null
+        candidate.lastError = null
+      }
 
       if (typeof this.repository.update === 'function') {
         const result = await this.repository.update(
@@ -178,6 +219,7 @@ export class LedgerOutboxService {
             claimToken,
             claimedAt: now,
             leaseExpiresAt,
+            ...(clearWaitMarker ? { errorCode: null, lastError: null } : {}),
           }
         )
 
@@ -202,40 +244,121 @@ export class LedgerOutboxService {
     return null
   }
 
-  private async checkDependency(event: LedgerOutbox): Promise<boolean> {
-    if (!event.dependencyKey) return true
+  /** Danh sách parent hiệu lực: `dependencyKeys ?? [dependencyKey]` (hàng cũ chỉ có dependencyKey). */
+  private dependencyKeysOf(event: LedgerOutbox): string[] {
+    if (
+      Array.isArray(event.dependencyKeys) &&
+      event.dependencyKeys.length > 0
+    ) {
+      return event.dependencyKeys
+    }
+    return event.dependencyKey ? [event.dependencyKey] : []
+  }
 
-    // Format dependencyKey: 'aggregateType:aggregateId:eventType'
-    const parts = event.dependencyKey.split(':')
-    if (parts.length < 3 || !parts[0] || !parts[1] || !parts[2]) return true
+  private assertValidKeys(input: LedgerEventInput): void {
+    for (const segment of [
+      input.aggregateType,
+      input.aggregateId,
+      input.eventType,
+    ]) {
+      if (!keySegmentValid(segment)) {
+        throw new BadRequestException('LEDGER_KEY_INVALID')
+      }
+    }
+    for (const key of [
+      ...(input.dependencyKey ? [input.dependencyKey] : []),
+      ...(input.dependencyKeys ?? []),
+    ]) {
+      const parts = typeof key === 'string' ? key.split(':') : []
+      if (parts.length !== 3 || !parts.every(keySegmentValid)) {
+        throw new BadRequestException('LEDGER_KEY_INVALID')
+      }
+    }
+  }
 
-    const aggregateType: string = parts[0]
-    const aggregateId: string = parts[1]
-    const eventType: string = parts[2]
-    const depEvent = await this.repository.findOne({
-      where: { aggregateType, aggregateId, eventType },
-    })
+  private normalizeDependencyKeys(input: LedgerEventInput): string[] {
+    const keys = [
+      ...(input.dependencyKey ? [input.dependencyKey] : []),
+      ...(input.dependencyKeys ?? []),
+    ]
+    return [...new Set(keys)]
+  }
 
-    if (!depEvent) {
-      // Dependency chưa tồn tại hoặc chưa tạo -> defer
-      return false
+  /**
+   * D12: item sẵn sàng khi MỌI parent đã confirmed. Parent `failed` → child
+   * `failed` (DEPENDENCY_FAILED). Parent thiếu/pending → chờ, không tăng attempts.
+   */
+  private async checkDependencies(
+    event: LedgerOutbox,
+    now: Date
+  ): Promise<boolean> {
+    let blockingKey: string | null = null
+
+    for (const key of this.dependencyKeysOf(event)) {
+      // Format key: 'aggregateType:aggregateId:eventType'
+      const parts = key.split(':')
+      if (parts.length < 3 || !parts[0] || !parts[1] || !parts[2]) continue
+
+      const aggregateType: string = parts[0]
+      const aggregateId: string = parts[1]
+      const eventType: string = parts[2]
+      const depEvent = await this.repository.findOne({
+        where: { aggregateType, aggregateId, eventType },
+      })
+
+      if (depEvent?.status === 'failed') {
+        event.status = 'failed'
+        event.errorCode = 'DEPENDENCY_FAILED'
+        event.lastError = `Prerequisite event [${key}] failed terminally`
+        event.nextRetryAt = null
+        await this.repository.save(event)
+        await this.projectFailureIfTerminal(event)
+        this.logger.error(
+          `Event [${event._id?.toString()}] marked failed because dependency [${key}] failed`
+        )
+        return false
+      }
+
+      if (depEvent?.status !== 'confirmed' && blockingKey === null) {
+        blockingKey = key
+      }
     }
 
-    if (depEvent.status === 'failed') {
-      event.status = 'failed'
-      event.errorCode = 'DEPENDENCY_FAILED'
-      event.lastError = `Prerequisite event [${event.dependencyKey}] failed terminally`
-      event.nextRetryAt = null
-      await this.repository.save(event)
-      await this.projectFailureIfTerminal(event)
-      this.logger.error(
-        `Event [${event._id?.toString()}] marked failed because dependency [${event.dependencyKey}] failed`
+    if (blockingKey === null) return true
+
+    await this.recordDependencyWait(event, blockingKey, now)
+    return false
+  }
+
+  private async recordDependencyWait(
+    event: LedgerOutbox,
+    blockingKey: string,
+    now: Date
+  ): Promise<void> {
+    const waitCycles = (event.dependencyWaitCycles ?? 0) + 1
+    const delayMs = Math.min(
+      DEPENDENCY_WAIT_MAX_MS,
+      DEPENDENCY_WAIT_STEP_MS * waitCycles
+    )
+    event.dependencyWaitCycles = waitCycles
+    event.errorCode = 'DEPENDENCY_PENDING'
+    event.lastError = `Waiting for prerequisite [${blockingKey}]`
+    event.nextRetryAt = new Date(now.getTime() + delayMs)
+
+    if (typeof this.repository.update === 'function') {
+      // Status-guarded để không ghi đè một claim đồng thời của worker khác.
+      await this.repository.update(
+        { _id: event._id, status: 'pending' },
+        {
+          errorCode: event.errorCode,
+          lastError: event.lastError,
+          nextRetryAt: event.nextRetryAt,
+          dependencyWaitCycles: waitCycles,
+        }
       )
-      return false
+    } else {
+      await this.repository.save(event)
     }
-
-    // Chỉ cho phép submit nếu dependency đã confirmed
-    return depEvent.status === 'confirmed'
   }
 
   /**
@@ -319,16 +442,22 @@ export class LedgerOutboxService {
     }
 
     const rawMessage = error instanceof Error ? error.message : String(error)
-    const isConflict =
-      isTerminal ||
-      rawMessage.includes('xung đột') ||
-      rawMessage.includes('conflict') ||
-      rawMessage.includes('CONFLICT') ||
-      rawMessage.includes('không hợp lệ')
+    // D12: tiền tố ERR_<CODE> của chaincode được phân loại trước; substring cũ chỉ là fallback.
+    const chaincodeClass = this.classifyChaincodeError(rawMessage)
+    const isConflict = chaincodeClass
+      ? chaincodeClass.terminal
+      : isTerminal ||
+        rawMessage.includes('xung đột') ||
+        rawMessage.includes('conflict') ||
+        rawMessage.includes('CONFLICT') ||
+        rawMessage.includes('không hợp lệ')
 
     if (isConflict) {
       event.status = 'failed'
-      event.errorCode = 'TERMINAL_CONFLICT'
+      event.errorCode =
+        chaincodeClass && chaincodeClass.terminal
+          ? chaincodeClass.errorCode
+          : 'TERMINAL_CONFLICT'
       event.lastError = this.sanitizeError(error)
       event.nextRetryAt = null
       this.logger.error(
@@ -355,6 +484,7 @@ export class LedgerOutboxService {
         )
       }
       event.lastError = this.sanitizeError(error)
+      if (event.errorCode === 'DEPENDENCY_PENDING') event.errorCode = null
     }
 
     await this.repository.save(event)
@@ -363,6 +493,15 @@ export class LedgerOutboxService {
       event,
       event.status === 'failed' ? 'ledger.failed' : 'ledger.retry-scheduled'
     )
+  }
+
+  private classifyChaincodeError(message: string): ChaincodeErrorClass | null {
+    if (message.includes(COMMIT_RETRYABLE_MARKER)) return { terminal: false }
+    if (message.includes(COMMIT_REJECTED_MARKER)) {
+      return { terminal: true, errorCode: 'TERMINAL_COMMIT_REJECTED' }
+    }
+    const code = CHAINCODE_ERROR_PATTERN.exec(message)?.[1]
+    return code ? (CHAINCODE_ERROR_CLASSES[code] ?? null) : null
   }
 
   private async recordTransactionEvent(
@@ -450,6 +589,7 @@ export class LedgerOutboxService {
     event.nextRetryAt = new Date()
     event.lastError = null
     event.errorCode = null
+    event.dependencyWaitCycles = 0
     event.claimToken = null
     event.leaseExpiresAt = null
 
@@ -477,6 +617,13 @@ export class LedgerOutboxService {
         continue
       }
 
+      const invalidReason = this.validateBeforeSubmit(event)
+      if (invalidReason) {
+        await this.failWithoutSubmit(event, invalidReason)
+        processed += 1
+        continue
+      }
+
       try {
         const result = await this.fabricService.submitTransaction(
           event.payload.action,
@@ -494,12 +641,58 @@ export class LedgerOutboxService {
   }
 
   private requiresChaincodeUpgrade(event: LedgerOutbox): boolean {
-    const minimumAbiVersion = event.payload.metadata?.minimumAbiVersion
-    if (minimumAbiVersion !== 2) return false
-    if (typeof this.fabricService.getChaincodeAbiVersion !== 'function') {
-      return false
+    const metadata = event.payload?.metadata
+    const minimumAbiVersion = metadata?.minimumAbiVersion
+    if (
+      minimumAbiVersion === 2 &&
+      typeof this.fabricService.getChaincodeAbiVersion === 'function' &&
+      this.fabricService.getChaincodeAbiVersion() < minimumAbiVersion
+    ) {
+      return true
     }
-    return this.fabricService.getChaincodeAbiVersion() < minimumAbiVersion
+
+    // PROP-399 D2: evidence schema v3 chỉ được submit khi chaincode quảng bá hỗ trợ.
+    const minimumEvidenceSchemaVersion = metadata?.minimumEvidenceSchemaVersion
+    if (
+      typeof minimumEvidenceSchemaVersion === 'number' &&
+      typeof this.fabricService.supportsEvidenceSchemaVersion === 'function'
+    ) {
+      return !this.fabricService.supportsEvidenceSchemaVersion(
+        minimumEvidenceSchemaVersion
+      )
+    }
+    return false
+  }
+
+  /** D12: action lạ hoặc args sai dạng → terminal, không bao giờ submit. */
+  private validateBeforeSubmit(event: LedgerOutbox): string | null {
+    const action = event.payload?.action
+    if (typeof action !== 'string' || !ALLOWED_RETRY_ACTIONS.has(action)) {
+      return `LEDGER_ACTION_UNKNOWN: ${String(action).slice(0, 80)}`
+    }
+    if (!Array.isArray(event.payload.args)) {
+      return 'LEDGER_ARGS_INVALID: args must be an array'
+    }
+    const reason = validateLedgerActionArgs(action, event.payload.args)
+    return reason ? `LEDGER_ARGS_INVALID: ${action}: ${reason}` : null
+  }
+
+  private async failWithoutSubmit(
+    event: LedgerOutbox,
+    reason: string
+  ): Promise<void> {
+    event.status = 'failed'
+    event.errorCode = reason.split(':')[0] ?? 'LEDGER_ARGS_INVALID'
+    event.lastError = reason.replace(/[\r\n]/g, ' ').slice(0, 240)
+    event.nextRetryAt = null
+    event.claimToken = null
+    event.leaseExpiresAt = null
+    await this.repository.save(event)
+    this.logger.error(
+      `Event [${event._id?.toString()}] failed terminally before submission: ${event.errorCode}`
+    )
+    await this.projectFailureIfTerminal(event)
+    await this.recordTransactionEvent(event, 'ledger.failed')
   }
 
   private sanitizeError(error: unknown): string {

@@ -47,6 +47,8 @@ import { ContractLayoutProfile } from './layout/contract-layout-profile.schema'
 import { ContractLayoutAudit } from './layout/contract-layout-audit.schema'
 import { ContractLayoutService } from './layout/contract-layout.service'
 import { ContractLayoutsController } from './layout/contract-layouts.controller'
+import { ContractEvidencePackageService } from './contract-evidence-package.service'
+import { ContractEvidencePackageExportService } from './contract-evidence-package.export.service'
 
 @Module({
   imports: [
@@ -112,6 +114,8 @@ import { ContractLayoutsController } from './layout/contract-layouts.controller'
     },
     FlowNotificationService,
     ContractLayoutService,
+    ContractEvidencePackageService,
+    ContractEvidencePackageExportService,
   ],
   exports: [
     ContractsService,
@@ -124,6 +128,7 @@ import { ContractLayoutsController } from './layout/contract-layouts.controller'
     ContractCommercialEditorService,
     ContractAmendmentService,
     DepositConfirmationResolver,
+    ContractEvidencePackageService,
   ],
 })
 export class ContractsModule {}

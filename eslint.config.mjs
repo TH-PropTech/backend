@@ -12,6 +12,7 @@ export default tseslint.config(
       'commitlint.config.cjs',
       'eslint.config.mjs',
       'jest.config.cjs',
+      'test/jest-e2e.cjs',
     ],
   },
   eslint.configs.recommended,

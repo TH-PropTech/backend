@@ -57,9 +57,32 @@ export const configuration = (): {
     chaincodeName: string
     peerEndpoint: string
     peerHostAlias: string
+    /** Legacy một identity — chỉ còn ở chế độ tương thích ngoài production. */
     certPath: string
     keyPath: string
     tlsCertPath: string
+    /** PROP-399 D5: identity tách vai trò, theo đường dẫn file/secret mount. */
+    identities: Record<
+      'writer' | 'reader' | 'operator',
+      { certPath: string; keyPath: string }
+    >
+    identityExpiryWarnDays: number
+    explorer: {
+      enabled: boolean
+      publicUrl: string | undefined
+      healthUrl: string | undefined
+      /** Chỉ chứng chỉ công khai để chứng minh Explorer không dùng chung identity với backend. */
+      certPath: string
+    }
+    reconciliation: {
+      pageSize: number
+      orphanPageBudget: number
+      maxContracts: number
+    }
+  }
+  evidencePackage: {
+    maxFiles: number
+    maxBytes: number
   }
   rentalOps: {
     schedulerEnabled: boolean
@@ -150,6 +173,42 @@ export const configuration = (): {
     certPath: process.env.FABRIC_CERT_PATH ?? '',
     keyPath: process.env.FABRIC_KEY_PATH ?? '',
     tlsCertPath: process.env.FABRIC_TLS_CERT_PATH ?? '',
+    identities: {
+      writer: {
+        certPath: process.env.FABRIC_WRITER_CERT_PATH ?? '',
+        keyPath: process.env.FABRIC_WRITER_KEY_PATH ?? '',
+      },
+      reader: {
+        certPath: process.env.FABRIC_READER_CERT_PATH ?? '',
+        keyPath: process.env.FABRIC_READER_KEY_PATH ?? '',
+      },
+      operator: {
+        certPath: process.env.FABRIC_OPERATOR_CERT_PATH ?? '',
+        keyPath: process.env.FABRIC_OPERATOR_KEY_PATH ?? '',
+      },
+    },
+    identityExpiryWarnDays: Number(
+      process.env.FABRIC_IDENTITY_EXPIRY_WARN_DAYS ?? 30
+    ),
+    explorer: {
+      enabled: process.env.FABRIC_EXPLORER_ENABLED === 'true',
+      publicUrl: process.env.FABRIC_EXPLORER_PUBLIC_URL || undefined,
+      healthUrl: process.env.FABRIC_EXPLORER_HEALTH_URL || undefined,
+      certPath: process.env.FABRIC_EXPLORER_CERT_PATH ?? '',
+    },
+    reconciliation: {
+      pageSize: Number(process.env.FABRIC_RECONCILIATION_PAGE_SIZE ?? 100),
+      orphanPageBudget: Number(
+        process.env.FABRIC_RECONCILIATION_ORPHAN_PAGE_BUDGET ?? 10
+      ),
+      maxContracts: Number(
+        process.env.FABRIC_RECONCILIATION_MAX_CONTRACTS ?? 500
+      ),
+    },
+  },
+  evidencePackage: {
+    maxFiles: Number(process.env.EVIDENCE_PACKAGE_MAX_FILES ?? 50),
+    maxBytes: Number(process.env.EVIDENCE_PACKAGE_MAX_BYTES ?? 104857600),
   },
   rentalOps: {
     schedulerEnabled: process.env.RENTAL_SCHEDULER_ENABLED === 'true',

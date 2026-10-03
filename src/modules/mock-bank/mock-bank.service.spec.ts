@@ -559,6 +559,134 @@ describe('MockBankService', () => {
     expect(context.paymentRepository.save).toHaveBeenCalledTimes(1)
   })
 
+  describe('settlement paid transition evidence (PROP-399 D3, task 5.2)', () => {
+    function settlementCallbackContext(
+      lineStates: Array<'paid' | 'unpaid'>,
+      initialStatus: 'partially-paid' | 'paid' = 'partially-paid',
+      payOnly?: number
+    ): {
+      context: ReturnType<typeof createContext>
+      settlement: {
+        status: string
+        lines: Array<{ paidAt: Date | null }>
+      }
+      evidence: { recordSettlementPaidEvidence: jest.Mock }
+      call: () => Promise<{ replayed: boolean }>
+    } {
+      const context = createContext()
+      const settlementId = new ObjectId().toHexString()
+      const lines = lineStates.map(state => ({
+        kind: 'FIRST_RENT' as const,
+        amount: 1_000_000,
+        paymentId: new ObjectId().toHexString(),
+        paidAt: state === 'paid' ? new Date('2030-01-01') : null,
+      }))
+      const settlement = {
+        _id: new ObjectId(settlementId),
+        contractId: 'contract-1',
+        tenantId,
+        landlordId: 'landlord-1',
+        lines,
+        status: initialStatus,
+      }
+      const unpaid = lines
+        .filter(line => !line.paidAt)
+        .slice(0, payOnly ?? lines.length)
+      context.attempt.paymentType = 'settlement'
+      context.attempt.paymentId = settlementId
+      context.attempt.paymentIds = unpaid.map(line => line.paymentId)
+      context.attempt.amount = unpaid.length * 1_000_000
+      context.settlementRepository.findOne.mockResolvedValue(settlement)
+      context.paymentRepository.findOne.mockImplementation(
+        ({ where }: { where: { _id: ObjectId } }) =>
+          Promise.resolve({
+            ...context.payment,
+            _id: where._id,
+            amount: 1_000_000,
+            status: 'unpaid',
+          })
+      )
+      const evidence = {
+        recordSettlementPaidEvidence: jest.fn().mockResolvedValue(undefined),
+      }
+      Reflect.set(context.service, 'moveInSettlementsService', evidence)
+      const body = {
+        txRef: context.attempt.txRef,
+        amount: context.attempt.amount,
+        status: 'success' as const,
+      }
+      const timestamp = Date.now().toString()
+      const headers = {
+        timestamp,
+        nonce: 'settlement-evidence-nonce',
+        signature: context.service.signCallback(
+          body,
+          timestamp,
+          'settlement-evidence-nonce'
+        ),
+      }
+      return {
+        context,
+        settlement,
+        evidence,
+        call: () => context.service.handleSettlementCallback(body, headers),
+      }
+    }
+
+    it('produces settlement evidence exactly once when the callback completes the settlement, after the business state is saved', async () => {
+      const { context, settlement, evidence, call } = settlementCallbackContext(
+        ['paid', 'unpaid']
+      )
+
+      await call()
+
+      expect(settlement.status).toBe('paid')
+      expect(evidence.recordSettlementPaidEvidence).toHaveBeenCalledTimes(1)
+      expect(evidence.recordSettlementPaidEvidence).toHaveBeenCalledWith(
+        settlement
+      )
+      expect(
+        context.settlementRepository.save.mock.invocationCallOrder[0]
+      ).toBeLessThan(
+        evidence.recordSettlementPaidEvidence.mock.invocationCallOrder[0] ??
+          Infinity
+      )
+
+      context.attempt.status = 'succeeded'
+      const replay = await call()
+      expect(replay.replayed).toBe(true)
+      expect(evidence.recordSettlementPaidEvidence).toHaveBeenCalledTimes(1)
+    })
+
+    it('produces no evidence while lines remain unpaid (partially-paid)', async () => {
+      const { settlement, evidence, call } = settlementCallbackContext(
+        ['paid', 'unpaid', 'unpaid'],
+        'partially-paid',
+        1
+      )
+      await call()
+      expect(settlement.status).toBe('partially-paid')
+      expect(evidence.recordSettlementPaidEvidence).not.toHaveBeenCalled()
+    })
+
+    it('does not produce evidence for a settlement that was already paid before the callback', async () => {
+      const { evidence, call } = settlementCallbackContext(
+        ['paid', 'paid'],
+        'paid'
+      )
+      await call().catch(() => undefined)
+      expect(evidence.recordSettlementPaidEvidence).not.toHaveBeenCalled()
+    })
+
+    it('never fails the callback because the evidence producer failed', async () => {
+      const { evidence, call } = settlementCallbackContext(['paid', 'unpaid'])
+      evidence.recordSettlementPaidEvidence.mockRejectedValue(
+        new Error('outbox down')
+      )
+      await expect(call()).resolves.toMatchObject({ replayed: false })
+    })
+  })
+
   it('rejects a settlement callback whose amount differs from the attempt', async () => {
     const context = createContext()
     context.attempt.paymentType = 'settlement'

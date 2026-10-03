@@ -7,6 +7,11 @@ import { ContractAmendment } from '../contracts/schemas/contract-amendment.schem
 import { DepositAgreement } from '../contracts/schemas/deposit-agreement.schema'
 import { Payment } from '../payments/schemas/payment.schema'
 import { LedgerOutbox } from './schemas/ledger-outbox.schema'
+import { FabricGovernanceSnapshot } from './schemas/fabric-governance-snapshot.schema'
+import {
+  MoveInSettlement,
+  type LedgerEvidenceRef,
+} from '../move-in-settlements/schemas/move-in-settlement.schema'
 
 export interface ProjectionResultInput {
   txHash: string
@@ -34,8 +39,59 @@ export class LedgerProjectionService {
     private readonly paymentRepository: Repository<Payment>,
     @Optional()
     @InjectRepository(ContractAmendment)
-    private readonly amendmentRepository?: Repository<ContractAmendment>
+    private readonly amendmentRepository?: Repository<ContractAmendment>,
+    @Optional()
+    @InjectRepository(FabricGovernanceSnapshot)
+    private readonly governanceRepository?: Repository<FabricGovernanceSnapshot>,
+    @Optional()
+    @InjectRepository(MoveInSettlement)
+    private readonly settlementRepository?: Repository<MoveInSettlement>
   ) {}
+
+  /**
+   * PROP-399: tx/block chỉ lấy từ dữ liệu commit Fabric thật. Simulation không có
+   * giao dịch/khối thật nên luôn null (nhãn `confirmed-simulation` là nhãn trung thực).
+   */
+  private ledgerEvidenceFields(
+    result: ProjectionResultInput
+  ): Pick<LedgerEvidenceRef, 'ledgerStatus' | 'txHash' | 'blockNumber'> {
+    if ((result.networkMode ?? 'fabric') === 'simulation') {
+      return {
+        ledgerStatus: 'confirmed-simulation',
+        txHash: null,
+        blockNumber: null,
+      }
+    }
+    return {
+      ledgerStatus: 'confirmed-fabric',
+      txHash: result.txHash,
+      blockNumber:
+        typeof result.blockNumber === 'number' &&
+        Number.isSafeInteger(result.blockNumber) &&
+        result.blockNumber > 0
+          ? result.blockNumber
+          : null,
+    }
+  }
+
+  private async projectSettlementEvidence(
+    aggregateType: 'move-in-settlement' | 'move-in-handover',
+    id: ObjectId,
+    update: (ref: LedgerEvidenceRef) => LedgerEvidenceRef
+  ): Promise<void> {
+    if (!this.settlementRepository) return
+    const settlement = await this.settlementRepository.findOne({
+      where: { _id: id },
+    })
+    const field =
+      aggregateType === 'move-in-settlement'
+        ? 'settlementEvidence'
+        : 'handoverEvidence'
+    const current = settlement?.[field]
+    if (!settlement || !current) return // không bịa bằng chứng khi bản ghi chưa có manifest
+    settlement[field] = update(current)
+    await this.settlementRepository.save(settlement)
+  }
 
   async projectResult(
     event: LedgerOutbox,
@@ -117,6 +173,30 @@ export class LedgerProjectionService {
           }
           break
         }
+        case 'governance-snapshot': {
+          if (!this.governanceRepository) break
+          const snapshot = await this.governanceRepository.findOne({
+            where: { _id: objId },
+          })
+          if (snapshot) {
+            const fields = this.ledgerEvidenceFields(result)
+            snapshot.ledgerStatus = fields.ledgerStatus
+            snapshot.txHash = fields.txHash
+            snapshot.blockNumber = fields.blockNumber
+            await this.governanceRepository.save(snapshot)
+          }
+          break
+        }
+        case 'move-in-settlement':
+        case 'move-in-handover': {
+          const fields = this.ledgerEvidenceFields(result)
+          await this.projectSettlementEvidence(
+            event.aggregateType,
+            objId,
+            ref => ({ ...ref, ...fields })
+          )
+          break
+        }
         default:
           this.logger.debug(
             `No projection handler for aggregateType [${event.aggregateType}]`
@@ -184,6 +264,25 @@ export class LedgerProjectionService {
           }
           break
         }
+        case 'governance-snapshot': {
+          if (!this.governanceRepository) break
+          const snapshot = await this.governanceRepository.findOne({
+            where: { _id: objId },
+          })
+          if (snapshot) {
+            snapshot.ledgerStatus = 'failed-terminal'
+            await this.governanceRepository.save(snapshot)
+          }
+          break
+        }
+        case 'move-in-settlement':
+        case 'move-in-handover':
+          await this.projectSettlementEvidence(
+            event.aggregateType,
+            objId,
+            ref => ({ ...ref, ledgerStatus: 'failed-terminal' })
+          )
+          break
         default:
           this.logger.debug(
             `No failure projection handler for aggregateType [${event.aggregateType}]`

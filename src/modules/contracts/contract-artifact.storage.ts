@@ -1,12 +1,18 @@
 import { Injectable, OnModuleDestroy } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { GridFSBucket, MongoClient, ObjectId } from 'mongodb'
+import type { Readable } from 'node:stream'
 
 export const CONTRACT_ARTIFACT_STORAGE = Symbol('CONTRACT_ARTIFACT_STORAGE')
 
 export interface ContractArtifactStorage {
   upload(bytes: Buffer, filename: string): Promise<ObjectId>
   download(fileId: ObjectId): Promise<Buffer>
+  /**
+   * PROP-399 D8: đọc GridFS dạng stream (bộ nhớ có giới hạn) cho gói bằng chứng. Tùy chọn để các
+   * storage giả lập hiện có không phải thay đổi; vắng mặt = không thể xuất gói.
+   */
+  openDownloadStream?(fileId: ObjectId): Promise<Readable>
 }
 
 @Injectable()
@@ -39,6 +45,11 @@ export class MongoGridFsArtifactStorage
       stream.once('error', reject)
       stream.once('end', () => resolve(Buffer.concat(chunks)))
     })
+  }
+
+  async openDownloadStream(fileId: ObjectId): Promise<Readable> {
+    const bucket = await this.bucket()
+    return bucket.openDownloadStream(fileId)
   }
 
   async onModuleDestroy(): Promise<void> {
