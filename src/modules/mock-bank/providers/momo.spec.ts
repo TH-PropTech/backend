@@ -1,4 +1,7 @@
-import { ServiceUnavailableException } from '@nestjs/common'
+import {
+  BadRequestException,
+  ServiceUnavailableException,
+} from '@nestjs/common'
 import { createHmac } from 'node:crypto'
 import { MomoAdapter } from './momo.adapter'
 import { MomoCallbackVerifier } from './momo-callback.verifier'
@@ -52,6 +55,50 @@ describe('MomoAdapter', () => {
       createHmac('sha256', momo.secretKey).update(raw).digest('hex')
     )
   })
+
+  it.each([
+    ['atm', 'payWithATM'],
+    ['card', 'payWithCC'],
+  ] as const)(
+    'signs the %s method as requestType %s',
+    async (momoMethod, requestType) => {
+      const fetcher = jsonFetcher({
+        resultCode: 0,
+        payUrl: 'https://test-payment.momo.vn/v2/gateway/pay?t=2',
+      })
+      const adapter = new MomoAdapter(testConfigService() as never, fetcher)
+
+      await adapter.createPaymentIntent({ ...input, momoMethod })
+
+      const [, init] = fetcher.mock.calls[0] as [string, { body: string }]
+      const body = JSON.parse(init.body) as Record<string, string | number>
+      expect(body.requestType).toBe(requestType)
+      const raw =
+        `accessKey=${momo.accessKey}&amount=2000000&extraData=&ipnUrl=${momo.ipnUrl}` +
+        `&orderId=MOMO-abc&orderInfo=Rent 2026-10&partnerCode=${momo.partnerCode}` +
+        `&redirectUrl=${momo.returnUrl}&requestId=${String(body.requestId)}&requestType=${requestType}`
+      expect(body.signature).toBe(
+        createHmac('sha256', momo.secretKey).update(raw).digest('hex')
+      )
+    }
+  )
+
+  it.each([
+    ['card', 10_000_001],
+    ['atm', 9_999],
+    ['wallet', 50_000_001],
+  ] as const)(
+    'rejects %s amount %d before calling MoMo',
+    async (momoMethod, amount) => {
+      const fetcher = jsonFetcher({ resultCode: 0, payUrl: 'https://x' })
+      const adapter = new MomoAdapter(testConfigService() as never, fetcher)
+
+      await expect(
+        adapter.createPaymentIntent({ ...input, amount, momoMethod })
+      ).rejects.toThrow(BadRequestException)
+      expect(fetcher).not.toHaveBeenCalled()
+    }
+  )
 
   it.each([
     [

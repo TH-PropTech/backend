@@ -61,7 +61,16 @@ describe('PaymentProviderRegistry', () => {
     expect(listed).toEqual([
       { provider: 'mock-bank', label: 'Mock Bank (sandbox)', simulation: true },
       { provider: 'vnpay', label: 'VNPAY', simulation: false },
-      { provider: 'momo', label: 'MoMo', simulation: false },
+      {
+        provider: 'momo',
+        label: 'MoMo',
+        simulation: false,
+        methods: [
+          expect.objectContaining({ method: 'wallet', maxAmount: 50_000_000 }),
+          expect.objectContaining({ method: 'atm', minAmount: 10_000 }),
+          expect.objectContaining({ method: 'card', maxAmount: 10_000_000 }),
+        ],
+      },
       { provider: 'zalopay', label: 'ZaloPay', simulation: false },
     ])
     expect(JSON.stringify(listed)).not.toContain(TEST_PAYMENTS.vnpay.tmnCode)

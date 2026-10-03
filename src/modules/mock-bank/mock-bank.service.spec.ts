@@ -1288,6 +1288,47 @@ describe('MockBankService', () => {
       )
     })
 
+    it('creates a new MoMo attempt when the tenant switches MoMo method', async () => {
+      const context = createContext()
+      context.attemptRepository.findOne.mockResolvedValueOnce({
+        _id: new ObjectId(),
+        provider: 'momo',
+        txRef: 'MOMO-wallet',
+        momoMethod: 'wallet',
+        status: 'pending',
+        amount: 2_000_000,
+        expiresAt: new Date(Date.now() + 60_000),
+      })
+      const momoAdapter = {
+        name: 'momo' as const,
+        newTxRef: jest.fn().mockReturnValue('MOMO-card'),
+        createPaymentIntent: jest.fn().mockResolvedValue({
+          provider: 'momo',
+          txRef: 'MOMO-card',
+          redirectUrl: 'https://test-payment.momo.vn/pay?card=1',
+          expiresAt: new Date(Date.now() + 60_000),
+        }),
+      }
+      context.providerRegistry.get.mockReturnValue(momoAdapter)
+
+      await context.service.initRentPayment(paymentId, tenantId, {
+        provider: 'momo',
+        momoMethod: 'card',
+      })
+
+      expect(context.attemptRepository.save).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({ txRef: 'MOMO-wallet', status: 'expired' })
+      )
+      expect(momoAdapter.createPaymentIntent).toHaveBeenCalledWith(
+        expect.objectContaining({ momoMethod: 'card' })
+      )
+      expect(context.attemptRepository.save).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({ txRef: 'MOMO-card', momoMethod: 'card' })
+      )
+    })
+
     it('writes nothing when the gateway rejects the create request', async () => {
       const context = createContext()
       context.attemptRepository.findOne.mockResolvedValueOnce(null)

@@ -7,7 +7,10 @@ import {
   ObjectIdColumn,
   UpdateDateColumn,
 } from 'typeorm'
-import type { PaymentProviderName } from '../../mock-bank/providers/payment-provider.port'
+import type {
+  MomoPaymentMethod,
+  PaymentProviderName,
+} from '../../mock-bank/providers/payment-provider.port'
 
 export type PaymentAttemptStatus =
   | 'pending'
@@ -70,6 +73,10 @@ export class PaymentAttempt {
 
   @Column({ type: 'string', nullable: true })
   clientChannel?: PaymentClientChannel | null
+
+  /** MoMo request type the tenant chose; null for other providers. */
+  @Column({ type: 'string', nullable: true })
+  momoMethod?: MomoPaymentMethod | null
 
   @CreateDateColumn()
   createdAt!: Date

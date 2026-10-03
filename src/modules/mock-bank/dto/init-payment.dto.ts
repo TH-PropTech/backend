@@ -12,6 +12,10 @@ import {
   type SelectablePaymentProvider,
 } from '../../../config/configuration'
 import type { PaymentClientChannel } from '../../payments/schemas/payment-attempt.schema'
+import {
+  MOMO_PAYMENT_METHODS,
+  type MomoPaymentMethod,
+} from '../providers/payment-provider.port'
 
 /** Gateway choice shared by every init endpoint; server enforces the allow-list. */
 export class PaymentInitChoiceDto {
@@ -27,6 +31,15 @@ export class PaymentInitChoiceDto {
   @IsOptional()
   @IsIn(['web', 'mobile'])
   clientChannel?: PaymentClientChannel
+
+  @ApiPropertyOptional({
+    enum: MOMO_PAYMENT_METHODS,
+    default: 'wallet',
+    description: 'MoMo only: wallet/QR, domestic ATM card or Visa/Master/JCB',
+  })
+  @IsOptional()
+  @IsIn(MOMO_PAYMENT_METHODS)
+  momoMethod?: MomoPaymentMethod
 }
 
 export class InitDepositPaymentDto extends PaymentInitChoiceDto {
