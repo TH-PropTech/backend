@@ -21,8 +21,6 @@ export type SmartCaSigningRequest = {
   transactionId: string
   artifactHash: string
   signerCccd: string
-  password: string
-  otp: string
   certificateSerial: string
   documentId: string
 }
@@ -30,19 +28,12 @@ export type SmartCaSigningRequest = {
 export type SmartCaSignResult = {
   transactionId: string
   transactionCode?: string
-  sad: string
-  expiresIn: number
 }
 
 export type SmartCaSignature = {
   documentId: string
   signatureValue: string
   signedAt: string | null
-}
-
-export type SmartCaConfirmResult = {
-  transactionId: string
-  signature: SmartCaSignature
 }
 
 export type SmartCaStatusResult = {
@@ -55,10 +46,8 @@ type SmartCaConfig = {
   apiUrl?: string
   spId?: string
   spPassword?: string
-  mobileCode?: string
   certPath?: string
-  signV2Path?: string
-  confirmV2Path?: string
+  signPath?: string
   statusPathTmpl?: string
 }
 
@@ -98,17 +87,18 @@ export class SmartCaProvider {
     return certificates.map(certificate => this.parseCertificate(certificate))
   }
 
+  /**
+   * VNPT SmartCA v1 (§3.3): gửi yêu cầu ký, CA đẩy thông báo xuống app của
+   * thuê bao. Không có mật khẩu/OTP người ký; kết quả lấy qua status/webhook.
+   */
   async requestSignature(
     input: SmartCaSigningRequest
   ): Promise<SmartCaSignResult> {
-    const config = this.requireConfig('signV2Path')
-    const envelope = await this.post(`${config.apiUrl}${config.signV2Path}`, {
+    const config = this.requireConfig('signPath')
+    const envelope = await this.post(`${config.apiUrl}${config.signPath}`, {
       sp_id: config.spId,
       sp_password: config.spPassword,
-      mobile_code: config.mobileCode || undefined,
       user_id: input.signerCccd,
-      password: input.password,
-      otp: input.otp,
       transaction_id: input.transactionId,
       serial_number: input.certificateSerial,
       sign_files: [
@@ -121,48 +111,12 @@ export class SmartCaProvider {
       ],
     })
     const transactionId = optionalString(envelope.data.transaction_id)
-    const sad = optionalString(envelope.data.sad)
-    const expiresIn = envelope.data.expired_in
-    if (!transactionId || !sad || typeof expiresIn !== 'number') {
-      this.invalidResponse()
-    }
+    if (!transactionId) this.invalidResponse()
 
     const transactionCode = optionalString(envelope.data.tran_code)
     return {
       transactionId,
       ...(transactionCode ? { transactionCode } : {}),
-      sad,
-      expiresIn,
-    }
-  }
-
-  async confirmSignature(input: {
-    transactionId: string
-    signerCccd: string
-    password: string
-    sad: string
-    documentId: string
-  }): Promise<SmartCaConfirmResult> {
-    const config = this.requireConfig('confirmV2Path')
-    const envelope = await this.post(
-      `${config.apiUrl}${config.confirmV2Path}`,
-      {
-        sp_id: config.spId,
-        sp_password: config.spPassword,
-        user_id: input.signerCccd,
-        password: input.password,
-        transaction_id: input.transactionId,
-        sad: input.sad,
-      }
-    )
-    const transactionId = optionalString(envelope.data.transaction_id)
-    if (!transactionId || transactionId !== input.transactionId) {
-      this.invalidResponse()
-    }
-
-    return {
-      transactionId,
-      signature: this.findSignature(envelope.data.signatures, input.documentId),
     }
   }
 
@@ -206,11 +160,7 @@ export class SmartCaProvider {
   }
 
   private requireConfig<
-    TPath extends
-      | 'certPath'
-      | 'signV2Path'
-      | 'confirmV2Path'
-      | 'statusPathTmpl',
+    TPath extends 'certPath' | 'signPath' | 'statusPathTmpl',
   >(path: TPath): SmartCaConfig & Required<Pick<SmartCaConfig, TPath>> {
     const config = this.configService.get<SmartCaConfig>('smartCA')
     if (
@@ -316,19 +266,6 @@ export class SmartCaProvider {
       ...(validTo ? { validTo } : {}),
       isValid: activeStatus && validWindow,
     }
-  }
-
-  private findSignature(
-    payload: unknown,
-    documentId: string
-  ): SmartCaSignature {
-    if (!Array.isArray(payload)) this.invalidResponse()
-    const signatureEntries: unknown[] = payload
-    const signature = signatureEntries.find(
-      value => isRecord(value) && value.doc_id === documentId
-    )
-    if (!signature) this.invalidResponse()
-    return this.parseSignature(signature)
   }
 
   private parseSignature(payload: unknown): SmartCaSignature {

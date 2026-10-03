@@ -21,7 +21,6 @@ import { SmartCaSigningSession } from './smartca/smartca-signing-session.schema'
 import { SmartCaProvider } from './smartca/smartca.provider'
 import { MockSmartCaProvider } from './smartca/mock-smartca.provider'
 import { SmartCaSigningService } from './smartca/smartca-signing.service'
-import { SmartCaCallbackGuard } from './smartca/smartca-callback.guard'
 import { ContractTemplate } from './legal/contract-template.schema'
 import { ContractTemplateAudit } from './legal/contract-template-audit.schema'
 import { ContractTemplateGovernanceService } from './legal/contract-template-governance.service'
@@ -103,7 +102,6 @@ import { ContractEvidencePackageExportService } from './contract-evidence-packag
       },
     },
     SmartCaSigningService,
-    SmartCaCallbackGuard,
     ContractTemplateGovernanceService,
     ContractCommercialEditorService,
     ContractAmendmentService,

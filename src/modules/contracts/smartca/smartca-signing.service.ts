@@ -1,10 +1,10 @@
 import {
-  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
   Optional,
+  ServiceUnavailableException,
 } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { createHash, randomUUID } from 'crypto'
@@ -23,29 +23,14 @@ import {
 } from './smartca.provider'
 import { SmartCaSigningSession } from './smartca-signing-session.schema'
 
-export type SmartCaSignatureEvidence = {
-  artifactHash: string
-  certificateSerial?: string
-  certificateSubject?: string
-  certificateIssuer?: string
-  signatureHash?: string
-  signatureAlgorithm?: string
-  signatureValueRef?: string
-  signedAt?: string
-}
-
 export type CreateSmartCaSessionInput = {
   idempotencyKey?: string
   certificateSerial?: string
-  smartCaPassword: string
-  smartCaOtp: string
 }
 
 export type SmartCaCertificateList = {
   certificates: SmartCaCertificate[]
 }
-
-type ReconciliationStatus = 'pending' | 'signed' | 'rejected'
 
 type SigningContext = {
   contract: Contract
@@ -70,6 +55,8 @@ export class SmartCaSigningService {
     private readonly depositConfirmationResolver?: DepositConfirmationResolver
   ) {}
 
+  private readonly webhookInFlight = new Map<string, Promise<void>>()
+
   async listCertificates(
     contractId: string,
     signerId: string
@@ -84,7 +71,6 @@ export class SmartCaSigningService {
     signerId: string,
     input: CreateSmartCaSessionInput
   ): Promise<SmartCaSigningSession> {
-    this.validateCredentials(input)
     const context = await this.resolveSigningContext(contractId, signerId)
     const requestedKey = input.idempotencyKey?.trim()
     const existing = requestedKey
@@ -105,18 +91,14 @@ export class SmartCaSigningService {
         existing.providerStatus = 'expired'
         return this.sessionRepository.save(existing)
       }
-      const recovered = await this.recoverPendingSession(
-        existing,
-        context.documentId
-      )
-      if (recovered.status !== 'pending') return recovered
+      return this.recoverPendingSession(existing, context.documentId)
     }
 
     const signerCccd = await this.resolveCccd(signerId)
     const certificates = await this.resolveValidCertificates(signerCccd)
     const certificate = this.selectCertificate(
       certificates,
-      input.certificateSerial ?? existing?.certificateSerial ?? undefined
+      input.certificateSerial
     )
     const idempotencyKey = requestedKey ?? randomUUID()
     const transactionId = this.createTransactionId(
@@ -124,73 +106,44 @@ export class SmartCaSigningService {
       context.signerRole,
       idempotencyKey
     )
-    const session =
-      existing ??
-      this.sessionRepository.create({
-        contractId,
-        signerId,
-        signerRole: context.signerRole,
-        artifactHash: context.artifactHash,
-        providerTransactionId: transactionId,
-        status: 'pending',
-        idempotencyKey,
-        confirmationUrl: null,
-        certificateSerial: certificate.serialNumber,
-        certificateSubject: certificate.subject ?? null,
-        certificateIssuer: certificate.issuer ?? null,
-        signatureHash: null,
-        signatureAlgorithm: null,
-        signatureValueRef: null,
-        signedAt: null,
-        verifiedAt: null,
-        providerStatus: 'pending',
-        expiresAt: new Date(Date.now() + 15 * 60 * 1000),
-      })
-
-    if (existing) {
-      session.certificateSerial = certificate.serialNumber
-      session.certificateSubject = certificate.subject ?? null
-      session.certificateIssuer = certificate.issuer ?? null
-    }
+    const session = this.sessionRepository.create({
+      contractId,
+      signerId,
+      signerRole: context.signerRole,
+      artifactHash: context.artifactHash,
+      providerTransactionId: transactionId,
+      status: 'pending',
+      idempotencyKey,
+      confirmationUrl: null,
+      certificateSerial: certificate.serialNumber,
+      certificateSubject: certificate.subject ?? null,
+      certificateIssuer: certificate.issuer ?? null,
+      signatureHash: null,
+      signatureAlgorithm: null,
+      signatureValueRef: null,
+      signedAt: null,
+      verifiedAt: null,
+      providerStatus: 'pending',
+      documentId: context.documentId,
+      expiresAt: new Date(Date.now() + 15 * 60 * 1000),
+    })
     await this.sessionRepository.save(session)
 
-    let password = input.smartCaPassword
-    let otp = input.smartCaOtp
-    let sad: string | undefined
     try {
       const signResult = await this.provider.requestSignature({
         transactionId: session.providerTransactionId,
         artifactHash: context.artifactHash,
         signerCccd,
-        password,
-        otp,
         certificateSerial: certificate.serialNumber,
         documentId: context.documentId,
       })
       session.providerTransactionId = signResult.transactionId
-      session.expiresAt = new Date(Date.now() + signResult.expiresIn * 1000)
-      await this.sessionRepository.save(session)
-      sad = signResult.sad
-
-      const confirmation = await this.provider.confirmSignature({
-        transactionId: signResult.transactionId,
-        signerCccd,
-        password,
-        sad,
-        documentId: context.documentId,
-      })
-      if (confirmation.transactionId !== signResult.transactionId) {
-        throw new ConflictException('SMARTCA_TRANSACTION_MISMATCH')
+      return this.sessionRepository.save(session)
+    } catch (error) {
+      if (this.isDefiniteRejection(error)) {
+        await this.sessionRepository.remove(session)
       }
-      return this.completeWithSignature(
-        session,
-        confirmation.signature,
-        context.documentId
-      )
-    } finally {
-      password = ''
-      otp = ''
-      sad = undefined
+      throw error
     }
   }
 
@@ -260,50 +213,39 @@ export class SmartCaSigningService {
     return this.recoverPendingSession(session, context.documentId)
   }
 
-  async reconcile(
-    providerTransactionId: string,
-    status: ReconciliationStatus,
-    evidence: SmartCaSignatureEvidence
-  ): Promise<SmartCaSigningSession> {
-    const session = await this.sessionRepository.findOne({
-      where: { providerTransactionId },
-    })
-    if (!session) throw new NotFoundException('SMARTCA_SESSION_NOT_FOUND')
-    if (session.status !== 'pending') return session
-    if (session.expiresAt <= new Date()) {
-      session.status = 'expired'
-      session.providerStatus = 'expired'
-      return this.sessionRepository.save(session)
-    }
-    if (evidence.artifactHash !== session.artifactHash) {
-      throw new ConflictException('SMARTCA_SIGNATURE_DIGEST_MISMATCH')
-    }
-    if (status === 'signed' && !evidence.certificateSerial) {
-      throw new ConflictException('SMARTCA_CERTIFICATE_INVALID')
-    }
+  /**
+   * Webhook của VNPT chỉ là tín hiệu (§3.5). Hệ thống luôn xác minh lại bằng
+   * status API trước khi ghi nhận chữ ký; mọi lỗi được nuốt và log vì VNPT
+   * luôn cần nhận 200. In-flight dedupe theo transaction tránh webhook lặp
+   * gọi status API nhiều lần.
+   */
+  async handleWebhook(transactionId: string): Promise<void> {
+    const inFlight = this.webhookInFlight.get(transactionId)
+    if (inFlight) return inFlight
 
-    session.status = status
-    session.providerStatus = status
-    session.certificateSerial = evidence.certificateSerial ?? null
-    session.certificateSubject = evidence.certificateSubject ?? null
-    session.certificateIssuer = evidence.certificateIssuer ?? null
-    session.signatureHash = evidence.signatureHash ?? null
-    session.signatureAlgorithm = evidence.signatureAlgorithm ?? null
-    session.signatureValueRef = evidence.signatureValueRef ?? null
-    session.signedAt =
-      status === 'signed'
-        ? (this.parseSignedAt(evidence.signedAt) ?? new Date())
-        : null
-    session.verifiedAt = status === 'signed' ? new Date() : null
-    const saved = await this.sessionRepository.save(session)
-    await this.syncSignedContract(saved)
-    return saved
+    const task = this.processWebhook(transactionId).finally(() => {
+      this.webhookInFlight.delete(transactionId)
+    })
+    this.webhookInFlight.set(transactionId, task)
+    return task
   }
 
-  private validateCredentials(input: CreateSmartCaSessionInput): void {
-    if (!input.smartCaPassword.trim() || !input.smartCaOtp.trim()) {
-      throw new BadRequestException('SMARTCA_CREDENTIALS_REQUIRED')
+  private async processWebhook(transactionId: string): Promise<void> {
+    try {
+      const session = await this.sessionRepository.findOne({
+        where: { providerTransactionId: transactionId },
+      })
+      if (!session || session.status !== 'pending' || !session.documentId) {
+        return
+      }
+      await this.recoverPendingSession(session, session.documentId)
+    } catch {
+      // Webhook không bao giờ là nguồn sự thật: nuốt lỗi, để poll xử lý sau.
     }
+  }
+
+  private isDefiniteRejection(error: unknown): boolean {
+    return !(error instanceof ServiceUnavailableException)
   }
 
   private async resolveSigningContext(
@@ -429,8 +371,9 @@ export class SmartCaSigningService {
 
   private async recoverPendingSession(
     session: SmartCaSigningSession,
-    documentId: string
+    fallbackDocumentId: string
   ): Promise<SmartCaSigningSession> {
+    const documentId = session.documentId ?? fallbackDocumentId
     const providerResult = await this.provider.getSignatureStatus(
       session.providerTransactionId,
       documentId

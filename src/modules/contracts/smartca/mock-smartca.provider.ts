@@ -1,8 +1,7 @@
 import { Injectable } from '@nestjs/common'
-import { createHash, randomBytes } from 'crypto'
+import { createHash } from 'crypto'
 import type {
   SmartCaCertificate,
-  SmartCaConfirmResult,
   SmartCaSignResult,
   SmartCaSignature,
   SmartCaSigningRequest,
@@ -10,20 +9,22 @@ import type {
 } from './smartca.provider'
 
 /**
- * MockSmartCaProvider — giả lập SmartCA hoàn toàn offline.
+ * MockSmartCaProvider — giả lập SmartCA v1 hoàn toàn offline.
  * Được inject thay thế SmartCaProvider khi SMARTCA_ENV=mock.
  *
- * Luồng giả lập:
+ * Luồng giả lập (người ký "duyệt trong app" sau MOCK_APPROVAL_DELAY_MS):
  *  listCertificates   → trả 1 cert fake "MOCK-CERT-001"
- *  requestSignature   → trả sad + transactionId ngay lập tức
- *  confirmSignature   → trả signature fake (SHA-256 của artifactHash)
- *  getSignatureStatus → luôn trả 'signed'
+ *  requestSignature   → ghi nhận giao dịch, trả transactionId (chưa có chữ ký)
+ *  getSignatureStatus → 'pending' trước hạn duyệt, sau đó 'signed'
  */
 @Injectable()
 export class MockSmartCaProvider {
   private static readonly MOCK_CERT_SERIAL = 'MOCK-CERT-001'
   private static readonly MOCK_ISSUER = 'CN=VNPT-CA Test, O=VNPT-IT, C=VN'
   private static readonly MOCK_SUBJECT_PREFIX = 'CN=MockUser-'
+  private static readonly MOCK_APPROVAL_DELAY_MS = 3000
+
+  private readonly requestedAt = new Map<string, number>()
 
   listCertificates(signerCccd: string): Promise<SmartCaCertificate[]> {
     const now = new Date()
@@ -45,27 +46,10 @@ export class MockSmartCaProvider {
   }
 
   requestSignature(input: SmartCaSigningRequest): Promise<SmartCaSignResult> {
-    // sad = base64 của randomBytes (giả lập token xác nhận)
-    const sad = randomBytes(32).toString('base64url')
+    this.requestedAt.set(input.transactionId, Date.now())
     return Promise.resolve({
       transactionId: input.transactionId,
       transactionCode: `MOCK-TC-${Date.now()}`,
-      sad,
-      expiresIn: 900, // 15 phút
-    })
-  }
-
-  confirmSignature(input: {
-    transactionId: string
-    signerCccd: string
-    password: string
-    sad: string
-    documentId: string
-  }): Promise<SmartCaConfirmResult> {
-    const signature = this.buildSignature(input.documentId, input.sad)
-    return Promise.resolve({
-      transactionId: input.transactionId,
-      signature,
     })
   }
 
@@ -73,11 +57,20 @@ export class MockSmartCaProvider {
     providerTransactionId: string,
     documentId: string
   ): Promise<SmartCaStatusResult> {
-    const signature = this.buildSignature(documentId, providerTransactionId)
+    const requestedAt = this.requestedAt.get(providerTransactionId)
+    const approved =
+      requestedAt !== undefined &&
+      Date.now() - requestedAt >= MockSmartCaProvider.MOCK_APPROVAL_DELAY_MS
+    if (!approved) {
+      return Promise.resolve({
+        transactionId: providerTransactionId,
+        status: 'pending',
+      })
+    }
     return Promise.resolve({
       transactionId: providerTransactionId,
       status: 'signed',
-      signature,
+      signature: this.buildSignature(documentId, providerTransactionId),
     })
   }
 

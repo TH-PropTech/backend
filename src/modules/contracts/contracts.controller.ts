@@ -32,6 +32,7 @@ import {
   ApiUnprocessableEntityResponse,
 } from '@nestjs/swagger'
 import { FileInterceptor } from '@nestjs/platform-express'
+import { ConfigService } from '@nestjs/config'
 import {
   IsString,
   IsNotEmpty,
@@ -42,7 +43,6 @@ import {
   IsObject,
   MaxLength,
   IsOptional,
-  IsIn,
 } from 'class-validator'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import type { UserPayload } from '../auth/interfaces/auth.interface'
@@ -67,7 +67,6 @@ import { OtpActionType } from '../smart-otp/enums/otp-action-type.enum'
 import type { ContractViewDto } from './dto/contract-view.dto'
 import type { ContractAuditEventDto } from './dto/contract-audit-event.dto'
 import { SmartCaSigningService } from './smartca/smartca-signing.service'
-import { SmartCaCallbackGuard } from './smartca/smartca-callback.guard'
 import { DepositAgreementsService } from './deposit-agreements.service'
 import { DepositAgreement } from './schemas/deposit-agreement.schema'
 import type { ContractArtifact } from './schemas/contract-artifact.schema'
@@ -208,45 +207,30 @@ export class TerminateContractDto {
   idempotencyKey!: string
 }
 
-export class SmartCaCallbackDto {
+/**
+ * Payload webhook của VNPT SmartCA (§3.5). Mọi trường là dữ liệu không tin
+ * cậy: chữ ký/trạng thái không được dùng để ghi nhận, chỉ `transaction_id`
+ * dùng để biết giao dịch nào cần đối soát lại qua status API.
+ */
+export class SmartCaWebhookDto {
   @IsString()
   @IsNotEmpty()
-  transactionId!: string
+  sp_id!: string
 
-  @IsIn(['signed', 'rejected'])
-  status!: 'signed' | 'rejected'
+  @IsNotEmpty()
+  status_code!: number | string
 
   @IsString()
   @IsNotEmpty()
-  artifactHash!: string
+  message!: string
 
   @IsOptional()
   @IsString()
-  certificateSerial?: string
+  transaction_id?: string
 
   @IsOptional()
-  @IsString()
-  certificateSubject?: string
-
-  @IsOptional()
-  @IsString()
-  certificateIssuer?: string
-
-  @IsOptional()
-  @IsString()
-  signatureHash?: string
-
-  @IsOptional()
-  @IsString()
-  signatureAlgorithm?: string
-
-  @IsOptional()
-  @IsString()
-  signatureValueRef?: string
-
-  @IsOptional()
-  @IsString()
-  signedAt?: string
+  @IsObject({ each: true })
+  signed_files?: Record<string, unknown>[]
 }
 
 // ── Controller ──
@@ -267,7 +251,9 @@ export class ContractsController {
     @Optional()
     private readonly depositAgreementsService?: DepositAgreementsService,
     @Optional()
-    private readonly evidencePackageExportService?: ContractEvidencePackageExportService
+    private readonly evidencePackageExportService?: ContractEvidencePackageExportService,
+    @Optional()
+    private readonly configService?: ConfigService
   ) {}
 
   /** Lấy chi tiết hợp đồng phong phú cho Contract Workspace */
@@ -644,18 +630,34 @@ export class ContractsController {
     return toSmartCaSigningSessionDto(session)
   }
 
+  /**
+   * Webhook của VNPT SmartCA (§3.5). Không có header/secret để xác thực
+   * theo tài liệu, nên response luôn `200` không tiết lộ phiên có tồn tại
+   * hay không; chữ ký chỉ được ghi nhận sau khi `handleWebhook` xác minh
+   * lại bằng status API.
+   */
   @Post('smartca/callback')
   @Public()
-  @UseGuards(SmartCaCallbackGuard)
+  @ApiOperation({
+    summary: 'Webhook do VNPT SmartCA gọi (không dành cho client)',
+    description:
+      'VNPT gọi endpoint này khi người ký duyệt giao dịch trong app SmartCA. ' +
+      'Payload không được tin cậy: chỉ `transaction_id` được dùng để đối soát lại ' +
+      'qua status API của VNPT. Luôn trả 200 để không lộ phiên có tồn tại hay không.',
+  })
+  @ApiOkResponse({ description: 'Luôn trả `{ received: true }`.' })
   async smartCaCallback(
-    @Body() body: SmartCaCallbackDto
-  ): Promise<SmartCaSigningSessionDto> {
-    const session = await this.smartCaSigningService.reconcile(
-      body.transactionId,
-      body.status,
-      body
-    )
-    return toSmartCaSigningSessionDto(session)
+    @Body() body: SmartCaWebhookDto
+  ): Promise<{ received: true }> {
+    const expectedSpId = this.configService?.get<string>('smartCA.spId')
+    if (
+      body.sp_id === expectedSpId &&
+      body.transaction_id &&
+      body.transaction_id.trim()
+    ) {
+      await this.smartCaSigningService.handleWebhook(body.transaction_id)
+    }
+    return { received: true }
   }
 
   /** Lấy danh sách hợp đồng theo userId — Admin, Nhân viên, Chủ nhà, Khách thuê */

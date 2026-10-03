@@ -370,28 +370,12 @@ describe('canonical contract workspace integration', () => {
             Promise.resolve({
               transactionId,
               transactionCode: 'redacted',
-              sad: 'redacted',
-              expiresIn: 299,
             })
         ),
-        confirmSignature: jest.fn(
-          ({
-            transactionId,
-            documentId,
-          }: {
-            transactionId: string
-            documentId: string
-          }) =>
-            Promise.resolve({
-              transactionId,
-              signature: {
-                documentId,
-                signatureValue: 'redacted',
-                signedAt: '2026-09-23T10:00:00.000Z',
-              },
-            })
-        ),
-        getSignatureStatus: jest.fn(),
+        getSignatureStatus: jest.fn().mockResolvedValue({
+          transactionId: 'provider-transaction',
+          status: 'pending',
+        }),
       } as never,
       {
         recordSmartCaSignature: jest
@@ -428,8 +412,6 @@ describe('canonical contract workspace integration', () => {
         ),
       SIGN_SMARTCA: actorId =>
         smartCaService.createSession(id, actorId, {
-          smartCaPassword: 'redacted',
-          smartCaOtp: '000000',
           idempotencyKey: `flow-${actorId}`,
         }),
     }

@@ -195,8 +195,6 @@ export const envValidationSchema = Joi.object({
   CLOUDINARY_CLOUD_NAME: Joi.string().allow('').optional(),
   CLOUDINARY_API_KEY: Joi.string().allow('').optional(),
   CLOUDINARY_API_SECRET: Joi.string().allow('').optional(),
-  SMARTCA_CALLBACK_SECRET: Joi.string().allow('').optional(),
-  SMARTCA_TEST_CALLBACK_SECRET: Joi.string().allow('').optional(),
   RENTAL_FLOW_V4_ENABLED: Joi.boolean().default(false),
   PAYMENT_PROVIDER: Joi.string()
     .valid('mock-bank', 'vnpay', 'momo', 'zalopay', 'sepay', 'techcombank')

@@ -23,14 +23,6 @@ export default registerAs('smartCA', () => {
     spPassword: isTest
       ? process.env.SMARTCA_TEST_SP_PASSWORD || ''
       : process.env.SMARTCA_SP_PASSWORD || '',
-    mobileCode: isTest
-      ? process.env.SMARTCA_TEST_MOBILE_CODE || ''
-      : process.env.SMARTCA_MOBILE_CODE || '',
-
-    // Shared secret used to authenticate provider callbacks.
-    callbackSecret: isTest
-      ? process.env.SMARTCA_TEST_CALLBACK_SECRET || ''
-      : process.env.SMARTCA_CALLBACK_SECRET || '',
 
     // Default user_id (số CCCD) - lấy từ KYC của user trong production
     defaultUserId: isTest
@@ -43,14 +35,10 @@ export default registerAs('smartCA', () => {
         '/sca/sp769/v1/credentials/get_certificate'
       : process.env.SMARTCA_CERT_PATH ||
         '/sca/sp769/v1/credentials/get_certificate',
-    signV2Path: isTest
-      ? process.env.SMARTCA_TEST_SIGN_V2_PATH || '/sca/sp769/v2/signatures/sign'
-      : process.env.SMARTCA_SIGN_V2_PATH || '/sca/sp769/v2/signatures/sign',
-    confirmV2Path: isTest
-      ? process.env.SMARTCA_TEST_CONFIRM_V2_PATH ||
-        '/sca/sp769/v2/signatures/confirm'
-      : process.env.SMARTCA_CONFIRM_V2_PATH ||
-        '/sca/sp769/v2/signatures/confirm',
+    // v1 sign (§3.3): người ký duyệt trong app VNPT SmartCA, không có password/OTP
+    signPath: isTest
+      ? process.env.SMARTCA_TEST_SIGN_PATH || '/sca/sp769/v1/signatures/sign'
+      : process.env.SMARTCA_SIGN_PATH || '/sca/sp769/v1/signatures/sign',
     // Status API: POST (không phải GET!) — template có {transactionId}
     statusPathTmpl: isTest
       ? process.env.SMARTCA_TEST_STATUS_PATH_TMPL ||

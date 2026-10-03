@@ -3,8 +3,8 @@ import {
   ForbiddenException,
   NotFoundException,
   ServiceUnavailableException,
+  UnprocessableEntityException,
 } from '@nestjs/common'
-import { createHash } from 'crypto'
 import { ObjectId } from 'mongodb'
 import type { RentalExecutionPolicyRef } from '../../rental-flow-config/rental-execution-policy.util'
 import type { SmartCaCertificate } from './smartca.provider'
@@ -47,13 +47,9 @@ describe('SmartCaSigningService', () => {
   const signingInput = {
     idempotencyKey: 'request-1',
     certificateSerial: 'SERIAL-001',
-    smartCaPassword: 'password-redacted',
-    smartCaOtp: '000000',
   }
   const signingInputWithoutSerial = {
     idempotencyKey: signingInput.idempotencyKey,
-    smartCaPassword: signingInput.smartCaPassword,
-    smartCaOtp: signingInput.smartCaOtp,
   }
 
   type TestContext = {
@@ -63,12 +59,12 @@ describe('SmartCaSigningService', () => {
       findOne: jest.Mock
       create: jest.Mock
       save: jest.Mock
+      remove: jest.Mock
     }
     kycRepository: { findOne: jest.Mock }
     provider: {
       listCertificates: jest.Mock
       requestSignature: jest.Mock
-      confirmSignature: jest.Mock
       getSignatureStatus: jest.Mock
     }
     contractsService: { recordSmartCaSignature: jest.Mock }
@@ -87,6 +83,7 @@ describe('SmartCaSigningService', () => {
         ...value,
       })),
       save: jest.fn((value: Record<string, unknown>) => Promise.resolve(value)),
+      remove: jest.fn().mockResolvedValue(true),
     }
     const kycRepository = {
       findOne: jest.fn().mockResolvedValue({
@@ -103,22 +100,7 @@ describe('SmartCaSigningService', () => {
           Promise.resolve({
             transactionId: input.transactionId,
             transactionCode: 'transaction-code-redacted',
-            sad: 'sad-redacted',
-            expiresIn: 299,
           })
-        ),
-      confirmSignature: jest
-        .fn()
-        .mockImplementation(
-          (input: { transactionId: string; documentId: string }) =>
-            Promise.resolve({
-              transactionId: input.transactionId,
-              signature: {
-                documentId: input.documentId,
-                signatureValue: 'signature-value-redacted',
-                signedAt: '2026-09-23T10:00:00.000Z',
-              },
-            })
         ),
       getSignatureStatus: jest.fn().mockResolvedValue({
         transactionId: 'provider-transaction',
@@ -137,9 +119,6 @@ describe('SmartCaSigningService', () => {
         artifact: {},
       }),
     }
-    // Mặc định phản chiếu hành vi cũ (chỉ dựa vào contract.depositPaidAt) để
-    // các test hiện có không phải sửa; test cho DepositConfirmationResolver
-    // sẽ tự override qua mockResolvedValueOnce/mockResolvedValue khi cần.
     const depositConfirmationResolver = {
       resolve: jest
         .fn()
@@ -174,7 +153,7 @@ describe('SmartCaSigningService', () => {
 
   afterEach(() => jest.clearAllMocks())
 
-  it('orchestrates certificate, sign and confirm on one canonical artifact', async () => {
+  it('orchestrates certificate and sign on one canonical artifact, returning pending session', async () => {
     const ctx = context()
 
     const result = await ctx.service.createSession(
@@ -191,8 +170,6 @@ describe('SmartCaSigningService', () => {
       expect.objectContaining({
         artifactHash,
         signerCccd: '000000000001',
-        password: signingInput.smartCaPassword,
-        otp: signingInput.smartCaOtp,
         certificateSerial: 'SERIAL-001',
         documentId,
       })
@@ -200,29 +177,17 @@ describe('SmartCaSigningService', () => {
     const transactionId = firstCallArgument<{ transactionId: string }>(
       ctx.provider.requestSignature
     ).transactionId
-    expect(ctx.provider.confirmSignature).toHaveBeenCalledWith({
-      transactionId,
-      signerCccd: '000000000001',
-      password: signingInput.smartCaPassword,
-      sad: 'sad-redacted',
-      documentId,
-    })
+
     expect(result).toEqual(
       expect.objectContaining({
-        status: 'signed',
+        status: 'pending',
         signerId: 'tenant-1',
         artifactHash,
         providerTransactionId: transactionId,
         certificateSerial: 'SERIAL-001',
+        documentId,
       })
     )
-    expect(ctx.contractsService.recordSmartCaSignature).toHaveBeenCalledTimes(1)
-    const persistenceCalls = JSON.stringify(
-      ctx.sessionRepository.save.mock.calls as unknown
-    )
-    expect(persistenceCalls).not.toContain(signingInput.smartCaPassword)
-    expect(persistenceCalls).not.toContain(signingInput.smartCaOtp)
-    expect(persistenceCalls).not.toContain('sad-redacted')
   })
 
   it('uses stable transaction and document identifiers for the same idempotency key', async () => {
@@ -389,11 +354,6 @@ describe('SmartCaSigningService', () => {
   })
 
   it('allows deposit-first signing when the deposit agreement is paid even though contract.depositPaidAt is still null', async () => {
-    // RED trước khi sửa smartca-signing.service.ts: điều kiện cũ chỉ đọc
-    // contract.depositPaidAt (chỉ được ghi lúc kích hoạt), nên case này ném
-    // EXECUTION_POLICY_DEPOSIT_REQUIRED_BEFORE_SIGNING dù cọc đã trả qua
-    // thỏa thuận cọc. Sau khi dùng DepositConfirmationResolver, case này
-    // phải tạo được phiên ký (GREEN).
     const ctx = context({
       ...contract,
       deposit: 20_000_000,
@@ -421,7 +381,7 @@ describe('SmartCaSigningService', () => {
       signingInput
     )
 
-    expect(session.status).toBe('signed')
+    expect(session.status).toBe('pending')
     expect(ctx.depositConfirmationResolver.resolve).toHaveBeenCalledWith(
       expect.objectContaining({ deposit: 20_000_000 })
     )
@@ -441,10 +401,10 @@ describe('SmartCaSigningService', () => {
 
     await expect(
       ctx.service.createSession(contractId, 'tenant-1', signingInput)
-    ).resolves.toEqual(expect.objectContaining({ status: 'signed' }))
+    ).resolves.toEqual(expect.objectContaining({ status: 'pending' }))
   })
 
-  it('reuses a terminal idempotent session without another provider request', async () => {
+  it('reuses a pending session without another provider request when idempotencyKey matches', async () => {
     const ctx = context()
     const existing = {
       _id: new ObjectId(),
@@ -453,7 +413,8 @@ describe('SmartCaSigningService', () => {
       artifactHash,
       providerTransactionId: 'existing-transaction',
       idempotencyKey: signingInput.idempotencyKey,
-      status: 'signed' as const,
+      status: 'pending' as const,
+      documentId,
       expiresAt: new Date(Date.now() + 60_000),
     }
     ctx.sessionRepository.findOne.mockResolvedValue(existing)
@@ -464,44 +425,22 @@ describe('SmartCaSigningService', () => {
     expect(ctx.provider.requestSignature).not.toHaveBeenCalled()
   })
 
-  it('recovers an existing pending session through status before signing again', async () => {
+  it('deletes the pending session and throws on definite VNPT rejection', async () => {
     const ctx = context()
-    const existing = {
-      _id: new ObjectId(),
-      contractId,
-      signerId: 'tenant-1',
-      signerRole: 'tenant' as const,
-      artifactHash,
-      providerTransactionId: 'provider-transaction',
-      idempotencyKey: signingInput.idempotencyKey,
-      status: 'pending' as 'pending' | 'signed',
-      certificateSerial: validCertificate.serialNumber,
-      certificateSubject: validCertificate.subject,
-      certificateIssuer: validCertificate.issuer,
-      expiresAt: new Date(Date.now() + 60_000),
-    }
-    ctx.sessionRepository.findOne.mockResolvedValue(existing)
-    ctx.provider.getSignatureStatus.mockResolvedValue({
-      transactionId: 'provider-transaction',
-      status: 'signed',
-      signature: {
-        documentId,
-        signatureValue: 'recovered-signature',
-        signedAt: null,
-      },
-    })
+    ctx.provider.requestSignature.mockRejectedValue(
+      new UnprocessableEntityException('SMARTCA_CREDENTIAL_OR_REQUEST_REJECTED')
+    )
 
     await expect(
       ctx.service.createSession(contractId, 'tenant-1', signingInput)
-    ).resolves.toEqual(expect.objectContaining({ status: 'signed' }))
-    expect(ctx.provider.getSignatureStatus).toHaveBeenCalledWith(
-      'provider-transaction',
-      documentId
+    ).rejects.toThrow('SMARTCA_CREDENTIAL_OR_REQUEST_REJECTED')
+
+    expect(ctx.sessionRepository.remove).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'pending' })
     )
-    expect(ctx.provider.requestSignature).not.toHaveBeenCalled()
   })
 
-  it('keeps a pre-persisted session recoverable when provider transport fails', async () => {
+  it('keeps a pre-persisted session recoverable when provider transport fails (network error)', async () => {
     const ctx = context()
     ctx.provider.requestSignature.mockRejectedValue(
       new ServiceUnavailableException('SMARTCA_PROVIDER_UNAVAILABLE')
@@ -513,36 +452,10 @@ describe('SmartCaSigningService', () => {
     expect(ctx.sessionRepository.save).toHaveBeenCalledWith(
       expect.objectContaining({ status: 'pending' })
     )
+    expect(ctx.sessionRepository.remove).not.toHaveBeenCalled()
   })
 
-  it('hashes the signature value and uses backend verified time for a null provider timestamp', async () => {
-    const ctx = context()
-    ctx.provider.confirmSignature.mockImplementation(
-      (input: { transactionId: string; documentId: string }) =>
-        Promise.resolve({
-          transactionId: input.transactionId,
-          signature: {
-            documentId: input.documentId,
-            signatureValue: 'signature-value-redacted',
-            signedAt: null,
-          },
-        })
-    )
-
-    const result = await ctx.service.createSession(
-      contractId,
-      'tenant-1',
-      signingInput
-    )
-
-    expect(result.signatureHash).toBe(
-      createHash('sha256').update('signature-value-redacted').digest('hex')
-    )
-    expect(result.signatureValueRef).toBe('signature-value-redacted')
-    expect(result.signedAt).toBeInstanceOf(Date)
-  })
-
-  it('polls and reconciles a matching signature idempotently', async () => {
+  it('polls and completes correctly just once', async () => {
     const ctx = context()
     const session = {
       _id: new ObjectId(),
@@ -550,6 +463,7 @@ describe('SmartCaSigningService', () => {
       signerId: 'tenant-1',
       signerRole: 'tenant' as const,
       artifactHash,
+      documentId,
       providerTransactionId: 'provider-transaction',
       status: 'pending' as 'pending' | 'signed',
       certificateSerial: validCertificate.serialNumber,
@@ -568,11 +482,16 @@ describe('SmartCaSigningService', () => {
       },
     })
 
-    await expect(
-      ctx.service.poll(contractId, session._id.toHexString(), 'tenant-1', false)
-    ).resolves.toEqual(expect.objectContaining({ status: 'signed' }))
+    const result = await ctx.service.poll(
+      contractId,
+      session._id.toHexString(),
+      'tenant-1',
+      false
+    )
+    expect(result).toEqual(expect.objectContaining({ status: 'signed' }))
     expect(ctx.contractsService.recordSmartCaSignature).toHaveBeenCalledTimes(1)
 
+    // Second poll on a signed session shouldn't change anything
     session.status = 'signed'
     await ctx.service.poll(
       contractId,
@@ -583,32 +502,7 @@ describe('SmartCaSigningService', () => {
     expect(ctx.contractsService.recordSmartCaSignature).toHaveBeenCalledTimes(1)
   })
 
-  it('rejects callback evidence for another artifact and makes terminal callbacks idempotent', async () => {
-    const ctx = context()
-    const session = {
-      providerTransactionId: 'provider-transaction',
-      artifactHash,
-      status: 'pending' as 'pending' | 'signed',
-      expiresAt: new Date(Date.now() + 60_000),
-    }
-    ctx.sessionRepository.findOne.mockResolvedValue(session)
-
-    await expect(
-      ctx.service.reconcile('provider-transaction', 'signed', {
-        artifactHash: 'b'.repeat(64),
-        certificateSerial: 'SERIAL-001',
-      })
-    ).rejects.toThrow('SMARTCA_SIGNATURE_DIGEST_MISMATCH')
-
-    session.status = 'signed'
-    await expect(
-      ctx.service.reconcile('provider-transaction', 'rejected', {
-        artifactHash: 'b'.repeat(64),
-      })
-    ).resolves.toBe(session)
-  })
-
-  it('cancels pending sessions and leaves terminal sessions unchanged', async () => {
+  it('cancels pending sessions and leaves terminal sessions unchanged when polling', async () => {
     const ctx = context()
     const session = {
       _id: new ObjectId(),
@@ -631,6 +525,82 @@ describe('SmartCaSigningService', () => {
         providerStatus: 'cancelled',
       })
     )
+
+    // Poll on cancelled session keeps it cancelled
+    const result = await ctx.service.poll(
+      contractId,
+      session._id.toHexString(),
+      'tenant-1',
+      false
+    )
+    expect(result.status).toBe('cancelled')
+  })
+
+  describe('handleWebhook', () => {
+    it('ignores unknown transaction without throwing', async () => {
+      const ctx = context()
+      ctx.sessionRepository.findOne.mockResolvedValue(null)
+      await expect(
+        ctx.service.handleWebhook('unknown-txn')
+      ).resolves.toBeUndefined()
+    })
+
+    it('ignores session lacking documentId without throwing', async () => {
+      const ctx = context()
+      ctx.sessionRepository.findOne.mockResolvedValue({
+        providerTransactionId: 'txn-1',
+        status: 'pending',
+        documentId: null,
+      })
+      await expect(ctx.service.handleWebhook('txn-1')).resolves.toBeUndefined()
+    })
+
+    it('ignores status API error without throwing', async () => {
+      const ctx = context()
+      ctx.sessionRepository.findOne.mockResolvedValue({
+        providerTransactionId: 'txn-1',
+        status: 'pending',
+        documentId,
+      })
+      ctx.provider.getSignatureStatus.mockRejectedValue(
+        new Error('Network error')
+      )
+      await expect(ctx.service.handleWebhook('txn-1')).resolves.toBeUndefined()
+    })
+
+    it('handles webhook successfully and deduplicates in-flight calls', async () => {
+      const ctx = context()
+      const session = {
+        _id: new ObjectId(),
+        contractId,
+        signerId: 'tenant-1',
+        signerRole: 'tenant' as const,
+        artifactHash,
+        documentId,
+        providerTransactionId: 'txn-1',
+        status: 'pending' as 'pending' | 'signed',
+        certificateSerial: validCertificate.serialNumber,
+        expiresAt: new Date(Date.now() + 60_000),
+      }
+      ctx.sessionRepository.findOne.mockResolvedValue(session)
+      ctx.provider.getSignatureStatus.mockResolvedValue({
+        transactionId: 'txn-1',
+        status: 'signed',
+        signature: {
+          documentId,
+          signatureValue: 'polled-signature',
+          signedAt: '2026-09-23T10:00:00.000Z',
+        },
+      })
+
+      // Simulate concurrent calls
+      await Promise.all([
+        ctx.service.handleWebhook('txn-1'),
+        ctx.service.handleWebhook('txn-1'),
+      ])
+
+      expect(ctx.provider.getSignatureStatus).toHaveBeenCalledTimes(1)
+    })
   })
 
   it('rejects invalid contract and session identifiers', async () => {
