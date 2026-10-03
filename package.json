@@ -29,7 +29,7 @@
     "test": "node --max-old-space-size=2048 ./node_modules/jest/bin/jest.js --runInBand",
     "test:watch": "node --max-old-space-size=2048 ./node_modules/jest/bin/jest.js --watch --runInBand",
     "test:cov": "node --max-old-space-size=3072 ./node_modules/jest/bin/jest.js --coverage --runInBand",
-    "test:e2e": "node --max-old-space-size=2048 ./node_modules/jest/bin/jest.js --config ./test/jest-e2e.json --runInBand",
+    "test:e2e": "node --max-old-space-size=2048 ./node_modules/jest/bin/jest.js --config ./test/jest-e2e.cjs --runInBand",
     "db:up": "docker compose up -d mongodb",
     "db:down": "docker compose down",
     "db:logs": "docker compose logs -f mongodb",
