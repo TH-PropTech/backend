@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Injectable,
   Logger,
   Optional,
@@ -8,6 +9,7 @@ import { ConfigService } from '@nestjs/config'
 import { randomBytes, randomUUID } from 'node:crypto'
 import type { PaymentsConfig } from '../../../config/configuration'
 import type {
+  MomoPaymentMethod,
   PaymentIntentInput,
   PaymentProviderAdapter,
   ProviderAccountLink,
@@ -22,7 +24,52 @@ import {
   type GatewayFetcher,
 } from './gateway.util'
 
-/** MoMo AIO v2 `captureWallet` create-order adapter. */
+export type MomoMethodOption = {
+  method: MomoPaymentMethod
+  label: string
+  minAmount: number
+  maxAmount: number
+}
+
+/** MoMo AIO v2 request types and their per-order VND limits (MoMo docs). */
+const MOMO_METHODS: Record<
+  MomoPaymentMethod,
+  MomoMethodOption & { requestType: string }
+> = {
+  wallet: {
+    method: 'wallet',
+    label: 'Ví MoMo / QR',
+    requestType: 'captureWallet',
+    minAmount: 1_000,
+    maxAmount: 50_000_000,
+  },
+  atm: {
+    method: 'atm',
+    label: 'Thẻ ATM nội địa',
+    requestType: 'payWithATM',
+    minAmount: 10_000,
+    maxAmount: 50_000_000,
+  },
+  card: {
+    method: 'card',
+    label: 'Thẻ Visa / Master / JCB',
+    requestType: 'payWithCC',
+    minAmount: 1_000,
+    maxAmount: 10_000_000,
+  },
+}
+
+/** Public method list for the provider picker (no request internals). */
+export const MOMO_METHOD_OPTIONS: MomoMethodOption[] = Object.values(
+  MOMO_METHODS
+).map(({ method, label, minAmount, maxAmount }) => ({
+  method,
+  label,
+  minAmount,
+  maxAmount,
+}))
+
+/** MoMo AIO v2 create-order adapter (wallet, ATM or international card). */
 @Injectable()
 export class MomoAdapter implements PaymentProviderAdapter {
   readonly name = 'momo' as const
@@ -46,8 +93,13 @@ export class MomoAdapter implements PaymentProviderAdapter {
     const config = this.configService.getOrThrow<PaymentsConfig['momo']>(
       'rentalFlow.payments.momo'
     )
+    const method = MOMO_METHODS[input.momoMethod ?? 'wallet']
+    if (input.amount < method.minAmount || input.amount > method.maxAmount) {
+      // Fail before calling MoMo so the tenant sees why, not a gateway error.
+      throw new BadRequestException('PAYMENT_AMOUNT_OUT_OF_RANGE')
+    }
     const requestId = randomUUID()
-    const requestType = 'captureWallet'
+    const requestType = method.requestType
     const extraData = ''
     const rawSignature =
       `accessKey=${config.accessKey}&amount=${input.amount}` +

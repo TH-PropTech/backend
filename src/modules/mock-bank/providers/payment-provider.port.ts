@@ -6,6 +6,10 @@ export type PaymentProviderName =
   | 'sepay'
   | 'techcombank'
 
+/** How the tenant pays inside MoMo: wallet/QR, domestic ATM card, intl card. */
+export const MOMO_PAYMENT_METHODS = ['wallet', 'atm', 'card'] as const
+export type MomoPaymentMethod = (typeof MOMO_PAYMENT_METHODS)[number]
+
 /** External gateways that authenticate their own callbacks. */
 export type GatewayProviderName = 'vnpay' | 'momo' | 'zalopay'
 
@@ -30,6 +34,8 @@ export type PaymentIntentInput = {
   txRef: string
   expiresAt: Date
   clientIp?: string | undefined
+  /** MoMo only; other adapters ignore it. Defaults to `wallet`. */
+  momoMethod?: MomoPaymentMethod | undefined
 }
 
 /**

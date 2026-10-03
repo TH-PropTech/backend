@@ -31,6 +31,7 @@ import { ObjectId } from 'mongodb'
 import { PaymentProviderRegistry } from './providers/payment-provider.registry'
 import type {
   GatewayVerdict,
+  MomoPaymentMethod,
   PaymentProviderName,
 } from './providers/payment-provider.port'
 import type { PaymentsConfig } from '../../config/configuration'
@@ -72,6 +73,7 @@ export type PaymentInitOptions = {
   provider?: PaymentProviderName | undefined
   clientChannel?: PaymentClientChannel | undefined
   clientIp?: string | undefined
+  momoMethod?: MomoPaymentMethod | undefined
 }
 
 type PaymentType = PaymentAttempt['paymentType']
@@ -951,8 +953,9 @@ export class MockBankService {
 
   /**
    * Creates (or reuses) the live attempt for one payment target (D6):
-   * same provider + unexpired → reuse without a gateway call; otherwise the
-   * live attempt is expired and a new one is created on the chosen provider.
+   * same provider (+ same MoMo method) + unexpired → reuse without a gateway
+   * call; otherwise the live attempt is expired and a new one is created on
+   * the chosen provider.
    * Nothing is persisted when the gateway rejects the create request.
    */
   private async createAttempt(input: {
@@ -966,6 +969,8 @@ export class MockBankService {
     options: PaymentInitOptions
   }): Promise<{ payment: MockPaymentInit; reused: boolean }> {
     const adapter = this.providerRegistry.get(input.options.provider)
+    const momoMethod =
+      adapter.name === 'momo' ? (input.options.momoMethod ?? 'wallet') : null
     const live = await this.attemptRepository.findOne({
       where: {
         paymentId: input.paymentId,
@@ -977,6 +982,7 @@ export class MockBankService {
     if (live) {
       if (
         live.provider === adapter.name &&
+        (live.momoMethod ?? null) === momoMethod &&
         live.expiresAt.getTime() > Date.now()
       ) {
         return {
@@ -1001,6 +1007,7 @@ export class MockBankService {
       txRef: adapter.newTxRef(),
       expiresAt: new Date(Date.now() + ttlMinutes * 60 * 1000),
       clientIp: input.options.clientIp,
+      momoMethod: momoMethod ?? undefined,
     })
     const attempt = this.attemptRepository.create({
       provider: intent.provider,
@@ -1018,6 +1025,7 @@ export class MockBankService {
       providerPaymentUrl: intent.redirectUrl,
       providerTransactionId: null,
       clientChannel: input.options.clientChannel ?? 'web',
+      momoMethod,
     })
     await this.attemptRepository.save(attempt)
     await this.recordTransactionEvent({

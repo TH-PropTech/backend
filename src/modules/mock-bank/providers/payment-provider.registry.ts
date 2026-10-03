@@ -2,7 +2,11 @@ import { BadRequestException, Injectable } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import type { SelectablePaymentProvider } from '../../../config/configuration'
 import { MockBankAdapter } from './mock-bank.adapter'
-import { MomoAdapter } from './momo.adapter'
+import {
+  MOMO_METHOD_OPTIONS,
+  MomoAdapter,
+  type MomoMethodOption,
+} from './momo.adapter'
 import { MomoCallbackVerifier } from './momo-callback.verifier'
 import type {
   GatewayProviderName,
@@ -20,6 +24,8 @@ export type PaymentProviderOption = {
   provider: SelectablePaymentProvider
   label: string
   simulation: boolean
+  /** MoMo only: payment methods with their VND limits. */
+  methods?: MomoMethodOption[]
 }
 
 const PROVIDER_LABELS: Record<SelectablePaymentProvider, string> = {
@@ -98,6 +104,7 @@ export class PaymentProviderRegistry {
       provider,
       label: PROVIDER_LABELS[provider],
       simulation: provider === 'mock-bank',
+      ...(provider === 'momo' ? { methods: MOMO_METHOD_OPTIONS } : {}),
     }))
   }
 
