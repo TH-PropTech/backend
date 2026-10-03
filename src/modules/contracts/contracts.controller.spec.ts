@@ -3,6 +3,7 @@ import {
   ConflictException,
   ForbiddenException,
 } from '@nestjs/common'
+import type { ConfigService } from '@nestjs/config'
 import { ContractsController } from './contracts.controller'
 import type { ContractsService } from './contracts.service'
 import type { ContractArtifactService } from './contract-artifact.service'
@@ -51,9 +52,13 @@ describe('ContractsController', () => {
     getSession: jest.fn(),
     poll: jest.fn(),
     cancelSession: jest.fn(),
+    handleWebhook: jest.fn(),
   }
   const depositAgreementsService = {
     createForContract: jest.fn(),
+  }
+  const configService = {
+    get: jest.fn().mockReturnValue('sp-redacted'),
   }
   const controller = new ContractsController(
     service as unknown as ContractsService,
@@ -63,7 +68,9 @@ describe('ContractsController', () => {
     ledgerEvidenceQueryService as unknown as LedgerEvidenceQueryService,
     smartOtpService as unknown as SmartOtpService,
     smartCaSigningService as unknown as SmartCaSigningService,
-    depositAgreementsService as unknown as DepositAgreementsService
+    depositAgreementsService as unknown as DepositAgreementsService,
+    undefined,
+    configService as unknown as ConfigService
   )
 
   beforeEach(() => jest.clearAllMocks())
@@ -450,8 +457,6 @@ describe('ContractsController', () => {
     const dto = {
       idempotencyKey: 'request-1',
       certificateSerial: 'SERIAL-001',
-      smartCaPassword: 'password-redacted',
-      smartCaOtp: '000000',
     }
 
     const result = await controller.createSmartCaSigningSession(
@@ -469,8 +474,61 @@ describe('ContractsController', () => {
       expect.objectContaining({ id: 'session-1', status: 'signed' })
     )
     const serialized = JSON.stringify(result)
-    expect(serialized).not.toContain(dto.smartCaPassword)
-    expect(serialized).not.toContain(dto.smartCaOtp)
     expect(serialized).not.toContain('raw-signature-must-not-leak')
+  })
+
+  describe('smartCaCallback', () => {
+    it('ignores a mismatched sp_id, calls no reconciliation, and always returns 200', async () => {
+      const result = await controller.smartCaCallback({
+        sp_id: 'wrong-sp',
+        status_code: 200,
+        message: 'success',
+        transaction_id: 'txn-1',
+      })
+
+      expect(smartCaSigningService.handleWebhook).not.toHaveBeenCalled()
+      expect(result).toEqual({ received: true })
+    })
+
+    it('ignores a webhook missing transaction_id', async () => {
+      const result = await controller.smartCaCallback({
+        sp_id: 'sp-redacted',
+        status_code: 200,
+        message: 'success',
+      })
+
+      expect(smartCaSigningService.handleWebhook).not.toHaveBeenCalled()
+      expect(result).toEqual({ received: true })
+    })
+
+    it('calls handleWebhook for a matching sp_id and transaction_id, ignoring signed_files payload', async () => {
+      const result = await controller.smartCaCallback({
+        sp_id: 'sp-redacted',
+        status_code: 200,
+        message: 'success',
+        transaction_id: 'txn-1',
+        signed_files: [
+          {
+            doc_id: 'doc-1',
+            signature_value: 'forged-signature-must-not-be-used',
+          },
+        ],
+      })
+
+      expect(smartCaSigningService.handleWebhook).toHaveBeenCalledWith('txn-1')
+      expect(result).toEqual({ received: true })
+    })
+
+    it('still returns 200 for an unknown transaction (does not leak session existence)', async () => {
+      smartCaSigningService.handleWebhook.mockResolvedValue(undefined)
+      const result = await controller.smartCaCallback({
+        sp_id: 'sp-redacted',
+        status_code: 200,
+        message: 'success',
+        transaction_id: 'unknown-txn',
+      })
+
+      expect(result).toEqual({ received: true })
+    })
   })
 })

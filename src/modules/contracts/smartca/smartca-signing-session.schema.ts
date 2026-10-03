@@ -32,6 +32,7 @@ export class SmartCaSigningSession {
   @Column({ nullable: true }) signedAt?: Date | null
   @Column({ nullable: true }) verifiedAt?: Date | null
   @Column({ nullable: true }) providerStatus?: string | null
+  @Column({ nullable: true }) documentId?: string | null
   @Column() expiresAt!: Date
   @CreateDateColumn() createdAt!: Date
   @UpdateDateColumn() updatedAt!: Date

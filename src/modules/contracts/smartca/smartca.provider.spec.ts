@@ -10,18 +10,20 @@ describe('SmartCaProvider', () => {
     apiUrl: 'https://smartca.test',
     spId: 'partner-redacted',
     spPassword: 'partner-secret-redacted',
-    mobileCode: 'mobile-redacted',
     certPath: '/certificate',
-    signV2Path: '/sign',
-    confirmV2Path: '/confirm',
+    signPath: '/sign',
     statusPathTmpl: '/status/{transactionId}',
   }
   const signerCccd = '000000000001'
-  const password = 'user-password-redacted'
-  const otp = '000000'
-  const sad = 'sad-redacted'
   const documentId = 'contract-contract-1-r2'
   const artifactHash = 'a'.repeat(64)
+  const signingRequest = {
+    transactionId: 'client-transaction-1',
+    artifactHash,
+    signerCccd,
+    certificateSerial: 'SERIAL-001',
+    documentId,
+  }
 
   function createProvider(
     config: Partial<typeof configValue> = configValue
@@ -119,7 +121,7 @@ describe('SmartCaProvider', () => {
     )
   })
 
-  it('sends the complete v2 sign request and parses transaction data from nested data', async () => {
+  it('sends a v1 sign request without any user credential and parses nested transaction data', async () => {
     const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue(
       jsonResponse({
         status_code: 200,
@@ -127,28 +129,14 @@ describe('SmartCaProvider', () => {
         data: {
           transaction_id: 'vnpt-transaction-1',
           tran_code: 'transaction-code-redacted',
-          sad,
-          expired_in: 299,
         },
       })
     )
     const provider = createProvider()
 
-    await expect(
-      provider.requestSignature({
-        transactionId: 'client-transaction-1',
-        artifactHash,
-        signerCccd,
-        password,
-        otp,
-        certificateSerial: 'SERIAL-001',
-        documentId,
-      })
-    ).resolves.toEqual({
+    await expect(provider.requestSignature(signingRequest)).resolves.toEqual({
       transactionId: 'vnpt-transaction-1',
       transactionCode: 'transaction-code-redacted',
-      sad,
-      expiresIn: 299,
     })
     const [url, init] = fetchMock.mock.calls[0] ?? []
     const body = parseJsonBody(init)
@@ -156,14 +144,17 @@ describe('SmartCaProvider', () => {
     expect(init?.method).toBe('POST')
     expect(body).toEqual(
       expect.objectContaining({
+        sp_id: 'partner-redacted',
+        sp_password: 'partner-secret-redacted',
         user_id: signerCccd,
-        password,
-        otp,
         transaction_id: 'client-transaction-1',
         serial_number: 'SERIAL-001',
       })
     )
-    expect(body).not.toEqual(expect.objectContaining({ user_id: 'mongo-id' }))
+    expect(body).not.toHaveProperty('password')
+    expect(body).not.toHaveProperty('otp')
+    expect(body).not.toHaveProperty('mobile_code')
+    expect(body).not.toHaveProperty('sad')
     expect(body.sign_files).toEqual([
       {
         doc_id: documentId,
@@ -175,103 +166,44 @@ describe('SmartCaProvider', () => {
   })
 
   it.each([
+    { status_code: 200, message: 'Success', data: {} },
     {
       status_code: 200,
       message: 'Success',
-      data: { transaction_id: 'vnpt-transaction-1', expired_in: 299 },
+      data: { tran_code: 'code-without-transaction-id' },
     },
-    { transaction_id: 'flat-response-must-not-be-accepted', sad },
+    { transaction_id: 'flat-response-must-not-be-accepted' },
   ])(
-    'rejects sign responses missing the required nested SAD contract',
+    'rejects sign responses missing the required nested transaction id',
     async payload => {
       jest.spyOn(global, 'fetch').mockResolvedValue(jsonResponse(payload))
       const provider = createProvider()
 
-      await expect(
-        provider.requestSignature({
-          transactionId: 'client-transaction-1',
-          artifactHash,
-          signerCccd,
-          password,
-          otp,
-          certificateSerial: 'SERIAL-001',
-          documentId,
-        })
-      ).rejects.toThrow('SMARTCA_PROVIDER_RESPONSE_INVALID')
+      await expect(provider.requestSignature(signingRequest)).rejects.toThrow(
+        'SMARTCA_PROVIDER_RESPONSE_INVALID'
+      )
     }
   )
 
-  it('confirms with SAD and selects the signature matching the requested document', async () => {
-    const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue(
+  it('maps a rejected sign status_code to a sanitized credential/request error', async () => {
+    jest.spyOn(global, 'fetch').mockResolvedValue(
       jsonResponse({
-        status_code: 200,
-        message: 'Success',
-        data: {
-          transaction_id: 'vnpt-transaction-1',
-          expired_in: 299,
-          signatures: [
-            {
-              doc_id: 'another-document',
-              signature_value: 'wrong-signature',
-              timestamp_signature: '2026-09-23T09:00:00.000Z',
-            },
-            {
-              doc_id: documentId,
-              signature_value: 'signature-value-redacted',
-              timestamp_signature: null,
-            },
-          ],
-        },
+        status_code: 401,
+        message: 'SP_CREDENTIAL_INVALID detail',
+        data: null,
       })
     )
     const provider = createProvider()
 
-    await expect(
-      provider.confirmSignature({
-        transactionId: 'vnpt-transaction-1',
-        signerCccd,
-        password,
-        sad,
-        documentId,
-      })
-    ).resolves.toEqual({
-      transactionId: 'vnpt-transaction-1',
-      signature: {
-        documentId,
-        signatureValue: 'signature-value-redacted',
-        signedAt: null,
-      },
-    })
-    const request = fetchMock.mock.calls[0]?.[1]
-    expect(parseJsonBody(request)).toEqual(
-      expect.objectContaining({ password, sad })
+    await expect(provider.requestSignature(signingRequest)).rejects.toThrow(
+      'SMARTCA_CREDENTIAL_OR_REQUEST_REJECTED'
     )
   })
 
-  it('rejects confirm when no signature matches the requested document', async () => {
-    jest.spyOn(global, 'fetch').mockResolvedValue(
-      jsonResponse({
-        status_code: 200,
-        message: 'Success',
-        data: {
-          transaction_id: 'vnpt-transaction-1',
-          signatures: [
-            { doc_id: 'another-document', signature_value: 'redacted' },
-          ],
-        },
-      })
-    )
-    const provider = createProvider()
-
-    await expect(
-      provider.confirmSignature({
-        transactionId: 'vnpt-transaction-1',
-        signerCccd,
-        password,
-        sad,
-        documentId,
-      })
-    ).rejects.toThrow('SMARTCA_PROVIDER_RESPONSE_INVALID')
+  it('does not expose a confirm step in the v1 flow', () => {
+    expect(
+      (createProvider() as unknown as Record<string, unknown>).confirmSignature
+    ).toBeUndefined()
   })
 
   it('polls with POST empty body and parses the matching nested signature', async () => {
@@ -361,35 +293,32 @@ describe('SmartCaProvider', () => {
     )
   })
 
-  it('never includes credential, SAD, CCCD or signature values in thrown errors', async () => {
+  it('never includes SP credential, CCCD or signature values in thrown errors', async () => {
     jest.spyOn(global, 'fetch').mockResolvedValue(
       jsonResponse({
         status_code: 200,
         message: 'Success',
-        data: { transaction_id: 'vnpt-transaction-1', signatures: [] },
+        data: {
+          transaction_id: 'vnpt-transaction-1',
+          signatures: [
+            { doc_id: 'another-document', signature_value: 'signature-leak' },
+          ],
+        },
       })
     )
     const provider = createProvider()
 
     let thrown: unknown
     try {
-      await provider.confirmSignature({
-        transactionId: 'vnpt-transaction-1',
-        signerCccd,
-        password,
-        sad,
-        documentId,
-      })
+      await provider.getSignatureStatus('vnpt-transaction-1', documentId)
     } catch (error: unknown) {
       thrown = error
     }
 
     expect(thrown).toBeInstanceOf(BadGatewayException)
     const serialized = JSON.stringify(thrown)
-    expect(serialized).not.toContain(password)
-    expect(serialized).not.toContain(otp)
-    expect(serialized).not.toContain(sad)
+    expect(serialized).not.toContain('partner-secret-redacted')
     expect(serialized).not.toContain(signerCccd)
-    expect(serialized).not.toContain('signature-value-redacted')
+    expect(serialized).not.toContain('signature-leak')
   })
 })

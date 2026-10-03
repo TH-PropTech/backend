@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
-import { IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator'
+import { IsOptional, IsString, MaxLength } from 'class-validator'
 import type { SmartCaCertificate } from '../smartca/smartca.provider'
 import type { SmartCaSigningSession } from '../smartca/smartca-signing-session.schema'
 
@@ -15,18 +15,6 @@ export class CreateSmartCaSigningSessionDto {
   @IsString()
   @MaxLength(256)
   certificateSerial?: string
-
-  @ApiProperty({ writeOnly: true, maxLength: 256 })
-  @IsString()
-  @IsNotEmpty()
-  @MaxLength(256)
-  smartCaPassword!: string
-
-  @ApiProperty({ writeOnly: true, maxLength: 32 })
-  @IsString()
-  @IsNotEmpty()
-  @MaxLength(32)
-  smartCaOtp!: string
 }
 
 export class SmartCaCertificateDto {
@@ -99,6 +87,9 @@ export class SmartCaSigningSessionDto {
   @ApiPropertyOptional()
   providerStatus?: string | null
 
+  @ApiPropertyOptional()
+  documentId?: string | null
+
   @ApiPropertyOptional({ format: 'date-time' })
   signedAt?: string | null
 
@@ -148,6 +139,7 @@ export function toSmartCaSigningSessionDto(
     signatureHash: session.signatureHash ?? null,
     signatureAlgorithm: session.signatureAlgorithm ?? null,
     providerStatus: session.providerStatus ?? null,
+    documentId: session.documentId ?? null,
     signedAt: session.signedAt?.toISOString() ?? null,
     verifiedAt: session.verifiedAt?.toISOString() ?? null,
     expiresAt: session.expiresAt.toISOString(),
