@@ -320,6 +320,14 @@ export class Contract {
   @Column({ nullable: true })
   settlementId?: string | null
 
+  /** PROP-399 D2: snapshot của cấu hình/pháp lý đã quản trị hợp đồng này khi kích hoạt. Bất biến sau khi gán. */
+  @Column({ nullable: true })
+  governanceSnapshotRef?: {
+    snapshotId: string
+    version: number
+    manifestHash: string
+  } | null
+
   @Column({ nullable: true })
   governingAmendmentId?: string | null
 

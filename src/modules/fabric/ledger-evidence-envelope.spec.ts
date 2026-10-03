@@ -1,5 +1,6 @@
 import {
   buildSignedContractLedgerEvidence,
+  buildSignedContractLedgerEvidenceV3,
   hashSignedContractLedgerEvidence,
   parseSignedContractLedgerEvidence,
   assertSignedContractLedgerEvidence,
@@ -107,5 +108,89 @@ describe('signed contract ledger evidence envelope', () => {
         },
       })
     ).toThrow('LEDGER_EVIDENCE_SIGNATURE_MISMATCH')
+  })
+
+  it('builds v3 evidence with a governance block while leaving the v2 hash unchanged when governance is absent (PROP-399 D2)', () => {
+    const v2 = buildSignedContractLedgerEvidence({
+      contractId: 'contract-1',
+      artifact,
+      signatures,
+    })
+    const v2Hash = hashSignedContractLedgerEvidence(v2)
+
+    const v3 = buildSignedContractLedgerEvidenceV3({
+      contractId: 'contract-1',
+      artifact,
+      signatures,
+      governance: {
+        snapshotId: 'snap-1',
+        version: 2,
+        manifestHash: 'd'.repeat(64),
+      },
+    })
+    expect(v3.schemaVersion).toBe(3)
+    expect(v3.governance).toEqual({
+      snapshotId: 'snap-1',
+      version: 2,
+      manifestHash: 'd'.repeat(64),
+    })
+    expect(hashSignedContractLedgerEvidence(v3 as never)).not.toBe(v2Hash)
+
+    // Building v2 again afterward (e.g. for a different, non-governed
+    // contract) must still produce the exact same hash as before any v3
+    // code path existed.
+    const v2Again = buildSignedContractLedgerEvidence({
+      contractId: 'contract-1',
+      artifact,
+      signatures,
+    })
+    expect(hashSignedContractLedgerEvidence(v2Again)).toBe(v2Hash)
+  })
+
+  it('hashes and parses v3 evidence (the parser accepts v1, v2 and v3)', () => {
+    const v3 = buildSignedContractLedgerEvidenceV3({
+      contractId: 'contract-1',
+      artifact,
+      signatures,
+      governance: {
+        snapshotId: 'snap-1',
+        version: 2,
+        manifestHash: 'd'.repeat(64),
+      },
+    })
+    expect(hashSignedContractLedgerEvidence(v3)).toMatch(/^[a-f0-9]{64}$/)
+    expect(parseSignedContractLedgerEvidence(v3)).toBe(v3)
+    expect(() =>
+      parseSignedContractLedgerEvidence({
+        ...v3,
+        governance: { snapshotId: 'snap-1', version: 2, manifestHash: 'bad' },
+      })
+    ).toThrow('LEDGER_EVIDENCE_GOVERNANCE_INVALID')
+    expect(() =>
+      parseSignedContractLedgerEvidence({ ...v3, governance: undefined })
+    ).toThrow('LEDGER_EVIDENCE_GOVERNANCE_INVALID')
+  })
+
+  it('rejects an invalid governance block when building v3 evidence', () => {
+    expect(() =>
+      buildSignedContractLedgerEvidenceV3({
+        contractId: 'contract-1',
+        artifact,
+        signatures,
+        governance: {
+          snapshotId: '',
+          version: 1,
+          manifestHash: 'd'.repeat(64),
+        },
+      })
+    ).toThrow('LEDGER_EVIDENCE_GOVERNANCE_INVALID')
+    expect(() =>
+      buildSignedContractLedgerEvidenceV3({
+        contractId: 'contract-1',
+        artifact,
+        signatures,
+        governance: { snapshotId: 'snap-1', version: 1, manifestHash: 'bad' },
+      })
+    ).toThrow('LEDGER_EVIDENCE_GOVERNANCE_INVALID')
   })
 })

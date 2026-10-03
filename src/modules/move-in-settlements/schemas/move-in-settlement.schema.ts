@@ -21,6 +21,20 @@ export type SettlementLine = {
   paidAt?: Date | null
 }
 
+/** PROP-399 D3: tham chiếu bằng chứng ledger cho một manifest (quyết toán hoặc bàn giao). */
+export type LedgerEvidenceRef = {
+  manifestVersion: number
+  manifestHash: string
+  ledgerStatus:
+    | 'pending'
+    | 'confirmed-fabric'
+    | 'confirmed-simulation'
+    | 'failed-terminal'
+  txHash: string | null
+  blockNumber: number | null
+  recordedAt: Date
+}
+
 @Entity('move_in_settlements')
 @Index(['contractId'], { unique: true })
 export class MoveInSettlement {
@@ -49,6 +63,11 @@ export class MoveInSettlement {
     overrideReason?: string | null
     completedAt: Date | null
   } | null
+  /** PROP-399 D3: bằng chứng MOVE_IN_SETTLED/HANDOVER_RECORDED đã neo (hoặc chờ neo) trên ledger. */
+  @Column('json', { nullable: true })
+  settlementEvidence?: LedgerEvidenceRef | null
+  @Column('json', { nullable: true })
+  handoverEvidence?: LedgerEvidenceRef | null
   @CreateDateColumn() createdAt!: Date
   @UpdateDateColumn() updatedAt!: Date
 }

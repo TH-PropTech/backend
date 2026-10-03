@@ -34,6 +34,7 @@ import {
 } from './payment-request.builder'
 import type { DepositAgreement } from '../contracts/schemas/deposit-agreement.schema'
 import { MoveInSettlement } from '../move-in-settlements/schemas/move-in-settlement.schema'
+import { MoveInSettlementsService } from '../move-in-settlements/move-in-settlements.service'
 import { RentalTransactionEventService } from '../rental-transactions/rental-transaction-event.service'
 import type { RentalTransactionActorRole } from '../rental-transactions/schemas/rental-transaction-event.schema'
 
@@ -105,7 +106,9 @@ export class MockBankService {
     @InjectRepository(MoveInSettlement)
     private readonly settlementRepository: Repository<MoveInSettlement>,
     @Optional()
-    private readonly transactionEventService?: RentalTransactionEventService
+    private readonly transactionEventService?: RentalTransactionEventService,
+    @Optional()
+    private readonly moveInSettlementsService?: MoveInSettlementsService
   ) {}
 
   private async recordTransactionEvent(input: {
@@ -608,6 +611,7 @@ export class MockBankService {
       await this.paymentRepository.save(payment)
       await this.enqueuePaymentLedgerEvent(payment)
     }
+    const wasPaid = settlement.status === 'paid'
     settlement.lines = settlement.lines.map(line =>
       line.paymentId && paymentIds.includes(line.paymentId) && !line.paidAt
         ? { ...line, paidAt }
@@ -617,6 +621,19 @@ export class MockBankService {
       ? 'paid'
       : 'partially-paid'
     await this.settlementRepository.save(settlement)
+    if (!wasPaid && settlement.status === 'paid') {
+      // PROP-399 D3: sinh bằng chứng MOVE_IN_SETTLED đúng một lần, sau khi trạng thái nghiệp vụ đã lưu.
+      try {
+        await this.moveInSettlementsService?.recordSettlementPaidEvidence(
+          settlement
+        )
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        this.logger.warn(
+          `Settlement ledger evidence failed for [${settlement._id.toHexString()}]: ${message}`
+        )
+      }
+    }
     attempt.status = 'succeeded'
     attempt.processedAt = paidAt
     attempt.callbackDigest = this.callbackDigest(body, headers)

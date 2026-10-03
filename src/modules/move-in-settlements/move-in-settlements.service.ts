@@ -16,8 +16,25 @@ import { RentalTransactionEventService } from '../rental-transactions/rental-tra
 import type { RentalTransactionActorRole } from '../rental-transactions/schemas/rental-transaction-event.schema'
 import {
   MoveInSettlement,
+  type LedgerEvidenceRef,
   type SettlementLine,
 } from './schemas/move-in-settlement.schema'
+import { LedgerOutboxService } from '../fabric/ledger-outbox.service'
+import type { LedgerOutbox } from '../fabric/schemas/ledger-outbox.schema'
+import {
+  MOVE_IN_SETTLEMENT_EVIDENCE_SCHEMA_VERSION,
+  buildMoveInSettlementEvidenceEnvelope,
+  hashMoveInSettlementEvidenceEnvelope,
+} from '../fabric/move-in-evidence-envelope'
+import {
+  MOVE_IN_HANDOVER_EVIDENCE_SCHEMA_VERSION,
+  buildMoveInHandoverEvidenceEnvelope,
+  hashMoveInHandoverEvidenceEnvelope,
+} from '../fabric/move-in-handover-evidence-envelope'
+import {
+  buildHandoverArgs,
+  buildMoveInSettlementArgs,
+} from '../fabric/ledger-action-args'
 
 @Injectable()
 export class MoveInSettlementsService {
@@ -32,8 +49,264 @@ export class MoveInSettlementsService {
     private readonly paymentRepo: Repository<Payment>,
     private readonly notifications: NotificationsService,
     @Optional()
-    private readonly transactionEventService?: RentalTransactionEventService
+    private readonly transactionEventService?: RentalTransactionEventService,
+    @Optional()
+    private readonly ledgerOutboxService?: LedgerOutboxService
   ) {}
+
+  /**
+   * PROP-399 D3 (MOVE_IN_SETTLED): gọi đúng một lần khi settlement vừa chuyển sang `paid`
+   * và đã được lưu. Lưu `settlementEvidence` rồi mới enqueue; mọi lỗi chỉ được log —
+   * giao dịch nghiệp vụ không bao giờ thất bại vì sổ cái (reconciliation sẽ phát hiện).
+   */
+  async recordSettlementPaidEvidence(
+    settlement: MoveInSettlement
+  ): Promise<void> {
+    if (
+      !this.ledgerOutboxService ||
+      settlement.status !== 'paid' ||
+      settlement.settlementEvidence
+    ) {
+      return
+    }
+    const settlementId = settlement._id.toHexString()
+    try {
+      const { manifestHash, paidAt } = this.buildSettlementEvidence(settlement)
+      settlement.settlementEvidence = this.pendingEvidence(
+        MOVE_IN_SETTLEMENT_EVIDENCE_SCHEMA_VERSION,
+        manifestHash
+      )
+      await this.settlementRepo.save(settlement)
+      await this.enqueueSettlementEvidence(settlement, manifestHash, paidAt)
+    } catch (error) {
+      this.logLedgerEvidenceFailure('settlement', settlementId, error)
+    }
+  }
+
+  /**
+   * PROP-399 D7 (repair): tạo lại đúng một outbox item MOVE_IN_SETTLED từ trạng thái nghiệp vụ còn
+   * hợp lệ. Idempotent theo khoá outbox; trả null khi điều kiện nghiệp vụ không còn (không paid).
+   */
+  async ensureSettlementEvidenceQueued(
+    settlementId: string
+  ): Promise<LedgerOutbox | null> {
+    if (!this.ledgerOutboxService) return null
+    const settlement = await this.findOrNull(settlementId)
+    if (!settlement || settlement.status !== 'paid') return null
+    const { manifestHash, paidAt } = this.buildSettlementEvidence(settlement)
+    if (!settlement.settlementEvidence) {
+      settlement.settlementEvidence = this.pendingEvidence(
+        MOVE_IN_SETTLEMENT_EVIDENCE_SCHEMA_VERSION,
+        manifestHash
+      )
+      await this.settlementRepo.save(settlement)
+    } else if (settlement.settlementEvidence.manifestHash !== manifestHash) {
+      throw new ConflictException('SETTLEMENT_EVIDENCE_HASH_CONFLICT')
+    }
+    return this.enqueueSettlementEvidence(settlement, manifestHash, paidAt)
+  }
+
+  private buildSettlementEvidence(settlement: MoveInSettlement): {
+    manifestHash: string
+    paidAt: string
+  } {
+    const paidTimes = settlement.lines
+      .map(line => (line.paidAt ? new Date(line.paidAt).getTime() : NaN))
+      .filter(time => !Number.isNaN(time))
+    const paidAt = new Date(
+      paidTimes.length > 0 ? Math.max(...paidTimes) : Date.now()
+    ).toISOString()
+    const envelope = buildMoveInSettlementEvidenceEnvelope({
+      settlementId: settlement._id.toHexString(),
+      contractId: settlement.contractId,
+      statementHash: settlement.statementHash,
+      lines: settlement.lines.map(line => ({
+        kind: line.kind,
+        amount: line.amount,
+        paymentId: line.paymentId,
+      })),
+      total: settlement.total,
+      paidAt,
+    })
+    return {
+      manifestHash: hashMoveInSettlementEvidenceEnvelope(envelope),
+      paidAt,
+    }
+  }
+
+  private enqueueSettlementEvidence(
+    settlement: MoveInSettlement,
+    manifestHash: string,
+    paidAt: string
+  ): Promise<LedgerOutbox> {
+    const settlementId = settlement._id.toHexString()
+    return this.ledgerOutboxService!.enqueue({
+      aggregateType: 'move-in-settlement',
+      aggregateId: settlementId,
+      eventType: 'move-in.settled',
+      action: 'recordMoveInSettlement',
+      args: buildMoveInSettlementArgs({
+        settlementId,
+        contractId: settlement.contractId,
+        manifestHash,
+        manifestSchemaVersion: MOVE_IN_SETTLEMENT_EVIDENCE_SCHEMA_VERSION,
+        occurredAt: paidAt,
+      }),
+      dependencyKeys: [`contract:${settlement.contractId}:contract.activated`],
+      metadata: {
+        contractId: settlement.contractId,
+        settlementId,
+        schemaVersion: MOVE_IN_SETTLEMENT_EVIDENCE_SCHEMA_VERSION,
+        payloadHash: manifestHash,
+      },
+    })
+  }
+
+  /** PROP-399 D3 (HANDOVER_RECORDED): tương tự — chỉ gọi khi `completedAt` vừa được đặt và lưu. */
+  private async recordHandoverCompletedEvidence(
+    settlement: MoveInSettlement
+  ): Promise<void> {
+    const handover = settlement.handover
+    if (
+      !this.ledgerOutboxService ||
+      !handover?.completedAt ||
+      settlement.handoverEvidence
+    ) {
+      return
+    }
+    const settlementId = settlement._id.toHexString()
+    try {
+      const { manifestHash, completedAt, overrideUsed } =
+        this.buildHandoverEvidence(settlement)
+      settlement.handoverEvidence = this.pendingEvidence(
+        MOVE_IN_HANDOVER_EVIDENCE_SCHEMA_VERSION,
+        manifestHash
+      )
+      await this.settlementRepo.save(settlement)
+      await this.enqueueHandoverEvidence(
+        settlement,
+        manifestHash,
+        completedAt,
+        overrideUsed
+      )
+    } catch (error) {
+      this.logLedgerEvidenceFailure('handover', settlementId, error)
+    }
+  }
+
+  /** PROP-399 D7 (repair): như ensureSettlementEvidenceQueued nhưng cho bàn giao đã hoàn tất. */
+  async ensureHandoverEvidenceQueued(
+    settlementId: string
+  ): Promise<LedgerOutbox | null> {
+    if (!this.ledgerOutboxService) return null
+    const settlement = await this.findOrNull(settlementId)
+    if (!settlement?.handover?.completedAt) return null
+    const { manifestHash, completedAt, overrideUsed } =
+      this.buildHandoverEvidence(settlement)
+    if (!settlement.handoverEvidence) {
+      settlement.handoverEvidence = this.pendingEvidence(
+        MOVE_IN_HANDOVER_EVIDENCE_SCHEMA_VERSION,
+        manifestHash
+      )
+      await this.settlementRepo.save(settlement)
+    } else if (settlement.handoverEvidence.manifestHash !== manifestHash) {
+      throw new ConflictException('HANDOVER_EVIDENCE_HASH_CONFLICT')
+    }
+    return this.enqueueHandoverEvidence(
+      settlement,
+      manifestHash,
+      completedAt,
+      overrideUsed
+    )
+  }
+
+  private buildHandoverEvidence(settlement: MoveInSettlement): {
+    manifestHash: string
+    completedAt: string
+    overrideUsed: boolean
+  } {
+    const handover = settlement.handover!
+    const completedAt = new Date(handover.completedAt!).toISOString()
+    const overrideUsed = Boolean(handover.overrideReason?.trim())
+    const envelope = buildMoveInHandoverEvidenceEnvelope({
+      settlementId: settlement._id.toHexString(),
+      contractId: settlement.contractId,
+      revision: handover.revision,
+      handoverHash: handover.handoverHash,
+      tenantConfirmationHash: handover.tenantConfirmation?.hash ?? '',
+      landlordConfirmationHash: handover.landlordConfirmation?.hash ?? '',
+      completedAt,
+      overrideUsed,
+    })
+    return {
+      manifestHash: hashMoveInHandoverEvidenceEnvelope(envelope),
+      completedAt,
+      overrideUsed,
+    }
+  }
+
+  private enqueueHandoverEvidence(
+    settlement: MoveInSettlement,
+    manifestHash: string,
+    completedAt: string,
+    overrideUsed: boolean
+  ): Promise<LedgerOutbox> {
+    const settlementId = settlement._id.toHexString()
+    const handover = settlement.handover!
+    return this.ledgerOutboxService!.enqueue({
+      aggregateType: 'move-in-handover',
+      aggregateId: settlementId,
+      eventType: 'handover.completed',
+      action: 'recordHandover',
+      args: buildHandoverArgs({
+        settlementId,
+        contractId: settlement.contractId,
+        handoverHash: handover.handoverHash,
+        manifestSchemaVersion: MOVE_IN_HANDOVER_EVIDENCE_SCHEMA_VERSION,
+        revision: handover.revision,
+        overrideUsed,
+        occurredAt: completedAt,
+      }),
+      dependencyKeys: [`contract:${settlement.contractId}:contract.activated`],
+      metadata: {
+        contractId: settlement.contractId,
+        settlementId,
+        handoverRevision: handover.revision,
+        schemaVersion: MOVE_IN_HANDOVER_EVIDENCE_SCHEMA_VERSION,
+        payloadHash: manifestHash,
+      },
+    })
+  }
+
+  private async findOrNull(id: string): Promise<MoveInSettlement | null> {
+    if (!ObjectId.isValid(id)) return null
+    return this.settlementRepo.findOne({ where: { _id: new ObjectId(id) } })
+  }
+
+  private pendingEvidence(
+    manifestVersion: number,
+    manifestHash: string
+  ): LedgerEvidenceRef {
+    return {
+      manifestVersion,
+      manifestHash,
+      ledgerStatus: 'pending',
+      txHash: null,
+      blockNumber: null,
+      recordedAt: new Date(),
+    }
+  }
+
+  private logLedgerEvidenceFailure(
+    kind: 'settlement' | 'handover',
+    settlementId: string,
+    error: unknown
+  ): void {
+    const message = error instanceof Error ? error.message : String(error)
+    this.logger.warn(
+      `Ledger evidence for ${kind} [${settlementId}] was not queued; business state is unaffected and reconciliation will recover it: ${message}`
+    )
+  }
 
   private async recordTransactionEvent(input: {
     contractId: string
@@ -271,6 +544,7 @@ export class MoveInSettlementsService {
         refs: { settlementId: saved._id.toHexString() },
         transitionKey: `settlement:${saved._id.toHexString()}:handover-completed`,
       })
+      await this.recordHandoverCompletedEvidence(saved)
     }
     return saved
   }

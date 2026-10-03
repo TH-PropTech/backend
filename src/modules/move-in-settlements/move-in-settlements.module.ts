@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common'
 import { TypeOrmModule } from '@nestjs/typeorm'
 import { NotificationsModule } from '../notifications/notifications.module'
+import { FabricModule } from '../fabric/fabric.module'
 import { Contract } from '../contracts/schemas/contract.schema'
 import { Payment } from '../payments/schemas/payment.schema'
 import { MoveInSettlement } from './schemas/move-in-settlement.schema'
@@ -12,6 +13,7 @@ import { MoveInSettlementScheduler } from './move-in-settlement.scheduler'
   imports: [
     TypeOrmModule.forFeature([MoveInSettlement, Contract, Payment]),
     NotificationsModule,
+    FabricModule,
   ],
   controllers: [MoveInSettlementsController],
   providers: [MoveInSettlementsService, MoveInSettlementScheduler],

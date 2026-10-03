@@ -1,10 +1,36 @@
+// archiver@8 (PROP-399 evidence package) and its zip-stream chain are ESM-only. Jest runs in CommonJS,
+// so exactly those packages are transpiled to CommonJS; every other dependency is left untouched.
+const ESM_ONLY_DEPENDENCIES = [
+  'archiver',
+  'is-stream',
+  'zip-stream',
+  'compress-commons',
+  'crc32-stream',
+]
+const esmPattern = ESM_ONLY_DEPENDENCIES.join('|')
+
 module.exports = {
   moduleFileExtensions: ['js', 'json', 'ts'],
   rootDir: 'src',
-  testRegex: '.*\\.spec\\.ts$',
+  testRegex: '.*\.spec\.ts$',
   transform: {
-    '^.+\\.(t|j)s$': 'ts-jest',
+    [`node_modules[\\/](?:.*[\\/])?(?:${esmPattern})[\\/].+\.js$`]: [
+      'ts-jest',
+      {
+        tsconfig: {
+          allowJs: true,
+          module: 'commonjs',
+          target: 'es2022',
+          esModuleInterop: true,
+        },
+        diagnostics: false,
+      },
+    ],
+    '^.+\.(t|j)s$': 'ts-jest',
   },
+  transformIgnorePatterns: [
+    `node_modules[\\/](?!(?:.*[\\/])?(?:${esmPattern})[\\/])`,
+  ],
   collectCoverageFrom: ['**/*.(t|j)s'],
   coverageDirectory: '../coverage',
   testEnvironment: 'node',

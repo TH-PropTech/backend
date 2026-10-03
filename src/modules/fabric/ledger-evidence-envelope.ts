@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto'
+import { isSha256, stableStringify } from './canonical-json'
 
 export const SIGNED_CONTRACT_LEDGER_EVIDENCE_SCHEMA_VERSION = 2 as const
+export const SIGNED_CONTRACT_LEDGER_EVIDENCE_SCHEMA_VERSION_V3 = 3 as const
 
 type SignerRole = 'tenant' | 'landlord'
 
@@ -57,26 +59,8 @@ export type LegacySignedContractLedgerEvidence = {
 
 export type ParsedSignedContractLedgerEvidence =
   | SignedContractLedgerEvidenceEnvelope
+  | SignedContractLedgerEvidenceEnvelopeV3
   | LegacySignedContractLedgerEvidence
-
-function isSha256(value: string): boolean {
-  return /^[a-f0-9]{64}$/i.test(value)
-}
-
-function stableStringify(value: unknown): string {
-  if (value === null || typeof value !== 'object') {
-    return JSON.stringify(value)
-  }
-  if (Array.isArray(value)) {
-    return `[${value.map(item => stableStringify(item)).join(',')}]`
-  }
-  const record = value as Record<string, unknown>
-  const entries = Object.keys(record)
-    .filter(key => record[key] !== undefined)
-    .sort()
-    .map(key => `${JSON.stringify(key)}:${stableStringify(record[key])}`)
-  return `{${entries.join(',')}}`
-}
 
 function hashReference(value: Record<string, unknown>): string {
   return createHash('sha256').update(stableStringify(value)).digest('hex')
@@ -148,8 +132,59 @@ export function buildSignedContractLedgerEvidence(
   }
 }
 
+/** PROP-399 D2: tham chiếu bất biến tới snapshot cấu hình/pháp lý đã quản trị hợp đồng. */
+export type SignedContractGovernanceReference = {
+  snapshotId: string
+  version: number
+  manifestHash: string
+}
+
+export type SignedContractLedgerEvidenceInputV3 =
+  SignedContractLedgerEvidenceInput & {
+    governance: SignedContractGovernanceReference
+  }
+
+export type SignedContractLedgerEvidenceEnvelopeV3 = Omit<
+  SignedContractLedgerEvidenceEnvelope,
+  'schemaVersion'
+> & {
+  schemaVersion: typeof SIGNED_CONTRACT_LEDGER_EVIDENCE_SCHEMA_VERSION_V3
+  governance: SignedContractGovernanceReference
+}
+
+/**
+ * PROP-399 D2: bằng chứng hợp đồng đã ký, bản v3, gắn thêm tham chiếu
+ * governance snapshot. Chỉ dùng khi contract có `governanceSnapshotRef`;
+ * KHÔNG thay đổi `buildSignedContractLedgerEvidence` (v2) ở trên — hợp đồng
+ * không có governance vẫn dùng v2 và giữ nguyên hash như trước.
+ */
+export function buildSignedContractLedgerEvidenceV3(
+  input: SignedContractLedgerEvidenceInputV3
+): SignedContractLedgerEvidenceEnvelopeV3 {
+  const v2 = buildSignedContractLedgerEvidence(input)
+
+  const { governance } = input
+  if (
+    !governance ||
+    !governance.snapshotId ||
+    !Number.isInteger(governance.version) ||
+    governance.version < 1 ||
+    !isSha256(governance.manifestHash)
+  ) {
+    throw new Error('LEDGER_EVIDENCE_GOVERNANCE_INVALID')
+  }
+
+  return {
+    ...v2,
+    schemaVersion: SIGNED_CONTRACT_LEDGER_EVIDENCE_SCHEMA_VERSION_V3,
+    governance: { ...governance },
+  }
+}
+
 export function hashSignedContractLedgerEvidence(
-  envelope: SignedContractLedgerEvidenceEnvelope
+  envelope:
+    | SignedContractLedgerEvidenceEnvelope
+    | SignedContractLedgerEvidenceEnvelopeV3
 ): string {
   return createHash('sha256').update(stableStringify(envelope)).digest('hex')
 }
@@ -161,6 +196,24 @@ export function parseSignedContractLedgerEvidence(
     const record = value as Record<string, unknown>
     if (record.schemaVersion === 2) {
       return value as SignedContractLedgerEvidenceEnvelope
+    }
+    if (
+      record.schemaVersion === SIGNED_CONTRACT_LEDGER_EVIDENCE_SCHEMA_VERSION_V3
+    ) {
+      const governance = record.governance as
+        | Partial<SignedContractGovernanceReference>
+        | undefined
+      if (
+        !governance ||
+        typeof governance.snapshotId !== 'string' ||
+        !governance.snapshotId ||
+        !Number.isInteger(governance.version) ||
+        (governance.version as number) < 1 ||
+        !isSha256(governance.manifestHash)
+      ) {
+        throw new Error('LEDGER_EVIDENCE_GOVERNANCE_INVALID')
+      }
+      return value as SignedContractLedgerEvidenceEnvelopeV3
     }
     if (
       typeof record.contractHash === 'string' &&

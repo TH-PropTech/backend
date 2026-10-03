@@ -14,14 +14,22 @@ import {
   ForbiddenException,
   Optional,
   Res,
+  ServiceUnavailableException,
 } from '@nestjs/common'
 import {
   ApiTags,
   ApiBearerAuth,
   ApiProduces,
   ApiConsumes,
+  ApiBadRequestResponse,
+  ApiConflictResponse,
   ApiCreatedResponse,
+  ApiForbiddenResponse,
+  ApiNotFoundResponse,
   ApiOkResponse,
+  ApiOperation,
+  ApiResponse,
+  ApiUnprocessableEntityResponse,
 } from '@nestjs/swagger'
 import { FileInterceptor } from '@nestjs/platform-express'
 import {
@@ -45,6 +53,8 @@ import { Public } from '../../common/decorators/public.decorator'
 import { ContractsService } from './contracts.service'
 import { Contract } from './schemas/contract.schema'
 import { ContractArtifactService } from './contract-artifact.service'
+import { ContractEvidencePackageExportService } from './contract-evidence-package.export.service'
+import { EvidencePackageQueryDto } from './dto/evidence-package-query.dto'
 import type { PublicServiceChecklist } from './legal/public-service-checklist'
 import { ContractViewService } from './contract-view.service'
 import { LedgerAuditQueryService } from '../fabric/ledger-audit-query.service'
@@ -255,7 +265,9 @@ export class ContractsController {
     private readonly smartOtpService: SmartOtpService,
     private readonly smartCaSigningService: SmartCaSigningService,
     @Optional()
-    private readonly depositAgreementsService?: DepositAgreementsService
+    private readonly depositAgreementsService?: DepositAgreementsService,
+    @Optional()
+    private readonly evidencePackageExportService?: ContractEvidencePackageExportService
   ) {}
 
   /** Lấy chi tiết hợp đồng phong phú cho Contract Workspace */
@@ -403,6 +415,105 @@ export class ContractsController {
     const isStaff =
       user.roles?.some(role => ['staff', 'admin'].includes(role)) ?? false
     return this.contractsService.findOneForUser(id, user._id ?? '', isStaff)
+  }
+
+  /**
+   * PROP-399 D8: gói bằng chứng tranh chấp (ZIP) — stream từ GridFS, không nạp PDF/gói vào RAM.
+   * Quyền: participant của hợp đồng, staff, admin (quan hệ hợp đồng được kiểm tra trong service).
+   */
+  @Get(':id/evidence-package')
+  @Roles('admin', 'staff', 'landlord', 'tenant')
+  @ApiProduces('application/zip')
+  @ApiOperation({
+    summary:
+      'Tải gói bằng chứng hợp đồng (ZIP có manifest, hash từng tệp và báo cáo xác minh 3 lớp)',
+  })
+  @ApiOkResponse({
+    description:
+      'Gói ZIP (manifest.json, verification-report.json, contract/contract-r<rev>.pdf, evidence/*.json)',
+    content: {
+      'application/zip': { schema: { type: 'string', format: 'binary' } },
+    },
+    headers: {
+      'Content-Disposition': {
+        description:
+          'attachment; filename="evidence-<mã hợp đồng>-r<revision>.zip"',
+        schema: { type: 'string' },
+      },
+      'X-Evidence-Package-Hash': {
+        description:
+          'packageHash logic (SHA-256) của manifest — bằng chứng di động của gói',
+        schema: { type: 'string' },
+      },
+      'X-Evidence-Package-Revision': {
+        description: 'Revision artifact canonical trong gói',
+        schema: { type: 'string' },
+      },
+    },
+  })
+  @ApiBadRequestResponse({ description: 'revision không hợp lệ' })
+  @ApiForbiddenResponse({
+    description:
+      'CONTRACT_ACCESS_DENIED — không phải participant hay nhân sự được phép',
+  })
+  @ApiNotFoundResponse({
+    description: 'CONTRACT_NOT_FOUND | EVIDENCE_VERSION_NOT_FOUND',
+  })
+  @ApiConflictResponse({
+    description:
+      'EVIDENCE_ARTIFACT_MISMATCH — bytes lưu trữ không khớp hash canonical',
+  })
+  @ApiResponse({
+    status: 413,
+    description: 'EVIDENCE_PACKAGE_TOO_LARGE (kèm limit: maxFiles | maxBytes)',
+  })
+  @ApiUnprocessableEntityResponse({
+    description: 'EVIDENCE_PACKAGE_INCOMPLETE — thiếu artifact ký chuẩn',
+  })
+  async downloadEvidencePackage(
+    @Param('id') id: string,
+    @Query() query: EvidencePackageQueryDto,
+    @CurrentUser() user: UserPayload,
+    @Res() response: Response
+  ): Promise<void> {
+    if (!this.evidencePackageExportService) {
+      throw new ServiceUnavailableException('EVIDENCE_PACKAGE_UNAVAILABLE')
+    }
+    // Mọi kiểm tra quyền/toàn vẹn/giới hạn xảy ra ở prepare() — trước khi gửi byte đầu tiên.
+    const prepared = await this.evidencePackageExportService.prepare(
+      id,
+      { id: user._id ?? '', roles: user.roles ?? [] },
+      { revision: query.revision }
+    )
+
+    const headers: Record<string, string> = {
+      'Content-Type': prepared.contentType,
+      'Content-Disposition': `attachment; filename="${prepared.filename}"`,
+      'Cache-Control': 'private, no-store',
+      'X-Content-Type-Options': 'nosniff',
+      'X-Evidence-Package-Hash': prepared.packageHash,
+      'X-Evidence-Package-Revision': String(prepared.revision),
+    }
+    for (const [name, value] of Object.entries(headers)) {
+      response.setHeader(name, value)
+    }
+
+    const abort = new AbortController()
+    const onClose = (): void => {
+      if (!response.writableFinished) abort.abort()
+    }
+    response.once('close', onClose)
+    try {
+      await prepared.run(response, abort.signal)
+    } catch (error) {
+      if (!response.headersSent) {
+        for (const name of Object.keys(headers)) response.removeHeader(name)
+        throw error
+      }
+      // Đã gửi một phần: kết nối đã bị huỷ bởi lớp ghi; không thể gửi JSON lỗi nữa.
+    } finally {
+      response.off('close', onClose)
+    }
   }
 
   @Get(':id/pdf')

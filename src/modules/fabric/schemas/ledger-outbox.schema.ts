@@ -17,6 +17,8 @@ export type LedgerOutboxStatus =
 @Entity('ledger_outbox')
 @Index(['aggregateType', 'aggregateId', 'eventType'], { unique: true })
 @Index(['status', 'nextRetryAt', 'leaseExpiresAt'])
+@Index(['contractId', 'createdAt'])
+@Index(['eventType', 'updatedAt'])
 export class LedgerOutbox {
   @ObjectIdColumn()
   _id!: ObjectId
@@ -57,6 +59,18 @@ export class LedgerOutbox {
 
   @Column({ nullable: true })
   dependencyKey?: string | null
+
+  /** PROP-399 D12/B1: nhiều parent — mọi parent phải confirmed mới nhận claim. `dependencyKey` vẫn đọc được. */
+  @Column({ nullable: true })
+  dependencyKeys?: string[] | null
+
+  /** PROP-399 D6: hợp đồng liên quan (từ metadata.contractId, hoặc aggregateId của aggregate `contract`) — phục vụ lọc Audit Center. */
+  @Column({ nullable: true })
+  contractId?: string | null
+
+  /** Số vòng chờ parent chưa confirmed (D12). Dùng cho backoff chờ, KHÔNG tính vào `attempts`. */
+  @Column({ nullable: true, type: 'int' })
+  dependencyWaitCycles?: number | null
 
   @Column({ nullable: true })
   claimToken?: string | null

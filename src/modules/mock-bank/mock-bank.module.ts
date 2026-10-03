@@ -14,12 +14,14 @@ import { VnpayCallbackVerifier } from './providers/vnpay-callback.verifier'
 import { FabricModule } from '../fabric/fabric.module'
 import { PaymentRequestsController } from './payment-requests.controller'
 import { MoveInSettlement } from '../move-in-settlements/schemas/move-in-settlement.schema'
+import { MoveInSettlementsModule } from '../move-in-settlements/move-in-settlements.module'
 
 @Module({
   imports: [
     ConfigModule,
     ContractsModule,
     FabricModule,
+    MoveInSettlementsModule,
     TypeOrmModule.forFeature([
       Payment,
       PaymentAttempt,

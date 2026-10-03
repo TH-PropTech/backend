@@ -371,6 +371,23 @@ export class ContractTemplateGovernanceService implements OnApplicationBootstrap
     return template
   }
 
+  /** PROP-399: phiên bản published mới nhất của mỗi templateKey (nguồn của governance manifest). */
+  async listLatestPublished(): Promise<ContractTemplate[]> {
+    const published = await this.templateRepository.find({
+      where: { status: 'published' },
+    })
+    const latest = new Map<string, ContractTemplate>()
+    for (const template of published) {
+      const current = latest.get(template.templateKey)
+      if (!current || template.version > current.version) {
+        latest.set(template.templateKey, template)
+      }
+    }
+    return [...latest.values()].sort((a, b) =>
+      a.templateKey.localeCompare(b.templateKey)
+    )
+  }
+
   async getAuditHistory(
     templateKey: string,
     version?: number

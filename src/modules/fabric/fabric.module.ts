@@ -2,10 +2,14 @@ import { Module } from '@nestjs/common'
 import { TypeOrmModule } from '@nestjs/typeorm'
 import { BlockchainLog } from './schemas/blockchain-log.schema'
 import { LedgerOutbox } from './schemas/ledger-outbox.schema'
+import { FabricGovernanceSnapshot } from './schemas/fabric-governance-snapshot.schema'
+import { LedgerReconciliationRun } from './schemas/ledger-reconciliation-run.schema'
+import { LedgerReconciliationFinding } from './schemas/ledger-reconciliation-finding.schema'
 import { Contract } from '../contracts/schemas/contract.schema'
 import { ContractAmendment } from '../contracts/schemas/contract-amendment.schema'
 import { DepositAgreement } from '../contracts/schemas/deposit-agreement.schema'
 import { Payment } from '../payments/schemas/payment.schema'
+import { MoveInSettlement } from '../move-in-settlements/schemas/move-in-settlement.schema'
 import { FabricService } from './fabric.service'
 import { FabricController } from './fabric.controller'
 import { LedgerOutboxService } from './ledger-outbox.service'
@@ -13,6 +17,12 @@ import { LedgerAuditQueryService } from './ledger-audit-query.service'
 import { LedgerProjectionService } from './ledger-projection.service'
 import { LedgerOutboxWorker } from './ledger-outbox.worker'
 import { LedgerEvidenceQueryService } from './ledger-evidence-query.service'
+import { FabricGovernanceService } from './fabric-governance.service'
+import { LedgerReconciliationService } from './ledger-reconciliation.service'
+import { LegalTermsModule } from '../legal-terms/legal-terms.module'
+import { PoliciesModule } from '../policies/policies.module'
+import { PlatformFeesModule } from '../platform-fees/platform-fees.module'
+import { RentalFlowConfigModule } from '../rental-flow-config/rental-flow-config.module'
 
 @Module({
   imports: [
@@ -23,7 +33,17 @@ import { LedgerEvidenceQueryService } from './ledger-evidence-query.service'
       ContractAmendment,
       DepositAgreement,
       Payment,
+      MoveInSettlement,
+      FabricGovernanceSnapshot,
+      LedgerReconciliationRun,
+      LedgerReconciliationFinding,
     ]),
+    // Nguồn governance (D2). ContractTemplate/Layout nằm trong ContractsModule (import FabricModule)
+    // nên được tra cứu lazy bằng ModuleRef trong FabricGovernanceService để tránh vòng phụ thuộc.
+    LegalTermsModule,
+    PoliciesModule,
+    PlatformFeesModule,
+    RentalFlowConfigModule,
   ],
   controllers: [FabricController],
   providers: [
@@ -33,6 +53,8 @@ import { LedgerEvidenceQueryService } from './ledger-evidence-query.service'
     LedgerProjectionService,
     LedgerOutboxWorker,
     LedgerEvidenceQueryService,
+    FabricGovernanceService,
+    LedgerReconciliationService,
   ],
   exports: [
     FabricService,
@@ -41,6 +63,8 @@ import { LedgerEvidenceQueryService } from './ledger-evidence-query.service'
     LedgerProjectionService,
     LedgerOutboxWorker,
     LedgerEvidenceQueryService,
+    FabricGovernanceService,
+    LedgerReconciliationService,
     TypeOrmModule,
   ],
 })

@@ -66,7 +66,8 @@ export class LedgerEvidenceQueryService {
 
   async getContractLedgerEvidence(
     contractId: string,
-    contract: Pick<Contract, 'depositAgreementId'>
+    contract: Pick<Contract, 'depositAgreementId'> &
+      Partial<Pick<Contract, 'settlementId' | 'governanceSnapshotRef'>>
   ): Promise<LedgerEvidenceDto> {
     const [payments, amendments, deposit] = await Promise.all([
       this.paymentRepository.find({ where: { contractId } }),
@@ -98,6 +99,27 @@ export class LedgerEvidenceQueryService {
         aggregateType: 'contract-amendment',
         aggregateId: amendment._id.toString(),
       })),
+      // PROP-399: quyết toán, bàn giao nhận nhà và governance snapshot mà hợp đồng tham chiếu.
+      ...(contract.settlementId
+        ? [
+            {
+              aggregateType: 'move-in-settlement',
+              aggregateId: contract.settlementId,
+            },
+            {
+              aggregateType: 'move-in-handover',
+              aggregateId: contract.settlementId,
+            },
+          ]
+        : []),
+      ...(contract.governanceSnapshotRef?.snapshotId
+        ? [
+            {
+              aggregateType: 'governance-snapshot',
+              aggregateId: contract.governanceSnapshotRef.snapshotId,
+            },
+          ]
+        : []),
     ])
 
     const [outboxGroups, logGroups] = await Promise.all([
@@ -120,6 +142,16 @@ export class LedgerEvidenceQueryService {
           ? [
               this.logRepository.find({
                 where: { depositId: deposit._id.toString() },
+              }),
+            ]
+          : []),
+        ...(contract.governanceSnapshotRef?.snapshotId
+          ? [
+              this.logRepository.find({
+                where: {
+                  governanceSnapshotId:
+                    contract.governanceSnapshotRef.snapshotId,
+                },
               }),
             ]
           : []),
@@ -175,7 +207,7 @@ export class LedgerEvidenceQueryService {
           : null,
       recordedAt: event.confirmedAt?.toISOString() ?? null,
       payloadHash: this.safeHash(event.payloadHash),
-      dependsOn: this.safeDependency(event.dependencyKey),
+      dependsOn: this.safeDependencies(event),
       attempts: Number.isFinite(event.attempts) ? event.attempts : 0,
       errorCode: this.safeCode(event.errorCode),
       explorerUrl: this.explorerUrl(networkMode, txId, template),
@@ -194,10 +226,23 @@ export class LedgerEvidenceQueryService {
       ? 'payment'
       : log.depositId
         ? 'deposit'
-        : 'contract'
-    const aggregateId = log.paymentId ?? log.depositId ?? log.contractId ?? ''
-    const detailPayloadHash =
-      typeof details.payloadHash === 'string'
+        : log.governanceSnapshotId
+          ? 'governance-snapshot'
+          : log.settlementId
+            ? log.handoverRevision != null
+              ? 'move-in-handover'
+              : 'move-in-settlement'
+            : 'contract'
+    const aggregateId =
+      log.paymentId ??
+      log.depositId ??
+      log.governanceSnapshotId ??
+      log.settlementId ??
+      log.contractId ??
+      ''
+    const detailPayloadHash = log.payloadHash
+      ? log.payloadHash
+      : typeof details.payloadHash === 'string'
         ? details.payloadHash
         : details.contractHash
     return {
@@ -259,6 +304,20 @@ export class LedgerEvidenceQueryService {
     return typeof value === 'string' && /^[A-Z0-9_-]{1,64}$/.test(value)
       ? value
       : null
+  }
+
+  /** D12: hiển thị mọi parent (`dependencyKeys ?? [dependencyKey]`), mỗi id rút gọn. */
+  private safeDependencies(event: LedgerOutbox): string | null {
+    const keys =
+      Array.isArray(event.dependencyKeys) && event.dependencyKeys.length > 0
+        ? event.dependencyKeys
+        : event.dependencyKey
+          ? [event.dependencyKey]
+          : []
+    const safe = keys
+      .map(key => this.safeDependency(key))
+      .filter((key): key is string => key !== null)
+    return safe.length > 0 ? safe.join(',') : null
   }
 
   private safeDependency(value: string | null | undefined): string | null {

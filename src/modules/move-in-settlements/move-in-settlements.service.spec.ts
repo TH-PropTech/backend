@@ -1,5 +1,7 @@
 import { ObjectId } from 'mongodb'
+import { getMetadataArgsStorage } from 'typeorm'
 import { MoveInSettlementsService } from './move-in-settlements.service'
+import { MoveInSettlement } from './schemas/move-in-settlement.schema'
 import type { Contract } from '../contracts/schemas/contract.schema'
 import type { Payment } from '../payments/schemas/payment.schema'
 import { RentalTransactionEventService } from '../rental-transactions/rental-transaction-event.service'
@@ -252,5 +254,32 @@ describe('MoveInSettlementsService', () => {
     )
     expect(notifications.createNotification).toHaveBeenCalledTimes(2)
     expect(row.status).toBe('overdue')
+  })
+})
+
+describe('move-in settlement persistence schema (PROP-399)', () => {
+  it('persists optional settlement/handover ledger evidence so legacy documents without them stay valid', () => {
+    const columnNames = getMetadataArgsStorage()
+      .columns.filter(column => column.target === MoveInSettlement)
+      .map(column =>
+        typeof column.propertyName === 'string' ? column.propertyName : ''
+      )
+    expect(columnNames).toEqual(
+      expect.arrayContaining(['settlementEvidence', 'handoverEvidence'])
+    )
+
+    const legacy = new MoveInSettlement()
+    expect(legacy.settlementEvidence).toBeUndefined()
+    expect(legacy.handoverEvidence).toBeUndefined()
+
+    legacy.settlementEvidence = {
+      manifestVersion: 1,
+      manifestHash: 'a'.repeat(64),
+      ledgerStatus: 'pending',
+      txHash: null,
+      blockNumber: null,
+      recordedAt: new Date('2030-01-01'),
+    }
+    expect(legacy.settlementEvidence.manifestHash).toHaveLength(64)
   })
 })

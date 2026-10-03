@@ -44,8 +44,11 @@ import {
 } from './contract-artifact.service'
 import {
   buildSignedContractLedgerEvidence,
+  buildSignedContractLedgerEvidenceV3,
   hashSignedContractLedgerEvidence,
+  type SignedContractGovernanceReference,
 } from '../fabric/ledger-evidence-envelope'
+import { FabricGovernanceService } from '../fabric/fabric-governance.service'
 import { ContractTemplateGovernanceService } from './legal/contract-template-governance.service'
 import {
   buildCanonicalContractPayload,
@@ -191,7 +194,9 @@ export class ContractsService {
     @Optional() private readonly layoutService?: ContractLayoutService,
     @Optional() private readonly artifactService?: ContractArtifactService,
     @Optional()
-    private readonly transactionEventService?: RentalTransactionEventService
+    private readonly transactionEventService?: RentalTransactionEventService,
+    @Optional()
+    private readonly governanceService?: FabricGovernanceService
   ) {}
 
   private async recordTransactionEvent(input: {
@@ -236,8 +241,12 @@ export class ContractsService {
     depositId?: string | null | undefined
     depositHash?: string | null | undefined
     evidenceJson?: string | undefined
+    /** PROP-399: evidence có governance không được bị bỏ rơi bởi args ABI v1 → luôn dạng v2. */
+    requireAbiV2?: boolean | undefined
   }): { args: string[]; argsVersion: 1 | 2 } {
-    const argsVersion = this.fabricService.getChaincodeAbiVersion()
+    const argsVersion = input.requireAbiV2
+      ? 2
+      : this.fabricService.getChaincodeAbiVersion()
     const baseArgs = [
       input.contractId,
       input.contractCode,
@@ -264,6 +273,38 @@ export class ContractsService {
       ],
       argsVersion,
     }
+  }
+
+  /**
+   * PROP-399 D2: gắn snapshot governance eligible mới nhất (theo executionPolicySnapshot
+   * của chính hợp đồng) vào hợp đồng đang kích hoạt. Tham chiếu bất biến sau khi gán và
+   * được persist TRƯỚC khi enqueue evidence. Không có snapshot → null (hành vi cũ).
+   */
+  private async bindGovernanceSnapshot(
+    contract: Contract
+  ): Promise<SignedContractGovernanceReference | null> {
+    if (contract.governanceSnapshotRef) return contract.governanceSnapshotRef
+    const policy = contract.executionPolicySnapshot
+    if (!this.governanceService || !policy?.policyId) return null
+
+    const snapshot =
+      await this.governanceService.findLatestEligibleForExecutionPolicy({
+        policyId: policy.policyId,
+        version: policy.version,
+      })
+    if (!snapshot) return null
+
+    const reference: SignedContractGovernanceReference = {
+      snapshotId: snapshot._id.toHexString(),
+      version: snapshot.version,
+      manifestHash: snapshot.manifestHash,
+    }
+    contract.governanceSnapshotRef = reference
+    await this.contractRepository.update(
+      { _id: contract._id },
+      { governanceSnapshotRef: reference }
+    )
+    return reference
   }
 
   // ── Private helpers ──
@@ -699,7 +740,8 @@ export class ContractsService {
     if (!tenantSignature || !landlordSignature) {
       throw new ConflictException('SMARTCA_SIGNATURES_REQUIRED')
     }
-    const ledgerEvidence = buildSignedContractLedgerEvidence({
+    const governanceReference = await this.bindGovernanceSnapshot(contract)
+    const ledgerEvidenceInput = {
       contractId: contract._id.toHexString(),
       artifact: {
         artifactId: canonicalReference.artifactId,
@@ -729,7 +771,14 @@ export class ContractsService {
       },
       depositId: contract.depositId ?? null,
       depositHash: contract.depositHash ?? null,
-    })
+    }
+    // Có governance → evidence v3 (chaincode kiểm GOVERNANCE_<snapshotId>); không có → v2 như cũ.
+    const ledgerEvidence = governanceReference
+      ? buildSignedContractLedgerEvidenceV3({
+          ...ledgerEvidenceInput,
+          governance: governanceReference,
+        })
+      : buildSignedContractLedgerEvidence(ledgerEvidenceInput)
     const ledgerEvidenceHash = hashSignedContractLedgerEvidence(ledgerEvidence)
     contract.contractHash = canonicalHash
     contract.activationKey = `smartca:${canonicalHash}`
@@ -760,19 +809,37 @@ export class ContractsService {
       depositId: contract.depositId,
       depositHash: contract.depositHash,
       evidenceJson: JSON.stringify(ledgerEvidence),
+      requireAbiV2: Boolean(governanceReference),
     })
+    const depositDependencyKey = contract.depositId
+      ? `deposit:${contract.depositId}:deposit.paid`
+      : null
     await this.ledgerOutboxService.enqueue({
       aggregateType: 'contract',
       aggregateId: contract._id.toHexString(),
       eventType: 'contract.activated',
       action: 'createContract',
       args: createContractPayload.args,
-      dependencyKey: contract.depositId
-        ? `deposit:${contract.depositId}:deposit.paid`
-        : null,
+      ...(governanceReference
+        ? {
+            // D12: mọi parent phải confirmed — deposit (nếu có) và governance snapshot.
+            dependencyKeys: [
+              ...(depositDependencyKey ? [depositDependencyKey] : []),
+              `governance-snapshot:${governanceReference.snapshotId}:governance.published`,
+            ],
+          }
+        : { dependencyKey: depositDependencyKey }),
       metadata: {
         contractId: contract._id.toHexString(),
         argsVersion: createContractPayload.argsVersion,
+        ...(governanceReference
+          ? {
+              // Chờ chaincode hỗ trợ ABI v2 + evidence v3 thay vì submit làm rơi governance.
+              minimumAbiVersion: 2,
+              minimumEvidenceSchemaVersion: 3,
+              waitingCode: 'CHAINCODE_UPGRADE_REQUIRED',
+            }
+          : {}),
         details: {
           contractHash: contract.contractHash,
           artifactHash: canonicalReference.artifactHash,

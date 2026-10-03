@@ -189,3 +189,31 @@ describe('ContractTemplateGovernanceService', () => {
     ).rejects.toThrow('PROTECTED_LEGAL_CLAUSE_CHANGED')
   })
 })
+
+describe('ContractTemplateGovernanceService.listLatestPublished (PROP-399 governance source)', () => {
+  it('returns only the highest published version per templateKey, ordered by key', async () => {
+    const rows = [
+      { templateKey: 'VN_RE', version: 1, status: 'published' },
+      { templateKey: 'VN_INDIVIDUAL', version: 1, status: 'published' },
+      { templateKey: 'VN_INDIVIDUAL', version: 3, status: 'published' },
+      { templateKey: 'VN_INDIVIDUAL', version: 2, status: 'published' },
+    ] as ContractTemplate[]
+    const templateRepository = {
+      find: jest.fn().mockResolvedValue(rows),
+    }
+    const service = new ContractTemplateGovernanceService(
+      templateRepository as unknown as Repository<ContractTemplate>,
+      {} as unknown as Repository<ContractTemplateAudit>
+    )
+
+    const latest = await service.listLatestPublished()
+
+    expect(templateRepository.find).toHaveBeenCalledWith({
+      where: { status: 'published' },
+    })
+    expect(latest.map(t => `${t.templateKey}@${t.version}`)).toEqual([
+      'VN_INDIVIDUAL@3',
+      'VN_RE@1',
+    ])
+  })
+})

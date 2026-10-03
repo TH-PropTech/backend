@@ -159,6 +159,23 @@ export class ContractLayoutService {
     return saved
   }
 
+  /** PROP-399: phiên bản published mới nhất của mỗi profileKey (nguồn của governance manifest). */
+  async listLatestPublished(): Promise<ContractLayoutProfile[]> {
+    const published = await this.profileRepository.find({
+      where: { status: 'published' },
+    })
+    const latest = new Map<string, ContractLayoutProfile>()
+    for (const profile of published) {
+      const current = latest.get(profile.profileKey)
+      if (!current || profile.version > current.version) {
+        latest.set(profile.profileKey, profile)
+      }
+    }
+    return [...latest.values()].sort((a, b) =>
+      a.profileKey.localeCompare(b.profileKey)
+    )
+  }
+
   async findPublishedForContract(
     legalProfile: LegalProfile,
     templateKey: string | null

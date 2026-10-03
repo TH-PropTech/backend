@@ -1,4 +1,5 @@
 import { getMetadataArgsStorage } from 'typeorm'
+import { Contract } from './schemas/contract.schema'
 import { ContractArtifact } from './schemas/contract-artifact.schema'
 import { ContractTemplate } from './legal/contract-template.schema'
 import { SmartCaSigningSession } from './smartca/smartca-signing-session.schema'
@@ -47,5 +48,17 @@ describe('contract persistence schema', () => {
     expect(getColumnNames(SmartCaSigningSession)).toEqual(
       expect.arrayContaining(['signatureAlgorithm', 'signatureValueRef'])
     )
+  })
+
+  it('persists an optional, immutable governance snapshot reference on contracts (PROP-399)', () => {
+    expect(getColumnNames(Contract)).toContain('governanceSnapshotRef')
+    const contract = new Contract()
+    expect(contract.governanceSnapshotRef).toBeUndefined()
+    contract.governanceSnapshotRef = {
+      snapshotId: 'snap-1',
+      version: 1,
+      manifestHash: 'a'.repeat(64),
+    }
+    expect(contract.governanceSnapshotRef.snapshotId).toBe('snap-1')
   })
 })
