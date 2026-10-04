@@ -3,6 +3,20 @@ import { User } from '../../users/schemas/user.schema'
 import type { RentalPackageSnapshot } from '../rental-package.util'
 import type { RentalExecutionPolicyRef } from '../../rental-flow-config/rental-execution-policy.util'
 
+const VND_PER_MILLION = 1_000_000
+
+/** `priceMonthly` is always stored in VND; "triệu" is derived, never guessed. */
+function toMillions(priceMonthlyVnd: number): number {
+  return priceMonthlyVnd / VND_PER_MILLION
+}
+
+function formatMonthlyRent(priceMonthlyVnd: number): string {
+  if (priceMonthlyVnd >= VND_PER_MILLION) {
+    return `${toMillions(priceMonthlyVnd)} triệu/tháng`
+  }
+  return `${priceMonthlyVnd.toLocaleString('vi-VN')} đ/tháng`
+}
+
 export interface RentalPackageResponse {
   packageId: string
   version: number
@@ -28,6 +42,7 @@ export interface WebApartmentResponse {
   location: string
   price: string
   priceNum: number
+  priceVnd: number
   area: string
   areaNum: number
   rooms: string
@@ -293,10 +308,7 @@ export class ApartmentResponseMapper {
   static toWebJson(
     apartment: Apartment & { landlord?: User | null }
   ): WebApartmentResponse {
-    const priceInMillions =
-      apartment.priceMonthly >= 1000000
-        ? apartment.priceMonthly / 1000000
-        : apartment.priceMonthly
+    const priceInMillions = toMillions(apartment.priceMonthly)
     const rentalAvailability =
       ApartmentResponseMapper.mapRentalAvailability(apartment)
 
@@ -338,8 +350,9 @@ export class ApartmentResponseMapper {
       tagText,
       description: apartment.description,
       location: apartment.location,
-      price: `${priceInMillions} triệu/tháng`,
+      price: formatMonthlyRent(apartment.priceMonthly),
       priceNum: priceInMillions,
+      priceVnd: apartment.priceMonthly,
       area: `${apartment.area} m²`,
       areaNum: apartment.area,
       rooms: `${apartment.bedrooms} PN - ${apartment.bathrooms} WC`,
@@ -396,10 +409,7 @@ export class ApartmentResponseMapper {
   static toMobileJson(
     apartment: Apartment & { landlord?: User | null }
   ): MobileApartmentResponse {
-    const priceInMillions =
-      apartment.priceMonthly >= 1000000
-        ? apartment.priceMonthly / 1000000
-        : apartment.priceMonthly
+    const priceInMillions = toMillions(apartment.priceMonthly)
     const rentalAvailability =
       ApartmentResponseMapper.mapRentalAvailability(apartment)
     return {
