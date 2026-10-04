@@ -3,6 +3,7 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common'
 import type { ConfigService } from '@nestjs/config'
+import { GroqKeyPool } from '../groq/groq-key-pool.service'
 import { GroqVisionService } from './groq-vision.service'
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -15,9 +16,9 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 function createService(apiKey?: string): GroqVisionService {
   const configService = {
-    get: jest.fn().mockReturnValue(apiKey),
+    get: jest.fn().mockReturnValue(apiKey ? [apiKey] : []),
   } as unknown as ConfigService
-  return new GroqVisionService(configService)
+  return new GroqVisionService(new GroqKeyPool(configService))
 }
 
 describe('GroqVisionService', () => {

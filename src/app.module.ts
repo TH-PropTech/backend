@@ -32,6 +32,7 @@ import { PoliciesModule } from './modules/policies/policies.module'
 import { LegalTermsModule } from './modules/legal-terms/legal-terms.module'
 import { LegalSourcesModule } from './modules/legal-sources/legal-sources.module'
 import { AiConsultationModule } from './modules/ai-consultation/ai-consultation.module'
+import { GroqModule } from './modules/groq/groq.module'
 import { RedisModule } from './modules/redis/redis.module'
 import { RecommendationsModule } from './modules/recommendations/recommendations.module'
 import { SafetyReportsModule } from './modules/safety-reports/safety-reports.module'
@@ -107,6 +108,7 @@ import { RentalTransactionsModule } from './modules/rental-transactions/rental-t
     LegalSourcesModule,
     AiConsultationModule,
     RedisModule,
+    GroqModule,
     RecommendationsModule,
     SafetyReportsModule,
     SavedSearchesModule,

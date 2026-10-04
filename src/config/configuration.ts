@@ -82,7 +82,7 @@ export const configuration = (): {
     url: string
   }
   groq: {
-    apiKey: string
+    apiKeys: string[]
   }
   ekyc: {
     serviceUrl: string
@@ -176,7 +176,14 @@ export const configuration = (): {
     url: process.env.REDIS_URL ?? 'redis://localhost:6379',
   },
   groq: {
-    apiKey: process.env.GROQ_API_KEY ?? '',
+    apiKeys: [
+      ...new Set(
+        `${process.env.GROQ_API_KEYS ?? ''},${process.env.GROQ_API_KEY ?? ''}`
+          .split(',')
+          .map(key => key.trim())
+          .filter(Boolean)
+      ),
+    ],
   },
   ekyc: {
     serviceUrl: process.env.EKYC_SERVICE_URL ?? '',

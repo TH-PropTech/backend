@@ -3,7 +3,7 @@ import {
   Injectable,
   ServiceUnavailableException,
 } from '@nestjs/common'
-import { ConfigService } from '@nestjs/config'
+import { GroqKeyPool } from '../groq/groq-key-pool.service'
 import type {
   ConditionFinding,
   ConditionFindingStatus,
@@ -42,14 +42,13 @@ interface VisionAnalysisResult {
 
 @Injectable()
 export class GroqVisionService {
-  constructor(private readonly configService: ConfigService) {}
+  constructor(private readonly groqKeyPool: GroqKeyPool) {}
 
   async analyzeCondition(
     image: Buffer,
     mimeType: string
   ): Promise<VisionAnalysisResult> {
-    const apiKey = this.configService.get<string>('groq.apiKey')
-    if (!apiKey) {
+    if (!this.groqKeyPool.hasKeys()) {
       throw new ServiceUnavailableException(
         'Condition analysis is not configured'
       )
@@ -57,46 +56,49 @@ export class GroqVisionService {
 
     let response: Response
     try {
-      response = await fetch(GROQ_CHAT_COMPLETIONS_URL, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: GROQ_VISION_MODEL,
-          temperature: 0,
-          max_completion_tokens: 1200,
-          response_format: { type: 'json_object' },
-          messages: [
-            {
-              role: 'user',
-              content: [
-                {
-                  type: 'text',
-                  text: [
-                    'Inspect this property image for visible condition issues.',
-                    'Return JSON only with findings, overallCondition and checklist.',
-                    'Each finding must contain label, status, confidence, description and boundingBox.',
-                    'status must be detected, uncertain, or not_detected.',
-                    'confidence must be between 0 and 1.',
-                    'boundingBox is null or normalized x, y, width and height values between 0 and 1.',
-                    'overallCondition must be good, attention_needed, or uncertain.',
-                    'checklist must be an array of short follow-up checks grounded in visible or uncertain findings.',
-                    'Do not infer defects that are not visible. Use uncertain when image evidence is insufficient.',
-                  ].join(' '),
+      const body = JSON.stringify({
+        model: GROQ_VISION_MODEL,
+        temperature: 0,
+        max_completion_tokens: 1200,
+        response_format: { type: 'json_object' },
+        messages: [
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'text',
+                text: [
+                  'Inspect this property image for visible condition issues.',
+                  'Return JSON only with findings, overallCondition and checklist.',
+                  'Each finding must contain label, status, confidence, description and boundingBox.',
+                  'status must be detected, uncertain, or not_detected.',
+                  'confidence must be between 0 and 1.',
+                  'boundingBox is null or normalized x, y, width and height values between 0 and 1.',
+                  'overallCondition must be good, attention_needed, or uncertain.',
+                  'checklist must be an array of short follow-up checks grounded in visible or uncertain findings.',
+                  'Do not infer defects that are not visible. Use uncertain when image evidence is insufficient.',
+                ].join(' '),
+              },
+              {
+                type: 'image_url',
+                image_url: {
+                  url: `data:${mimeType};base64,${image.toString('base64')}`,
                 },
-                {
-                  type: 'image_url',
-                  image_url: {
-                    url: `data:${mimeType};base64,${image.toString('base64')}`,
-                  },
-                },
-              ],
-            },
-          ],
-        }),
+              },
+            ],
+          },
+        ],
       })
+      response = await this.groqKeyPool.run(GROQ_VISION_MODEL, apiKey =>
+        fetch(GROQ_CHAT_COMPLETIONS_URL, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body,
+        })
+      )
     } catch (error) {
       throw new BadGatewayException(
         'Condition analysis provider is unavailable',
