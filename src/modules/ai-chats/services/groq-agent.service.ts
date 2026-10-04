@@ -36,7 +36,7 @@ export class GroqAgentService {
       this.configService.get<string>('GROQ_API_KEY') ||
       process.env.GROQ_API_KEY ||
       ''
-    this.model = 'llama-3.3-70b-versatile'
+    this.model = 'openai/gpt-oss-120b'
   }
 
   getTools(): unknown[] {
