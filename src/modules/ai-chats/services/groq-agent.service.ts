@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common'
-import { ConfigService } from '@nestjs/config'
+import { GroqKeyPool } from '../../groq/groq-key-pool.service'
 
 export interface ChatMessage {
   role: 'user' | 'assistant' | 'system' | 'tool'
@@ -28,16 +28,9 @@ export interface ToolCall {
 @Injectable()
 export class GroqAgentService {
   private readonly logger = new Logger(GroqAgentService.name)
-  private readonly apiKey: string
-  private readonly model: string
+  private readonly model = 'llama-3.3-70b-versatile'
 
-  constructor(private readonly configService: ConfigService) {
-    this.apiKey =
-      this.configService.get<string>('GROQ_API_KEY') ||
-      process.env.GROQ_API_KEY ||
-      ''
-    this.model = 'llama-3.3-70b-versatile'
-  }
+  constructor(private readonly groqKeyPool: GroqKeyPool) {}
 
   getTools(): unknown[] {
     return [
@@ -136,7 +129,7 @@ export class GroqAgentService {
     content: string | null
     toolCalls?: ToolCall[]
   }> {
-    if (!this.apiKey) {
+    if (!this.groqKeyPool.hasKeys()) {
       this.logger.error('GROQ_API_KEY is not configured.')
       return {
         content: 'Xin lỗi, khóa API Groq chưa được cấu hình trên máy chủ.',
@@ -207,22 +200,22 @@ Quy tắc quan trọng về luồng xử lý (BẮT BUỘC TUÂN THỦ TỪNG B�
     ]
 
     try {
-      const response = await fetch(
-        'https://api.groq.com/openai/v1/chat/completions',
-        {
+      const body = JSON.stringify({
+        model: this.model,
+        messages: fullMessages,
+        ...(disableTools ? {} : { tools: this.getTools() }),
+        temperature: 0.3,
+        stream: false,
+      })
+      const response = await this.groqKeyPool.run(this.model, apiKey =>
+        fetch('https://api.groq.com/openai/v1/chat/completions', {
           method: 'POST',
           headers: {
-            Authorization: `Bearer ${this.apiKey}`,
+            Authorization: `Bearer ${apiKey}`,
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({
-            model: this.model,
-            messages: fullMessages,
-            ...(disableTools ? {} : { tools: this.getTools() }),
-            temperature: 0.3,
-            stream: false,
-          }),
-        }
+          body,
+        })
       )
 
       if (!response.ok) {

@@ -1,29 +1,31 @@
+import type { ConfigService } from '@nestjs/config'
+import { GroqKeyPool } from '../../groq/groq-key-pool.service'
 import { GroqLlmService } from './groq-llm.service'
 
+function createService(...keys: string[]): GroqLlmService {
+  const config = { get: jest.fn().mockReturnValue(keys) }
+  return new GroqLlmService(new GroqKeyPool(config as unknown as ConfigService))
+}
+
 describe('GroqLlmService', () => {
-  const originalKey = process.env.GROQ_API_KEY
   const originalFetch = global.fetch
 
   afterEach(() => {
-    if (originalKey === undefined) delete process.env.GROQ_API_KEY
-    else process.env.GROQ_API_KEY = originalKey
     global.fetch = originalFetch
   })
 
   it('returns a configuration message without making a network request', async () => {
-    delete process.env.GROQ_API_KEY
     const fetchMock = jest.fn<
       ReturnType<typeof fetch>,
       Parameters<typeof fetch>
     >()
     global.fetch = fetchMock
 
-    await expect(new GroqLlmService().chat([])).resolves.toContain('Groq')
+    await expect(createService().chat([])).resolves.toContain('Groq')
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it('sends the selected key and conversation to Groq', async () => {
-    process.env.GROQ_API_KEY = 'server-key'
     const fetchMock = jest.fn<
       ReturnType<typeof fetch>,
       Parameters<typeof fetch>
@@ -38,7 +40,7 @@ describe('GroqLlmService', () => {
     global.fetch = fetchMock
 
     await expect(
-      new GroqLlmService().chat(
+      createService('server-key').chat(
         [{ role: 'user', content: 'Tôi cần căn hộ 2 phòng ngủ' }],
         'session-key'
       )
@@ -57,8 +59,28 @@ describe('GroqLlmService', () => {
     })
   })
 
+  it('rotates to the next server key when the first is rate limited', async () => {
+    const fetchMock = jest.fn<
+      ReturnType<typeof fetch>,
+      Parameters<typeof fetch>
+    >()
+    fetchMock
+      .mockResolvedValueOnce(new Response('limit', { status: 429 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ choices: [{ message: { content: 'ok' } }] })
+        )
+      )
+    global.fetch = fetchMock
+
+    await expect(createService('key-1', 'key-2').chat([])).resolves.toBe('ok')
+    const used = fetchMock.mock.calls.map(
+      call => (call[1]?.headers as Record<string, string>).Authorization
+    )
+    expect(used).toEqual(['Bearer key-1', 'Bearer key-2'])
+  })
+
   it('returns a recoverable assistant message on provider failure', async () => {
-    process.env.GROQ_API_KEY = 'server-key'
     const fetchMock = jest.fn<
       ReturnType<typeof fetch>,
       Parameters<typeof fetch>
@@ -66,7 +88,7 @@ describe('GroqLlmService', () => {
     fetchMock.mockResolvedValue(new Response('failure', { status: 500 }))
     global.fetch = fetchMock
 
-    await expect(new GroqLlmService().chat([])).resolves.toContain(
+    await expect(createService('server-key').chat([])).resolves.toContain(
       'lỗi kết nối'
     )
   })
