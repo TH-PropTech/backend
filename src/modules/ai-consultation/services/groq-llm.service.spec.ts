@@ -53,7 +53,8 @@ describe('GroqLlmService', () => {
       throw new Error('Expected a JSON Groq request body')
     }
     expect(JSON.parse(requestBody)).toMatchObject({
-      model: 'llama-3.3-70b-versatile',
+      model: 'openai/gpt-oss-120b',
+      reasoning_effort: 'low',
     })
   })
 
