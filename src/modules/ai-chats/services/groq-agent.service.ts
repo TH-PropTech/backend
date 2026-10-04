@@ -28,7 +28,7 @@ export interface ToolCall {
 @Injectable()
 export class GroqAgentService {
   private readonly logger = new Logger(GroqAgentService.name)
-  private readonly model = 'llama-3.3-70b-versatile'
+  private readonly model = 'openai/gpt-oss-120b'
 
   constructor(private readonly groqKeyPool: GroqKeyPool) {}
 

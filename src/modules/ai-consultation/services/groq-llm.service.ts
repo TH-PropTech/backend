@@ -9,7 +9,7 @@ export interface ChatMessage {
 @Injectable()
 export class GroqLlmService {
   private readonly logger = new Logger(GroqLlmService.name)
-  private readonly defaultModel = 'llama-3.3-70b-versatile'
+  private readonly defaultModel = 'openai/gpt-oss-120b'
 
   constructor(private readonly groqKeyPool: GroqKeyPool) {}
 
@@ -30,7 +30,8 @@ export class GroqLlmService {
           model: this.defaultModel,
           messages,
           temperature: 0.7,
-          max_tokens: 150,
+          max_tokens: 1024,
+          reasoning_effort: 'low',
         }),
       })
 
