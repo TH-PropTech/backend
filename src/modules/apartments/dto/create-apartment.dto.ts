@@ -122,6 +122,21 @@ export class RentalPackageDto {
   @Type(() => SettlementPolicyDto)
   settlementPolicy?: SettlementPolicyDto
 
+  @ApiPropertyOptional({ description: 'Tiền cọc tính toán (tùy chọn khi gửi)' })
+  @IsOptional()
+  @IsNumber()
+  resolvedDepositAmount?: number
+
+  @ApiPropertyOptional({ description: 'Tiền giữ chỗ tính toán' })
+  @IsOptional()
+  @IsNumber()
+  resolvedHoldingDepositAmount?: number
+
+  @ApiPropertyOptional({ description: 'Tiền cọc bổ sung tính toán' })
+  @IsOptional()
+  @IsNumber()
+  resolvedSecurityTopUpAmount?: number
+
   @IsIn(['active', 'inactive'])
   @IsOptional()
   status?: 'active' | 'inactive'
