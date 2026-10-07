@@ -44,6 +44,7 @@ import type { DepositAgreement } from '../contracts/schemas/deposit-agreement.sc
 import { Contract } from '../contracts/schemas/contract.schema'
 import { MoveInSettlement } from '../move-in-settlements/schemas/move-in-settlement.schema'
 import { MoveInSettlementsService } from '../move-in-settlements/move-in-settlements.service'
+import { PayoutsService } from '../payouts/payouts.service'
 import { RentalTransactionEventService } from '../rental-transactions/rental-transaction-event.service'
 import type { RentalTransactionActorRole } from '../rental-transactions/schemas/rental-transaction-event.schema'
 
@@ -143,7 +144,9 @@ export class MockBankService {
     @Optional()
     private readonly transactionEventService?: RentalTransactionEventService,
     @Optional()
-    private readonly moveInSettlementsService?: MoveInSettlementsService
+    private readonly moveInSettlementsService?: MoveInSettlementsService,
+    @Optional()
+    private readonly payoutsService?: PayoutsService
   ) {}
 
   private async recordTransactionEvent(input: {
@@ -830,6 +833,27 @@ export class MockBankService {
     payment.ledgerStatus = 'pending'
     await this.paymentRepository.save(payment)
     await this.enqueuePaymentLedgerEvent(payment)
+    await this.createPayoutFor(payment)
+  }
+
+  /** Payout failures must never fail the tenant's already-recorded payment. */
+  private async createPayoutFor(payment: Payment): Promise<void> {
+    if (!this.payoutsService) return
+    if (payment.type === 'platform-fee' || payment.payeeRole === 'platform') {
+      return
+    }
+    try {
+      await this.payoutsService.createForPayment({
+        paymentId: payment._id.toHexString(),
+        contractId: payment.contractId ?? null,
+        landlordId: payment.landlordId,
+        amount: payment.amount,
+      })
+    } catch (error) {
+      this.logger.warn(
+        `Payout creation failed for payment ${payment._id.toHexString()}: ${error instanceof Error ? error.message : 'unknown'}`
+      )
+    }
   }
 
   async getWallet(userId: string): Promise<{
@@ -885,6 +909,7 @@ export class MockBankService {
         simulation: accountLink.simulation,
       })
     )
+    await this.payoutsService?.releaseAwaitingWallet(userId)
     return {
       userId,
       provider: created.provider,

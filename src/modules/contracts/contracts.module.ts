@@ -21,6 +21,8 @@ import { SmartCaSigningSession } from './smartca/smartca-signing-session.schema'
 import { SmartCaProvider } from './smartca/smartca.provider'
 import { MockSmartCaProvider } from './smartca/mock-smartca.provider'
 import { SmartCaSigningService } from './smartca/smartca-signing.service'
+import { SmartCaEventsGateway } from './smartca/smartca-events.gateway'
+import { SMARTCA_EVENTS_PUBLISHER } from './smartca/smartca-events.publisher'
 import { ContractTemplate } from './legal/contract-template.schema'
 import { ContractTemplateAudit } from './legal/contract-template-audit.schema'
 import { ContractTemplateGovernanceService } from './legal/contract-template-governance.service'
@@ -102,6 +104,11 @@ import { ContractEvidencePackageExportService } from './contract-evidence-packag
       },
     },
     SmartCaSigningService,
+    SmartCaEventsGateway,
+    {
+      provide: SMARTCA_EVENTS_PUBLISHER,
+      useExisting: SmartCaEventsGateway,
+    },
     ContractTemplateGovernanceService,
     ContractCommercialEditorService,
     ContractAmendmentService,

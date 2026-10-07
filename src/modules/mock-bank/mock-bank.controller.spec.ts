@@ -1,3 +1,4 @@
+import { ForbiddenException, NotFoundException } from '@nestjs/common'
 import { MockBankController } from './mock-bank.controller'
 
 const headers = {
@@ -14,12 +15,14 @@ const mappedHeaders = {
 function createController(
   service: object = {},
   registry: object = {},
-  gateway: object = {}
+  gateway: object = {},
+  payouts: object = {}
 ): MockBankController {
   return new MockBankController(
     service as never,
     registry as never,
-    gateway as never
+    gateway as never,
+    payouts as never
   )
 }
 
@@ -255,5 +258,80 @@ describe('MockBankController', () => {
       return_code: -1,
       return_message: 'mac not equal',
     })
+  })
+
+  it('settles a payout as success for the authenticated landlord', async () => {
+    const settled = { payout: { status: 'paid-out' }, replayed: false }
+    const payouts = { settleForLandlord: jest.fn().mockResolvedValue(settled) }
+
+    await expect(
+      createController({}, {}, {}, payouts).payoutSuccess('PAYOUT-1', {
+        _id: 'landlord-1',
+      })
+    ).resolves.toBe(settled)
+    expect(payouts.settleForLandlord).toHaveBeenCalledWith(
+      'PAYOUT-1',
+      'success',
+      'landlord-1'
+    )
+  })
+
+  it('settles a payout as failed for the authenticated landlord', async () => {
+    const payouts = {
+      settleForLandlord: jest
+        .fn()
+        .mockResolvedValue({ payout: { status: 'failed' }, replayed: false }),
+    }
+
+    await createController({}, {}, {}, payouts).payoutFailed('PAYOUT-1', {
+      _id: 'landlord-1',
+    })
+
+    expect(payouts.settleForLandlord).toHaveBeenCalledWith(
+      'PAYOUT-1',
+      'failed',
+      'landlord-1'
+    )
+  })
+
+  it('rejects payout results when the token has no user id', () => {
+    const payouts = { settleForLandlord: jest.fn() }
+    const controller = createController({}, {}, {}, payouts)
+
+    expect(() => controller.payoutSuccess('PAYOUT-1', {})).toThrow(
+      'USER_ID_REQUIRED'
+    )
+    expect(() => controller.payoutFailed('PAYOUT-1', {})).toThrow(
+      'USER_ID_REQUIRED'
+    )
+    expect(payouts.settleForLandlord).not.toHaveBeenCalled()
+  })
+
+  it('rejects payout simulation for a non-simulation wallet', async () => {
+    const payouts = {
+      settleForLandlord: jest
+        .fn()
+        .mockRejectedValue(new ForbiddenException('PAYOUT_SIMULATION_ONLY')),
+    }
+
+    await expect(
+      createController({}, {}, {}, payouts).payoutSuccess('PAYOUT-1', {
+        _id: 'landlord-1',
+      })
+    ).rejects.toBeInstanceOf(ForbiddenException)
+  })
+
+  it('returns not found for an unknown payout reference', async () => {
+    const payouts = {
+      settleForLandlord: jest
+        .fn()
+        .mockRejectedValue(new NotFoundException('PAYOUT_NOT_FOUND')),
+    }
+
+    await expect(
+      createController({}, {}, {}, payouts).payoutFailed('PAYOUT-X', {
+        _id: 'landlord-1',
+      })
+    ).rejects.toBeInstanceOf(NotFoundException)
   })
 })

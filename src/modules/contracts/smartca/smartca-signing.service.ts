@@ -1,7 +1,9 @@
 import {
   ConflictException,
   ForbiddenException,
+  Inject,
   Injectable,
+  Logger,
   NotFoundException,
   Optional,
   ServiceUnavailableException,
@@ -22,6 +24,11 @@ import {
   type SmartCaSignature,
 } from './smartca.provider'
 import { SmartCaSigningSession } from './smartca-signing-session.schema'
+import {
+  SMARTCA_EVENTS_PUBLISHER,
+  type SmartCaEventsPublisher,
+  type SmartCaSessionUpdatedEvent,
+} from './smartca-events.publisher'
 
 export type CreateSmartCaSessionInput = {
   idempotencyKey?: string
@@ -41,6 +48,8 @@ type SigningContext = {
 
 @Injectable()
 export class SmartCaSigningService {
+  private readonly logger = new Logger(SmartCaSigningService.name)
+
   constructor(
     @InjectRepository(Contract)
     private readonly contractRepository: Repository<Contract>,
@@ -52,10 +61,14 @@ export class SmartCaSigningService {
     @Optional() private readonly contractsService?: ContractsService,
     @Optional() private readonly artifactService?: ContractArtifactService,
     @Optional()
-    private readonly depositConfirmationResolver?: DepositConfirmationResolver
+    private readonly depositConfirmationResolver?: DepositConfirmationResolver,
+    @Optional()
+    @Inject(SMARTCA_EVENTS_PUBLISHER)
+    private readonly eventsPublisher?: SmartCaEventsPublisher
   ) {}
 
   private readonly webhookInFlight = new Map<string, Promise<void>>()
+  private readonly publishedTerminalEvents = new Set<string>()
 
   async listCertificates(
     contractId: string,
@@ -87,9 +100,7 @@ export class SmartCaSigningService {
     if (existing) {
       if (existing.status !== 'pending') return existing
       if (existing.expiresAt <= new Date()) {
-        existing.status = 'expired'
-        existing.providerStatus = 'expired'
-        return this.sessionRepository.save(existing)
+        return this.saveTerminalSession(existing, 'expired')
       }
       return this.recoverPendingSession(existing, context.documentId)
     }
@@ -164,9 +175,7 @@ export class SmartCaSigningService {
       throw new ForbiddenException('SMARTCA_SESSION_ACCESS_DENIED')
     }
     if (session.status === 'pending' && session.expiresAt <= new Date()) {
-      session.status = 'expired'
-      session.providerStatus = 'expired'
-      await this.sessionRepository.save(session)
+      return this.saveTerminalSession(session, 'expired')
     }
     return session
   }
@@ -184,9 +193,7 @@ export class SmartCaSigningService {
       isStaff
     )
     if (session.status !== 'pending') return session
-    session.status = 'cancelled'
-    session.providerStatus = 'cancelled'
-    return this.sessionRepository.save(session)
+    return this.saveTerminalSession(session, 'cancelled')
   }
 
   async poll(
@@ -240,7 +247,13 @@ export class SmartCaSigningService {
       }
       await this.recoverPendingSession(session, session.documentId)
     } catch {
-      // Webhook không bao giờ là nguồn sự thật: nuốt lỗi, để poll xử lý sau.
+      const correlationId = createHash('sha256')
+        .update(transactionId)
+        .digest('hex')
+        .slice(0, 12)
+      this.logger.warn(
+        `SmartCA webhook reconciliation failed correlation=${correlationId}`
+      )
     }
   }
 
@@ -380,9 +393,7 @@ export class SmartCaSigningService {
     )
     if (providerResult.status === 'pending') return session
     if (providerResult.status === 'rejected') {
-      session.status = 'rejected'
-      session.providerStatus = 'rejected'
-      return this.sessionRepository.save(session)
+      return this.saveTerminalSession(session, 'rejected')
     }
     if (!providerResult.signature) {
       throw new ConflictException('SMARTCA_PROVIDER_RESPONSE_INVALID')
@@ -417,7 +428,43 @@ export class SmartCaSigningService {
     session.verifiedAt = new Date()
     const saved = await this.sessionRepository.save(session)
     await this.syncSignedContract(saved)
+    await this.publishTerminalSession(saved)
     return saved
+  }
+
+  private async saveTerminalSession(
+    session: SmartCaSigningSession,
+    status: SmartCaSessionUpdatedEvent['status']
+  ): Promise<SmartCaSigningSession> {
+    session.status = status
+    session.providerStatus = status
+    const saved = await this.sessionRepository.save(session)
+    await this.publishTerminalSession(saved)
+    return saved
+  }
+
+  private async publishTerminalSession(
+    session: SmartCaSigningSession
+  ): Promise<void> {
+    if (!this.eventsPublisher || session.status === 'pending' || !session._id) {
+      return
+    }
+    const sessionId = session._id.toHexString()
+    const eventKey = `${sessionId}:${session.status}`
+    if (this.publishedTerminalEvents.has(eventKey)) return
+    this.publishedTerminalEvents.add(eventKey)
+
+    try {
+      await this.eventsPublisher.publish({
+        contractId: session.contractId,
+        sessionId,
+        status: session.status,
+      })
+    } catch {
+      this.logger.warn(
+        `SmartCA realtime publish failed session=${sessionId} status=${session.status}`
+      )
+    }
   }
 
   private async syncSignedContract(

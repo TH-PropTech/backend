@@ -20,6 +20,7 @@ import { FabricModule } from '../fabric/fabric.module'
 import { PaymentRequestsController } from './payment-requests.controller'
 import { MoveInSettlement } from '../move-in-settlements/schemas/move-in-settlement.schema'
 import { MoveInSettlementsModule } from '../move-in-settlements/move-in-settlements.module'
+import { PayoutsModule } from '../payouts/payouts.module'
 import { Contract } from '../contracts/schemas/contract.schema'
 
 @Module({
@@ -28,6 +29,7 @@ import { Contract } from '../contracts/schemas/contract.schema'
     ContractsModule,
     FabricModule,
     MoveInSettlementsModule,
+    PayoutsModule,
     TypeOrmModule.forFeature([
       Payment,
       PaymentAttempt,

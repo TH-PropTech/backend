@@ -50,6 +50,7 @@ import { OperationsModule } from './modules/operations/operations.module'
 import { RentalFlowConfigModule } from './modules/rental-flow-config/rental-flow-config.module'
 import { PropertyOwnershipTransferModule } from './modules/property-ownership-transfer/property-ownership-transfer.module'
 import { PlatformFeesModule } from './modules/platform-fees/platform-fees.module'
+import { PayoutsModule } from './modules/payouts/payouts.module'
 import { RentalTransactionsModule } from './modules/rental-transactions/rental-transactions.module'
 
 @Module({
@@ -125,6 +126,7 @@ import { RentalTransactionsModule } from './modules/rental-transactions/rental-t
     RentalFlowConfigModule,
     PropertyOwnershipTransferModule,
     PlatformFeesModule,
+    PayoutsModule,
     RentalTransactionsModule,
   ],
 })

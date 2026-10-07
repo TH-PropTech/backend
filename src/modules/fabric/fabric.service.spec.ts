@@ -58,8 +58,13 @@ describe('FabricService', () => {
     getOrThrow: jest.Mock
   }
 
+  // Mỗi service khởi tạo bật một interval readiness; phải dừng sau mỗi test để timer
+  // không chạy sau khi môi trường Jest bị teardown (ReferenceError → exit code 1 trên CI).
+  let initSpy: jest.SpyInstance
+
   beforeEach(() => {
     jest.clearAllMocks()
+    initSpy = jest.spyOn(FabricService.prototype, 'onModuleInit')
     logRepository = {
       save: jest.fn(entity => Promise.resolve({ ...entity, _id: 'log-1' })),
       find: jest.fn().mockResolvedValue([]),
@@ -68,6 +73,12 @@ describe('FabricService', () => {
       get: jest.fn(),
       getOrThrow: jest.fn(),
     }
+  })
+
+  afterEach(() => {
+    const started = initSpy.mock.contexts as FabricService[]
+    initSpy.mockRestore()
+    for (const service of started) service.onModuleDestroy()
   })
 
   function setupValidConfig(): void {
