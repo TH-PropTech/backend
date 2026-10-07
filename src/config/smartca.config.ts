@@ -51,9 +51,5 @@ export default registerAs('smartCA', () => {
       process.env.SMARTCA_SIGNING_TIMEOUT_MS || '300000',
       10
     ),
-    pollingIntervalMs: parseInt(
-      process.env.SMARTCA_POLLING_INTERVAL_MS || '3000',
-      10
-    ),
   }
 })

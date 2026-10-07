@@ -70,6 +70,7 @@ describe('SmartCaSigningService', () => {
     contractsService: { recordSmartCaSignature: jest.Mock }
     artifactService: { resolveCanonicalArtifact: jest.Mock }
     depositConfirmationResolver: { resolve: jest.Mock }
+    eventsPublisher: { publish: jest.Mock }
   }
 
   function context(contractValue: typeof contract = contract): TestContext {
@@ -124,6 +125,9 @@ describe('SmartCaSigningService', () => {
         .fn()
         .mockResolvedValue({ confirmed: Boolean(contractValue.depositPaidAt) }),
     }
+    const eventsPublisher = {
+      publish: jest.fn().mockResolvedValue(undefined),
+    }
     return {
       service: new SmartCaSigningService(
         contractRepository as never,
@@ -132,7 +136,8 @@ describe('SmartCaSigningService', () => {
         provider as never,
         contractsService as never,
         artifactService as never,
-        depositConfirmationResolver as never
+        depositConfirmationResolver as never,
+        eventsPublisher
       ),
       contractRepository,
       sessionRepository,
@@ -141,6 +146,7 @@ describe('SmartCaSigningService', () => {
       contractsService,
       artifactService,
       depositConfirmationResolver,
+      eventsPublisher,
     }
   }
 
@@ -490,6 +496,11 @@ describe('SmartCaSigningService', () => {
     )
     expect(result).toEqual(expect.objectContaining({ status: 'signed' }))
     expect(ctx.contractsService.recordSmartCaSignature).toHaveBeenCalledTimes(1)
+    expect(ctx.eventsPublisher.publish).toHaveBeenCalledWith({
+      contractId,
+      sessionId: session._id.toHexString(),
+      status: 'signed',
+    })
 
     // Second poll on a signed session shouldn't change anything
     session.status = 'signed'
@@ -500,6 +511,7 @@ describe('SmartCaSigningService', () => {
       false
     )
     expect(ctx.contractsService.recordSmartCaSignature).toHaveBeenCalledTimes(1)
+    expect(ctx.eventsPublisher.publish).toHaveBeenCalledTimes(1)
   })
 
   it('cancels pending sessions and leaves terminal sessions unchanged when polling', async () => {
@@ -525,6 +537,11 @@ describe('SmartCaSigningService', () => {
         providerStatus: 'cancelled',
       })
     )
+    expect(ctx.eventsPublisher.publish).toHaveBeenCalledWith({
+      contractId,
+      sessionId: session._id.toHexString(),
+      status: 'cancelled',
+    })
 
     // Poll on cancelled session keeps it cancelled
     const result = await ctx.service.poll(
@@ -534,6 +551,98 @@ describe('SmartCaSigningService', () => {
       false
     )
     expect(result.status).toBe('cancelled')
+    expect(ctx.eventsPublisher.publish).toHaveBeenCalledTimes(1)
+  })
+
+  it('publishes rejected and expired transitions but not pending status checks', async () => {
+    const rejected = context()
+    const rejectedSession = {
+      _id: new ObjectId(),
+      contractId,
+      signerId: 'tenant-1',
+      artifactHash,
+      documentId,
+      providerTransactionId: 'rejected-transaction',
+      status: 'pending' as const,
+      expiresAt: new Date(Date.now() + 60_000),
+    }
+    rejected.sessionRepository.findOne.mockResolvedValue(rejectedSession)
+    rejected.provider.getSignatureStatus.mockResolvedValue({
+      transactionId: 'rejected-transaction',
+      status: 'rejected',
+    })
+
+    await rejected.service.poll(
+      contractId,
+      rejectedSession._id.toHexString(),
+      'tenant-1',
+      false
+    )
+    expect(rejected.eventsPublisher.publish).toHaveBeenCalledWith({
+      contractId,
+      sessionId: rejectedSession._id.toHexString(),
+      status: 'rejected',
+    })
+
+    const pending = context()
+    const pendingSession = {
+      ...rejectedSession,
+      _id: new ObjectId(),
+      providerTransactionId: 'pending-transaction',
+      status: 'pending' as const,
+    }
+    pending.sessionRepository.findOne.mockResolvedValue(pendingSession)
+    await pending.service.poll(
+      contractId,
+      pendingSession._id.toHexString(),
+      'tenant-1',
+      false
+    )
+    expect(pending.eventsPublisher.publish).not.toHaveBeenCalled()
+
+    const expired = context()
+    const expiredSession = {
+      ...pendingSession,
+      _id: new ObjectId(),
+      idempotencyKey: signingInput.idempotencyKey,
+      expiresAt: new Date(Date.now() - 1),
+    }
+    expired.sessionRepository.findOne.mockResolvedValue(expiredSession)
+    await expired.service.createSession(contractId, 'tenant-1', signingInput)
+    expect(expired.eventsPublisher.publish).toHaveBeenCalledWith({
+      contractId,
+      sessionId: expiredSession._id.toHexString(),
+      status: 'expired',
+    })
+  })
+
+  it('keeps a successful signing transition when realtime publishing fails', async () => {
+    const ctx = context()
+    const session = {
+      _id: new ObjectId(),
+      contractId,
+      signerId: 'tenant-1',
+      signerRole: 'tenant' as const,
+      artifactHash,
+      documentId,
+      providerTransactionId: 'provider-transaction',
+      status: 'pending' as const,
+      certificateSerial: validCertificate.serialNumber,
+      expiresAt: new Date(Date.now() + 60_000),
+    }
+    ctx.sessionRepository.findOne.mockResolvedValue(session)
+    ctx.provider.getSignatureStatus.mockResolvedValue({
+      transactionId: 'provider-transaction',
+      status: 'signed',
+      signature: { documentId, signatureValue: 'signature' },
+    })
+    ctx.eventsPublisher.publish.mockRejectedValue(
+      new Error('socket unavailable')
+    )
+
+    await expect(
+      ctx.service.poll(contractId, session._id.toHexString(), 'tenant-1', false)
+    ).resolves.toEqual(expect.objectContaining({ status: 'signed' }))
   })
 
   describe('handleWebhook', () => {
@@ -600,6 +709,7 @@ describe('SmartCaSigningService', () => {
       ])
 
       expect(ctx.provider.getSignatureStatus).toHaveBeenCalledTimes(1)
+      expect(ctx.eventsPublisher.publish).toHaveBeenCalledTimes(1)
     })
   })
 
