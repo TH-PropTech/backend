@@ -46,6 +46,10 @@ import {
   type VnpayIpnAck,
   type ZalopayCallbackAck,
 } from './gateway-callback.service'
+import {
+  PayoutsService,
+  type PayoutSettleResult,
+} from '../payouts/payouts.service'
 
 type GatewayQuery = Record<string, string | string[] | undefined>
 
@@ -55,7 +59,8 @@ export class MockBankController {
   constructor(
     private readonly mockBankService: MockBankService,
     private readonly providerRegistry: PaymentProviderRegistry,
-    private readonly gatewayCallbackService: GatewayCallbackService
+    private readonly gatewayCallbackService: GatewayCallbackService,
+    private readonly payoutsService: PayoutsService
   ) {}
 
   @Get('providers')
@@ -283,6 +288,30 @@ export class MockBankController {
   @UseGuards(JwtAuthGuard)
   simulate(@Param('txRef') txRef: string): Promise<MockPaymentCallbackResult> {
     return this.mockBankService.simulateSuccess(txRef)
+  }
+
+  @Get('payout/:txRef/success')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Simulated payout result: transfer succeeded' })
+  payoutSuccess(
+    @Param('txRef') txRef: string,
+    @CurrentUser() user: UserPayload
+  ): Promise<PayoutSettleResult> {
+    if (!user._id) throw new UnauthorizedException('USER_ID_REQUIRED')
+    return this.payoutsService.settleForLandlord(txRef, 'success', user._id)
+  }
+
+  @Get('payout/:txRef/failed')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Simulated payout result: transfer failed' })
+  payoutFailed(
+    @Param('txRef') txRef: string,
+    @CurrentUser() user: UserPayload
+  ): Promise<PayoutSettleResult> {
+    if (!user._id) throw new UnauthorizedException('USER_ID_REQUIRED')
+    return this.payoutsService.settleForLandlord(txRef, 'failed', user._id)
   }
 
   @Get('wallet')

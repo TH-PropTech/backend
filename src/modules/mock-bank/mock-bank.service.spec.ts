@@ -923,6 +923,115 @@ describe('MockBankService', () => {
     expect(attemptRepository.save).toHaveBeenCalledTimes(1)
   })
 
+  describe('landlord payout hook', () => {
+    function signedRentCallback(context: ReturnType<typeof createContext>): {
+      body: { txRef: string; amount: number; status: 'success' }
+      headers: { timestamp: string; nonce: string; signature: string }
+    } {
+      const body = {
+        txRef: context.attempt.txRef,
+        amount: context.attempt.amount,
+        status: 'success' as const,
+      }
+      const timestamp = Date.now().toString()
+      return {
+        body,
+        headers: {
+          timestamp,
+          nonce: 'nonce-payout',
+          signature: context.service.signCallback(
+            body,
+            timestamp,
+            'nonce-payout'
+          ),
+        },
+      }
+    }
+
+    it('creates one payout for the landlord when a rent payment becomes paid', async () => {
+      const context = createContext()
+      const payoutsService = {
+        createForPayment: jest.fn().mockResolvedValue({}),
+        releaseAwaitingWallet: jest.fn(),
+      }
+      Reflect.set(context.service, 'payoutsService', payoutsService)
+      Reflect.set(context.payment, 'landlordId', 'landlord-1')
+      const { body, headers } = signedRentCallback(context)
+
+      await context.service.handleRentCallback(body, headers)
+
+      expect(payoutsService.createForPayment).toHaveBeenCalledTimes(1)
+      expect(payoutsService.createForPayment).toHaveBeenCalledWith({
+        paymentId: context.payment._id.toHexString(),
+        contractId: 'contract-1',
+        landlordId: 'landlord-1',
+        amount: 2_000_000,
+      })
+    })
+
+    it('does not create a payout for a platform-fee payment', async () => {
+      const context = createContext()
+      const payoutsService = {
+        createForPayment: jest.fn(),
+        releaseAwaitingWallet: jest.fn(),
+      }
+      Reflect.set(context.service, 'payoutsService', payoutsService)
+      Reflect.set(context.payment, 'type', 'platform-fee')
+      Reflect.set(context.payment, 'payeeRole', 'platform')
+      const { body, headers } = signedRentCallback(context)
+
+      await context.service.handleRentCallback(body, headers)
+
+      expect(payoutsService.createForPayment).not.toHaveBeenCalled()
+    })
+
+    it('still confirms the tenant payment when payout creation fails', async () => {
+      const context = createContext()
+      const payoutsService = {
+        createForPayment: jest.fn().mockRejectedValue(new Error('db down')),
+        releaseAwaitingWallet: jest.fn(),
+      }
+      Reflect.set(context.service, 'payoutsService', payoutsService)
+      Reflect.set(context.payment, 'landlordId', 'landlord-1')
+      const { body, headers } = signedRentCallback(context)
+
+      const result = await context.service.handleRentCallback(body, headers)
+
+      expect(result.replayed).toBe(false)
+      expect(context.payment.status).toBe('paid')
+      expect(payoutsService.createForPayment).toHaveBeenCalledTimes(1)
+    })
+
+    it('releases awaiting payouts when a wallet is newly linked', async () => {
+      const context = createContext()
+      const payoutsService = {
+        createForPayment: jest.fn(),
+        releaseAwaitingWallet: jest.fn().mockResolvedValue(1),
+      }
+      Reflect.set(context.service, 'payoutsService', payoutsService)
+      context.walletRepository.findOne.mockResolvedValueOnce(null)
+
+      await context.service.linkWallet('landlord-1')
+
+      expect(payoutsService.releaseAwaitingWallet).toHaveBeenCalledWith(
+        'landlord-1'
+      )
+    })
+
+    it('does not release payouts when the wallet was already linked', async () => {
+      const context = createContext()
+      const payoutsService = {
+        createForPayment: jest.fn(),
+        releaseAwaitingWallet: jest.fn(),
+      }
+      Reflect.set(context.service, 'payoutsService', payoutsService)
+
+      await context.service.linkWallet(tenantId)
+
+      expect(payoutsService.releaseAwaitingWallet).not.toHaveBeenCalled()
+    })
+  })
+
   it('records exactly one payment.succeeded transaction event across a replayed rent callback', async () => {
     const context = createContext()
     const { service, attempt } = context

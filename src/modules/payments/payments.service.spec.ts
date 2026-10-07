@@ -251,6 +251,8 @@ describe('PaymentsService', () => {
     paymentRepository.save.mockImplementation(
       (value: Payment): Promise<Payment> => Promise.resolve(value)
     )
+    const payoutsService = { createForPayment: jest.fn().mockResolvedValue({}) }
+    Reflect.set(service, 'payoutsService', payoutsService)
 
     const result = await service.confirmPayment(
       payment._id.toString(),
@@ -273,6 +275,39 @@ describe('PaymentsService', () => {
         ],
       })
     )
+    expect(payoutsService.createForPayment).toHaveBeenCalledWith({
+      paymentId: payment._id.toHexString(),
+      contractId: 'contract-1',
+      landlordId: 'landlord-1',
+      amount: 10_000_000,
+    })
+
+    await service.confirmPayment(payment._id.toString(), 'staff-1', true)
+    expect(payoutsService.createForPayment).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps a confirmed payment successful when payout creation fails', async () => {
+    const payment = {
+      _id: new ObjectId(),
+      contractId: 'contract-1',
+      tenantId: 'tenant-1',
+      landlordId: 'landlord-1',
+      amount: 10_000_000,
+      status: 'unpaid',
+      paidAt: null,
+      dueDate: new Date('2030-01-31T00:00:00.000Z'),
+    } as Payment
+    paymentRepository.findOne.mockResolvedValue(payment)
+    paymentRepository.save.mockImplementation(
+      (value: Payment): Promise<Payment> => Promise.resolve(value)
+    )
+    Reflect.set(service, 'payoutsService', {
+      createForPayment: jest.fn().mockRejectedValue(new Error('payout down')),
+    })
+
+    await expect(
+      service.confirmPayment(payment._id.toHexString(), 'staff-1', true)
+    ).resolves.toMatchObject({ status: 'paid' })
   })
 
   it('returns not found for an invalid payment id', async () => {

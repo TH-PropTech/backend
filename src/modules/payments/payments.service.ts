@@ -19,6 +19,7 @@ import { Payment } from './schemas/payment.schema'
 import { OwnershipTransferResolver } from '../property-ownership-transfer/ownership-transfer.resolver'
 import { resolveEffectiveCommercial } from '../contracts/commercial/resolve-effective-commercial'
 import { RentalTransactionEventService } from '../rental-transactions/rental-transaction-event.service'
+import { PayoutsService } from '../payouts/payouts.service'
 
 @Injectable()
 export class PaymentsService {
@@ -34,7 +35,8 @@ export class PaymentsService {
     @Optional()
     private readonly ownershipTransferResolver?: OwnershipTransferResolver,
     @Optional()
-    private readonly transactionEventService?: RentalTransactionEventService
+    private readonly transactionEventService?: RentalTransactionEventService,
+    @Optional() private readonly payoutsService?: PayoutsService
   ) {}
 
   private async recordTransactionEvent(input: {
@@ -292,7 +294,26 @@ export class PaymentsService {
         dependencyKey: `contract:${payment.contractId}:contract.activated`,
       })
     }
+    await this.createPayoutFor(saved)
     return saved
+  }
+
+  private async createPayoutFor(payment: Payment): Promise<void> {
+    if (!this.payoutsService) return
+    if (payment.type === 'platform-fee' || payment.payeeRole === 'platform')
+      return
+    try {
+      await this.payoutsService.createForPayment({
+        paymentId: payment._id.toHexString(),
+        contractId: payment.contractId ?? null,
+        landlordId: payment.landlordId,
+        amount: payment.amount,
+      })
+    } catch (error) {
+      this.logger.warn(
+        `Payout creation failed for payment ${payment._id.toHexString()}: ${error instanceof Error ? error.message : 'unknown'}`
+      )
+    }
   }
 
   async getOverdue(): Promise<Payment[]> {

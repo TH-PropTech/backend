@@ -8,6 +8,7 @@ import { PaymentsService } from './payments.service'
 import { NotificationsModule } from '../notifications/notifications.module'
 import { FabricModule } from '../fabric/fabric.module'
 import { PropertyOwnershipTransferModule } from '../property-ownership-transfer/property-ownership-transfer.module'
+import { PayoutsModule } from '../payouts/payouts.module'
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { PropertyOwnershipTransferModule } from '../property-ownership-transfer/
     NotificationsModule,
     FabricModule,
     PropertyOwnershipTransferModule,
+    PayoutsModule,
   ],
   controllers: [PaymentsController],
   providers: [PaymentsService],
