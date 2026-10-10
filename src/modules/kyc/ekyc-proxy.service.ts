@@ -78,22 +78,6 @@ export class EkycProxyService {
     )
   }
 
-  async ocrFront(file: Express.Multer.File): Promise<EkycOcrFrontResult> {
-    const payload = await this.postForm(
-      '/api/ekyc/frontID',
-      createFormData('frontID', file)
-    )
-    return parseOcrFront(payload)
-  }
-
-  async ocrBack(file: Express.Multer.File): Promise<EkycOcrBackResult> {
-    const payload = await this.postForm(
-      '/api/ekyc/backID',
-      createFormData('backID', file)
-    )
-    return parseOcrBack(payload)
-  }
-
   async verifyFace(
     selfie: Express.Multer.File,
     frontCard: Express.Multer.File
@@ -194,38 +178,6 @@ function appendFile(
   formData.append(fieldName, blob, file.originalname)
 }
 
-function parseOcrFront(payload: unknown): EkycOcrFrontResult {
-  const result = getRootRecord(payload, 'result')
-  return {
-    idNumber: readString(result.idNumber, 'idNumber'),
-    fullName: readString(result.fullName, 'fullName'),
-    dob: readString(result.dob, 'dob'),
-    gender: readString(result.gender, 'gender'),
-    nationality: readString(result.nationality, 'nationality'),
-    ...optionalString(result, 'birthplace'),
-    ...optionalString(result, 'address'),
-  }
-}
-
-function parseOcrBack(payload: unknown): EkycOcrBackResult {
-  const result = getRootRecord(payload, 'result')
-  const data = isRecord(result.data) ? result.data : undefined
-  const normalizedData = data
-    ? {
-        ...renameOptionalString(data, 'address', 'address'),
-        ...renameOptionalString(data, 'issue_date', 'issueDate'),
-        ...renameOptionalString(data, 'init_date', 'issueDate'),
-        ...renameOptionalString(data, 'expiry_date', 'expiryDate'),
-        ...renameOptionalString(data, 'place_of_birth', 'placeOfBirth'),
-      }
-    : undefined
-  return {
-    success: readBoolean(result.success, 'success'),
-    ...optionalString(result, 'version'),
-    ...(normalizedData ? { data: normalizedData } : {}),
-  }
-}
-
 function parseBiometric(payload: unknown): EkycBiometricResult {
   const results = getRootRecord(payload, 'results')
   const isSuccess = results.success !== false
@@ -317,15 +269,6 @@ function optionalString(
 ): Record<string, string> {
   const value = record[field]
   return typeof value === 'string' ? { [field]: value } : {}
-}
-
-function renameOptionalString(
-  record: JsonRecord,
-  source: string,
-  target: string
-): Record<string, string> {
-  const value = record[source]
-  return typeof value === 'string' ? { [target]: value } : {}
 }
 
 function optionalNumber(
