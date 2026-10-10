@@ -2,8 +2,10 @@ import {
   BadGatewayException,
   BadRequestException,
   Injectable,
+  Logger,
 } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
+import { v2 as cloudinary } from 'cloudinary'
 import {
   createCipheriv,
   createDecipheriv,
@@ -24,14 +26,20 @@ export interface KycMediaContent {
 
 const MEDIA_REFERENCE_PATTERN =
   /^kyc-media:([a-f\d]{24}):(front-card|back-card|selfie):([a-f\d-]{36})$/i
+const CLOUD_REFERENCE_PATTERN =
+  /^kyc-cloud:([a-f\d]{24}):(front-card|back-card|selfie):([a-f\d-]{36})$/i
+const CLOUDINARY_KYC_FOLDER = 'kyc'
+const CLOUDINARY_READ_TIMEOUT_MS = 15_000
 const ENVELOPE_VERSION = 1
 const IV_BYTES = 12
 const AUTH_TAG_BYTES = 16
 
 @Injectable()
 export class KycMediaService {
+  private readonly logger = new Logger(KycMediaService.name)
   private readonly encryptionKey: Buffer
   private readonly storageRoot: string
+  private readonly cloudinaryConfig: CloudinaryCredentials | null
 
   constructor(configService: ConfigService) {
     const keyHex = configService.getOrThrow<string>('kyc.mediaEncryptionKey')
@@ -45,6 +53,11 @@ export class KycMediaService {
       process.cwd(),
       configService.getOrThrow<string>('kyc.privateMediaDir')
     )
+    const cloudName = configService.get<string>('cloudinary.cloudName')
+    const apiKey = configService.get<string>('cloudinary.apiKey')
+    const apiSecret = configService.get<string>('cloudinary.apiSecret')
+    this.cloudinaryConfig =
+      cloudName && apiKey && apiSecret ? { cloudName, apiKey, apiSecret } : null
   }
 
   async store(
@@ -54,7 +67,19 @@ export class KycMediaService {
   ): Promise<string> {
     validateUserId(userId)
     validateKycImage(file)
-    const reference = `kyc-media:${userId}:${kind}:${randomUUID()}`
+    const id = randomUUID()
+    if (this.cloudinaryConfig) {
+      try {
+        await this.uploadToCloudinary(userId, kind, id, file)
+        return `kyc-cloud:${userId}:${kind}:${id}`
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        this.logger.warn(
+          `Cloudinary upload failed, storing locally: ${message}`
+        )
+      }
+    }
+    const reference = `kyc-media:${userId}:${kind}:${id}`
     const target = this.resolveReference(reference)
     await fs.mkdir(path.dirname(target), { recursive: true })
     await fs.writeFile(target, encrypt(file, this.encryptionKey))
@@ -62,6 +87,9 @@ export class KycMediaService {
   }
 
   async read(reference: string): Promise<KycMediaContent> {
+    if (reference.startsWith('kyc-cloud:')) {
+      return this.readFromCloudinary(reference)
+    }
     if (reference.startsWith('kyc-media:')) {
       const encrypted = await fs.readFile(this.resolveReference(reference))
       return decrypt(Buffer.from(encrypted), this.encryptionKey)
@@ -71,6 +99,10 @@ export class KycMediaService {
   }
 
   async remove(reference: string): Promise<void> {
+    if (reference.startsWith('kyc-cloud:')) {
+      await this.removeFromCloudinary(reference)
+      return
+    }
     if (!reference.startsWith('kyc-media:')) return
     await fs.rm(this.resolveReference(reference), { force: true })
   }
@@ -94,6 +126,96 @@ export class KycMediaService {
     }
   }
 
+  /** Private (authenticated) upload: the image has no public URL and needs a signed one to be read. */
+  private async uploadToCloudinary(
+    userId: string,
+    kind: KycMediaKind,
+    id: string,
+    file: Express.Multer.File
+  ): Promise<void> {
+    this.configureCloudinary()
+    await new Promise<void>((resolve, reject) => {
+      const stream = cloudinary.uploader.upload_stream(
+        {
+          public_id: cloudinaryPublicId(userId, kind, id),
+          type: 'authenticated',
+          resource_type: 'image',
+          overwrite: false,
+        },
+        (error, result) => {
+          if (error || !result) {
+            reject(new Error(error?.message ?? 'empty upload result'))
+          } else {
+            resolve()
+          }
+        }
+      )
+      stream.end(file.buffer)
+    })
+  }
+
+  private async readFromCloudinary(
+    reference: string
+  ): Promise<KycMediaContent> {
+    this.configureCloudinary()
+    const url = cloudinary.url(this.resolveCloudPublicId(reference), {
+      resource_type: 'image',
+      type: 'authenticated',
+      sign_url: true,
+      secure: true,
+    })
+    let response: Response
+    try {
+      response = await fetch(url, {
+        signal: AbortSignal.timeout(CLOUDINARY_READ_TIMEOUT_MS),
+      })
+    } catch {
+      throw new BadGatewayException('Không thể đọc ảnh KYC đã lưu')
+    }
+    if (!response.ok) {
+      throw new BadGatewayException('Không thể đọc ảnh KYC đã lưu')
+    }
+    const mimetype = response.headers.get('content-type')?.split(';')[0]
+    if (mimetype !== 'image/jpeg' && mimetype !== 'image/png') {
+      throw new BadGatewayException('Định dạng ảnh KYC đã lưu không hợp lệ')
+    }
+    return { buffer: Buffer.from(await response.arrayBuffer()), mimetype }
+  }
+
+  private async removeFromCloudinary(reference: string): Promise<void> {
+    this.configureCloudinary()
+    try {
+      await cloudinary.uploader.destroy(this.resolveCloudPublicId(reference), {
+        type: 'authenticated',
+        resource_type: 'image',
+        invalidate: true,
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      this.logger.warn(`Cloudinary delete failed: ${message}`)
+    }
+  }
+
+  private configureCloudinary(): void {
+    if (!this.cloudinaryConfig) {
+      throw new BadGatewayException('Chưa cấu hình lưu trữ ảnh KYC trên cloud')
+    }
+    cloudinary.config({
+      cloud_name: this.cloudinaryConfig.cloudName,
+      api_key: this.cloudinaryConfig.apiKey,
+      api_secret: this.cloudinaryConfig.apiSecret,
+      secure: true,
+    })
+  }
+
+  private resolveCloudPublicId(reference: string): string {
+    const match = CLOUD_REFERENCE_PATTERN.exec(reference)
+    if (!match?.[1] || !match[2] || !match[3]) {
+      throw new BadRequestException('Tham chiếu ảnh KYC không hợp lệ')
+    }
+    return cloudinaryPublicId(match[1], match[2] as KycMediaKind, match[3])
+  }
+
   private resolveReference(reference: string): string {
     const match = MEDIA_REFERENCE_PATTERN.exec(reference)
     if (!match?.[1] || !match[2] || !match[3]) {
@@ -101,6 +223,20 @@ export class KycMediaService {
     }
     return path.join(this.storageRoot, match[1], `${match[2]}-${match[3]}.bin`)
   }
+}
+
+interface CloudinaryCredentials {
+  readonly cloudName: string
+  readonly apiKey: string
+  readonly apiSecret: string
+}
+
+function cloudinaryPublicId(
+  userId: string,
+  kind: KycMediaKind,
+  id: string
+): string {
+  return `${CLOUDINARY_KYC_FOLDER}/${userId}/${kind}-${id}`
 }
 
 function encrypt(file: Express.Multer.File, key: Buffer): Buffer {
