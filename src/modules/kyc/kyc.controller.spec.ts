@@ -3,6 +3,7 @@ import { BadRequestException } from '@nestjs/common'
 import { BiometricGrantService } from './biometric-grant.service'
 import { KycController } from './kyc.controller'
 import type { EkycProxyService } from './ekyc-proxy.service'
+import type { GroqCccdOcrService } from './groq-cccd-ocr.service'
 import type { KycService } from './kyc.service'
 
 function createImage(fieldname: string): Express.Multer.File {
@@ -26,9 +27,11 @@ describe('KycController eKYC boundaries', () => {
     findMine: jest.fn(),
     readMedia: jest.fn(),
   }
-  const proxy = {
+  const groqOcr = {
     ocrFront: jest.fn(),
     ocrBack: jest.fn(),
+  }
+  const proxy = {
     verifyFace: jest.fn(),
     verifyFaceMatch: jest.fn(),
     detectOrientation: jest.fn(),
@@ -42,7 +45,8 @@ describe('KycController eKYC boundaries', () => {
     controller = new KycController(
       kycService as unknown as KycService,
       proxy as unknown as EkycProxyService,
-      grants
+      grants,
+      groqOcr as unknown as GroqCccdOcrService
     )
   })
 
@@ -50,7 +54,7 @@ describe('KycController eKYC boundaries', () => {
     await expect(controller.ocrFront(undefined)).rejects.toBeInstanceOf(
       BadRequestException
     )
-    expect(proxy.ocrFront).not.toHaveBeenCalled()
+    expect(groqOcr.ocrFront).not.toHaveBeenCalled()
   })
 
   it('rejects spoofed image bytes before proxying', async () => {
@@ -61,7 +65,7 @@ describe('KycController eKYC boundaries', () => {
     await expect(controller.ocrFront(invalid)).rejects.toBeInstanceOf(
       BadRequestException
     )
-    expect(proxy.ocrFront).not.toHaveBeenCalled()
+    expect(groqOcr.ocrFront).not.toHaveBeenCalled()
   })
 
   it('creates a user-scoped grant after successful verification', async () => {

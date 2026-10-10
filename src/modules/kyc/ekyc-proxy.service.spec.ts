@@ -59,50 +59,6 @@ describe('EkycProxyService', () => {
     jest.clearAllMocks()
   })
 
-  it('normalizes a valid front OCR response', async () => {
-    fetchMock.mockResolvedValue(
-      jsonResponse({
-        result: {
-          idNumber: '079123456789',
-          fullName: 'NGUYEN VAN A',
-          dob: '01/01/2000',
-          gender: 'Nam',
-          nationality: 'Viet Nam',
-          birthplace: 'TP HCM',
-          address: 'TP HCM',
-        },
-      })
-    )
-
-    const result = await createService().ocrFront(createFile())
-
-    expect(result.idNumber).toBe('079123456789')
-    expect(fetchMock).toHaveBeenCalledWith(
-      `${SERVICE_URL}/api/ekyc/frontID`,
-      expect.objectContaining({ method: 'POST' })
-    )
-  })
-
-  it('normalizes a front OCR response wrapped by an API envelope', async () => {
-    fetchMock.mockResolvedValue(
-      jsonResponse({
-        payload: {
-          result: {
-            idNumber: '079123456789',
-            fullName: 'NGUYEN VAN A',
-            dob: '01/01/2000',
-            gender: 'Nam',
-            nationality: 'Viet Nam',
-          },
-        },
-      })
-    )
-
-    const result = await createService().ocrFront(createFile())
-
-    expect(result.idNumber).toBe('079123456789')
-  })
-
   it('normalizes a valid biometric response without inventing an OCR score', async () => {
     fetchMock.mockResolvedValue(
       jsonResponse({
@@ -212,17 +168,9 @@ describe('EkycProxyService', () => {
   it('fails closed when upstream returns a non-success status', async () => {
     fetchMock.mockResolvedValue(jsonResponse({ error: 'internal path' }, 503))
 
-    await expect(createService().ocrBack(createFile())).rejects.toBeInstanceOf(
-      BadGatewayException
-    )
-  })
-
-  it('fails closed when upstream returns malformed OCR data', async () => {
-    fetchMock.mockResolvedValue(jsonResponse({ result: { fullName: 42 } }))
-
-    await expect(createService().ocrFront(createFile())).rejects.toBeInstanceOf(
-      BadGatewayException
-    )
+    await expect(
+      createService().verifyFace(createFile(), createFile())
+    ).rejects.toBeInstanceOf(BadGatewayException)
   })
 
   it('maps an aborted upstream request to a gateway timeout', async () => {

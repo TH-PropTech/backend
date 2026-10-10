@@ -6,6 +6,7 @@ import { User } from '../users/schemas/user.schema'
 import { KycService } from './kyc.service'
 import { KycController } from './kyc.controller'
 import { EkycProxyService } from './ekyc-proxy.service'
+import { GroqCccdOcrService } from './groq-cccd-ocr.service'
 import { BiometricGrantService } from './biometric-grant.service'
 import { BiometricEvidenceService } from './biometric-evidence.service'
 import { KycMediaService } from './kyc-media.service'
@@ -15,6 +16,7 @@ import { KycMediaService } from './kyc-media.service'
   providers: [
     KycService,
     EkycProxyService,
+    GroqCccdOcrService,
     BiometricGrantService,
     BiometricEvidenceService,
     KycMediaService,

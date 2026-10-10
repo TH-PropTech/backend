@@ -18,6 +18,7 @@ import {
   FileInterceptor,
   FileFieldsInterceptor,
 } from '@nestjs/platform-express'
+import { GroqCccdOcrService } from './groq-cccd-ocr.service'
 import { KycService, KycListResult, KycSelfResult } from './kyc.service'
 import {
   EkycProxyService,
@@ -47,12 +48,13 @@ export class KycController {
   constructor(
     private readonly kycService: KycService,
     private readonly ekycProxyService: EkycProxyService,
-    private readonly biometricGrantService: BiometricGrantService
+    private readonly biometricGrantService: BiometricGrantService,
+    private readonly groqCccdOcr: GroqCccdOcrService
   ) {}
 
   /**
    * POST /api/v1/kyc/ocr-front
-   * Nhận ảnh mặt trước CCCD từ client, proxy sang eKYC Python OCR, trả về kết quả
+   * Nhận ảnh mặt trước CCCD từ client, đọc thông tin in trên thẻ bằng Groq vision
    */
   @Post('ocr-front')
   @ApiConsumes('multipart/form-data')
@@ -64,12 +66,12 @@ export class KycController {
   ): Promise<EkycOcrFrontResult> {
     if (!file) throw new BadRequestException('Thiếu file frontID')
     validateKycImage(file)
-    return this.ekycProxyService.ocrFront(file)
+    return this.groqCccdOcr.ocrFront(file)
   }
 
   /**
    * POST /api/v1/kyc/ocr-back
-   * Nhận ảnh mặt sau CCCD từ client, proxy sang eKYC Python OCR, trả về kết quả
+   * Nhận ảnh mặt sau CCCD từ client, đọc thông tin in trên thẻ bằng Groq vision
    */
   @Post('ocr-back')
   @ApiConsumes('multipart/form-data')
@@ -81,7 +83,7 @@ export class KycController {
   ): Promise<EkycOcrBackResult> {
     if (!file) throw new BadRequestException('Thiếu file backID')
     validateKycImage(file)
-    return this.ekycProxyService.ocrBack(file)
+    return this.groqCccdOcr.ocrBack(file)
   }
 
   @Post('face-orientation')
