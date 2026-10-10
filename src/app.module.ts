@@ -52,6 +52,7 @@ import { PropertyOwnershipTransferModule } from './modules/property-ownership-tr
 import { PlatformFeesModule } from './modules/platform-fees/platform-fees.module'
 import { PayoutsModule } from './modules/payouts/payouts.module'
 import { RentalTransactionsModule } from './modules/rental-transactions/rental-transactions.module'
+import { LegalKnowledgeModule } from './modules/legal-knowledge/legal-knowledge.module'
 
 @Module({
   imports: [
@@ -128,6 +129,7 @@ import { RentalTransactionsModule } from './modules/rental-transactions/rental-t
     PlatformFeesModule,
     PayoutsModule,
     RentalTransactionsModule,
+    LegalKnowledgeModule,
   ],
 })
 export class AppModule {}
