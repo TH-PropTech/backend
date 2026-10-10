@@ -119,6 +119,25 @@ export class GroqAgentService {
           },
         },
       },
+      {
+        type: 'function',
+        function: {
+          name: 'search_legal_knowledge',
+          description:
+            'Tra cứu kho tri thức pháp lý và quy định (luật, nghị định, thông tư, quy định thuê nhà, nội quy nền tảng) đã được quản trị viên xuất bản. Chỉ trả về các đoạn nội dung từ văn bản đã xuất bản.',
+          parameters: {
+            type: 'object',
+            properties: {
+              query: {
+                type: 'string',
+                description:
+                  'Câu hỏi pháp lý của người dùng, được diễn đạt lại bằng các từ khóa chính (ví dụ: "đặt cọc thuê nhà tối đa bao nhiêu tháng", "chấm dứt hợp đồng thuê trước hạn").',
+              },
+            },
+            required: ['query'],
+          },
+        },
+      },
     ]
   }
 
@@ -168,7 +187,14 @@ Quy tắc quan trọng về luồng xử lý (BẮT BUỘC TUÂN THỦ TỪNG B�
 4. Khác:
    - TUYỆT ĐỐI KHÔNG hiển thị mã định danh kỹ thuật (ID căn hộ / MongoDB ObjectId) trong văn bản gửi cho khách hàng.
    - Nếu khách hàng hỏi quy trình, điều khoản hay FAQ chung chung, giải thích rõ bằng văn bản và không gọi bất kỳ tool nào.
-   - Trả lời ngắn gọn, lịch sự, trực diện, không dài dòng.`
+   - Trả lời ngắn gọn, lịch sự, trực diện, không dài dòng.
+
+TRI THỨC PHÁP LÝ / QUY ĐỊNH:
+- Khi khách hỏi về luật, quy định, nghị định, thông tư, quy định thuê nhà, tiền đặt cọc, chấm dứt hợp đồng, quyền và nghĩa vụ của bên thuê hoặc bên cho thuê, tính hợp pháp, thủ tục, hoặc nội quy của nền tảng, BẮT BUỘC gọi tool \`search_legal_knowledge\` với tham số query là câu hỏi đã diễn đạt lại bằng các từ khóa chính.
+- KHÔNG gọi \`search_legal_knowledge\` cùng lượt với \`search_apartments\`, \`request_booking\` hoặc \`create_booking_draft\`.
+- Chỉ trả lời DỰA TRÊN các đoạn nội dung mà tool trả về. Khi trích dẫn, ghi nguồn theo mẫu "Theo <tên văn bản>, <điều/mục>". TUYỆT ĐỐI KHÔNG tự bịa số điều, tên văn bản, mức phí, thời hạn hay nội dung không có trong kết quả tool.
+- Nếu tool báo không tìm thấy nội dung phù hợp: BẮT ĐẦU câu trả lời đúng bằng cụm "Hiện chưa có dữ liệu" (ví dụ: "Hiện chưa có dữ liệu về vấn đề này trong kho tri thức"), rồi gợi ý khách hàng tham khảo luật sư hoặc cổng thông tin chính thức của cơ quan có thẩm quyền. Trong trường hợp này TUYỆT ĐỐI KHÔNG nêu tên bất kỳ luật, nghị định, thông tư, số hiệu hay số điều cụ thể nào từ kiến thức riêng của bạn (kể cả làm ví dụ hoặc gợi ý tra cứu).
+- Với mọi câu trả lời pháp lý, kết thúc bằng một câu ngắn: nội dung chỉ mang tính tham khảo, không thay thế tư vấn pháp lý chuyên nghiệp.`
 
     // Safe sliding window: keep up to 5 user turns (including their subsequent tool calls & assistant replies)
     // to optimize token usage and avoid context dilution, while preserving tool calling structure.

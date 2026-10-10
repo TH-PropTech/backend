@@ -83,6 +83,7 @@ export const configuration = (): {
   }
   groq: {
     apiKeys: string[]
+    keyEncryptionSecret: string
   }
   ekyc: {
     serviceUrl: string
@@ -184,6 +185,7 @@ export const configuration = (): {
           .filter(Boolean)
       ),
     ],
+    keyEncryptionSecret: process.env.GROQ_KEY_ENCRYPTION_SECRET ?? '',
   },
   ekyc: {
     serviceUrl: process.env.EKYC_SERVICE_URL ?? '',

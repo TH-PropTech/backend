@@ -175,6 +175,8 @@ export const envValidationSchema = Joi.object({
   REDIS_URL: Joi.string().default('redis://localhost:6379'),
   GROQ_API_KEY: Joi.string().allow('').optional(),
   GROQ_API_KEYS: Joi.string().allow('').optional(),
+  // Length (>= 32) is checked by GroqKeysService, which is disabled while empty.
+  GROQ_KEY_ENCRYPTION_SECRET: Joi.string().allow('').optional(),
   RECOMMENDATION_API_URL: Joi.string().allow('').optional(),
   EKYC_SERVICE_URL: Joi.string()
     .uri({ scheme: ['http', 'https'] })

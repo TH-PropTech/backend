@@ -10,7 +10,7 @@ import { ConfigService } from '@nestjs/config'
 import { ModuleRef } from '@nestjs/core'
 import { InjectRepository } from '@nestjs/typeorm'
 import { ObjectId } from 'mongodb'
-import { Repository } from 'typeorm'
+import { FindOptionsWhere, Repository } from 'typeorm'
 import { Contract } from '../contracts/schemas/contract.schema'
 import { DepositAgreement } from '../contracts/schemas/deposit-agreement.schema'
 import { RentalApplication } from '../rental-applications/schemas/rental-application.schema'
@@ -258,11 +258,10 @@ export class RentalTransactionsService {
     }
 
     const deposits = await this.depositRepository.find({
-      where: [
-        { status: 'payment-pending' },
-        { status: 'accepted' },
-        { status: 'draft' },
-      ],
+      // TypeORM's Mongo driver rejects array `where`; use $in instead.
+      where: {
+        status: { $in: ['payment-pending', 'accepted', 'draft'] },
+      } as unknown as FindOptionsWhere<DepositAgreement>,
     })
     for (const deposit of deposits) {
       const ageMinutes = this.ageMinutes(deposit.updatedAt, now)
@@ -287,7 +286,9 @@ export class RentalTransactionsService {
     }
 
     const contracts = await this.contractRepository.find({
-      where: [{ status: 'fully-signed-pending-deposit' }, { status: 'active' }],
+      where: {
+        status: { $in: ['fully-signed-pending-deposit', 'active'] },
+      } as unknown as FindOptionsWhere<Contract>,
     })
     for (const contract of contracts) {
       if (

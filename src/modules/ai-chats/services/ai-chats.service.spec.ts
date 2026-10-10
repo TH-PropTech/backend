@@ -1,15 +1,17 @@
 import { Test, TestingModule } from '@nestjs/testing'
 import { getRepositoryToken } from '@nestjs/typeorm'
 import { AiChatsService } from './ai-chats.service'
-import { GroqAgentService } from './groq-agent.service'
+import { GroqAgentService, ToolCall } from './groq-agent.service'
 import { ApartmentsService } from '../../apartments/apartments.service'
 import { BookingsService } from '../../bookings/bookings.service'
 import { User } from '../../users/schemas/user.schema'
 import { RedisService } from '../../redis/redis.service'
 import { ObjectId } from 'mongodb'
+import { LEGAL_KNOWLEDGE_SEARCH } from '../../legal-knowledge/legal-knowledge.types'
 
 describe('AiChatsService', () => {
   let service: AiChatsService
+  let legalSearch: { search: jest.Mock }
   let groqAgentService: {
     chat: jest.Mock
   }
@@ -66,6 +68,9 @@ describe('AiChatsService', () => {
       set: jest.fn().mockResolvedValue('OK'),
       del: jest.fn().mockResolvedValue(1),
     }
+    legalSearch = {
+      search: jest.fn().mockResolvedValue([]),
+    }
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -75,6 +80,7 @@ describe('AiChatsService', () => {
         { provide: BookingsService, useValue: bookingsService },
         { provide: getRepositoryToken(User), useValue: userRepo },
         { provide: RedisService, useValue: redisService },
+        { provide: LEGAL_KNOWLEDGE_SEARCH, useValue: legalSearch },
       ],
     }).compile()
 
@@ -257,6 +263,193 @@ describe('AiChatsService', () => {
 
       expect(result.content).toContain('Bạn muốn đặt lịch xem căn hộ nào ạ?')
       expect(result.metadata?.bookingRequest).toBeUndefined()
+    })
+  })
+
+  describe('search_legal_knowledge tool', () => {
+    const getSecondCallMessages = (): Array<{
+      role: string
+      content: string
+      tool_call_id?: string
+    }> =>
+      (groqAgentService.chat.mock.calls as unknown[][])[1]?.[0] as Array<{
+        role: string
+        content: string
+        tool_call_id?: string
+      }>
+
+    const legalToolCall = (
+      query: unknown
+    ): { content: null; toolCalls: ToolCall[] } => ({
+      content: null,
+      toolCalls: [
+        {
+          id: 'call_legal',
+          type: 'function' as const,
+          function: {
+            name: 'search_legal_knowledge',
+            arguments: { query },
+          },
+        },
+      ],
+    })
+
+    const sampleHits = [
+      {
+        docId: 'doc1',
+        title: 'Bộ luật Dân sự 2015',
+        docNumber: '91/2015/QH13',
+        issuer: 'Quốc hội',
+        heading: 'Điều 472. Hợp đồng thuê tài sản',
+        text: 'Bên thuê phải trả tiền thuê đúng thời hạn đã thỏa thuận.',
+        score: 3.2,
+        sourceUrl: 'https://thuvienphapluat.vn/van-ban/bo-luat-dan-su',
+      },
+      {
+        docId: 'doc2',
+        title: 'Quy định nội bộ nền tảng',
+        heading: 'Mục 2. Đặt cọc',
+        text: 'Tiền đặt cọc không vượt quá 2 tháng tiền thuê.',
+        score: 2.1,
+      },
+    ]
+
+    it('Bỏ legalCitations khi câu trả lời mở đầu bằng "Hiện chưa có dữ liệu"', async () => {
+      legalSearch.search.mockResolvedValueOnce(sampleHits)
+      groqAgentService.chat
+        .mockResolvedValueOnce(legalToolCall('thuế thu nhập cá nhân'))
+        .mockResolvedValueOnce({
+          content:
+            'Hiện chưa có dữ liệu về vấn đề này trong kho tri thức. Bạn nên hỏi luật sư.',
+        })
+
+      const result = await service.handleUserMessage(
+        { deviceId: 'device-legal-nodata' },
+        'Thuế thu nhập cá nhân tính thế nào?'
+      )
+
+      expect(result.metadata?.legalCitations).toBeUndefined()
+    })
+
+    it('Thực thi tool, đưa nội dung đánh số vào LLM và gắn legalCitations vào metadata', async () => {
+      legalSearch.search.mockResolvedValueOnce(sampleHits)
+      groqAgentService.chat
+        .mockResolvedValueOnce(
+          legalToolCall('đặt cọc thuê nhà tối đa bao nhiêu')
+        )
+        .mockResolvedValueOnce({
+          content:
+            'Theo Quy định nội bộ nền tảng, Mục 2. Đặt cọc, tiền đặt cọc không vượt quá 2 tháng tiền thuê. Nội dung chỉ mang tính tham khảo, không thay thế tư vấn pháp lý chuyên nghiệp.',
+        })
+
+      const result = await service.handleUserMessage(
+        { deviceId: 'device-legal-1' },
+        'Tiền đặt cọc thuê nhà tối đa bao nhiêu?',
+        jest.fn()
+      )
+
+      expect(legalSearch.search).toHaveBeenCalledWith(
+        'đặt cọc thuê nhà tối đa bao nhiêu',
+        4
+      )
+      const secondCallMessages = getSecondCallMessages()
+      const toolMessage = secondCallMessages[secondCallMessages.length - 1]
+      expect(toolMessage?.role).toBe('tool')
+      expect(toolMessage?.tool_call_id).toBe('call_legal')
+      expect(toolMessage?.content).toContain('[1] Văn bản: Bộ luật Dân sự 2015')
+      expect(toolMessage?.content).toContain('Số hiệu: 91/2015/QH13')
+      expect(toolMessage?.content).toContain(
+        'Điều/mục: Điều 472. Hợp đồng thuê tài sản'
+      )
+      expect(toolMessage?.content).toContain(
+        '[2] Văn bản: Quy định nội bộ nền tảng'
+      )
+      expect(toolMessage?.content).toContain(
+        'Nguồn: https://thuvienphapluat.vn/van-ban/bo-luat-dan-su'
+      )
+
+      expect(result.metadata?.legalCitations).toEqual([
+        {
+          title: 'Bộ luật Dân sự 2015',
+          heading: 'Điều 472. Hợp đồng thuê tài sản',
+          url: 'https://thuvienphapluat.vn/van-ban/bo-luat-dan-su',
+        },
+        {
+          title: 'Quy định nội bộ nền tảng',
+          heading: 'Mục 2. Đặt cọc',
+        },
+      ])
+      expect(result.metadata?.propertyCards).toBeUndefined()
+      expect(result.metadata?.bookingRequest).toBeUndefined()
+    })
+
+    it('Không có kết quả: trả thông báo không tìm thấy và không gắn citation', async () => {
+      legalSearch.search.mockResolvedValueOnce([])
+      groqAgentService.chat
+        .mockResolvedValueOnce(legalToolCall('luật vũ trụ'))
+        .mockResolvedValueOnce({
+          content: 'Hiện chưa có dữ liệu về vấn đề này.',
+        })
+
+      const result = await service.handleUserMessage(
+        { deviceId: 'device-legal-2' },
+        'Luật vũ trụ quy định gì?',
+        jest.fn()
+      )
+
+      const secondCallMessages = getSecondCallMessages()
+      expect(secondCallMessages[secondCallMessages.length - 1]?.content).toBe(
+        'Không tìm thấy nội dung phù hợp trong kho tri thức pháp lý.'
+      )
+      expect(result.metadata?.legalCitations).toBeUndefined()
+      expect(result.content).toBe('Hiện chưa có dữ liệu về vấn đề này.')
+    })
+
+    it('Lỗi khi tìm kiếm: không làm hỏng luồng chat và trả thông báo không tìm thấy', async () => {
+      legalSearch.search.mockRejectedValueOnce(new Error('index down'))
+      groqAgentService.chat
+        .mockResolvedValueOnce(legalToolCall('đặt cọc'))
+        .mockResolvedValueOnce({ content: 'Xin thử lại sau.' })
+
+      const result = await service.handleUserMessage(
+        { deviceId: 'device-legal-3' },
+        'Đặt cọc thế nào?',
+        jest.fn()
+      )
+
+      expect(result.content).toBe('Xin thử lại sau.')
+      expect(result.metadata?.legalCitations).toBeUndefined()
+    })
+
+    it('Thiếu searcher (module chưa đăng ký): trả thông báo không tìm thấy, không gọi search', async () => {
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          AiChatsService,
+          { provide: GroqAgentService, useValue: groqAgentService },
+          { provide: ApartmentsService, useValue: apartmentsService },
+          { provide: BookingsService, useValue: bookingsService },
+          { provide: getRepositoryToken(User), useValue: userRepo },
+          { provide: RedisService, useValue: redisService },
+        ],
+      }).compile()
+      const serviceWithoutSearch = module.get<AiChatsService>(AiChatsService)
+
+      groqAgentService.chat
+        .mockResolvedValueOnce(legalToolCall('đặt cọc'))
+        .mockResolvedValueOnce({ content: 'Hiện chưa có dữ liệu.' })
+
+      const result = await serviceWithoutSearch.handleUserMessage(
+        { deviceId: 'device-legal-4' },
+        'Đặt cọc thế nào?',
+        jest.fn()
+      )
+
+      expect(legalSearch.search).not.toHaveBeenCalled()
+      const secondCallMessages = getSecondCallMessages()
+      expect(secondCallMessages[secondCallMessages.length - 1]?.content).toBe(
+        'Không tìm thấy nội dung phù hợp trong kho tri thức pháp lý.'
+      )
+      expect(result.metadata?.legalCitations).toBeUndefined()
     })
   })
 })
