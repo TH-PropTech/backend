@@ -1,7 +1,13 @@
-import { Injectable, Logger } from '@nestjs/common'
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 import { AiChat, ChatMessage } from '../schemas/ai-chat.schema'
+import {
+  LEGAL_KNOWLEDGE_SEARCH,
+  LegalCitation,
+  LegalKnowledgeSearcher,
+  LegalSearchHit,
+} from '../../legal-knowledge/legal-knowledge.types'
 import {
   GroqAgentService,
   ChatMessage as LLMChatMessage,
@@ -27,6 +33,17 @@ interface CreateBookingDraftArgs {
   tenantPhone?: string
 }
 
+interface SearchLegalKnowledgeArgs {
+  query?: unknown
+}
+
+const LEGAL_SEARCH_LIMIT = 4
+const LEGAL_RESULT_MAX_CHARS = 4000
+/** The prompt tells the model to open with this phrase when the knowledge base has no answer. */
+const LEGAL_NO_DATA_PATTERN = /^\s*(?:\*\*)?\s*hiện chưa có dữ liệu/i
+const LEGAL_NOT_FOUND_MESSAGE =
+  'Không tìm thấy nội dung phù hợp trong kho tri thức pháp lý.'
+
 @Injectable()
 export class AiChatsService {
   private readonly logger = new Logger(AiChatsService.name)
@@ -37,8 +54,60 @@ export class AiChatsService {
     private readonly userRepository: Repository<User>,
     private readonly groqAgentService: GroqAgentService,
     private readonly apartmentsService: ApartmentsService,
-    private readonly bookingsService: BookingsService
+    private readonly bookingsService: BookingsService,
+    @Optional()
+    @Inject(LEGAL_KNOWLEDGE_SEARCH)
+    private readonly legalSearch?: LegalKnowledgeSearcher
   ) {}
+
+  /** Numbered excerpts for the LLM tool result (total capped at LEGAL_RESULT_MAX_CHARS). */
+  private formatLegalHits(hits: LegalSearchHit[]): string {
+    const lines: string[] = [
+      `Tìm thấy ${hits.length} đoạn nội dung pháp lý liên quan trong kho tri thức (chỉ trả lời dựa trên các đoạn này):`,
+    ]
+    let total = lines[0]?.length ?? 0
+    hits.forEach((hit, index) => {
+      const head = [
+        `[${index + 1}] Văn bản: ${hit.title}`,
+        hit.docNumber ? `Số hiệu: ${hit.docNumber}` : '',
+        hit.issuer ? `Cơ quan ban hành: ${hit.issuer}` : '',
+        hit.heading ? `Điều/mục: ${hit.heading}` : '',
+      ]
+        .filter(Boolean)
+        .join('\n')
+      const block = `${head}\nNội dung: ${hit.text}${
+        hit.sourceUrl ? `\nNguồn: ${hit.sourceUrl}` : ''
+      }`
+      if (total + block.length + 1 > LEGAL_RESULT_MAX_CHARS) return
+      lines.push(block)
+      total += block.length + 1
+    })
+    return lines.join('\n')
+  }
+
+  private toLegalCitations(hits: LegalSearchHit[]): LegalCitation[] {
+    return hits.map(hit => ({
+      title: hit.title,
+      ...(hit.heading ? { heading: hit.heading } : {}),
+      ...(hit.sourceUrl ? { url: hit.sourceUrl } : {}),
+    }))
+  }
+
+  /** Merge citations within one turn: dedupe by title + heading + url, keep at most 4. */
+  private mergeLegalCitations(
+    existing: LegalCitation[] | undefined,
+    incoming: LegalCitation[]
+  ): LegalCitation[] {
+    const merged: LegalCitation[] = [...(existing ?? [])]
+    for (const citation of incoming) {
+      const key = `${citation.title}|${citation.heading ?? ''}|${citation.url ?? ''}`
+      const exists = merged.some(
+        c => `${c.title}|${c.heading ?? ''}|${c.url ?? ''}` === key
+      )
+      if (!exists) merged.push(citation)
+    }
+    return merged.slice(0, LEGAL_SEARCH_LIMIT)
+  }
 
   private formatPhoneNumber(phone?: string): string {
     if (!phone) return ''
@@ -220,7 +289,7 @@ export class AiChatsService {
   async handleUserMessage(
     sessionKey: { userId?: string; deviceId?: string },
     text: string,
-    onChunk: (text: string) => void
+    onChunk?: (text: string) => void
   ): Promise<{ content: string; metadata?: ChatMessage['metadata'] }> {
     // 1. Add user message to history
     await this.addMessage(sessionKey, 'user', text)
@@ -457,6 +526,36 @@ export class AiChatsService {
             toolResultContent = `Lỗi hệ thống khi tìm căn hộ: ${errMsg}`
           }
         }
+      } else if (toolCall.function.name === 'search_legal_knowledge') {
+        const args = toolCall.function.arguments as SearchLegalKnowledgeArgs
+        const query = typeof args?.query === 'string' ? args.query.trim() : ''
+
+        if (!this.legalSearch || !query) {
+          toolResultContent = LEGAL_NOT_FOUND_MESSAGE
+        } else {
+          try {
+            const hits = await this.legalSearch.search(
+              query,
+              LEGAL_SEARCH_LIMIT
+            )
+            if (hits.length === 0) {
+              toolResultContent = LEGAL_NOT_FOUND_MESSAGE
+            } else {
+              toolResultContent = this.formatLegalHits(hits)
+              metadata = {
+                ...(metadata || {}),
+                legalCitations: this.mergeLegalCitations(
+                  metadata?.legalCitations,
+                  this.toLegalCitations(hits)
+                ),
+              }
+            }
+          } catch (e) {
+            const errMsg = e instanceof Error ? e.message : String(e)
+            this.logger.error(`Legal knowledge search failed: ${errMsg}`)
+            toolResultContent = LEGAL_NOT_FOUND_MESSAGE
+          }
+        }
       }
 
       // Add tool output back to messages for LLM context
@@ -538,16 +637,25 @@ export class AiChatsService {
       }
     }
 
+    // Citations only make sense when the answer actually used the knowledge base.
+    if (metadata?.legalCitations && LEGAL_NO_DATA_PATTERN.test(finalAnswer)) {
+      const rest = { ...metadata }
+      delete rest.legalCitations
+      metadata = Object.keys(rest).length > 0 ? rest : undefined
+    }
+
     // 5. Save assistant reply to history
     await this.addMessage(sessionKey, 'assistant', finalAnswer, metadata)
 
-    // 6. Simulate streaming response to the client
-    const words = finalAnswer.split(' ')
-    let currentText = ''
-    for (let i = 0; i < words.length; i++) {
-      currentText += (i === 0 ? '' : ' ') + words[i]
-      onChunk(currentText)
-      await new Promise(resolve => setTimeout(resolve, 30)) // 30ms typing delay per word
+    // 6. Simulate streaming only when a consumer is listening (the HTTP API has none)
+    if (onChunk) {
+      const words = finalAnswer.split(' ')
+      let currentText = ''
+      for (let i = 0; i < words.length; i++) {
+        currentText += (i === 0 ? '' : ' ') + words[i]
+        onChunk(currentText)
+        await new Promise(resolve => setTimeout(resolve, 30)) // 30ms typing delay per word
+      }
     }
 
     return { content: finalAnswer, metadata }

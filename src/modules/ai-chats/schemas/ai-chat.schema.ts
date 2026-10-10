@@ -13,6 +13,8 @@ export interface BookingRequestMetadata {
   apartmentTitle: string
 }
 
+import type { LegalCitation } from '../../legal-knowledge/legal-knowledge.types'
+
 export interface ChatMessage {
   role: 'user' | 'assistant' | 'system' | 'tool'
   content: string
@@ -31,6 +33,7 @@ export interface ChatMessage {
     propertyCard?: PropertyCardMetadata
     propertyCards?: PropertyCardMetadata[]
     bookingRequest?: BookingRequestMetadata
+    legalCitations?: LegalCitation[]
   }
 }
 
