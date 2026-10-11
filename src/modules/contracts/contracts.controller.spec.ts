@@ -14,6 +14,23 @@ import type { SmartOtpService } from '../smart-otp/services/smart-otp.service'
 import type { SmartCaSigningService } from './smartca/smartca-signing.service'
 import type { DepositAgreementsService } from './deposit-agreements.service'
 
+function createBinaryResponse(): {
+  response: never
+  end: jest.Mock
+  headers: Record<string, string>
+} {
+  const headers: Record<string, string> = {}
+  const end = jest.fn()
+  const response = {
+    setHeader: jest.fn((name: string, value: string) => {
+      headers[name] = value
+    }),
+    status: jest.fn().mockReturnThis(),
+    end,
+  } as never
+  return { response, end, headers }
+}
+
 describe('ContractsController', () => {
   const service = {
     signContractForUser: jest.fn(),
@@ -272,7 +289,7 @@ describe('ContractsController', () => {
         _id: 'tenant-1',
         roles: ['tenant'],
       },
-      { setHeader: jest.fn() } as never
+      createBinaryResponse().response
     )
 
     expect(artifactService.generateDocumentWithMetadata).toHaveBeenCalledWith(
@@ -281,6 +298,27 @@ describe('ContractsController', () => {
       false,
       'docx'
     )
+  })
+
+  it('writes the artifact bytes straight to the response instead of returning them to the envelope interceptor', async () => {
+    const bytes = Buffer.from('%PDF-1.7 artifact')
+    artifactService.generateDocumentWithMetadata.mockResolvedValue({
+      bytes,
+      reference: { revision: 2, artifactHash: 'a'.repeat(64) },
+    })
+    const { response, end, headers } = createBinaryResponse()
+
+    const returned = await controller.downloadArtifact(
+      'contract-1',
+      'pdf',
+      { _id: 'tenant-1', roles: ['tenant'] },
+      response
+    )
+
+    expect(returned).toBeUndefined()
+    expect(end).toHaveBeenCalledWith(bytes)
+    expect(headers['Content-Type']).toBe('application/pdf')
+    expect(headers['Content-Length']).toBe(String(bytes.length))
   })
 
   it('requires a canonical PDF upload for the staff artifact-lock route', async () => {

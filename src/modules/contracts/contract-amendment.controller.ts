@@ -60,8 +60,9 @@ export class ContractAmendmentController {
     @Param('contractId') contractId: string,
     @Param('amendmentId') amendmentId: string,
     @CurrentUser() user: UserPayload,
-    @Res({ passthrough: true }) response: Response
-  ): Promise<Buffer> {
+    // Ghi byte trực tiếp để ResponseEnvelopeInterceptor không bọc file thành JSON.
+    @Res() response: Response
+  ): Promise<void> {
     const result = await this.amendmentService.resolveArtifact(
       contractId,
       amendmentId,
@@ -82,7 +83,8 @@ export class ContractAmendmentController {
       'Content-Disposition',
       `attachment; filename="amendment-${amendmentId}-r${result.revision}.pdf"`
     )
-    return result.bytes
+    response.setHeader('Content-Length', String(result.bytes.length))
+    response.status(200).end(result.bytes)
   }
 
   @Get(':amendmentId')

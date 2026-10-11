@@ -512,8 +512,10 @@ export class ContractsController {
     @Param('id') id: string,
     @Query('format') format: string | undefined,
     @CurrentUser() user: UserPayload,
-    @Res({ passthrough: true }) response: Response
-  ): Promise<Buffer> {
+    // Ghi byte trực tiếp: nếu trả Buffer qua handler, ResponseEnvelopeInterceptor sẽ bọc thành JSON
+    // và trình xem PDF/tải về nhận được JSON thay vì file.
+    @Res() response: Response
+  ): Promise<void> {
     const isStaff =
       user.roles?.some(role => ['staff', 'admin'].includes(role)) ?? false
     const resolved = await this.artifactService.generateDocumentWithMetadata(
@@ -543,7 +545,8 @@ export class ContractsController {
       'Content-Disposition',
       `attachment; filename="contract-${id}-r${resolved.reference.revision}.${safeFormat}"`
     )
-    return resolved.bytes
+    response.setHeader('Content-Length', String(resolved.bytes.length))
+    response.status(200).end(resolved.bytes)
   }
 
   @Post(':id/smartca/signing-sessions')
