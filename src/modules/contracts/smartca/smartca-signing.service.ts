@@ -19,6 +19,7 @@ import { ContractsService } from '../contracts.service'
 import { DepositConfirmationResolver } from '../deposit-confirmation.resolver'
 import { isDepositGateOpen } from '../flow/flow-guards'
 import { Contract } from '../schemas/contract.schema'
+import { SignedArtifactService } from '../signed-artifact/signed-artifact.service'
 import {
   isSigningMethodEnabled,
   resolveEnabledSigningMethods,
@@ -108,7 +109,9 @@ export class SmartCaSigningService {
     private readonly depositConfirmationResolver?: DepositConfirmationResolver,
     @Optional()
     @Inject(SMARTCA_EVENTS_PUBLISHER)
-    private readonly eventsPublisher?: SmartCaEventsPublisher
+    private readonly eventsPublisher?: SmartCaEventsPublisher,
+    @Optional()
+    private readonly signedArtifactService?: SignedArtifactService
   ) {}
 
   private readonly webhookInFlight = new Map<string, Promise<void>>()
@@ -223,9 +226,19 @@ export class SmartCaSigningService {
 
     let signature: SmartCaSignature
     try {
+      const signedCopy = await this.prepareSignedCopy(
+        context,
+        signerId,
+        signerCccd,
+        certificate.serialNumber
+      )
+      if (signedCopy) {
+        session.signedArtifactId = signedCopy.id
+        await this.sessionRepository.save(session)
+      }
       const signResult = await this.provider.signV2({
         transactionId: session.providerTransactionId,
-        artifactHash: context.artifactHash,
+        artifactHash: signedCopy?.digest ?? context.artifactHash,
         signerCccd,
         certificateSerial: certificate.serialNumber,
         documentId: context.documentId,
@@ -252,8 +265,10 @@ export class SmartCaSigningService {
         throw new ConflictException('SMARTCA_PROVIDER_RESPONSE_INVALID')
       }
     } catch (error) {
-      if (session.status === 'pending')
+      if (session.status === 'pending') {
+        await this.discardSignedCopy(session, 'SMARTCA_REQUEST_REJECTED')
         await this.sessionRepository.remove(session)
+      }
       throw error
     }
     return this.completeWithSignature(session, signature, context.documentId)
@@ -321,9 +336,19 @@ export class SmartCaSigningService {
     await this.sessionRepository.save(session)
 
     try {
+      const signedCopy = await this.prepareSignedCopy(
+        context,
+        signerId,
+        signerCccd,
+        certificate.serialNumber
+      )
+      if (signedCopy) {
+        session.signedArtifactId = signedCopy.id
+        await this.sessionRepository.save(session)
+      }
       const signResult = await this.provider.requestSignature({
         transactionId: session.providerTransactionId,
-        artifactHash: context.artifactHash,
+        artifactHash: signedCopy?.digest ?? context.artifactHash,
         signerCccd,
         certificateSerial: certificate.serialNumber,
         documentId: context.documentId,
@@ -332,6 +357,7 @@ export class SmartCaSigningService {
       return this.sessionRepository.save(session)
     } catch (error) {
       if (this.isDefiniteRejection(error)) {
+        await this.discardSignedCopy(session, 'SMARTCA_REQUEST_REJECTED')
         await this.sessionRepository.remove(session)
       }
       throw error
@@ -608,8 +634,65 @@ export class SmartCaSigningService {
     session.verifiedAt = new Date()
     const saved = await this.sessionRepository.save(session)
     await this.syncSignedContract(saved)
+    await this.finalizeSignedCopy(saved, signature.signatureValue)
     await this.publishTerminalSession(saved)
     return saved
+  }
+
+  /**
+   * PAdES (tùy chọn): chuẩn bị bản PDF đã ký và trả digest để SmartCA ký thay cho
+   * hash canonical. Trả null khi tắt cờ, dùng provider mock hoặc không có chứng thư.
+   */
+  private async prepareSignedCopy(
+    context: SigningContext,
+    signerId: string,
+    signerCccd: string,
+    certificateSerial: string
+  ): Promise<{ id: string; digest: string } | null> {
+    if (!this.signedArtifactService?.isEnabled()) return null
+    if (!('getCertificateMaterial' in this.provider)) return null
+    const material = await this.provider.getCertificateMaterial(
+      signerCccd,
+      certificateSerial
+    )
+    const prepared = await this.signedArtifactService.prepare({
+      contract: context.contract,
+      signerId,
+      signerRole: context.signerRole,
+      signerPem: material.signerPem,
+      chainPem: material.chainPem,
+    })
+    return { id: prepared.id, digest: prepared.signedAttrsDigest }
+  }
+
+  private async finalizeSignedCopy(
+    session: SmartCaSigningSession,
+    signatureValue: string
+  ): Promise<void> {
+    if (!session.signedArtifactId || !this.signedArtifactService) return
+    const sessionId = session._id?.toHexString()
+    if (sessionId) {
+      await this.signedArtifactService.attachSession(
+        session.signedArtifactId,
+        sessionId
+      )
+    }
+    // Lỗi nhúng không làm mất chữ ký hợp lệ: bản đã ký ghi trạng thái failed để thử lại.
+    await this.signedArtifactService.finalize(
+      session.signedArtifactId,
+      signatureValue
+    )
+  }
+
+  private async discardSignedCopy(
+    session: SmartCaSigningSession,
+    errorCode: string
+  ): Promise<void> {
+    if (!session.signedArtifactId || !this.signedArtifactService) return
+    await this.signedArtifactService.markFailed(
+      session.signedArtifactId,
+      errorCode
+    )
   }
 
   private async saveTerminalSession(
@@ -618,6 +701,7 @@ export class SmartCaSigningService {
   ): Promise<SmartCaSigningSession> {
     session.status = status
     session.providerStatus = status
+    await this.discardSignedCopy(session, `SESSION_${status.toUpperCase()}`)
     const saved = await this.sessionRepository.save(session)
     await this.publishTerminalSession(saved)
     return saved

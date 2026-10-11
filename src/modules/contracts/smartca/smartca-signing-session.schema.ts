@@ -33,6 +33,8 @@ export class SmartCaSigningSession {
   @Column({ nullable: true }) verifiedAt?: Date | null
   @Column({ nullable: true }) providerStatus?: string | null
   @Column({ nullable: true }) documentId?: string | null
+  /** Bản PDF đã ký (PAdES) đang chờ chữ ký của session này; null khi không bật PAdES. */
+  @Column({ nullable: true }) signedArtifactId?: string | null
   @Column() expiresAt!: Date
   @CreateDateColumn() createdAt!: Date
   @UpdateDateColumn() updatedAt!: Date

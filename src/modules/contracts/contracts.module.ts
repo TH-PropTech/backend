@@ -49,6 +49,8 @@ import { ContractLayoutProfile } from './layout/contract-layout-profile.schema'
 import { ContractLayoutAudit } from './layout/contract-layout-audit.schema'
 import { ContractLayoutService } from './layout/contract-layout.service'
 import { ContractLayoutsController } from './layout/contract-layouts.controller'
+import { ContractSignedArtifact } from './signed-artifact/contract-signed-artifact.schema'
+import { SignedArtifactService } from './signed-artifact/signed-artifact.service'
 import { ContractEvidencePackageService } from './contract-evidence-package.service'
 import { ContractEvidencePackageExportService } from './contract-evidence-package.export.service'
 
@@ -60,6 +62,7 @@ import { ContractEvidencePackageExportService } from './contract-evidence-packag
       DepositAgreement,
       Apartment,
       SmartCaSigningSession,
+      ContractSignedArtifact,
       ContractTemplate,
       ContractTemplateAudit,
       ContractArtifact,
@@ -105,6 +108,7 @@ import { ContractEvidencePackageExportService } from './contract-evidence-packag
         return isMock ? mock : new SmartCaProvider(cfg)
       },
     },
+    SignedArtifactService,
     SmartCaSigningService,
     SmartCaEventsGateway,
     {

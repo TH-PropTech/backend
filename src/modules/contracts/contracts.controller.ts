@@ -67,6 +67,7 @@ import { OtpActionType } from '../smart-otp/enums/otp-action-type.enum'
 import type { ContractViewDto } from './dto/contract-view.dto'
 import type { ContractAuditEventDto } from './dto/contract-audit-event.dto'
 import { SmartCaSigningService } from './smartca/smartca-signing.service'
+import { SignedArtifactService } from './signed-artifact/signed-artifact.service'
 import { DepositAgreementsService } from './deposit-agreements.service'
 import { DepositAgreement } from './schemas/deposit-agreement.schema'
 import type { ContractArtifact } from './schemas/contract-artifact.schema'
@@ -255,7 +256,9 @@ export class ContractsController {
     @Optional()
     private readonly evidencePackageExportService?: ContractEvidencePackageExportService,
     @Optional()
-    private readonly configService?: ConfigService
+    private readonly configService?: ConfigService,
+    @Optional()
+    private readonly signedArtifactService?: SignedArtifactService
   ) {}
 
   /** Lấy chi tiết hợp đồng phong phú cho Contract Workspace */
@@ -502,6 +505,41 @@ export class ContractsController {
     } finally {
       response.off('close', onClose)
     }
+  }
+
+  @Get(':id/pdf/signed')
+  @Roles('admin', 'staff', 'landlord', 'tenant')
+  @ApiProduces('application/pdf')
+  async downloadSignedArtifact(
+    @Param('id') id: string,
+    @CurrentUser() user: UserPayload,
+    // Ghi byte trực tiếp (xem downloadArtifact): tránh envelope bọc Buffer thành JSON.
+    @Res() response: Response
+  ): Promise<void> {
+    const isStaff =
+      user.roles?.some(role => ['staff', 'admin'].includes(role)) ?? false
+    if (!this.signedArtifactService) {
+      throw new ServiceUnavailableException('SIGNED_ARTIFACT_UNAVAILABLE')
+    }
+    const signed = await this.signedArtifactService.downloadForActor(
+      id,
+      user._id ?? '',
+      isStaff
+    )
+    response.setHeader('Content-Type', 'application/pdf')
+    response.setHeader('Cache-Control', 'private, no-store')
+    response.setHeader('X-Content-Type-Options', 'nosniff')
+    response.setHeader(
+      'X-Contract-Signed-Artifact-Revision',
+      String(signed.revision)
+    )
+    response.setHeader('X-Contract-Signed-Artifact-Hash', signed.sha256)
+    response.setHeader('X-Contract-Artifact-Hash', signed.canonicalHash)
+    response.setHeader(
+      'Content-Disposition',
+      `attachment; filename="contract-${id}-signed-r${signed.revision}.pdf"`
+    )
+    response.end(signed.bytes)
   }
 
   @Get(':id/pdf')
