@@ -104,10 +104,13 @@ describe('ContractAmendmentController', () => {
       service as unknown as ContractAmendmentService
     )
     const headers: Record<string, string> = {}
+    const end = jest.fn()
     const response = {
       setHeader: (key: string, value: string) => {
         headers[key] = value
       },
+      status: jest.fn().mockReturnThis(),
+      end,
     } as never
 
     await expect(
@@ -117,7 +120,8 @@ describe('ContractAmendmentController', () => {
         { _id: 'tenant-1', roles: ['tenant'] },
         response
       )
-    ).resolves.toEqual(Buffer.from('%PDF-1.7\nartifact'))
+    ).resolves.toBeUndefined()
+    expect(end).toHaveBeenCalledWith(Buffer.from('%PDF-1.7\nartifact'))
     expect(headers['Cache-Control']).toBe('private, no-store')
     expect(headers['X-Contract-Amendment-Artifact-Hash']).toBe('b'.repeat(64))
   })
