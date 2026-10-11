@@ -146,4 +146,45 @@ describe('SmartCaSigningService v2', () => {
     ).resolves.toEqual({ status: 'signed' })
     expect(provider.signV2).not.toHaveBeenCalled()
   })
+
+  it('lists configured signing methods with availability and no secrets', async () => {
+    process.env['SMARTCA_V2_ENABLED'] = 'true'
+    const { service } = build()
+
+    const methods = await service.listSigningMethods(contractId, 'tenant-1')
+
+    expect(methods.map(method => method.id)).toEqual(
+      expect.arrayContaining(['smartca_v1', 'smartca_v2'])
+    )
+    const v2 = methods.find(method => method.id === 'smartca_v2')
+    expect(v2).toMatchObject({
+      available: true,
+      inputs: ['smartCaPassword', 'smartCaOtp'],
+    })
+    expect(JSON.stringify(methods)).not.toContain('000000000001')
+  })
+
+  it('marks real signing methods unavailable when the signer has no verified KYC', async () => {
+    process.env['SMARTCA_V2_ENABLED'] = 'true'
+    const { service } = build()
+    const kyc = (
+      service as unknown as { kycRepository: { findOne: jest.Mock } }
+    ).kycRepository
+    kyc.findOne.mockResolvedValue(null)
+
+    const methods = await service.listSigningMethods(contractId, 'tenant-1')
+
+    const v1 = methods.find(method => method.id === 'smartca_v1')
+    expect(v1).toMatchObject({
+      available: false,
+      reason: 'SMARTCA_KYC_REQUIRED',
+    })
+  })
+
+  it('does not list smartca_v2 when its flag is off', async () => {
+    process.env['SMARTCA_V2_ENABLED'] = 'false'
+    const { service } = build()
+    const methods = await service.listSigningMethods(contractId, 'tenant-1')
+    expect(methods.map(method => method.id)).not.toContain('smartca_v2')
+  })
 })
