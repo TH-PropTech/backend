@@ -177,6 +177,43 @@ describe('ContractsService.signContractForUser', () => {
   })
 })
 
+describe('ContractsService.signContractForTest', () => {
+  const originalEnv = { ...process.env }
+  afterEach(() => {
+    process.env = { ...originalEnv }
+  })
+
+  it('is refused unless ENABLE_TEST_SIGN_BYPASS=true', async () => {
+    delete process.env['ENABLE_TEST_SIGN_BYPASS']
+    process.env['NODE_ENV'] = 'development'
+    const { service } = createService()
+
+    await expect(
+      service.signContractForTest('contract-id', 'user-id')
+    ).rejects.toThrow('TEST_SIGN_BYPASS_DISABLED')
+  })
+
+  it('is refused in production even when the flag is set', async () => {
+    process.env['ENABLE_TEST_SIGN_BYPASS'] = 'true'
+    process.env['NODE_ENV'] = 'production'
+    const { service } = createService()
+
+    await expect(
+      service.signContractForTest('contract-id', 'user-id')
+    ).rejects.toThrow('TEST_SIGN_BYPASS_DISABLED')
+  })
+
+  it('rejects a non-participant when the bypass is enabled', async () => {
+    process.env['ENABLE_TEST_SIGN_BYPASS'] = 'true'
+    process.env['NODE_ENV'] = 'development'
+    const { service } = createService()
+
+    await expect(
+      service.signContractForTest('contract-id', 'outsider')
+    ).rejects.toThrow('CONTRACT_SIGN_ACCESS_DENIED')
+  })
+})
+
 describe('ContractsService public-service checklist', () => {
   it('scopes the checklist to an authorized participant and never completes the external procedure', async () => {
     const service = Object.create(

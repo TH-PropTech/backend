@@ -23,6 +23,12 @@ import {
   type ContractArtifactStorage,
 } from './contract-artifact.storage'
 import { RentalTransactionEventService } from '../rental-transactions/rental-transaction-event.service'
+import { ContractDocumentProjector } from './legal/contract-document.projector'
+import { ContractTemplateGovernanceService } from './legal/contract-template-governance.service'
+import {
+  CONTRACT_PDF_RENDERER_VERSION,
+  renderContractPdf,
+} from './contract-pdf.renderer'
 
 export type ContractArtifactFormat = 'pdf' | 'docx'
 
@@ -78,7 +84,9 @@ export class ContractArtifactService {
     @InjectTypeOrmRepository(ContractAmendment)
     private readonly amendmentRepository?: Repository<ContractAmendment>,
     @Optional()
-    private readonly transactionEventService?: RentalTransactionEventService
+    private readonly transactionEventService?: RentalTransactionEventService,
+    @Optional()
+    private readonly templateGovernanceService?: ContractTemplateGovernanceService
   ) {}
 
   async lockAmendmentArtifact(
@@ -211,11 +219,63 @@ export class ContractArtifactService {
     }
   }
 
+  /**
+   * Hệ thống tự dựng bản PDF chuẩn từ mẫu hợp đồng đã khóa rồi khóa artifact.
+   * Idempotent: đã có artifact thì trả lại artifact hiện hành.
+   */
+  async renderAndLockCanonicalArtifact(
+    contractId: string,
+    actorId: string,
+    isStaff: boolean
+  ): Promise<ContractArtifact> {
+    const contract = await this.findAuthorizedContract(
+      contractId,
+      actorId,
+      isStaff
+    )
+    if (!isStaff && contract.landlordId !== actorId) {
+      throw new ForbiddenException('CONTRACT_ARTIFACT_LOCK_ACCESS_DENIED')
+    }
+    if (!contract.contentLockedHash || !contract.contentLockedAt) {
+      throw new ConflictException('CONTRACT_CONTENT_NOT_LOCKED')
+    }
+    if (contract.artifactRef) {
+      const resolved = await this.resolveCanonicalArtifact(contract)
+      return resolved.artifact
+    }
+    const templateRef =
+      contract.contractTemplateRef ??
+      (contract.termsRef?.key.startsWith('VN_') ? contract.termsRef : undefined)
+    const template =
+      templateRef && this.templateGovernanceService
+        ? await this.templateGovernanceService.getPublishedVersion(
+            templateRef.key,
+            templateRef.version
+          )
+        : undefined
+    const document = ContractDocumentProjector.projectDocument(
+      contract,
+      template
+    )
+    document.supplementaryClauses = (
+      contract.layoutProfileRef?.supplementaryClauses ?? []
+    ).filter(clause => clause.enabled)
+    const bytes = await renderContractPdf(contract, document)
+    return this.lockCanonicalArtifact(contractId, actorId, isStaff, bytes, {
+      rendererVersion: CONTRACT_PDF_RENDERER_VERSION,
+      enforceContentHashMatch: false,
+    })
+  }
+
   async lockCanonicalArtifact(
     contractId: string,
     actorId: string,
     isStaff: boolean,
-    bytes: Buffer
+    bytes: Buffer,
+    options: {
+      rendererVersion?: string
+      enforceContentHashMatch?: boolean
+    } = {}
   ): Promise<ContractArtifact> {
     const contract = await this.findAuthorizedContract(
       contractId,
@@ -251,6 +311,7 @@ export class ContractArtifactService {
     }
     const artifactHash = this.digest(bytes)
     if (
+      (options.enforceContentHashMatch ?? true) &&
       contract.hashSchemaVersion !== 2 &&
       artifactHash !== contract.contentLockedHash
     ) {
@@ -282,7 +343,7 @@ export class ContractArtifactService {
       artifactHash,
       byteLength: bytes.length,
       canonicalContentHash: contract.contentLockedHash,
-      rendererVersion: 'uploaded-canonical-pdf-v1',
+      rendererVersion: options.rendererVersion ?? 'uploaded-canonical-pdf-v1',
       sourceSchemaVersion: contract.hashSchemaVersion ?? 1,
       contentType: 'application/pdf',
       lockedAt: contract.contentLockedAt,

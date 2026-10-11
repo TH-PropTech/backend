@@ -352,6 +352,12 @@ export class ContractActionsViewDto {
 
   @ApiProperty({ default: false })
   canLockContent!: boolean
+
+  @ApiProperty({
+    default: false,
+    description: 'Nội dung đã khóa nhưng chưa có bản PDF chuẩn để ký số.',
+  })
+  canLockArtifact!: boolean
 }
 
 export class ContractAccessViewDto {

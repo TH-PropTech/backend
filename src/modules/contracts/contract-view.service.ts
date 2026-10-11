@@ -25,6 +25,7 @@ import {
   type DepositConfirmation,
 } from './deposit-confirmation.resolver'
 import { evaluatePayDeposit, evaluateSigning } from './flow/flow-guards'
+import { isTestSignBypassEnabled } from './test-sign-bypass'
 import {
   projectContractFlow,
   type ContractFlowFacts,
@@ -354,7 +355,8 @@ export class ContractViewService {
       contractStatus: contract.status || 'draft',
       strategy: executionStrategy,
       isDepositConfirmed: isDepositPaid,
-      isKycVerified: currentActorKyc?.status === 'verified',
+      isKycVerified:
+        isTestSignBypassEnabled() || currentActorKyc?.status === 'verified',
     })
     const payGuard = evaluatePayDeposit(
       depositAgreement
@@ -534,6 +536,10 @@ export class ContractViewService {
           ['draft', 'deposit-pending', 'deposit-paid'].includes(
             contract.status ?? ''
           ),
+        canLockArtifact:
+          (isStaff || isLandlord) &&
+          Boolean(contract.contentLockedHash) &&
+          !contract.artifactRef,
       },
       access,
       ledger,
@@ -542,8 +548,10 @@ export class ContractViewService {
           depositAgreement,
           depositConfirmation,
           kycVerified: {
-            tenant: tenantKyc?.status === 'verified',
-            landlord: landlordKyc?.status === 'verified',
+            tenant:
+              isTestSignBypassEnabled() || tenantKyc?.status === 'verified',
+            landlord:
+              isTestSignBypassEnabled() || landlordKyc?.status === 'verified',
           },
           ledgerStatus,
           viewer: { isTenant, isLandlord, isStaff },

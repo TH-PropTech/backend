@@ -7,6 +7,7 @@ import {
   NotFoundException,
   Optional,
 } from '@nestjs/common'
+import { isTestSignBypassEnabled } from './test-sign-bypass'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 import { ObjectId } from 'mongodb'
@@ -573,6 +574,33 @@ export class ContractsService {
     )
     grant.consumedAt = consumed.consumedAt
     await this.signingGrantRepository.save(grant)
+    const signed = await this.signContract(contractId, role)
+    await this.flowNotificationService?.notifyForContract(contractId)
+    return signed
+  }
+
+  /**
+   * Chỉ dành cho dev/test: ký bỏ qua SmartCA, sinh trắc và Smart OTP để đi tiếp các bước sau
+   * khi đang chờ tích hợp. Cần đồng thời NODE_ENV != production và ENABLE_TEST_SIGN_BYPASS=true.
+   */
+  async signContractForTest(
+    contractId: string,
+    userId: string
+  ): Promise<Contract> {
+    if (!isTestSignBypassEnabled()) {
+      throw new ForbiddenException('TEST_SIGN_BYPASS_DISABLED')
+    }
+    const contract = await this.findOne(contractId)
+    const role =
+      contract.tenantId === userId
+        ? 'tenant'
+        : contract.landlordId === userId
+          ? 'landlord'
+          : null
+    if (!role) throw new ForbiddenException('CONTRACT_SIGN_ACCESS_DENIED')
+    if (!contract.contentLockedHash) {
+      throw new BadRequestException('CONTRACT_CONTENT_NOT_LOCKED')
+    }
     const signed = await this.signContract(contractId, role)
     await this.flowNotificationService?.notifyForContract(contractId)
     return signed

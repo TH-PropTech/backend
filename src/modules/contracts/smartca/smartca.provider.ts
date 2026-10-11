@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import {
   BadGatewayException,
   Injectable,
@@ -80,6 +81,8 @@ export class SmartCaProvider {
       sp_id: config.spId,
       sp_password: config.spPassword,
       user_id: signerCccd,
+      // Gateway v1 bắt buộc transaction_id cho cả get_certificate (thiếu → 400 missing_parameter_transaction_id).
+      transaction_id: `cert-${randomUUID()}`,
     })
     const certificates = envelope.data.user_certificates
     if (!Array.isArray(certificates)) this.invalidResponse()
@@ -199,6 +202,10 @@ export class SmartCaProvider {
 
     const envelope = this.parseEnvelope(payload)
     if (envelope.statusCode !== 200) {
+      // 65000: gói dịch vụ của người ký hết hạn / hết lượt ký (cần mua lượt ký trong app SmartCA).
+      if (envelope.statusCode === 65000) {
+        throw new UnprocessableEntityException('SMARTCA_SERVICE_PACK_EXPIRED')
+      }
       if ([400, 401, 403, 422].includes(envelope.statusCode)) {
         throw new UnprocessableEntityException(
           'SMARTCA_CREDENTIAL_OR_REQUEST_REJECTED'
@@ -246,11 +253,16 @@ export class SmartCaProvider {
     const now = Date.now()
     const startsAt = validFrom ? Date.parse(validFrom) : Number.NaN
     const endsAt = validTo ? Date.parse(validTo) : Number.NaN
-    const normalizedStatus = status?.toUpperCase()
-    const activeStatus =
-      normalizedStatus === 'ACTIVE' ||
-      normalizedStatus === 'VALID' ||
-      normalizedStatus === '1'
+    // Production trả cert_status là nhãn tiếng Việt ("Đang hoạt động") và mã máy đọc ở
+    // cert_status_code ("VALID"); cổng test/mock trả mã ngay trong cert_status.
+    const statusCode = optionalString(payload.cert_status_code)
+    const isActiveCode = (value: string | undefined): boolean => {
+      const normalized = value?.toUpperCase()
+      return (
+        normalized === 'ACTIVE' || normalized === 'VALID' || normalized === '1'
+      )
+    }
+    const activeStatus = isActiveCode(statusCode) || isActiveCode(status)
     const validWindow =
       Number.isFinite(startsAt) && Number.isFinite(endsAt)
         ? startsAt <= now && endsAt > now
