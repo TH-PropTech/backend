@@ -3,6 +3,8 @@ import { createHash } from 'crypto'
 import type {
   SmartCaCertificate,
   SmartCaSignResult,
+  SmartCaSignV2Request,
+  SmartCaSignV2Result,
   SmartCaSignature,
   SmartCaSigningRequest,
   SmartCaStatusResult,
@@ -51,6 +53,26 @@ export class MockSmartCaProvider {
       transactionId: input.transactionId,
       transactionCode: `MOCK-TC-${Date.now()}`,
     })
+  }
+
+  /** v2 giả lập: chấp nhận mọi mật khẩu/OTP không rỗng, trả chữ ký ngay (không cần sad). */
+  signV2(input: SmartCaSignV2Request): Promise<SmartCaSignV2Result> {
+    if (!input.password || !input.otp) {
+      return Promise.reject(new Error('MOCK_CREDENTIAL_REJECTED'))
+    }
+    return Promise.resolve({
+      transactionId: input.transactionId,
+      signature: this.buildSignature(input.documentId, input.transactionId),
+    })
+  }
+
+  confirmV2(input: {
+    transactionId: string
+    documentId: string
+  }): Promise<SmartCaSignature> {
+    return Promise.resolve(
+      this.buildSignature(input.documentId, input.transactionId)
+    )
   }
 
   getSignatureStatus(

@@ -5,6 +5,14 @@ import type { ContractDocumentViewDto } from './dto/contract-view.dto'
 
 export const CONTRACT_PDF_RENDERER_VERSION = 'th-proptech-pdf-v1'
 
+export const LEGAL_BASIS_LINES: readonly string[] = [
+  'Căn cứ Bộ luật Dân sự số 91/2015/QH13 ngày 24/11/2015;',
+  'Căn cứ Luật Nhà ở số 27/2023/QH15 ngày 27/11/2023;',
+  'Căn cứ Luật Kinh doanh bất động sản số 29/2023/QH15 ngày 28/11/2023;',
+  'Căn cứ Luật Giao dịch điện tử số 20/2023/QH15 ngày 22/6/2023;',
+  'Căn cứ nhu cầu và khả năng thực tế của các bên.',
+]
+
 const PAGE_MARGIN = 56
 const FONT_REGULAR = 'Body'
 const FONT_BOLD = 'Body-Bold'
@@ -27,14 +35,25 @@ function partyLines(
   role: string,
   name: string | null,
   cccd: string | null,
-  address: string | null
+  address: string | null,
+  phone: string | null
 ): string[] {
   return [
     role,
     `Họ và tên: ${name || '—'}`,
     `Số CCCD: ${cccd || '—'}`,
     `Địa chỉ: ${address || '—'}`,
+    `Điện thoại: ${phone || '—'}`,
   ]
+}
+
+/** Địa điểm lập hợp đồng: tỉnh/thành ở cuối địa chỉ căn hộ. */
+export function resolveSigningPlace(propertyAddress: string | null): string {
+  const parts = (propertyAddress ?? '')
+    .split(',')
+    .map(part => part.trim())
+    .filter(Boolean)
+  return parts[parts.length - 1] ?? 'Việt Nam'
 }
 
 /**
@@ -86,33 +105,40 @@ export function renderContractPdf(
         .text(`Mẫu: ${document.templateVersion}`, { align: 'center' })
         .moveDown(1)
 
+      pdf.font(FONT_REGULAR).fontSize(10)
+      for (const line of LEGAL_BASIS_LINES)
+        pdf.text(line, { width: contentWidth })
+      pdf.moveDown(0.8)
+
       pdf
         .font(FONT_REGULAR)
         .fontSize(10.5)
         .text(
-          `Hôm nay, ngày ${formatDate(contract.startDate)}, các bên dưới đây cùng thỏa thuận ký kết hợp đồng thuê căn hộ với các điều khoản sau:`,
+          `Hôm nay, ngày ${formatDate(contract.contentLockedAt ?? contract.startDate)}, tại ${resolveSigningPlace(contract.propertyAddress)}, các bên dưới đây cùng thỏa thuận ký kết hợp đồng thuê căn hộ với các điều khoản sau:`,
           { align: 'justify' }
         )
         .moveDown(0.8)
 
       const parties: Array<
-        [string, string | null, string | null, string | null]
+        [string, string | null, string | null, string | null, string | null]
       > = [
         [
           'BÊN CHO THUÊ (Bên A)',
           contract.landlordName,
           contract.landlordCccd,
           contract.landlordAddress,
+          contract.landlordPhone ?? null,
         ],
         [
           'BÊN THUÊ (Bên B)',
           contract.tenantName,
           contract.tenantCccd,
           contract.tenantAddress,
+          contract.tenantPhone ?? null,
         ],
       ]
-      for (const [role, name, cccd, address] of parties) {
-        const [heading, ...rest] = partyLines(role, name, cccd, address)
+      for (const [role, name, cccd, address, phone] of parties) {
+        const [heading, ...rest] = partyLines(role, name, cccd, address, phone)
         pdf
           .font(FONT_BOLD)
           .fontSize(10.5)
@@ -122,6 +148,17 @@ export function renderContractPdf(
         pdf.moveDown(0.6)
       }
       pdf.moveDown(0.4)
+      pdf.font(FONT_BOLD).fontSize(10.5).text('THÔNG TIN CĂN HỘ')
+      pdf.font(FONT_REGULAR).fontSize(10.5)
+      pdf.text(`Căn hộ: ${contract.propertyTitle || '—'}`)
+      pdf.text(`Địa chỉ: ${contract.propertyAddress || '—'}`)
+      pdf.text(
+        `Diện tích: ${contract.propertyArea ? `${contract.propertyArea} m²` : '—'}`
+      )
+      pdf.text(
+        `Giấy chứng nhận quyền sở hữu/sử dụng: ${contract.propertyOwnershipCertificate || '—'}`
+      )
+      pdf.moveDown(1)
 
       for (const section of document.sections) {
         pdf
@@ -164,38 +201,48 @@ export function renderContractPdf(
       }
 
       // Khối chữ ký: giữ nguyên trên cùng một trang.
-      if (pdf.y > pdf.page.height - PAGE_MARGIN - 130) pdf.addPage()
+      if (pdf.y > pdf.page.height - PAGE_MARGIN - 190) pdf.addPage()
       const signTop = pdf.y
       const colWidth = contentWidth / 2
+      pdf
+        .font(FONT_REGULAR)
+        .fontSize(10)
+        .text(
+          `Hợp đồng được lập tại ${resolveSigningPlace(contract.propertyAddress)}, ngày ${formatDate(contract.contentLockedAt ?? contract.startDate)}, ký kết bằng chữ ký số; các bên xác nhận đã đọc, hiểu rõ và có đủ thẩm quyền giao kết hợp đồng này.`,
+          PAGE_MARGIN,
+          signTop,
+          { width: contentWidth, align: 'justify' }
+        )
+      const blockTop = pdf.y + 12
       pdf.font(FONT_BOLD).fontSize(10.5)
-      pdf.text('ĐẠI DIỆN BÊN CHO THUÊ', PAGE_MARGIN, signTop, {
+      pdf.text('ĐẠI DIỆN BÊN CHO THUÊ', PAGE_MARGIN, blockTop, {
         width: colWidth,
         align: 'center',
       })
-      pdf.text('ĐẠI DIỆN BÊN THUÊ', PAGE_MARGIN + colWidth, signTop, {
+      pdf.text('ĐẠI DIỆN BÊN THUÊ', PAGE_MARGIN + colWidth, blockTop, {
         width: colWidth,
         align: 'center',
       })
       pdf.font(FONT_REGULAR).fontSize(9)
-      pdf.text('(Ký số bằng VNPT SmartCA)', PAGE_MARGIN, signTop + 16, {
+      pdf.text('(Ký số bằng VNPT SmartCA)', PAGE_MARGIN, blockTop + 16, {
         width: colWidth,
         align: 'center',
       })
       pdf.text(
         '(Ký số bằng VNPT SmartCA)',
         PAGE_MARGIN + colWidth,
-        signTop + 16,
+        blockTop + 16,
         { width: colWidth, align: 'center' }
       )
       pdf.fontSize(10.5)
-      pdf.text(contract.landlordName ?? '', PAGE_MARGIN, signTop + 80, {
+      pdf.text(contract.landlordName ?? '', PAGE_MARGIN, blockTop + 80, {
         width: colWidth,
         align: 'center',
       })
       pdf.text(
         contract.tenantName ?? '',
         PAGE_MARGIN + colWidth,
-        signTop + 80,
+        blockTop + 80,
         {
           width: colWidth,
           align: 'center',

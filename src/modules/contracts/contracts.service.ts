@@ -7,6 +7,7 @@ import {
   NotFoundException,
   Optional,
 } from '@nestjs/common'
+import { User } from '../users/schemas/user.schema'
 import { isTestSignBypassEnabled } from './test-sign-bypass'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
@@ -197,7 +198,10 @@ export class ContractsService {
     @Optional()
     private readonly transactionEventService?: RentalTransactionEventService,
     @Optional()
-    private readonly governanceService?: FabricGovernanceService
+    private readonly governanceService?: FabricGovernanceService,
+    @Optional()
+    @InjectRepository(User)
+    private readonly userRepository?: Repository<User>
   ) {}
 
   private async recordTransactionEvent(input: {
@@ -930,6 +934,49 @@ export class ContractsService {
     return this.contractRepository.save(contract)
   }
 
+  /**
+   * Chốt thông tin hai bên vào hợp đồng ngay trước khi khóa nội dung (họ tên, CCCD, nơi cư trú lấy từ
+   * hồ sơ KYC đã duyệt). Chỉ điền chỗ còn trống để không ghi đè dữ liệu staff đã nhập.
+   */
+  private async snapshotParties(contract: Contract): Promise<void> {
+    const [landlordKyc, tenantKyc] = await Promise.all([
+      this.kycService.findByUserId(contract.landlordId),
+      this.kycService.findByUserId(contract.tenantId),
+    ])
+    if (landlordKyc?.status === 'verified') {
+      contract.landlordName ||= landlordKyc.fullName ?? null
+      contract.landlordCccd ||= landlordKyc.idCardNumber ?? null
+      contract.landlordAddress ||= landlordKyc.placeOfResidence ?? null
+    }
+    if (tenantKyc?.status === 'verified') {
+      contract.tenantName ||= tenantKyc.fullName ?? null
+      contract.tenantCccd ||= tenantKyc.idCardNumber ?? null
+      contract.tenantAddress ||= tenantKyc.placeOfResidence ?? null
+    }
+    contract.landlordPhone ||= await this.findUserPhone(contract.landlordId)
+    contract.tenantPhone ||= await this.findUserPhone(contract.tenantId)
+    contract.propertyOwnershipCertificate ||=
+      await this.findOwnershipCertificate(contract.propertyId)
+  }
+
+  private async findUserPhone(userId: string): Promise<string | null> {
+    if (!this.userRepository || !ObjectId.isValid(userId)) return null
+    const user = await this.userRepository.findOne({
+      where: { _id: new ObjectId(userId) },
+    })
+    return user?.phone?.trim() || null
+  }
+
+  private async findOwnershipCertificate(
+    propertyId: string
+  ): Promise<string | null> {
+    if (!ObjectId.isValid(propertyId)) return null
+    const apartment = await this.apartmentRepository.findOne({
+      where: { _id: new ObjectId(propertyId) },
+    })
+    return apartment?.ownershipCertificate?.trim() || null
+  }
+
   async lockContractContent(
     contractId: string,
     actorId: string,
@@ -999,6 +1046,7 @@ export class ContractsService {
     contract.hashSchemaVersion = layout
       ? CONTRACT_CONTENT_HASH_SCHEMA_VERSION
       : 2
+    await this.snapshotParties(contract)
     contract.contentLockedHash = hashCanonicalContractPayload(
       buildCanonicalContractPayload(contract, template)
     )
