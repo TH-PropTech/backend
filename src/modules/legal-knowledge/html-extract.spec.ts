@@ -1,6 +1,20 @@
 import { extractMainText } from './html-extract'
 
 describe('extractMainText', () => {
+  it('keeps content inside a form that wraps the whole page (ASP.NET)', () => {
+    const html = `<body><form id="aspnetForm">
+      <div class="page-header">Cổng thông tin</div>
+      <div class="servicedetail"><p>Thành phần hồ sơ: tờ khai thay đổi thông tin cư trú.</p></div>
+    </form></body>`
+    expect(extractMainText(html).text).toContain('Thành phần hồ sơ')
+  })
+
+  it('still drops a small search form', () => {
+    const html = `<body><form><input value="x">Tìm kiếm nhanh</form>
+      <main><p>Nội dung chính của trang rất dài để vượt trội so với ô tìm kiếm nhỏ.</p></main></body>`
+    expect(extractMainText(html).text).not.toContain('Tìm kiếm nhanh')
+  })
+
   it('removes navigation, footer, scripts and ad blocks', () => {
     const html = `
       <html><head><title>Thủ tục thuê nhà</title><script>var x = 1</script></head>

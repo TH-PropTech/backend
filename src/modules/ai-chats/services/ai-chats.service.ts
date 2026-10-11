@@ -8,7 +8,9 @@ import {
   LegalKnowledgeSearcher,
   LegalSearchHit,
 } from '../../legal-knowledge/legal-knowledge.types'
+import { buildRelatedSourcesAnswer } from './legal-fallback-answer'
 import {
+  GROQ_CONNECTION_ERROR_REPLY,
   GroqAgentService,
   ChatMessage as LLMChatMessage,
 } from './groq-agent.service'
@@ -38,11 +40,14 @@ interface SearchLegalKnowledgeArgs {
 }
 
 const LEGAL_SEARCH_LIMIT = 4
-const LEGAL_RESULT_MAX_CHARS = 4000
+const LEGAL_RESULT_MAX_CHARS = 3400
 /** The prompt tells the model to open with this phrase when the knowledge base has no answer. */
 const LEGAL_NO_DATA_PATTERN = /^\s*(?:\*\*)?\s*hiện chưa có dữ liệu/i
 const LEGAL_NOT_FOUND_MESSAGE =
   'Không tìm thấy nội dung phù hợp trong kho tri thức pháp lý.'
+/** Sent once when the model refuses although the knowledge base returned excerpts. */
+const LEGAL_RETRY_NUDGE =
+  'Hướng dẫn nội bộ (không nhắc lại với người dùng): các đoạn tra cứu ở trên được chọn vì liên quan tới câu hỏi gần nhất của người dùng. Hãy trả lời TRỰC TIẾP câu hỏi đó dựa trên các đoạn này: nêu tên văn bản, ngày ban hành hoặc hiệu lực nếu có, rồi nói rõ phần nào kho tri thức chưa có (ví dụ chưa có bản so sánh với năm trước). Chỉ khi không đoạn nào liên quan mới nói chưa có dữ liệu. Không dùng kiến thức ngoài các đoạn. Kết thúc bằng một câu: nội dung chỉ mang tính tham khảo, không thay thế tư vấn pháp lý chuyên nghiệp.'
 
 @Injectable()
 export class AiChatsService {
@@ -63,7 +68,7 @@ export class AiChatsService {
   /** Numbered excerpts for the LLM tool result (total capped at LEGAL_RESULT_MAX_CHARS). */
   private formatLegalHits(hits: LegalSearchHit[]): string {
     const lines: string[] = [
-      `Tìm thấy ${hits.length} đoạn nội dung pháp lý liên quan trong kho tri thức (chỉ trả lời dựa trên các đoạn này):`,
+      `Tìm thấy ${hits.length} đoạn nội dung pháp lý trong kho tri thức (chỉ trả lời dựa trên các đoạn này). Nếu các đoạn chỉ trả lời được MỘT PHẦN câu hỏi, hãy trả lời phần có và nói rõ phần chưa có, không từ chối toàn bộ:`,
     ]
     let total = lines[0]?.length ?? 0
     hits.forEach((hit, index) => {
@@ -71,6 +76,7 @@ export class AiChatsService {
         `[${index + 1}] Văn bản: ${hit.title}`,
         hit.docNumber ? `Số hiệu: ${hit.docNumber}` : '',
         hit.issuer ? `Cơ quan ban hành: ${hit.issuer}` : '',
+        hit.fetchedAt ? `Cập nhật từ nguồn: ${hit.fetchedAt.slice(0, 10)}` : '',
         hit.heading ? `Điều/mục: ${hit.heading}` : '',
       ]
         .filter(Boolean)
@@ -90,6 +96,8 @@ export class AiChatsService {
       title: hit.title,
       ...(hit.heading ? { heading: hit.heading } : {}),
       ...(hit.sourceUrl ? { url: hit.sourceUrl } : {}),
+      ...(hit.issuer ? { issuer: hit.issuer } : {}),
+      ...(hit.fetchedAt ? { fetchedAt: hit.fetchedAt } : {}),
     }))
   }
 
@@ -310,6 +318,7 @@ export class AiChatsService {
 
     let loopLimit = 3
     let metadata: ChatMessage['metadata'] = undefined
+    let legalHits: LegalSearchHit[] = []
     let disableTools = false
     let lastBookingSuccessContent = ''
 
@@ -542,6 +551,7 @@ export class AiChatsService {
               toolResultContent = LEGAL_NOT_FOUND_MESSAGE
             } else {
               toolResultContent = this.formatLegalHits(hits)
+              legalHits = hits
               metadata = {
                 ...(metadata || {}),
                 legalCitations: this.mergeLegalCitations(
@@ -635,6 +645,40 @@ export class AiChatsService {
         const count = metadata.propertyCards?.length || 1
         finalAnswer = `Dưới đây là ${count} căn hộ phù hợp với yêu cầu tìm kiếm của bạn:`
       }
+    }
+
+    // The model sometimes refuses although the knowledge base returned excerpts:
+    // ask once more, from the question and the excerpts only (no tool-call history,
+    // so the model does not try to call the tool again).
+    if (
+      metadata?.legalCitations?.length &&
+      LEGAL_NO_DATA_PATTERN.test(finalAnswer)
+    ) {
+      const excerpts = [...llmMessages].reverse().find(m => m.role === 'tool')
+      if (excerpts) {
+        const retry = await this.groqAgentService.chat(
+          [
+            { role: 'user', content: text },
+            {
+              role: 'system',
+              content: excerpts.content + '\n\n' + LEGAL_RETRY_NUDGE,
+            },
+          ],
+          true
+        )
+        if (
+          retry?.content &&
+          retry.content !== GROQ_CONNECTION_ERROR_REPLY &&
+          !LEGAL_NO_DATA_PATTERN.test(retry.content)
+        ) {
+          finalAnswer = retry.content
+        }
+      }
+    }
+
+    // Still refusing although related documents exist: show them rather than "no data".
+    if (legalHits.length > 0 && LEGAL_NO_DATA_PATTERN.test(finalAnswer)) {
+      finalAnswer = buildRelatedSourcesAnswer(legalHits) ?? finalAnswer
     }
 
     // Citations only make sense when the answer actually used the knowledge base.

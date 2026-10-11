@@ -31,7 +31,7 @@ import type {
 } from './legal-knowledge.types'
 import { distillLegalPage } from './legal-distill'
 import { extractMainText } from './html-extract'
-import { foldVietnamese } from './legal-text'
+import { foldVietnamese, pickMainExcerpt } from './legal-text'
 import { fetchPageHtml, SafeFetchError } from './safe-fetch'
 import { LegalKnowledgeChunk } from './schemas/legal-knowledge-chunk.schema'
 import { LegalKnowledgeDoc } from './schemas/legal-knowledge-doc.schema'
@@ -39,7 +39,13 @@ import { LegalKnowledgeDoc } from './schemas/legal-knowledge-doc.schema'
 const DEFAULT_SEARCH_LIMIT = 4
 /** BM25 score floor; keyword-boosted hits are at least +2 so they always pass. */
 const SEARCH_MIN_SCORE = 0.5
-const HIT_TEXT_MAX = 1500
+const HIT_TEXT_MAX = 800
+/** A doc may fill at most this many result slots, so one long source cannot crowd out the others. */
+const MAX_HITS_PER_DOC = 1
+/** Candidates fetched before the per-doc cap is applied. */
+const CANDIDATE_FACTOR = 4
+/** The index is rebuilt in the background when older than this, so docs added by scripts show up without a restart. */
+const INDEX_MAX_AGE_MS = 60_000
 /** Below this many extracted characters the page is assumed to be JS-rendered or blocking bots. */
 const MIN_EXTRACTED_CHARS = 200
 const OBJECT_ID_PATTERN = /^[0-9a-fA-F]{24}$/
@@ -59,6 +65,7 @@ interface IndexedChunkMeta {
   docNumber?: string | undefined
   issuer?: string | undefined
   sourceUrl?: string | undefined
+  fetchedAt?: string | undefined
   heading?: string | undefined
   text: string
 }
@@ -73,6 +80,8 @@ export class LegalKnowledgeService
 {
   private readonly logger = new Logger(LegalKnowledgeService.name)
   private readonly index = new Bm25Index<IndexedChunkMeta>()
+  private indexBuiltAt = 0
+  private refreshing = false
 
   constructor(
     @InjectRepository(LegalKnowledgeDoc)
@@ -167,6 +176,10 @@ export class LegalKnowledgeService
       ? chunkLegalText(dto.content ?? '')
       : undefined
     if (dto.content !== undefined) doc.content = dto.content
+    // Text taken from a link again (re-fetch or script refresh): record when.
+    if (contentChanged && doc.contentSource === 'link') {
+      doc.fetchedAt = new Date()
+    }
     if (chunks) doc.chunkCount = chunks.length
 
     const saved = await this.docRepo.save(doc)
@@ -196,15 +209,27 @@ export class LegalKnowledgeService
     query: string,
     limit: number = DEFAULT_SEARCH_LIMIT
   ): Promise<LegalSearchHit[]> {
-    const hits = this.index.search(query, limit, SEARCH_MIN_SCORE).map(hit => ({
+    this.refreshIndexIfStale()
+    const perDoc = new Map<string, number>()
+    const candidates = this.index
+      .search(query, limit * CANDIDATE_FACTOR, SEARCH_MIN_SCORE)
+      .filter(hit => {
+        const used = perDoc.get(hit.meta.docId) ?? 0
+        if (used >= MAX_HITS_PER_DOC) return false
+        perDoc.set(hit.meta.docId, used + 1)
+        return true
+      })
+      .slice(0, limit)
+    const hits = candidates.map(hit => ({
       docId: hit.meta.docId,
       title: hit.meta.title,
       docNumber: hit.meta.docNumber,
       issuer: hit.meta.issuer,
       heading: hit.meta.heading,
-      text: hit.meta.text.slice(0, HIT_TEXT_MAX),
+      text: pickMainExcerpt(hit.meta.text, query, HIT_TEXT_MAX),
       score: hit.score,
       sourceUrl: hit.meta.sourceUrl,
+      fetchedAt: hit.meta.fetchedAt,
     }))
     return Promise.resolve(hits)
   }
@@ -245,6 +270,17 @@ export class LegalKnowledgeService
     }
   }
 
+  /** Fire-and-forget rebuild when the index is old; searches keep using the current index meanwhile. */
+  private refreshIndexIfStale(): void {
+    if (this.refreshing || Date.now() - this.indexBuiltAt < INDEX_MAX_AGE_MS) {
+      return
+    }
+    this.refreshing = true
+    void this.refreshIndexSafely().finally(() => {
+      this.refreshing = false
+    })
+  }
+
   /** Rebuilds the in-memory index from all published chunks. Errors are logged, not thrown. */
   async refreshIndexSafely(): Promise<void> {
     try {
@@ -263,6 +299,7 @@ export class LegalKnowledgeService
     })
     if (published.length === 0) {
       this.index.build([])
+      this.indexBuiltAt = Date.now()
       return
     }
 
@@ -293,12 +330,14 @@ export class LegalKnowledgeService
           docNumber: doc.docNumber || undefined,
           issuer: doc.issuer || undefined,
           sourceUrl: doc.sourceUrl || undefined,
+          fetchedAt: toIsoOrUndefined(doc.fetchedAt ?? doc.updatedAt),
           heading,
           text: chunk.text,
         },
       })
     }
     this.index.build(entries)
+    this.indexBuiltAt = Date.now()
   }
 
   private async setStatus(
@@ -376,6 +415,14 @@ function emptyToUndefined(value: string | undefined): string | undefined {
   if (value === undefined) return undefined
   const trimmed = value.trim()
   return trimmed.length > 0 ? trimmed : undefined
+}
+
+function toIsoOrUndefined(
+  value: Date | string | undefined
+): string | undefined {
+  if (!value) return undefined
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? undefined : date.toISOString()
 }
 
 function toDate(value: string | undefined): Date | undefined {

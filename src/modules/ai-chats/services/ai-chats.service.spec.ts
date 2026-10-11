@@ -1,7 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing'
 import { getRepositoryToken } from '@nestjs/typeorm'
 import { AiChatsService } from './ai-chats.service'
-import { GroqAgentService, ToolCall } from './groq-agent.service'
+import {
+  GROQ_CONNECTION_ERROR_REPLY,
+  GroqAgentService,
+  ToolCall,
+} from './groq-agent.service'
 import { ApartmentsService } from '../../apartments/apartments.service'
 import { BookingsService } from '../../bookings/bookings.service'
 import { User } from '../../users/schemas/user.schema'
@@ -304,6 +308,7 @@ describe('AiChatsService', () => {
         text: 'Bên thuê phải trả tiền thuê đúng thời hạn đã thỏa thuận.',
         score: 3.2,
         sourceUrl: 'https://thuvienphapluat.vn/van-ban/bo-luat-dan-su',
+        fetchedAt: '2026-10-11T03:15:00.000Z',
       },
       {
         docId: 'doc2',
@@ -328,6 +333,103 @@ describe('AiChatsService', () => {
         'Thuế thu nhập cá nhân tính thế nào?'
       )
 
+      expect(result.metadata?.legalCitations).toBeUndefined()
+    })
+
+    it('Thử lại một lần khi mô hình từ chối dù đã có đoạn liên quan, và giữ legalCitations nếu trả lời được', async () => {
+      legalSearch.search.mockResolvedValueOnce(sampleHits)
+      groqAgentService.chat
+        .mockResolvedValueOnce(legalToolCall('đặt cọc thuê nhà 2026'))
+        .mockResolvedValueOnce({
+          content: 'Hiện chưa có dữ liệu về thay đổi năm 2026.',
+        })
+        .mockResolvedValueOnce({
+          content:
+            'Theo Bộ luật Dân sự 2015, Điều 472, bên thuê phải trả tiền thuê đúng hạn. Kho tri thức chưa có bản so sánh với năm 2025.',
+        })
+
+      const result = await service.handleUserMessage(
+        { deviceId: 'device-legal-retry' },
+        'Luật thuê nhà 2026 có gì thay đổi so với 2025?'
+      )
+
+      expect(groqAgentService.chat).toHaveBeenCalledTimes(3)
+      const retryCall = (groqAgentService.chat.mock.calls as unknown[][])[2]
+      expect(retryCall?.[1]).toBe(true)
+      const retryMessages = (retryCall?.[0] ?? []) as Array<{
+        role: string
+        content: string
+        tool_calls?: unknown
+      }>
+      // Question plus excerpts only: no tool-call history to tempt another tool call.
+      expect(retryMessages.map(m => m.role)).toEqual(['user', 'system'])
+      expect(retryMessages.some(m => m.tool_calls)).toBe(false)
+      expect(retryMessages[0]?.content).toContain('thay đổi so với 2025')
+      expect(retryMessages[1]?.content).toContain(
+        '[1] Văn bản: Bộ luật Dân sự 2015'
+      )
+      expect(result.content).toContain('Theo Bộ luật Dân sự 2015')
+      expect(result.metadata?.legalCitations?.length).toBeGreaterThan(0)
+    })
+
+    it('Cả hai lượt đều từ chối nhưng kho có văn bản đủ liên quan: trả danh sách văn bản liên quan và giữ trích dẫn', async () => {
+      legalSearch.search.mockResolvedValueOnce([
+        { ...sampleHits[0]!, score: 32 },
+        { ...sampleHits[1]!, score: 28 },
+      ])
+      groqAgentService.chat
+        .mockResolvedValueOnce(legalToolCall('thay đổi 2026'))
+        .mockResolvedValueOnce({
+          content: 'Hiện chưa có dữ liệu về vấn đề này.',
+        })
+        .mockResolvedValueOnce({
+          content: 'Hiện chưa có dữ liệu về vấn đề này.',
+        })
+
+      const result = await service.handleUserMessage(
+        { deviceId: 'device-legal-fallback' },
+        'Luật thuê nhà 2026 có gì thay đổi?'
+      )
+
+      expect(result.content).toContain('có các văn bản liên quan')
+      expect(result.content).toContain('**Bộ luật Dân sự 2015**')
+      expect(result.metadata?.legalCitations?.length).toBeGreaterThan(0)
+    })
+
+    it('Không dùng câu báo lỗi kết nối của lượt thử lại làm câu trả lời', async () => {
+      legalSearch.search.mockResolvedValueOnce(sampleHits)
+      groqAgentService.chat
+        .mockResolvedValueOnce(legalToolCall('đặt cọc'))
+        .mockResolvedValueOnce({
+          content: 'Hiện chưa có dữ liệu về vấn đề này.',
+        })
+        .mockResolvedValueOnce({ content: GROQ_CONNECTION_ERROR_REPLY })
+
+      const result = await service.handleUserMessage(
+        { deviceId: 'device-legal-retry-3' },
+        'Đặt cọc thuê nhà thế nào?'
+      )
+
+      expect(result.content).toMatch(/^Hiện chưa có dữ liệu/)
+    })
+
+    it('Giữ nguyên câu từ chối khi thử lại vẫn không có nội dung', async () => {
+      legalSearch.search.mockResolvedValueOnce(sampleHits)
+      groqAgentService.chat
+        .mockResolvedValueOnce(legalToolCall('luật vũ trụ'))
+        .mockResolvedValueOnce({
+          content: 'Hiện chưa có dữ liệu về vấn đề này.',
+        })
+        .mockResolvedValueOnce({
+          content: 'Hiện chưa có dữ liệu về vấn đề này.',
+        })
+
+      const result = await service.handleUserMessage(
+        { deviceId: 'device-legal-retry-2' },
+        'Luật vũ trụ quy định gì?'
+      )
+
+      expect(result.content).toMatch(/^Hiện chưa có dữ liệu/)
       expect(result.metadata?.legalCitations).toBeUndefined()
     })
 
@@ -367,12 +469,15 @@ describe('AiChatsService', () => {
       expect(toolMessage?.content).toContain(
         'Nguồn: https://thuvienphapluat.vn/van-ban/bo-luat-dan-su'
       )
+      expect(toolMessage?.content).toContain('Cập nhật từ nguồn: 2026-10-11')
 
       expect(result.metadata?.legalCitations).toEqual([
         {
           title: 'Bộ luật Dân sự 2015',
           heading: 'Điều 472. Hợp đồng thuê tài sản',
           url: 'https://thuvienphapluat.vn/van-ban/bo-luat-dan-su',
+          issuer: 'Quốc hội',
+          fetchedAt: '2026-10-11T03:15:00.000Z',
         },
         {
           title: 'Quy định nội bộ nền tảng',

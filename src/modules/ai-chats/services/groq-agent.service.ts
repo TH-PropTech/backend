@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { GroqKeyPool } from '../../groq/groq-key-pool.service'
+import { estimateTokens, fitMessagesToBudget } from './prompt-budget'
 
 export interface ChatMessage {
   role: 'user' | 'assistant' | 'system' | 'tool'
@@ -24,6 +25,10 @@ export interface ToolCall {
     arguments: Record<string, unknown>
   }
 }
+
+/** Reply returned when the Groq call itself fails. */
+export const GROQ_CONNECTION_ERROR_REPLY =
+  'Xin lỗi, trợ lý AI đang gặp sự cố kết nối. Vui lòng thử lại sau ít phút.'
 
 @Injectable()
 export class GroqAgentService {
@@ -193,7 +198,8 @@ TRI THỨC PHÁP LÝ / QUY ĐỊNH:
 - Khi khách hỏi về luật, quy định, nghị định, thông tư, quy định thuê nhà, tiền đặt cọc, chấm dứt hợp đồng, quyền và nghĩa vụ của bên thuê hoặc bên cho thuê, tính hợp pháp, thủ tục, hoặc nội quy của nền tảng, BẮT BUỘC gọi tool \`search_legal_knowledge\` với tham số query là câu hỏi đã diễn đạt lại bằng các từ khóa chính.
 - KHÔNG gọi \`search_legal_knowledge\` cùng lượt với \`search_apartments\`, \`request_booking\` hoặc \`create_booking_draft\`.
 - Chỉ trả lời DỰA TRÊN các đoạn nội dung mà tool trả về. Khi trích dẫn, ghi nguồn theo mẫu "Theo <tên văn bản>, <điều/mục>". TUYỆT ĐỐI KHÔNG tự bịa số điều, tên văn bản, mức phí, thời hạn hay nội dung không có trong kết quả tool.
-- Nếu tool báo không tìm thấy nội dung phù hợp: BẮT ĐẦU câu trả lời đúng bằng cụm "Hiện chưa có dữ liệu" (ví dụ: "Hiện chưa có dữ liệu về vấn đề này trong kho tri thức"), rồi gợi ý khách hàng tham khảo luật sư hoặc cổng thông tin chính thức của cơ quan có thẩm quyền. Trong trường hợp này TUYỆT ĐỐI KHÔNG nêu tên bất kỳ luật, nghị định, thông tư, số hiệu hay số điều cụ thể nào từ kiến thức riêng của bạn (kể cả làm ví dụ hoặc gợi ý tra cứu).
+- Nếu tool trả về các đoạn liên quan MỘT PHẦN tới câu hỏi (ví dụ khách hỏi so sánh quy định giữa các năm nhưng kho chỉ có văn bản mới hoặc một khía cạnh như thuế, hồ sơ, thủ tục): HÃY trả lời phần mà các đoạn đó có, nêu rõ tên văn bản, ngày ban hành/hiệu lực nếu có trong đoạn, và nói rõ phần nào kho tri thức chưa có thông tin (ví dụ chưa có bản so sánh với năm trước). KHÔNG từ chối toàn bộ khi vẫn có nội dung liên quan; không tự suy diễn phần không có trong đoạn. Văn bản ghi là dự thảo thì phải nói rõ là chưa có hiệu lực.
+- Chỉ khi tool báo không tìm thấy nội dung phù hợp, hoặc các đoạn trả về hoàn toàn không liên quan tới câu hỏi: BẮT ĐẦU câu trả lời đúng bằng cụm "Hiện chưa có dữ liệu" (ví dụ: "Hiện chưa có dữ liệu về vấn đề này trong kho tri thức"), rồi gợi ý khách hàng tham khảo luật sư hoặc cổng thông tin chính thức của cơ quan có thẩm quyền. Trong trường hợp này TUYỆT ĐỐI KHÔNG nêu tên bất kỳ luật, nghị định, thông tư, số hiệu hay số điều cụ thể nào từ kiến thức riêng của bạn (kể cả làm ví dụ hoặc gợi ý tra cứu).
 - Với mọi câu trả lời pháp lý, kết thúc bằng một câu ngắn: nội dung chỉ mang tính tham khảo, không thay thế tư vấn pháp lý chuyên nghiệp.`
 
     // Safe sliding window: keep up to 5 user turns (including their subsequent tool calls & assistant replies)
@@ -214,15 +220,23 @@ TRI THỨC PHÁP LÝ / QUY ĐỊNH:
     }
     const slicedMessages = messages.slice(sliceIndex)
 
+    // Keep the request inside the Groq per-minute token limit: system prompt and tool
+    // definitions are fixed costs, history and tool results are trimmed to fit.
+    const fixedTokens =
+      estimateTokens(systemPrompt) +
+      (disableTools ? 0 : estimateTokens(JSON.stringify(this.getTools())))
     const fullMessages = [
       { role: 'system', content: systemPrompt },
-      ...slicedMessages.map(m => ({
-        role: m.role,
-        content: m.content || '',
-        name: m.name,
-        tool_call_id: m.tool_call_id,
-        tool_calls: m.tool_calls,
-      })),
+      ...fitMessagesToBudget(
+        fixedTokens,
+        slicedMessages.map(m => ({
+          role: m.role,
+          content: m.content || '',
+          name: m.name,
+          tool_call_id: m.tool_call_id,
+          tool_calls: m.tool_calls,
+        }))
+      ),
     ]
 
     try {
@@ -305,8 +319,7 @@ TRI THỨC PHÁP LÝ / QUY ĐỊNH:
     } catch (error) {
       this.logger.error('Error during chat completion with Groq:', error)
       return {
-        content:
-          'Xin lỗi, trợ lý AI đang gặp sự cố kết nối. Vui lòng thử lại sau ít phút.',
+        content: GROQ_CONNECTION_ERROR_REPLY,
       }
     }
   }
