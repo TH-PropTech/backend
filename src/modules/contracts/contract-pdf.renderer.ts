@@ -35,14 +35,25 @@ function partyLines(
   role: string,
   name: string | null,
   cccd: string | null,
-  address: string | null
+  address: string | null,
+  phone: string | null
 ): string[] {
   return [
     role,
     `Họ và tên: ${name || '—'}`,
     `Số CCCD: ${cccd || '—'}`,
     `Địa chỉ: ${address || '—'}`,
+    `Điện thoại: ${phone || '—'}`,
   ]
+}
+
+/** Địa điểm lập hợp đồng: tỉnh/thành ở cuối địa chỉ căn hộ. */
+export function resolveSigningPlace(propertyAddress: string | null): string {
+  const parts = (propertyAddress ?? '')
+    .split(',')
+    .map(part => part.trim())
+    .filter(Boolean)
+  return parts[parts.length - 1] ?? 'Việt Nam'
 }
 
 /**
@@ -103,29 +114,31 @@ export function renderContractPdf(
         .font(FONT_REGULAR)
         .fontSize(10.5)
         .text(
-          `Hôm nay, ngày ${formatDate(contract.startDate)}, các bên dưới đây cùng thỏa thuận ký kết hợp đồng thuê căn hộ với các điều khoản sau:`,
+          `Hôm nay, ngày ${formatDate(contract.contentLockedAt ?? contract.startDate)}, tại ${resolveSigningPlace(contract.propertyAddress)}, các bên dưới đây cùng thỏa thuận ký kết hợp đồng thuê căn hộ với các điều khoản sau:`,
           { align: 'justify' }
         )
         .moveDown(0.8)
 
       const parties: Array<
-        [string, string | null, string | null, string | null]
+        [string, string | null, string | null, string | null, string | null]
       > = [
         [
           'BÊN CHO THUÊ (Bên A)',
           contract.landlordName,
           contract.landlordCccd,
           contract.landlordAddress,
+          contract.landlordPhone ?? null,
         ],
         [
           'BÊN THUÊ (Bên B)',
           contract.tenantName,
           contract.tenantCccd,
           contract.tenantAddress,
+          contract.tenantPhone ?? null,
         ],
       ]
-      for (const [role, name, cccd, address] of parties) {
-        const [heading, ...rest] = partyLines(role, name, cccd, address)
+      for (const [role, name, cccd, address, phone] of parties) {
+        const [heading, ...rest] = partyLines(role, name, cccd, address, phone)
         pdf
           .font(FONT_BOLD)
           .fontSize(10.5)
@@ -135,6 +148,17 @@ export function renderContractPdf(
         pdf.moveDown(0.6)
       }
       pdf.moveDown(0.4)
+      pdf.font(FONT_BOLD).fontSize(10.5).text('THÔNG TIN CĂN HỘ')
+      pdf.font(FONT_REGULAR).fontSize(10.5)
+      pdf.text(`Căn hộ: ${contract.propertyTitle || '—'}`)
+      pdf.text(`Địa chỉ: ${contract.propertyAddress || '—'}`)
+      pdf.text(
+        `Diện tích: ${contract.propertyArea ? `${contract.propertyArea} m²` : '—'}`
+      )
+      pdf.text(
+        `Giấy chứng nhận quyền sở hữu/sử dụng: ${contract.propertyOwnershipCertificate || '—'}`
+      )
+      pdf.moveDown(1)
 
       for (const section of document.sections) {
         pdf
@@ -184,7 +208,7 @@ export function renderContractPdf(
         .font(FONT_REGULAR)
         .fontSize(10)
         .text(
-          `Hợp đồng được lập ngày ${formatDate(contract.contentLockedAt ?? contract.startDate)}, ký kết bằng chữ ký số; các bên xác nhận đã đọc, hiểu rõ và có đủ thẩm quyền giao kết hợp đồng này.`,
+          `Hợp đồng được lập tại ${resolveSigningPlace(contract.propertyAddress)}, ngày ${formatDate(contract.contentLockedAt ?? contract.startDate)}, ký kết bằng chữ ký số; các bên xác nhận đã đọc, hiểu rõ và có đủ thẩm quyền giao kết hợp đồng này.`,
           PAGE_MARGIN,
           signTop,
           { width: contentWidth, align: 'justify' }
