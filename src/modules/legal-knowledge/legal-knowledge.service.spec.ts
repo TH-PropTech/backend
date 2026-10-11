@@ -190,6 +190,36 @@ describe('LegalKnowledgeService', () => {
     expect(hits.every(hit => hit.title === 'Luật Nhà ở 2023')).toBe(true)
   })
 
+  it('lets one long doc fill only one result slot', async () => {
+    const { service } = createService()
+    const articles = Array.from(
+      { length: 6 },
+      (_, index) =>
+        `Điều ${index + 1}. Đặt cọc thuê nhà số ${index + 1}\nBên thuê đặt cọc thuê nhà cho bên cho thuê theo thỏa thuận.`
+    ).join('\n\n')
+    await service.create({
+      ...baseDoc,
+      title: 'Văn bản dài',
+      content: articles,
+      status: 'published',
+    })
+    await service.create({
+      ...baseDoc,
+      title: 'Văn bản ngắn',
+      content: 'Điều 1. Đặt cọc thuê nhà tối đa hai tháng tiền thuê nhà.',
+      status: 'published',
+    })
+
+    const hits = await service.search('đặt cọc thuê nhà', 4)
+
+    const perDoc = new Map<string, number>()
+    for (const hit of hits) {
+      perDoc.set(hit.docId, (perDoc.get(hit.docId) ?? 0) + 1)
+    }
+    expect(Math.max(...perDoc.values())).toBe(1)
+    expect(hits.some(hit => hit.title === 'Văn bản ngắn')).toBe(true)
+  })
+
   it('re-chunks and reindexes when content is updated', async () => {
     const { service, chunks } = createService()
     const doc = await service.create({ ...baseDoc, status: 'published' })
@@ -212,6 +242,37 @@ describe('LegalKnowledgeService', () => {
     expect((await service.search('thang máy bảo trì')).length).toBeGreaterThan(
       0
     )
+  })
+
+  it('returns when a hit was taken from its source link', async () => {
+    const { service } = createService()
+    const created = await service.create({
+      ...baseDoc,
+      sourceUrl: 'https://example.gov.vn/luat',
+      status: 'published',
+    })
+
+    const [hit] = await service.search('đặt cọc thuê nhà')
+
+    expect(hit?.fetchedAt).toBe(created.fetchedAt)
+  })
+
+  it('stamps a new fetchedAt when link-sourced content is refreshed, not on metadata edits', async () => {
+    const { service } = createService()
+    const created = await service.create({
+      ...baseDoc,
+      sourceUrl: 'https://example.gov.vn/luat',
+    })
+    const firstFetch = created.fetchedAt
+    await new Promise(resolve => setTimeout(resolve, 5))
+
+    const renamed = await service.update(created._id, { issuer: 'Quốc hội' })
+    expect(renamed.fetchedAt).toBe(firstFetch)
+
+    const refreshed = await service.update(created._id, {
+      content: 'Điều 1. Nội dung mới tải lại từ trang nguồn của cơ quan.',
+    })
+    expect(refreshed.fetchedAt).not.toBe(firstFetch)
   })
 
   it('leaves chunks alone when only metadata changes', async () => {

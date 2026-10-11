@@ -152,8 +152,10 @@ describe('MockBankController', () => {
     )
   })
 
-  it('rejects wallet access when the JWT has no user id', () => {
-    expect(() => createController().wallet({})).toThrow('USER_ID_REQUIRED')
+  it('rejects wallet invoice payment when the JWT has no user id', () => {
+    expect(() =>
+      createController().payInvoiceFromWallet({ paymentId: 'p' }, {})
+    ).toThrow('USER_ID_REQUIRED')
   })
 
   it('lists enabled providers from the registry', () => {

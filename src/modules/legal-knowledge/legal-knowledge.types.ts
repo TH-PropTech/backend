@@ -8,6 +8,7 @@ export const LEGAL_DOC_CATEGORIES = [
   'quyet-dinh',
   'noi-quy',
   'hop-dong-mau',
+  'thu-tuc',
   'faq',
   'khac',
 ] as const
@@ -26,6 +27,8 @@ export interface LegalSearchHit {
   text: string
   score: number
   sourceUrl?: string | undefined
+  /** ISO time the text was last taken from the source link (or last updated). */
+  fetchedAt?: string | undefined
 }
 
 export interface LegalKnowledgeSearcher {
@@ -38,6 +41,9 @@ export interface LegalCitation {
   title: string
   heading?: string | undefined
   url?: string | undefined
+  issuer?: string | undefined
+  /** ISO time the cited text was last taken from the source. */
+  fetchedAt?: string | undefined
 }
 
 export interface LegalChunkDraft {

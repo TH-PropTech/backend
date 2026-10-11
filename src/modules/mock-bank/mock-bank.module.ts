@@ -6,7 +6,6 @@ import { Payment } from '../payments/schemas/payment.schema'
 import { PaymentAttempt } from '../payments/schemas/payment-attempt.schema'
 import { MockBankController } from './mock-bank.controller'
 import { MockBankService } from './mock-bank.service'
-import { MockWallet } from './schemas/mock-wallet.schema'
 import { MockBankAdapter } from './providers/mock-bank.adapter'
 import { PaymentProviderRegistry } from './providers/payment-provider.registry'
 import { VnpayAdapter } from './providers/vnpay.adapter'
@@ -21,6 +20,7 @@ import { PaymentRequestsController } from './payment-requests.controller'
 import { MoveInSettlement } from '../move-in-settlements/schemas/move-in-settlement.schema'
 import { MoveInSettlementsModule } from '../move-in-settlements/move-in-settlements.module'
 import { PayoutsModule } from '../payouts/payouts.module'
+import { WalletsModule } from '../wallets/wallets.module'
 import { Contract } from '../contracts/schemas/contract.schema'
 
 @Module({
@@ -30,10 +30,10 @@ import { Contract } from '../contracts/schemas/contract.schema'
     FabricModule,
     MoveInSettlementsModule,
     PayoutsModule,
+    WalletsModule,
     TypeOrmModule.forFeature([
       Payment,
       PaymentAttempt,
-      MockWallet,
       MoveInSettlement,
       Contract,
     ]),

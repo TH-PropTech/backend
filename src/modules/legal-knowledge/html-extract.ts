@@ -65,6 +65,8 @@ const BLOCK_TAGS = new Set([
   'hr',
 ])
 const MAIN_MARKER = 'data-legal-main'
+/** A <form> holding at least this share of the page text is treated as the page wrapper. */
+const PAGE_FORM_MIN_SHARE = 0.6
 
 export interface ExtractedPage {
   title?: string
@@ -90,6 +92,7 @@ function extractUnsafe(html: string): ExtractedPage {
     $('title').first().text().replace(/\s+/g, ' ').trim() ||
     $('h1').first().text().replace(/\s+/g, ' ').trim()
 
+  unwrapPageForms($)
   $(REMOVED_TAGS.join(',')).remove()
 
   const root = pickMainRoot($)
@@ -118,6 +121,21 @@ function extractUnsafe(html: string): ExtractedPage {
     ...(title ? { title } : {}),
     text,
   }
+}
+
+/**
+ * ASP.NET WebForms pages wrap the whole page in one <form>. Keep the content of
+ * a form that holds most of the page text; other forms (search boxes, login) are
+ * still dropped with REMOVED_TAGS.
+ */
+function unwrapPageForms($: CheerioRoot): void {
+  const pageLength = $('body').text().length
+  $('form').each((_, el) => {
+    const form = $(el)
+    if (form.text().length >= pageLength * PAGE_FORM_MIN_SHARE) {
+      form.replaceWith(form.contents())
+    }
+  })
 }
 
 function pickMainRoot($: CheerioRoot): CheerioSelection {

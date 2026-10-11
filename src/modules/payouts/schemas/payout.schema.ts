@@ -23,7 +23,7 @@ export class Payout {
   @Column({ nullable: true }) txRef!: string | null
   /** Số tiền sàn chuyển đi (bằng Payment.amount). */
   @Column() sentAmount!: number
-  /** Phí sàn: giai đoạn này luôn 0. */
+  /** Luôn 0: hoa hồng sàn thu bằng hóa đơn riêng, chủ nhà trả từ số dư ví. */
   @Column({ default: 0 }) feeAmount!: number
   /** Số tiền chủ nhà nhận = sentAmount - feeAmount. */
   @Column() receivedAmount!: number

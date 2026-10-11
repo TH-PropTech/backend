@@ -15,6 +15,7 @@ if (dnsServers) {
   if (servers.length > 0) {
     try {
       dns.setServers(servers)
+      dns.promises.setServers(servers)
     } catch (err) {
       // eslint-disable-next-line no-console
       console.warn('Không thể thiết lập DNS servers tùy chỉnh:', err)
