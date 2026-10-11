@@ -689,6 +689,16 @@ export class ContractsController {
     )
   }
 
+  /** Dev/test: ký bỏ qua SmartCA. Bị chặn trừ khi ENABLE_TEST_SIGN_BYPASS=true và không phải production. */
+  @Post(':id/test-sign')
+  @Roles('landlord', 'tenant')
+  async testSign(
+    @Param('id') id: string,
+    @CurrentUser('id') userId: string
+  ): Promise<Contract> {
+    return this.contractsService.signContractForTest(id, userId)
+  }
+
   @Put(':id/content')
   @Roles('admin', 'staff', 'landlord')
   saveContent(
@@ -743,6 +753,21 @@ export class ContractsController {
       user._id ?? '',
       isStaff,
       artifact.buffer
+    )
+  }
+
+  @Post(':id/artifacts/render-lock')
+  @Roles('admin', 'staff', 'landlord')
+  renderAndLockCanonicalArtifact(
+    @Param('id') id: string,
+    @CurrentUser() user: UserPayload
+  ): Promise<ContractArtifact> {
+    const isStaff =
+      user.roles?.some(role => ['staff', 'admin'].includes(role)) ?? false
+    return this.artifactService.renderAndLockCanonicalArtifact(
+      id,
+      user._id ?? '',
+      isStaff
     )
   }
 

@@ -769,7 +769,9 @@ export class FabricService implements OnModuleInit, OnModuleDestroy {
         this.markConnectionUnavailable(role, error, 'submit')
       }
       const errMsg = error instanceof Error ? error.message : String(error)
-      this.logger.error(`Error submitting Fabric transaction: ${errMsg}`)
+      this.logger.error(
+        `Error submitting Fabric transaction: ${errMsg}${describeGatewayDetails(error)}`
+      )
       throw new Error(`Fabric transaction failed: ${errMsg}`)
     }
   }
@@ -1200,4 +1202,27 @@ export class FabricService implements OnModuleInit, OnModuleDestroy {
     if (this.mode === 'simulation') return true
     return this.chaincodeEvidenceSchemaVersions.includes(version)
   }
+}
+
+/**
+ * Lỗi endorse của Fabric Gateway chỉ nói "see attached details"; lý do thật (peer nào, chaincode
+ * trả gì) nằm trong `error.details`. Chỉ ghi vào log server, không đưa vào lỗi lưu ở outbox.
+ */
+function describeGatewayDetails(error: unknown): string {
+  const details = (error as { details?: unknown } | null)?.details
+  if (!Array.isArray(details) || details.length === 0) return ''
+  const lines = details.slice(0, 5).map(item => {
+    const entry = item as {
+      address?: unknown
+      mspId?: unknown
+      message?: unknown
+    }
+    const peer = [entry.mspId, entry.address]
+      .filter(value => typeof value === 'string')
+      .join('@')
+    const message =
+      typeof entry.message === 'string' ? entry.message.slice(0, 400) : ''
+    return `${peer || 'peer'}: ${message}`
+  })
+  return ` | details: ${lines.join(' | ')}`
 }

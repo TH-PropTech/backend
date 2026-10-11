@@ -65,6 +65,52 @@ describe('SmartCaProvider', () => {
     )
   })
 
+  it('accepts a production certificate whose cert_status is a Vietnamese label and cert_status_code is VALID', async () => {
+    jest.spyOn(global, 'fetch').mockResolvedValue(
+      jsonResponse({
+        status_code: 200,
+        message: 'Success',
+        data: {
+          user_certificates: [
+            {
+              serial_number: 'SERIAL-PROD-001',
+              service_type: 'SMARTCA',
+              cert_status_code: 'VALID',
+              cert_status: 'Đang hoạt động',
+              cert_subject: 'CN=TEST,UID=CCCD:000000000000',
+              cert_valid_from: '2026-01-01T00:00:00Z',
+              cert_valid_to: '2099-01-01T00:00:00Z',
+            },
+          ],
+        },
+      })
+    )
+    const provider = createProvider()
+
+    const [certificate] = await provider.listCertificates(signerCccd)
+
+    expect(certificate).toMatchObject({
+      serialNumber: 'SERIAL-PROD-001',
+      isValid: true,
+    })
+  })
+
+  it('maps an expired service pack (65000) to a specific error instead of a generic gateway failure', async () => {
+    jest.spyOn(global, 'fetch').mockResolvedValue(
+      jsonResponse({
+        status_code: 65000,
+        message:
+          'Service pack has expired, please renew or contact the package administrator',
+        data: null,
+      })
+    )
+    const provider = createProvider()
+
+    await expect(provider.listCertificates(signerCccd)).rejects.toThrow(
+      'SMARTCA_SERVICE_PACK_EXPIRED'
+    )
+  })
+
   it('parses and sanitizes certificate metadata from the VNPT envelope', async () => {
     const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue(
       jsonResponse({
@@ -103,9 +149,12 @@ describe('SmartCaProvider', () => {
       },
     ])
     const request = fetchMock.mock.calls[0]?.[1]
-    expect(parseJsonBody(request)).toEqual(
-      expect.objectContaining({ user_id: signerCccd })
-    )
+    const body = parseJsonBody(request) as {
+      user_id?: string
+      transaction_id?: string
+    }
+    expect(body.user_id).toBe(signerCccd)
+    expect(body.transaction_id).toMatch(/^cert-/)
   })
 
   it('rejects a malformed certificate envelope', async () => {
