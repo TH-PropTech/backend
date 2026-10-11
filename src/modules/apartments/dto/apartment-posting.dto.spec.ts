@@ -92,7 +92,7 @@ describe('CreateApartmentDto validation (design §8)', () => {
   it.each([
     ['title shorter than 10', { title: 'ngắn' }, 'title'],
     ['title longer than 200', { title: 'a'.repeat(201) }, 'title'],
-    ['description shorter than 50', { description: 'quá ngắn' }, 'description'],
+    ['description shorter than 10', { description: 'quá ngắn' }, 'description'],
     [
       'description longer than 5000',
       { description: 'a'.repeat(5001) },
@@ -122,6 +122,14 @@ describe('CreateApartmentDto validation (design §8)', () => {
     expect(await invalidFields({ ...validPayload, ...override })).toContain(
       property
     )
+  })
+
+  it('accepts a payload without a description (optional field)', async () => {
+    const withoutDescription: Record<string, unknown> = { ...validPayload }
+    delete withoutDescription['description']
+    expect(
+      await invalidFields(withoutDescription as typeof validPayload)
+    ).toEqual([])
   })
 
   it.each([
@@ -167,7 +175,8 @@ describe('CreateApartmentDto validation (design §8)', () => {
   it.each([
     ['title of exactly 10', { title: 'a'.repeat(10) }],
     ['title of exactly 200', { title: 'a'.repeat(200) }],
-    ['description of exactly 50', { description: 'a'.repeat(50) }],
+    ['description of exactly 10', { description: 'a'.repeat(10) }],
+    ['an empty description', { description: '' }],
     ['zero bedrooms (studio)', { bedrooms: 0 }],
     [
       'exactly 20 gallery images',

@@ -16,6 +16,7 @@ import {
   MinLength,
   MaxLength,
   ValidateNested,
+  ValidateIf,
 } from 'class-validator'
 import { Type } from 'class-transformer'
 import type { RentalExecutionPolicyRef } from '../../rental-flow-config/rental-execution-policy.util'
@@ -197,15 +198,20 @@ export class CreateApartmentDto {
   @IsIn(APARTMENT_CATEGORIES)
   category!: string
 
-  @ApiProperty({
-    description: 'Mô tả chi tiết',
-    minLength: 50,
+  @ApiPropertyOptional({
+    description:
+      'Mô tả chi tiết (không bắt buộc; nếu nhập thì tối thiểu 10 ký tự)',
+    minLength: 10,
     maxLength: 5000,
   })
+  @ValidateIf(
+    (_object, value: unknown) =>
+      value !== undefined && value !== null && value !== ''
+  )
   @IsString()
-  @MinLength(50)
+  @MinLength(10)
   @MaxLength(5000)
-  description!: string
+  description?: string
 
   @ApiPropertyOptional({
     description:
