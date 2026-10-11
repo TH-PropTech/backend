@@ -140,7 +140,11 @@ export class SmartCaProvider {
       '{transactionId}',
       encodeURIComponent(providerTransactionId)
     )
-    const envelope = await this.post(`${config.apiUrl}${path}`, {})
+    // Theo dự án tham chiếu đã ký thành công: gửi kèm thông tin đối tác trong body (sandbox chấp nhận cả hai).
+    const envelope = await this.post(`${config.apiUrl}${path}`, {
+      sp_id: config.spId,
+      sp_password: config.spPassword,
+    })
     const transactionId = optionalString(envelope.data.transaction_id)
     const signatures = envelope.data.signatures
     if (transactionId !== providerTransactionId || !Array.isArray(signatures)) {

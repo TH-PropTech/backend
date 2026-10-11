@@ -258,7 +258,7 @@ describe('SmartCaProvider', () => {
     ).toBeUndefined()
   })
 
-  it('polls with POST empty body and parses the matching nested signature', async () => {
+  it('polls with POST carrying the partner credentials and parses the matching nested signature', async () => {
     const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue(
       jsonResponse({
         status_code: 200,
@@ -290,7 +290,13 @@ describe('SmartCaProvider', () => {
     })
     expect(fetchMock).toHaveBeenCalledWith(
       'https://smartca.test/status/vnpt-transaction-1',
-      expect.objectContaining({ method: 'POST', body: '{}' })
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          sp_id: 'partner-redacted',
+          sp_password: 'partner-secret-redacted',
+        }),
+      })
     )
   })
 
