@@ -73,6 +73,8 @@ import type { ContractArtifact } from './schemas/contract-artifact.schema'
 import type { Response } from 'express'
 import {
   CreateSmartCaSigningSessionDto,
+  SignSmartCaV2Dto,
+  SigningMethodOptionDto,
   SmartCaCertificateListDto,
   SmartCaSigningSessionDto,
   toSmartCaCertificateListDto,
@@ -512,8 +514,10 @@ export class ContractsController {
     @Param('id') id: string,
     @Query('format') format: string | undefined,
     @CurrentUser() user: UserPayload,
-    @Res({ passthrough: true }) response: Response
-  ): Promise<Buffer> {
+    // Ghi byte trực tiếp: nếu trả Buffer qua handler, ResponseEnvelopeInterceptor sẽ bọc thành JSON
+    // và trình xem PDF/tải về nhận được JSON thay vì file.
+    @Res() response: Response
+  ): Promise<void> {
     const isStaff =
       user.roles?.some(role => ['staff', 'admin'].includes(role)) ?? false
     const resolved = await this.artifactService.generateDocumentWithMetadata(
@@ -543,7 +547,8 @@ export class ContractsController {
       'Content-Disposition',
       `attachment; filename="contract-${id}-r${resolved.reference.revision}.${safeFormat}"`
     )
-    return resolved.bytes
+    response.setHeader('Content-Length', String(resolved.bytes.length))
+    response.status(200).end(resolved.bytes)
   }
 
   @Post(':id/smartca/signing-sessions')
@@ -558,6 +563,39 @@ export class ContractsController {
       id,
       signerId,
       dto
+    )
+    return toSmartCaSigningSessionDto(session)
+  }
+
+  @Get(':id/signing-methods')
+  @Roles('landlord', 'tenant')
+  @ApiOkResponse({ type: [SigningMethodOptionDto] })
+  listSigningMethods(
+    @Param('id') id: string,
+    @CurrentUser('id') signerId: string
+  ): Promise<SigningMethodOptionDto[]> {
+    return this.smartCaSigningService.listSigningMethods(id, signerId)
+  }
+
+  @Post(':id/smartca/sign-v2')
+  @Roles('landlord', 'tenant')
+  @ApiCreatedResponse({ type: SmartCaSigningSessionDto })
+  async signSmartCaV2(
+    @Param('id') id: string,
+    @CurrentUser('id') signerId: string,
+    @Body() dto: SignSmartCaV2Dto
+  ): Promise<SmartCaSigningSessionDto> {
+    const session = await this.smartCaSigningService.createSessionV2(
+      id,
+      signerId,
+      {
+        password: dto.smartCaPassword,
+        otp: dto.smartCaOtp,
+        ...(dto.idempotencyKey ? { idempotencyKey: dto.idempotencyKey } : {}),
+        ...(dto.certificateSerial
+          ? { certificateSerial: dto.certificateSerial }
+          : {}),
+      }
     )
     return toSmartCaSigningSessionDto(session)
   }

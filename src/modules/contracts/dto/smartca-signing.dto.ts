@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
-import { IsOptional, IsString, MaxLength } from 'class-validator'
+import { IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator'
 import type { SmartCaCertificate } from '../smartca/smartca.provider'
 import type { SmartCaSigningSession } from '../smartca/smartca-signing-session.schema'
 
@@ -15,6 +15,42 @@ export class CreateSmartCaSigningSessionDto {
   @IsString()
   @MaxLength(256)
   certificateSerial?: string
+}
+
+export class SignSmartCaV2Dto extends CreateSmartCaSigningSessionDto {
+  @ApiProperty({ writeOnly: true, maxLength: 128 })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(128)
+  smartCaPassword!: string
+
+  @ApiProperty({ writeOnly: true, maxLength: 16 })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(16)
+  smartCaOtp!: string
+}
+
+export class SigningMethodOptionDto {
+  @ApiProperty({
+    enum: ['smartca_v1', 'smartca_v2', 'biometric_smart_otp', 'dev_sign'],
+  })
+  id!: string
+
+  @ApiProperty()
+  label!: string
+
+  @ApiProperty()
+  description!: string
+
+  @ApiProperty()
+  available!: boolean
+
+  @ApiPropertyOptional()
+  reason?: string
+
+  @ApiProperty({ type: [String] })
+  inputs!: string[]
 }
 
 export class SmartCaCertificateDto {

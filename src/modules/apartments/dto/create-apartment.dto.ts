@@ -220,6 +220,15 @@ export class CreateApartmentDto {
   @IsNotEmpty()
   city!: string
 
+  @ApiPropertyOptional({
+    description: 'Số giấy chứng nhận quyền sở hữu/sử dụng căn hộ',
+    maxLength: 200,
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  ownershipCertificate?: string
+
   @ApiProperty({
     description:
       'Quận/Huyện (tùy chọn: cơ cấu hành chính từ 1/7/2025 không còn cấp huyện)',

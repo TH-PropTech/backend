@@ -26,6 +26,17 @@ export type SmartCaSigningRequest = {
   documentId: string
 }
 
+export type SmartCaSignV2Request = SmartCaSigningRequest & {
+  password: string
+  otp: string
+}
+
+export type SmartCaSignV2Result = {
+  transactionId: string
+  sad?: string
+  signature?: SmartCaSignature
+}
+
 export type SmartCaSignResult = {
   transactionId: string
   transactionCode?: string
@@ -49,6 +60,8 @@ type SmartCaConfig = {
   spPassword?: string
   certPath?: string
   signPath?: string
+  signV2Path?: string
+  confirmV2Path?: string
   statusPathTmpl?: string
 }
 
@@ -56,6 +69,12 @@ type SmartCaEnvelope = {
   statusCode: number
   message: string
   data: Record<string, unknown>
+}
+
+/** Thời điểm UTC theo định dạng gateway yêu cầu: yyyyMMddHHmmssZ. */
+export function smartCaTimestamp(date: Date = new Date()): string {
+  const pad = (value: number): string => String(value).padStart(2, '0')
+  return `${date.getUTCFullYear()}${pad(date.getUTCMonth() + 1)}${pad(date.getUTCDate())}${pad(date.getUTCHours())}${pad(date.getUTCMinutes())}${pad(date.getUTCSeconds())}Z`
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -103,6 +122,8 @@ export class SmartCaProvider {
       sp_password: config.spPassword,
       user_id: input.signerCccd,
       transaction_id: input.transactionId,
+      transaction_desc: 'Ky hop dong thue can ho TH-PropTech',
+      time_stamp: smartCaTimestamp(),
       serial_number: input.certificateSerial,
       sign_files: [
         {
@@ -123,6 +144,77 @@ export class SmartCaProvider {
     }
   }
 
+  /**
+   * VNPT SmartCA v2 (tùy chọn): ký bằng mật khẩu + OTP của người ký. Gateway trả
+   * sad (cần confirm) hoặc chữ ký ngay. Mật khẩu/OTP chỉ là tham số của lời gọi,
+   * không được lưu hay log.
+   */
+  async signV2(input: SmartCaSignV2Request): Promise<SmartCaSignV2Result> {
+    const config = this.requireConfig('signV2Path')
+    const envelope = await this.post(
+      `${config.apiUrl}${config.signV2Path}`,
+      {
+        sp_id: config.spId,
+        sp_password: config.spPassword,
+        user_id: input.signerCccd,
+        password: input.password,
+        otp: input.otp,
+        transaction_id: input.transactionId,
+        serial_number: input.certificateSerial,
+        sign_files: [
+          {
+            doc_id: input.documentId,
+            file_type: 'pdf',
+            sign_type: 'hash',
+            data_to_be_signed: input.artifactHash,
+          },
+        ],
+      },
+      'SMARTCA_CREDENTIAL_REJECTED'
+    )
+    const transactionId =
+      optionalString(envelope.data.transaction_id) ?? input.transactionId
+    const sad = optionalString(envelope.data.sad)
+    const signature = this.findSignature(
+      envelope.data.signatures,
+      input.documentId
+    )
+    if (!sad && !signature) this.invalidResponse()
+    return {
+      transactionId,
+      ...(sad ? { sad } : {}),
+      ...(signature ? { signature } : {}),
+    }
+  }
+
+  async confirmV2(input: {
+    signerCccd: string
+    password: string
+    transactionId: string
+    documentId: string
+    sad: string
+  }): Promise<SmartCaSignature> {
+    const config = this.requireConfig('confirmV2Path')
+    const envelope = await this.post(
+      `${config.apiUrl}${config.confirmV2Path}`,
+      {
+        sp_id: config.spId,
+        sp_password: config.spPassword,
+        user_id: input.signerCccd,
+        password: input.password,
+        transaction_id: input.transactionId,
+        sad: input.sad,
+      },
+      'SMARTCA_CONFIRM_FAILED'
+    )
+    const signature = this.findSignature(
+      envelope.data.signatures,
+      input.documentId
+    )
+    if (!signature) this.invalidResponse()
+    return signature
+  }
+
   async getSignatureStatus(
     providerTransactionId: string,
     documentId: string
@@ -132,7 +224,11 @@ export class SmartCaProvider {
       '{transactionId}',
       encodeURIComponent(providerTransactionId)
     )
-    const envelope = await this.post(`${config.apiUrl}${path}`, {})
+    // Theo dự án tham chiếu đã ký thành công: gửi kèm thông tin đối tác trong body (sandbox chấp nhận cả hai).
+    const envelope = await this.post(`${config.apiUrl}${path}`, {
+      sp_id: config.spId,
+      sp_password: config.spPassword,
+    })
     const transactionId = optionalString(envelope.data.transaction_id)
     const signatures = envelope.data.signatures
     if (transactionId !== providerTransactionId || !Array.isArray(signatures)) {
@@ -163,7 +259,12 @@ export class SmartCaProvider {
   }
 
   private requireConfig<
-    TPath extends 'certPath' | 'signPath' | 'statusPathTmpl',
+    TPath extends
+      | 'certPath'
+      | 'signPath'
+      | 'signV2Path'
+      | 'confirmV2Path'
+      | 'statusPathTmpl',
   >(path: TPath): SmartCaConfig & Required<Pick<SmartCaConfig, TPath>> {
     const config = this.configService.get<SmartCaConfig>('smartCA')
     if (
@@ -179,7 +280,8 @@ export class SmartCaProvider {
 
   private async post(
     url: string,
-    body: Record<string, unknown>
+    body: Record<string, unknown>,
+    rejectionCode = 'SMARTCA_CREDENTIAL_OR_REQUEST_REJECTED'
   ): Promise<SmartCaEnvelope> {
     let response: Response
     try {
@@ -207,9 +309,7 @@ export class SmartCaProvider {
         throw new UnprocessableEntityException('SMARTCA_SERVICE_PACK_EXPIRED')
       }
       if ([400, 401, 403, 422].includes(envelope.statusCode)) {
-        throw new UnprocessableEntityException(
-          'SMARTCA_CREDENTIAL_OR_REQUEST_REJECTED'
-        )
+        throw new UnprocessableEntityException(rejectionCode)
       }
       throw new BadGatewayException('SMARTCA_REQUEST_FAILED')
     }
@@ -278,6 +378,18 @@ export class SmartCaProvider {
       ...(validTo ? { validTo } : {}),
       isValid: activeStatus && validWindow,
     }
+  }
+
+  private findSignature(
+    signatures: unknown,
+    documentId: string
+  ): SmartCaSignature | undefined {
+    if (!Array.isArray(signatures)) return undefined
+    const entries: unknown[] = signatures
+    const matching = entries.find(
+      value => isRecord(value) && value.doc_id === documentId
+    )
+    return matching ? this.parseSignature(matching) : undefined
   }
 
   private parseSignature(payload: unknown): SmartCaSignature {

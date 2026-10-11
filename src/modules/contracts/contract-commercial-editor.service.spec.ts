@@ -224,6 +224,9 @@ describe('ContractCommercialEditorService', () => {
       ContractsService.prototype
     ) as ContractsService
     Reflect.set(contentService, 'contractRepository', repository)
+    Reflect.set(contentService, 'kycService', {
+      findByUserId: jest.fn().mockResolvedValue(null),
+    })
     const locked = await contentService.lockContractContent(
       contract._id.toHexString(),
       'admin-1',

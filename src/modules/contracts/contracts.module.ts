@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common'
+import { User } from '../users/schemas/user.schema'
 import { ConfigService } from '@nestjs/config'
 import { TypeOrmModule } from '@nestjs/typeorm'
 import { Contract } from './schemas/contract.schema'
@@ -67,6 +68,7 @@ import { ContractEvidencePackageExportService } from './contract-evidence-packag
       MoveInSettlement,
       ContractLayoutProfile,
       ContractLayoutAudit,
+      User,
     ]),
     PoliciesModule,
     FabricModule,
