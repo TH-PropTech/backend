@@ -20,7 +20,11 @@ import {
   ApiTags,
 } from '@nestjs/swagger'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
+import { Roles } from '../../common/decorators/roles.decorator'
+import { RolesGuard } from '../../common/guards/roles.guard'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
+import { Payment } from '../payments/schemas/payment.schema'
+import { PayInvoiceFromWalletDto } from '../wallets/dto/wallet.dto'
 import type { UserPayload } from '../auth/interfaces/auth.interface'
 import {
   InitDepositPaymentDto,
@@ -36,7 +40,6 @@ import {
   type GatewayPaymentResult,
 } from './mock-bank.service'
 import type { PaymentRequestView } from './payment-request.builder'
-import type { PaymentProviderName } from './providers/payment-provider.port'
 import {
   PaymentProviderRegistry,
   type PaymentProviderOption,
@@ -290,7 +293,7 @@ export class MockBankController {
     return this.mockBankService.simulateSuccess(txRef)
   }
 
-  @Get('payout/:txRef/success')
+  @Post('payout/:txRef/success')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Simulated payout result: transfer succeeded' })
@@ -302,7 +305,7 @@ export class MockBankController {
     return this.payoutsService.settleForLandlord(txRef, 'success', user._id)
   }
 
-  @Get('payout/:txRef/failed')
+  @Post('payout/:txRef/failed')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Simulated payout result: transfer failed' })
@@ -314,34 +317,19 @@ export class MockBankController {
     return this.payoutsService.settleForLandlord(txRef, 'failed', user._id)
   }
 
-  @Get('wallet')
+  @Post('wallet/pay-invoice')
   @ApiBearerAuth()
-  @UseGuards(JwtAuthGuard)
-  wallet(@CurrentUser() user: UserPayload): Promise<{
-    userId: string
-    provider: PaymentProviderName
-    externalAccountRef: string
-    status: 'linked' | 'unlinked'
-    simulation: boolean
-    balance: null
-  }> {
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('landlord')
+  @ApiOperation({
+    summary: 'Pay a platform-fee invoice from the wallet balance',
+  })
+  payInvoiceFromWallet(
+    @Body() dto: PayInvoiceFromWalletDto,
+    @CurrentUser() user: UserPayload
+  ): Promise<Payment> {
     if (!user._id) throw new UnauthorizedException('USER_ID_REQUIRED')
-    return this.mockBankService.getWallet(user._id)
-  }
-
-  @Post('wallet/link')
-  @ApiBearerAuth()
-  @UseGuards(JwtAuthGuard)
-  linkWallet(@CurrentUser() user: UserPayload): Promise<{
-    userId: string
-    provider: PaymentProviderName
-    externalAccountRef: string
-    status: 'linked' | 'unlinked'
-    simulation: boolean
-    balance: null
-  }> {
-    if (!user._id) throw new UnauthorizedException('USER_ID_REQUIRED')
-    return this.mockBankService.linkWallet(user._id)
+    return this.mockBankService.payInvoiceFromWallet(dto.paymentId, user._id)
   }
 
   private callbackHeaders(headers: Record<string, string>): {

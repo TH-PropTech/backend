@@ -40,6 +40,7 @@ function setup(): {
   >
   wallets: Mocks<'findOne'>
   notifications: Mocks<'createNotificationOnce'>
+  walletsService: Mocks<'creditPayout'>
 } {
   const payouts = {
     findOne: jest.fn(),
@@ -53,15 +54,17 @@ function setup(): {
     updateOne: jest.fn(),
   }
   const wallets = { findOne: jest.fn() }
+  const walletsService = { creditPayout: jest.fn().mockResolvedValue({}) }
   const notifications = {
     createNotificationOnce: jest.fn().mockResolvedValue({}),
   }
   const service = new PayoutsService(
     payouts as never,
     wallets as never,
-    notifications as never
+    notifications as never,
+    walletsService as never
   )
-  return { service, payouts, wallets, notifications }
+  return { service, payouts, wallets, notifications, walletsService }
 }
 
 const source = {
@@ -229,6 +232,50 @@ describe('PayoutsService.settleForLandlord', () => {
         receivedAmount: 5_000_000,
       })
     )
+  })
+
+  it('credits the landlord wallet once with the received amount on success', async () => {
+    const { service, payouts, walletsService, pending } = withPending()
+    payouts.updateOne.mockResolvedValue({ modifiedCount: 1 })
+
+    await service.settleForLandlord('PAYOUT-1', 'success', LANDLORD)
+
+    expect(walletsService.creditPayout).toHaveBeenCalledTimes(1)
+    expect(walletsService.creditPayout).toHaveBeenCalledWith({
+      userId: LANDLORD,
+      payoutId: pending._id.toHexString(),
+      amount: 5_000_000,
+      contractId: 'c-1',
+      paymentId: 'pay-1',
+    })
+  })
+
+  it('does not credit the wallet when the transfer failed or the race was lost', async () => {
+    const { service, payouts, walletsService } = withPending()
+    payouts.updateOne.mockResolvedValue({ modifiedCount: 1 })
+    await service.settleForLandlord('PAYOUT-1', 'failed', LANDLORD)
+
+    payouts.updateOne.mockResolvedValue({ modifiedCount: 0 })
+    await service.settleForLandlord('PAYOUT-1', 'success', LANDLORD)
+
+    expect(walletsService.creditPayout).not.toHaveBeenCalled()
+  })
+
+  it('puts the payout back to pending and rethrows when crediting fails', async () => {
+    const { service, payouts, walletsService, notifications, pending } =
+      withPending()
+    payouts.updateOne.mockResolvedValue({ modifiedCount: 1 })
+    walletsService.creditPayout.mockRejectedValueOnce(new Error('wallet down'))
+
+    await expect(
+      service.settleForLandlord('PAYOUT-1', 'success', LANDLORD)
+    ).rejects.toThrow('wallet down')
+
+    expect(payouts.updateOne).toHaveBeenLastCalledWith(
+      { _id: pending._id },
+      { $set: { status: 'pending', paidOutAt: null } }
+    )
+    expect(notifications.createNotificationOnce).not.toHaveBeenCalled()
   })
 
   it('marks failed with a reason and does not send a received notification', async () => {

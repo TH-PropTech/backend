@@ -16,7 +16,7 @@ import {
   randomBytes,
   timingSafeEqual,
 } from 'node:crypto'
-import { MongoRepository, Repository } from 'typeorm'
+import { Repository } from 'typeorm'
 import { DepositAgreementsService } from '../contracts/deposit-agreements.service'
 import { evaluatePayDeposit } from '../contracts/flow/flow-guards'
 import { Payment } from '../payments/schemas/payment.schema'
@@ -25,7 +25,6 @@ import {
   type PaymentAttemptStatus,
   type PaymentClientChannel,
 } from '../payments/schemas/payment-attempt.schema'
-import { MockWallet } from './schemas/mock-wallet.schema'
 import type { PaymentCallbackDto } from './dto/init-payment.dto'
 import { ObjectId } from 'mongodb'
 import { PaymentProviderRegistry } from './providers/payment-provider.registry'
@@ -45,6 +44,7 @@ import { Contract } from '../contracts/schemas/contract.schema'
 import { MoveInSettlement } from '../move-in-settlements/schemas/move-in-settlement.schema'
 import { MoveInSettlementsService } from '../move-in-settlements/move-in-settlements.service'
 import { PayoutsService } from '../payouts/payouts.service'
+import { WalletsService } from '../wallets/wallets.service'
 import { RentalTransactionEventService } from '../rental-transactions/rental-transaction-event.service'
 import type { RentalTransactionActorRole } from '../rental-transactions/schemas/rental-transaction-event.schema'
 
@@ -132,8 +132,7 @@ export class MockBankService {
     private readonly paymentRepository: Repository<Payment>,
     @InjectRepository(PaymentAttempt)
     private readonly attemptRepository: Repository<PaymentAttempt>,
-    @InjectRepository(MockWallet)
-    private readonly walletRepository: MongoRepository<MockWallet>,
+    private readonly walletsService: WalletsService,
     private readonly providerRegistry: PaymentProviderRegistry,
     private readonly configService: ConfigService,
     private readonly ledgerOutboxService: LedgerOutboxService,
@@ -800,7 +799,7 @@ export class MockBankService {
   /** Shared paid transition for rent/invoice/settlement payments. */
   private async markPaymentPaid(
     payment: Payment,
-    attempt: PaymentAttempt,
+    attempt: Pick<PaymentAttempt, 'txRef'>,
     paidAt: Date,
     receiptSecret: string,
     types: { receiptType: string; hashType: string }
@@ -856,67 +855,58 @@ export class MockBankService {
     }
   }
 
-  async getWallet(userId: string): Promise<{
-    userId: string
-    provider: PaymentProviderName
-    externalAccountRef: string
-    status: 'linked' | 'unlinked'
-    simulation: boolean
-    balance: null
-  }> {
-    this.assertMockProvider()
-    const wallet = await this.walletRepository.findOne({ where: { userId } })
-    if (wallet) {
-      return {
-        userId,
-        provider: wallet.provider,
-        externalAccountRef: wallet.externalAccountRef,
-        status: wallet.status,
-        simulation: wallet.simulation,
-        balance: null,
-      }
+  /** Chủ nhà trả hóa đơn hoa hồng sàn bằng số dư ví: trừ ví rồi ghi nhận paid, lỗi thì hoàn ví. */
+  async payInvoiceFromWallet(
+    paymentId: string,
+    currentUserId: string
+  ): Promise<Payment> {
+    const invoice = await this.findPayment(paymentId)
+    this.assertWalletPayable(invoice, currentUserId)
+    const id = invoice._id.toHexString()
+    await this.walletsService.debitInvoice({
+      userId: currentUserId,
+      paymentId: id,
+      amount: invoice.amount,
+      contractId: invoice.contractId ?? null,
+      description: invoice.description,
+    })
+    try {
+      await this.markPaymentPaid(
+        invoice,
+        { txRef: `WALLET-${id}` },
+        new Date(),
+        this.receiptSecret('mock-bank'),
+        { receiptType: 'platform-fee', hashType: 'platform-fee' }
+      )
+    } catch (error) {
+      await this.walletsService.refundInvoice({
+        userId: currentUserId,
+        paymentId: id,
+        amount: invoice.amount,
+        contractId: invoice.contractId ?? null,
+      })
+      throw error
     }
-    return this.linkWallet(userId)
+    await this.recordTransactionEvent({
+      transactionKey: invoice.contractId ?? id,
+      contractId: invoice.contractId,
+      eventType: 'payment.succeeded',
+      actorRole: 'landlord',
+      actorId: currentUserId,
+      refs: { paymentId: id },
+      transitionKey: `payment:wallet:${id}:succeeded`,
+    })
+    return invoice
   }
 
-  async linkWallet(userId: string): Promise<{
-    userId: string
-    provider: PaymentProviderName
-    externalAccountRef: string
-    status: 'linked' | 'unlinked'
-    simulation: boolean
-    balance: null
-  }> {
-    this.assertMockProvider()
-    const existing = await this.walletRepository.findOne({ where: { userId } })
-    if (existing) {
-      return {
-        userId,
-        provider: existing.provider,
-        externalAccountRef: existing.externalAccountRef,
-        status: existing.status,
-        simulation: existing.simulation,
-        balance: null,
-      }
+  private assertWalletPayable(invoice: Payment, currentUserId: string): void {
+    const isLandlordFee =
+      invoice.type === 'platform-fee' && invoice.payerRole === 'landlord'
+    if (!isLandlordFee || invoice.payerId !== currentUserId) {
+      throw new ForbiddenException('PAYMENT_ACCESS_DENIED')
     }
-    const accountLink = await this.providerRegistry.getAccountLink(userId)
-    const created = await this.walletRepository.save(
-      this.walletRepository.create({
-        userId,
-        provider: accountLink.provider,
-        externalAccountRef: accountLink.externalAccountRef,
-        status: accountLink.status,
-        simulation: accountLink.simulation,
-      })
-    )
-    await this.payoutsService?.releaseAwaitingWallet(userId)
-    return {
-      userId,
-      provider: created.provider,
-      externalAccountRef: created.externalAccountRef,
-      status: created.status,
-      simulation: created.simulation,
-      balance: null,
+    if (invoice.status === 'paid' || invoice.status === 'waived') {
+      throw new ConflictException('PAYMENT_ALREADY_PAID')
     }
   }
 

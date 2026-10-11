@@ -11,6 +11,7 @@ import { ObjectId } from 'mongodb'
 import type { MongoRepository } from 'typeorm'
 import { MockWallet } from '../mock-bank/schemas/mock-wallet.schema'
 import { NotificationsService } from '../notifications/notifications.service'
+import { WalletsService } from '../wallets/wallets.service'
 import { Payout } from './schemas/payout.schema'
 
 export type PayoutSource = {
@@ -42,7 +43,8 @@ export class PayoutsService {
     private readonly payoutRepository: MongoRepository<Payout>,
     @InjectRepository(MockWallet)
     private readonly walletRepository: MongoRepository<MockWallet>,
-    private readonly notificationsService: NotificationsService
+    private readonly notificationsService: NotificationsService,
+    private readonly walletsService: WalletsService
   ) {}
 
   /** Tạo đúng một payout cho mỗi payment; gọi lại sẽ trả payout cũ. */
@@ -186,8 +188,28 @@ export class PayoutsService {
     )
     const fresh = await this.findById(payout._id.toHexString())
     if (result.modifiedCount === 0) return { payout: fresh, replayed: true }
+    if (outcome === 'success') await this.creditWalletOrRevert(fresh)
     if (outcome === 'success') await this.notifyReceived(fresh)
     return { payout: fresh, replayed: false }
+  }
+
+  /** Cộng ví sau khi chốt thành công; nếu cộng lỗi thì trả payout về pending để chốt lại được. */
+  private async creditWalletOrRevert(payout: Payout): Promise<void> {
+    try {
+      await this.walletsService.creditPayout({
+        userId: payout.landlordId,
+        payoutId: payout._id.toHexString(),
+        amount: payout.receivedAmount,
+        contractId: payout.contractId,
+        paymentId: payout.paymentId,
+      })
+    } catch (error) {
+      await this.payoutRepository.updateOne(
+        { _id: payout._id },
+        { $set: { status: 'pending', paidOutAt: null } }
+      )
+      throw error
+    }
   }
 
   private async findById(id: string): Promise<Payout> {

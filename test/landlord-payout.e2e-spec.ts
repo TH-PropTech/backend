@@ -90,7 +90,8 @@ function setup(options: { walletLinked: boolean }): {
   const service = new PayoutsService(
     payoutRepository as never,
     walletRepository as never,
-    notificationsService as never
+    notificationsService as never,
+    { creditPayout: () => Promise.resolve({}) } as never
   )
   return {
     service,
