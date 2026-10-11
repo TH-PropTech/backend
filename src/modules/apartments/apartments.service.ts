@@ -268,7 +268,7 @@ function resolveLocation(
 ): string {
   return (
     dto.location?.trim() ||
-    [dto.street, dto.ward, dto.district, dto.city].join(', ')
+    [dto.street, dto.ward, dto.district, dto.city].filter(Boolean).join(', ')
   )
 }
 
@@ -1012,7 +1012,7 @@ export class ApartmentsService {
       const project = await this.projectsService.findOrCreate({
         name: resolvedProjectName,
         city: dto.city,
-        district: dto.district,
+        district: dto.district ?? '',
         location: resolveLocation(dto),
       })
       resolvedProjectId = project._id.toString()
@@ -1028,7 +1028,7 @@ export class ApartmentsService {
         projectId: resolvedProjectId ?? null,
         projectName: resolvedProjectName || null,
         city: dto.city,
-        district: dto.district,
+        district: dto.district ?? '',
         location: resolveLocation(dto),
       })
       resolvedBuildingId = building._id.toString()
@@ -1046,7 +1046,7 @@ export class ApartmentsService {
       ownershipCertificate: dto.ownershipCertificate?.trim() || null,
       location: resolveLocation(dto),
       city: dto.city,
-      district: dto.district,
+      district: dto.district ?? '',
       ward: dto.ward,
       street: dto.street,
       address: dto.address,
@@ -1206,7 +1206,7 @@ export class ApartmentsService {
       ownershipCertificate: dto.ownershipCertificate?.trim() || null,
       location: resolveLocation(dto),
       city: dto.city,
-      district: dto.district,
+      district: dto.district ?? '',
       ward: dto.ward,
       street: dto.street,
       address: dto.address,

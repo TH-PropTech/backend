@@ -229,10 +229,14 @@ export class CreateApartmentDto {
   @MaxLength(200)
   ownershipCertificate?: string
 
-  @ApiProperty({ description: 'Quận/Huyện' })
+  @ApiProperty({
+    description:
+      'Quận/Huyện (tùy chọn: cơ cấu hành chính từ 1/7/2025 không còn cấp huyện)',
+    required: false,
+  })
   @IsString()
-  @IsNotEmpty()
-  district!: string
+  @IsOptional()
+  district?: string
 
   @ApiProperty({ description: 'Phường/Xã' })
   @IsString()
