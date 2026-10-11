@@ -18,6 +18,11 @@ export type SmartCaCertificate = {
   isValid: boolean
 }
 
+export type SmartCaCertificateMaterial = {
+  signerPem: string
+  chainPem: string[]
+}
+
 export type SmartCaSigningRequest = {
   transactionId: string
   artifactHash: string
@@ -77,6 +82,16 @@ export function smartCaTimestamp(date: Date = new Date()): string {
   return `${date.getUTCFullYear()}${pad(date.getUTCMonth() + 1)}${pad(date.getUTCDate())}${pad(date.getUTCHours())}${pad(date.getUTCMinutes())}${pad(date.getUTCSeconds())}Z`
 }
 
+/** Chuẩn hóa PEM hoặc DER base64 về PEM; trả undefined nếu không có dữ liệu. */
+export function toPem(value: string | undefined): string | undefined {
+  if (!value) return undefined
+  if (value.includes('-----BEGIN CERTIFICATE-----')) return value
+  const compact = value.replace(/\s+/g, '')
+  if (!compact) return undefined
+  const lines = compact.match(/.{1,64}/g)?.join('\n') ?? compact
+  return `-----BEGIN CERTIFICATE-----\n${lines}\n-----END CERTIFICATE-----\n`
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
@@ -107,6 +122,40 @@ export class SmartCaProvider {
     if (!Array.isArray(certificates)) this.invalidResponse()
 
     return certificates.map(certificate => this.parseCertificate(certificate))
+  }
+
+  /**
+   * Chứng thư công khai (PEM) của người ký + chuỗi CA, dùng dựng CMS cho PAdES.
+   * Đây là dữ liệu công khai, không phải secret; không được trả ra client.
+   */
+  async getCertificateMaterial(
+    signerCccd: string,
+    certificateSerial: string
+  ): Promise<SmartCaCertificateMaterial> {
+    const config = this.requireConfig('certPath')
+    const envelope = await this.post(`${config.apiUrl}${config.certPath}`, {
+      sp_id: config.spId,
+      sp_password: config.spPassword,
+      user_id: signerCccd,
+      transaction_id: `cert-${randomUUID()}`,
+    })
+    const items = envelope.data.user_certificates
+    if (!Array.isArray(items)) this.invalidResponse()
+    const entries: unknown[] = items
+    const item = entries.find(
+      value =>
+        isRecord(value) &&
+        optionalString(value.serial, value.serial_number) === certificateSerial
+    )
+    if (!isRecord(item)) this.invalidResponse()
+
+    const signerPem = toPem(optionalString(item.certificate, item.cert_data))
+    if (!signerPem) this.invalidResponse()
+    const chain = isRecord(item.chain_data) ? item.chain_data : {}
+    const chainPem = [chain.ca_cert, chain.root_cert]
+      .map(value => toPem(optionalString(value)))
+      .filter((value): value is string => Boolean(value))
+    return { signerPem, chainPem }
   }
 
   /**
