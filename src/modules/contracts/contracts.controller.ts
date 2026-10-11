@@ -73,6 +73,8 @@ import type { ContractArtifact } from './schemas/contract-artifact.schema'
 import type { Response } from 'express'
 import {
   CreateSmartCaSigningSessionDto,
+  SignSmartCaV2Dto,
+  SigningMethodOptionDto,
   SmartCaCertificateListDto,
   SmartCaSigningSessionDto,
   toSmartCaCertificateListDto,
@@ -558,6 +560,39 @@ export class ContractsController {
       id,
       signerId,
       dto
+    )
+    return toSmartCaSigningSessionDto(session)
+  }
+
+  @Get(':id/signing-methods')
+  @Roles('landlord', 'tenant')
+  @ApiOkResponse({ type: [SigningMethodOptionDto] })
+  listSigningMethods(
+    @Param('id') id: string,
+    @CurrentUser('id') signerId: string
+  ): Promise<SigningMethodOptionDto[]> {
+    return this.smartCaSigningService.listSigningMethods(id, signerId)
+  }
+
+  @Post(':id/smartca/sign-v2')
+  @Roles('landlord', 'tenant')
+  @ApiCreatedResponse({ type: SmartCaSigningSessionDto })
+  async signSmartCaV2(
+    @Param('id') id: string,
+    @CurrentUser('id') signerId: string,
+    @Body() dto: SignSmartCaV2Dto
+  ): Promise<SmartCaSigningSessionDto> {
+    const session = await this.smartCaSigningService.createSessionV2(
+      id,
+      signerId,
+      {
+        password: dto.smartCaPassword,
+        otp: dto.smartCaOtp,
+        ...(dto.idempotencyKey ? { idempotencyKey: dto.idempotencyKey } : {}),
+        ...(dto.certificateSerial
+          ? { certificateSerial: dto.certificateSerial }
+          : {}),
+      }
     )
     return toSmartCaSigningSessionDto(session)
   }

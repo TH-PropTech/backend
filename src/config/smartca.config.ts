@@ -39,6 +39,16 @@ export default registerAs('smartCA', () => {
     signPath: isTest
       ? process.env.SMARTCA_TEST_SIGN_PATH || '/sca/sp769/v1/signatures/sign'
       : process.env.SMARTCA_SIGN_PATH || '/sca/sp769/v1/signatures/sign',
+    // v2 (tùy chọn, tắt mặc định): ký bằng mật khẩu + OTP SmartCA rồi confirm bằng sad
+    v2Enabled: process.env.SMARTCA_V2_ENABLED === 'true',
+    signV2Path: isTest
+      ? process.env.SMARTCA_TEST_SIGN_V2_PATH || '/sca/sp769/v2/signatures/sign'
+      : process.env.SMARTCA_SIGN_V2_PATH || '/sca/sp769/v2/signatures/sign',
+    confirmV2Path: isTest
+      ? process.env.SMARTCA_TEST_CONFIRM_V2_PATH ||
+        '/sca/sp769/v2/signatures/confirm'
+      : process.env.SMARTCA_CONFIRM_V2_PATH ||
+        '/sca/sp769/v2/signatures/confirm',
     // Status API: POST (không phải GET!) — template có {transactionId}
     statusPathTmpl: isTest
       ? process.env.SMARTCA_TEST_STATUS_PATH_TMPL ||

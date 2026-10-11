@@ -12,6 +12,8 @@ describe('SmartCaProvider', () => {
     spPassword: 'partner-secret-redacted',
     certPath: '/certificate',
     signPath: '/sign',
+    signV2Path: '/sign-v2',
+    confirmV2Path: '/confirm-v2',
     statusPathTmpl: '/status/{transactionId}',
   }
   const signerCccd = '000000000001'
@@ -250,6 +252,69 @@ describe('SmartCaProvider', () => {
     await expect(provider.requestSignature(signingRequest)).rejects.toThrow(
       'SMARTCA_CREDENTIAL_OR_REQUEST_REJECTED'
     )
+  })
+
+  it('sends v2 sign with password and otp and returns the sad', async () => {
+    const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue(
+      jsonResponse({
+        status_code: 200,
+        message: 'Success',
+        data: { transaction_id: 'vnpt-v2-1', sad: 'sad-value' },
+      })
+    )
+    const provider = createProvider()
+
+    await expect(
+      provider.signV2({
+        ...signingRequest,
+        password: 'pw-secret',
+        otp: '123456',
+      })
+    ).resolves.toEqual({ transactionId: 'vnpt-v2-1', sad: 'sad-value' })
+    const [url, init] = fetchMock.mock.calls[0] ?? []
+    expect(url).toBe('https://smartca.test/sign-v2')
+    expect(parseJsonBody(init)).toEqual(
+      expect.objectContaining({ password: 'pw-secret', otp: '123456' })
+    )
+  })
+
+  it('maps a rejected v2 sign to SMARTCA_CREDENTIAL_REJECTED without echoing credentials', async () => {
+    jest
+      .spyOn(global, 'fetch')
+      .mockResolvedValue(
+        jsonResponse({ status_code: 401, message: 'bad pw-secret', data: null })
+      )
+    const provider = createProvider()
+
+    const error: unknown = await provider
+      .signV2({ ...signingRequest, password: 'pw-secret', otp: '123456' })
+      .catch((e: unknown) => e)
+    expect(JSON.stringify(error)).toContain('SMARTCA_CREDENTIAL_REJECTED')
+    expect(JSON.stringify(error)).not.toContain('pw-secret')
+  })
+
+  it('confirms v2 with sad and parses the matching signature', async () => {
+    const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue(
+      jsonResponse({
+        status_code: 200,
+        message: 'Success',
+        data: {
+          signatures: [{ doc_id: documentId, signature_value: 'sig-value' }],
+        },
+      })
+    )
+    const provider = createProvider()
+
+    await expect(
+      provider.confirmV2({
+        signerCccd,
+        password: 'pw-secret',
+        transactionId: 'vnpt-v2-1',
+        documentId,
+        sad: 'sad-value',
+      })
+    ).resolves.toMatchObject({ documentId, signatureValue: 'sig-value' })
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('https://smartca.test/confirm-v2')
   })
 
   it('does not expose a confirm step in the v1 flow', () => {

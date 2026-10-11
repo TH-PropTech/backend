@@ -1,6 +1,7 @@
 import {
   ConflictException,
   ForbiddenException,
+  HttpException,
   Inject,
   Injectable,
   Logger,
@@ -19,6 +20,11 @@ import { DepositConfirmationResolver } from '../deposit-confirmation.resolver'
 import { isDepositGateOpen } from '../flow/flow-guards'
 import { Contract } from '../schemas/contract.schema'
 import {
+  isSigningMethodEnabled,
+  resolveEnabledSigningMethods,
+  type SigningMethodId,
+} from '../signing-methods.config'
+import {
   SmartCaProvider,
   type SmartCaCertificate,
   type SmartCaSignature,
@@ -33,6 +39,44 @@ import {
 export type CreateSmartCaSessionInput = {
   idempotencyKey?: string
   certificateSerial?: string
+}
+
+export type CreateSmartCaSessionV2Input = CreateSmartCaSessionInput & {
+  /** Secret dùng một lần: chỉ tồn tại trong bộ nhớ của request, không persist/log. */
+  password: string
+  otp: string
+}
+
+export type SigningMethodOption = {
+  id: SigningMethodId
+  label: string
+  description: string
+  available: boolean
+  reason?: string
+  inputs: Array<'smartCaPassword' | 'smartCaOtp'>
+}
+
+const SIGNING_METHOD_LABELS: Record<
+  SigningMethodId,
+  { label: string; description: string }
+> = {
+  smartca_v1: {
+    label: 'VNPT SmartCA (xác nhận trên app)',
+    description: 'Gửi yêu cầu ký, bạn duyệt trong ứng dụng VNPT SmartCA.',
+  },
+  smartca_v2: {
+    label: 'VNPT SmartCA (mật khẩu + OTP)',
+    description: 'Nhập mật khẩu và OTP SmartCA TH để ký ngay trên web.',
+  },
+  biometric_smart_otp: {
+    label: 'Sinh trắc học + Smart OTP',
+    description: 'Xác thực khuôn mặt và Smart OTP của TH-PropTech.',
+  },
+  dev_sign: {
+    label: 'Ký thử nghiệm (dev)',
+    description:
+      'Chỉ dùng môi trường thử nghiệm, không phải chữ ký số có chứng thư.',
+  },
 }
 
 export type SmartCaCertificateList = {
@@ -77,6 +121,142 @@ export class SmartCaSigningService {
     await this.resolveSigningContext(contractId, signerId)
     const signerCccd = await this.resolveCccd(signerId)
     return { certificates: await this.resolveValidCertificates(signerCccd) }
+  }
+
+  /** Danh sách phương thức ký bật theo cấu hình, kèm khả năng dùng của participant. */
+  async listSigningMethods(
+    contractId: string,
+    signerId: string
+  ): Promise<SigningMethodOption[]> {
+    let gateReason: string | undefined
+    try {
+      await this.resolveSigningContext(contractId, signerId)
+    } catch (error) {
+      if (!(error instanceof HttpException)) throw error
+      gateReason = this.errorCode(error)
+    }
+    let kycReason: string | undefined
+    try {
+      await this.resolveCccd(signerId)
+    } catch (error) {
+      if (!(error instanceof HttpException)) throw error
+      kycReason = this.errorCode(error)
+    }
+
+    return resolveEnabledSigningMethods().map(id => {
+      const reason =
+        id === 'dev_sign'
+          ? undefined
+          : id === 'biometric_smart_otp'
+            ? gateReason
+            : (gateReason ?? kycReason)
+      return {
+        id,
+        ...SIGNING_METHOD_LABELS[id],
+        available: reason === undefined,
+        ...(reason ? { reason } : {}),
+        inputs:
+          id === 'smartca_v2'
+            ? (['smartCaPassword', 'smartCaOtp'] as const).map(value => value)
+            : [],
+      }
+    })
+  }
+
+  /**
+   * SmartCA v2 (tùy chọn): sign bằng mật khẩu + OTP, rồi confirm bằng sad trong
+   * cùng request. Mật khẩu/OTP/sad không được lưu hay log.
+   */
+  async createSessionV2(
+    contractId: string,
+    signerId: string,
+    input: CreateSmartCaSessionV2Input
+  ): Promise<SmartCaSigningSession> {
+    if (!isSigningMethodEnabled('smartca_v2')) {
+      throw new ForbiddenException('SIGNING_METHOD_DISABLED')
+    }
+    const context = await this.resolveSigningContext(contractId, signerId)
+    const alreadySigned = await this.sessionRepository.findOne({
+      where: {
+        contractId,
+        signerId,
+        artifactHash: context.artifactHash,
+        status: 'signed',
+      },
+    })
+    if (alreadySigned) return alreadySigned
+
+    const signerCccd = await this.resolveCccd(signerId)
+    const certificates = await this.resolveValidCertificates(signerCccd)
+    const certificate = this.selectCertificate(
+      certificates,
+      input.certificateSerial
+    )
+    const idempotencyKey = input.idempotencyKey?.trim() || randomUUID()
+    const transactionId = this.createTransactionId(
+      contractId,
+      context.signerRole,
+      idempotencyKey
+    )
+    const session = this.sessionRepository.create({
+      contractId,
+      signerId,
+      signerRole: context.signerRole,
+      artifactHash: context.artifactHash,
+      providerTransactionId: transactionId,
+      status: 'pending',
+      idempotencyKey,
+      confirmationUrl: null,
+      certificateSerial: certificate.serialNumber,
+      certificateSubject: certificate.subject ?? null,
+      certificateIssuer: certificate.issuer ?? null,
+      signatureHash: null,
+      signatureAlgorithm: null,
+      signatureValueRef: null,
+      signedAt: null,
+      verifiedAt: null,
+      providerStatus: 'pending',
+      documentId: context.documentId,
+      expiresAt: new Date(Date.now() + 15 * 60 * 1000),
+    })
+    await this.sessionRepository.save(session)
+
+    let signature: SmartCaSignature
+    try {
+      const signResult = await this.provider.signV2({
+        transactionId: session.providerTransactionId,
+        artifactHash: context.artifactHash,
+        signerCccd,
+        certificateSerial: certificate.serialNumber,
+        documentId: context.documentId,
+        password: input.password,
+        otp: input.otp,
+      })
+      session.providerTransactionId = signResult.transactionId
+      if (signResult.signature) {
+        signature = signResult.signature
+      } else if (signResult.sad) {
+        try {
+          signature = await this.provider.confirmV2({
+            signerCccd,
+            password: input.password,
+            transactionId: signResult.transactionId,
+            documentId: context.documentId,
+            sad: signResult.sad,
+          })
+        } catch (error) {
+          await this.saveTerminalSession(session, 'rejected')
+          throw error
+        }
+      } else {
+        throw new ConflictException('SMARTCA_PROVIDER_RESPONSE_INVALID')
+      }
+    } catch (error) {
+      if (session.status === 'pending')
+        await this.sessionRepository.remove(session)
+      throw error
+    }
+    return this.completeWithSignature(session, signature, context.documentId)
   }
 
   async createSession(
@@ -492,6 +672,13 @@ export class SmartCaSigningService {
       signatureValueRef: session.signatureValueRef ?? null,
       signedAt: session.signedAt,
     })
+  }
+
+  private errorCode(error: HttpException): string {
+    const response = error.getResponse()
+    if (typeof response === 'string') return response
+    const message = (response as { message?: unknown }).message
+    return typeof message === 'string' ? message : error.name
   }
 
   private parseSignedAt(value: string | undefined): Date | null {
