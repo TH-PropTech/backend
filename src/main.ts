@@ -14,6 +14,8 @@ if (dnsServers) {
   if (servers.length > 0) {
     try {
       dns.setServers(servers)
+      // Driver MongoDB phân giải SRV qua dns.promises, resolver này có thể không đồng bộ với dns.setServers
+      dns.promises.setServers(servers)
     } catch (err) {
       // eslint-disable-next-line no-console
       console.warn('Không thể thiết lập DNS servers tùy chỉnh:', err)

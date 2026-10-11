@@ -10,9 +10,14 @@
 
 const { MongoClient } = require('mongodb')
 
-const DATABASE_URL =
-  process.env.DATABASE_URL ||
-  'mongodb+srv://admin:22102004@cluster0.fh2rx8k.mongodb.net/th_proptech?retryWrites=true&w=majority&appName=Cluster0'
+const DATABASE_URL = process.env.DATABASE_URL
+
+if (!DATABASE_URL) {
+  console.error(
+    'Thiếu biến môi trường DATABASE_URL. Ví dụ: DATABASE_URL=<uri> node scripts/migrate-legacy-pricing.js'
+  )
+  process.exit(1)
+}
 
 const COLLECTION = 'apartments'
 
