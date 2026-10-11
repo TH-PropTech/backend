@@ -58,6 +58,12 @@ type SmartCaEnvelope = {
   data: Record<string, unknown>
 }
 
+/** Thời điểm UTC theo định dạng gateway yêu cầu: yyyyMMddHHmmssZ. */
+export function smartCaTimestamp(date: Date = new Date()): string {
+  const pad = (value: number): string => String(value).padStart(2, '0')
+  return `${date.getUTCFullYear()}${pad(date.getUTCMonth() + 1)}${pad(date.getUTCDate())}${pad(date.getUTCHours())}${pad(date.getUTCMinutes())}${pad(date.getUTCSeconds())}Z`
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
@@ -103,6 +109,8 @@ export class SmartCaProvider {
       sp_password: config.spPassword,
       user_id: input.signerCccd,
       transaction_id: input.transactionId,
+      transaction_desc: 'Ky hop dong thue can ho TH-PropTech',
+      time_stamp: smartCaTimestamp(),
       serial_number: input.certificateSerial,
       sign_files: [
         {

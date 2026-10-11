@@ -200,6 +200,9 @@ describe('SmartCaProvider', () => {
         serial_number: 'SERIAL-001',
       })
     )
+    const signBody = body as { transaction_desc?: string; time_stamp?: string }
+    expect(signBody.transaction_desc).toBeTruthy()
+    expect(signBody.time_stamp).toMatch(/^[0-9]{14}Z$/)
     expect(body).not.toHaveProperty('password')
     expect(body).not.toHaveProperty('otp')
     expect(body).not.toHaveProperty('mobile_code')

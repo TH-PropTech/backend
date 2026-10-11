@@ -5,6 +5,14 @@ import type { ContractDocumentViewDto } from './dto/contract-view.dto'
 
 export const CONTRACT_PDF_RENDERER_VERSION = 'th-proptech-pdf-v1'
 
+export const LEGAL_BASIS_LINES: readonly string[] = [
+  'Căn cứ Bộ luật Dân sự số 91/2015/QH13 ngày 24/11/2015;',
+  'Căn cứ Luật Nhà ở số 27/2023/QH15 ngày 27/11/2023;',
+  'Căn cứ Luật Kinh doanh bất động sản số 29/2023/QH15 ngày 28/11/2023;',
+  'Căn cứ Luật Giao dịch điện tử số 20/2023/QH15 ngày 22/6/2023;',
+  'Căn cứ nhu cầu và khả năng thực tế của các bên.',
+]
+
 const PAGE_MARGIN = 56
 const FONT_REGULAR = 'Body'
 const FONT_BOLD = 'Body-Bold'
@@ -86,6 +94,11 @@ export function renderContractPdf(
         .text(`Mẫu: ${document.templateVersion}`, { align: 'center' })
         .moveDown(1)
 
+      pdf.font(FONT_REGULAR).fontSize(10)
+      for (const line of LEGAL_BASIS_LINES)
+        pdf.text(line, { width: contentWidth })
+      pdf.moveDown(0.8)
+
       pdf
         .font(FONT_REGULAR)
         .fontSize(10.5)
@@ -164,38 +177,48 @@ export function renderContractPdf(
       }
 
       // Khối chữ ký: giữ nguyên trên cùng một trang.
-      if (pdf.y > pdf.page.height - PAGE_MARGIN - 130) pdf.addPage()
+      if (pdf.y > pdf.page.height - PAGE_MARGIN - 190) pdf.addPage()
       const signTop = pdf.y
       const colWidth = contentWidth / 2
+      pdf
+        .font(FONT_REGULAR)
+        .fontSize(10)
+        .text(
+          `Hợp đồng được lập ngày ${formatDate(contract.contentLockedAt ?? contract.startDate)}, ký kết bằng chữ ký số; các bên xác nhận đã đọc, hiểu rõ và có đủ thẩm quyền giao kết hợp đồng này.`,
+          PAGE_MARGIN,
+          signTop,
+          { width: contentWidth, align: 'justify' }
+        )
+      const blockTop = pdf.y + 12
       pdf.font(FONT_BOLD).fontSize(10.5)
-      pdf.text('ĐẠI DIỆN BÊN CHO THUÊ', PAGE_MARGIN, signTop, {
+      pdf.text('ĐẠI DIỆN BÊN CHO THUÊ', PAGE_MARGIN, blockTop, {
         width: colWidth,
         align: 'center',
       })
-      pdf.text('ĐẠI DIỆN BÊN THUÊ', PAGE_MARGIN + colWidth, signTop, {
+      pdf.text('ĐẠI DIỆN BÊN THUÊ', PAGE_MARGIN + colWidth, blockTop, {
         width: colWidth,
         align: 'center',
       })
       pdf.font(FONT_REGULAR).fontSize(9)
-      pdf.text('(Ký số bằng VNPT SmartCA)', PAGE_MARGIN, signTop + 16, {
+      pdf.text('(Ký số bằng VNPT SmartCA)', PAGE_MARGIN, blockTop + 16, {
         width: colWidth,
         align: 'center',
       })
       pdf.text(
         '(Ký số bằng VNPT SmartCA)',
         PAGE_MARGIN + colWidth,
-        signTop + 16,
+        blockTop + 16,
         { width: colWidth, align: 'center' }
       )
       pdf.fontSize(10.5)
-      pdf.text(contract.landlordName ?? '', PAGE_MARGIN, signTop + 80, {
+      pdf.text(contract.landlordName ?? '', PAGE_MARGIN, blockTop + 80, {
         width: colWidth,
         align: 'center',
       })
       pdf.text(
         contract.tenantName ?? '',
         PAGE_MARGIN + colWidth,
-        signTop + 80,
+        blockTop + 80,
         {
           width: colWidth,
           align: 'center',

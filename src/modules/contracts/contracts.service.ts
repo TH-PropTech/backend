@@ -930,6 +930,27 @@ export class ContractsService {
     return this.contractRepository.save(contract)
   }
 
+  /**
+   * Chốt thông tin hai bên vào hợp đồng ngay trước khi khóa nội dung (họ tên, CCCD, nơi cư trú lấy từ
+   * hồ sơ KYC đã duyệt). Chỉ điền chỗ còn trống để không ghi đè dữ liệu staff đã nhập.
+   */
+  private async snapshotParties(contract: Contract): Promise<void> {
+    const [landlordKyc, tenantKyc] = await Promise.all([
+      this.kycService.findByUserId(contract.landlordId),
+      this.kycService.findByUserId(contract.tenantId),
+    ])
+    if (landlordKyc?.status === 'verified') {
+      contract.landlordName ||= landlordKyc.fullName ?? null
+      contract.landlordCccd ||= landlordKyc.idCardNumber ?? null
+      contract.landlordAddress ||= landlordKyc.placeOfResidence ?? null
+    }
+    if (tenantKyc?.status === 'verified') {
+      contract.tenantName ||= tenantKyc.fullName ?? null
+      contract.tenantCccd ||= tenantKyc.idCardNumber ?? null
+      contract.tenantAddress ||= tenantKyc.placeOfResidence ?? null
+    }
+  }
+
   async lockContractContent(
     contractId: string,
     actorId: string,
@@ -999,6 +1020,7 @@ export class ContractsService {
     contract.hashSchemaVersion = layout
       ? CONTRACT_CONTENT_HASH_SCHEMA_VERSION
       : 2
+    await this.snapshotParties(contract)
     contract.contentLockedHash = hashCanonicalContractPayload(
       buildCanonicalContractPayload(contract, template)
     )
