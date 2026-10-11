@@ -99,6 +99,13 @@ export class Contract {
   @Column({ nullable: true })
   landlordAddress!: string | null
 
+  @Column({ nullable: true })
+  landlordPhone?: string | null
+
+  /** Giấy chứng nhận quyền sở hữu/sử dụng căn hộ, chốt cùng nội dung khi khóa hợp đồng. */
+  @Column({ nullable: true })
+  propertyOwnershipCertificate?: string | null
+
   @Column()
   tenantId!: string
 
@@ -110,6 +117,9 @@ export class Contract {
 
   @Column({ nullable: true })
   tenantAddress!: string | null
+
+  @Column({ nullable: true })
+  tenantPhone?: string | null
 
   // ── Thời hạn hợp đồng ──
 

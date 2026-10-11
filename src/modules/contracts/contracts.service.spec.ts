@@ -489,6 +489,42 @@ describe('ContractsService contract content', () => {
     expect(locked.tenantCccd).toBe('001204000002')
   })
 
+  it('snapshots party phones and the ownership certificate when locking', async () => {
+    const { service, contract } = createContentService()
+    contract.editorContent = validContent
+    contract.contentRevision = 1
+    contract.landlordId = '507f1f77bcf86cd799439021'
+    contract.tenantId = '507f1f77bcf86cd799439022'
+    contract.propertyId = '507f1f77bcf86cd799439023'
+    Reflect.set(service, 'userRepository', {
+      findOne: jest.fn(
+        ({ where }: { where: { _id: { toHexString: () => string } } }) =>
+          Promise.resolve({
+            phone:
+              where._id.toHexString() === '507f1f77bcf86cd799439021'
+                ? '0384589387'
+                : '0912345678',
+          })
+      ),
+    })
+    Reflect.set(service, 'apartmentRepository', {
+      findOne: jest
+        .fn()
+        .mockResolvedValue({ ownershipCertificate: ' CS 12345 ' }),
+    })
+
+    const locked = await service.lockContractContent(
+      contract._id.toString(),
+      '507f1f77bcf86cd799439021',
+      1,
+      false
+    )
+
+    expect(locked.landlordPhone).toBe('0384589387')
+    expect(locked.tenantPhone).toBe('0912345678')
+    expect(locked.propertyOwnershipCertificate).toBe('CS 12345')
+  })
+
   it('ignores parties whose KYC is not verified when locking', async () => {
     const { service, contract } = createContentService()
     contract.editorContent = validContent

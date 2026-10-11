@@ -40,6 +40,10 @@ export class Apartment {
   @Column()
   city!: string
 
+  /** Số giấy chứng nhận quyền sở hữu/sử dụng căn hộ (tùy chọn, dùng khi lập hợp đồng). */
+  @Column({ nullable: true })
+  ownershipCertificate?: string | null
+
   @Column()
   district!: string
 

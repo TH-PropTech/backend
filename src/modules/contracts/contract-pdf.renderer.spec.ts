@@ -1,6 +1,10 @@
 import type { Contract } from './schemas/contract.schema'
 import { ContractDocumentProjector } from './legal/contract-document.projector'
-import { renderContractPdf } from './contract-pdf.renderer'
+import {
+  LEGAL_BASIS_LINES,
+  renderContractPdf,
+  resolveSigningPlace,
+} from './contract-pdf.renderer'
 
 function buildContract(): Contract {
   return {
@@ -42,5 +46,17 @@ describe('renderContractPdf', () => {
     const bytes = await renderContractPdf(contract, document)
 
     expect(bytes.toString('latin1')).toContain('DejaVuSans')
+  })
+
+  it('takes the signing place from the province at the end of the property address', () => {
+    expect(
+      resolveSigningPlace('90 Vườn Lài, Phường Vườn Lài, Thành phố Hồ Chí Minh')
+    ).toBe('Thành phố Hồ Chí Minh')
+    expect(resolveSigningPlace(null)).toBe('Việt Nam')
+  })
+
+  it('opens with the legal basis of the lease', () => {
+    expect(LEGAL_BASIS_LINES.join(' ')).toContain('Bộ luật Dân sự')
+    expect(LEGAL_BASIS_LINES.join(' ')).toContain('Luật Nhà ở')
   })
 })

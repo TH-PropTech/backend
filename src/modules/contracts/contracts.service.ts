@@ -7,6 +7,7 @@ import {
   NotFoundException,
   Optional,
 } from '@nestjs/common'
+import { User } from '../users/schemas/user.schema'
 import { isTestSignBypassEnabled } from './test-sign-bypass'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
@@ -197,7 +198,10 @@ export class ContractsService {
     @Optional()
     private readonly transactionEventService?: RentalTransactionEventService,
     @Optional()
-    private readonly governanceService?: FabricGovernanceService
+    private readonly governanceService?: FabricGovernanceService,
+    @Optional()
+    @InjectRepository(User)
+    private readonly userRepository?: Repository<User>
   ) {}
 
   private async recordTransactionEvent(input: {
@@ -949,6 +953,28 @@ export class ContractsService {
       contract.tenantCccd ||= tenantKyc.idCardNumber ?? null
       contract.tenantAddress ||= tenantKyc.placeOfResidence ?? null
     }
+    contract.landlordPhone ||= await this.findUserPhone(contract.landlordId)
+    contract.tenantPhone ||= await this.findUserPhone(contract.tenantId)
+    contract.propertyOwnershipCertificate ||=
+      await this.findOwnershipCertificate(contract.propertyId)
+  }
+
+  private async findUserPhone(userId: string): Promise<string | null> {
+    if (!this.userRepository || !ObjectId.isValid(userId)) return null
+    const user = await this.userRepository.findOne({
+      where: { _id: new ObjectId(userId) },
+    })
+    return user?.phone?.trim() || null
+  }
+
+  private async findOwnershipCertificate(
+    propertyId: string
+  ): Promise<string | null> {
+    if (!ObjectId.isValid(propertyId)) return null
+    const apartment = await this.apartmentRepository.findOne({
+      where: { _id: new ObjectId(propertyId) },
+    })
+    return apartment?.ownershipCertificate?.trim() || null
   }
 
   async lockContractContent(
