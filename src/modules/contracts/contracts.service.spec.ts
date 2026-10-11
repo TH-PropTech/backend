@@ -287,6 +287,9 @@ describe('ContractsService contract content', () => {
       ContractsService.prototype
     ) as ContractsService
     Reflect.set(service, 'contractRepository', repository)
+    Reflect.set(service, 'kycService', {
+      findByUserId: jest.fn().mockResolvedValue(null),
+    })
     return { service, contract, repository }
   }
 
@@ -442,6 +445,106 @@ describe('ContractsService contract content', () => {
     )
     expect(locked.status).toBe('awaiting-signature')
     expect(locked.contentLockedHash).toMatch(/^[a-f0-9]{64}$/)
+  })
+
+  it('snapshots both parties from their verified KYC records when locking, without overwriting existing values', async () => {
+    const { service, contract } = createContentService()
+    contract.editorContent = validContent
+    contract.contentRevision = 1
+    contract.landlordId = 'landlord-1'
+    contract.tenantId = 'tenant-1'
+    contract.landlordName = null
+    contract.tenantName = 'Tên do nhân viên nhập'
+    Reflect.set(service, 'kycService', {
+      findByUserId: jest.fn((userId: string) =>
+        Promise.resolve(
+          userId === 'landlord-1'
+            ? {
+                status: 'verified',
+                fullName: 'Nguyễn Văn Chủ',
+                idCardNumber: '001204000001',
+                placeOfResidence: 'Phường Vườn Lài, TP.HCM',
+              }
+            : {
+                status: 'verified',
+                fullName: 'Trần Thị Khách',
+                idCardNumber: '001204000002',
+                placeOfResidence: 'Phường Gò Vấp, TP.HCM',
+              }
+        )
+      ),
+    })
+
+    const locked = await service.lockContractContent(
+      contract._id.toString(),
+      'landlord-1',
+      1,
+      false
+    )
+
+    expect(locked.landlordName).toBe('Nguyễn Văn Chủ')
+    expect(locked.landlordCccd).toBe('001204000001')
+    expect(locked.landlordAddress).toBe('Phường Vườn Lài, TP.HCM')
+    expect(locked.tenantName).toBe('Tên do nhân viên nhập')
+    expect(locked.tenantCccd).toBe('001204000002')
+  })
+
+  it('snapshots party phones and the ownership certificate when locking', async () => {
+    const { service, contract } = createContentService()
+    contract.editorContent = validContent
+    contract.contentRevision = 1
+    contract.landlordId = '507f1f77bcf86cd799439021'
+    contract.tenantId = '507f1f77bcf86cd799439022'
+    contract.propertyId = '507f1f77bcf86cd799439023'
+    Reflect.set(service, 'userRepository', {
+      findOne: jest.fn(
+        ({ where }: { where: { _id: { toHexString: () => string } } }) =>
+          Promise.resolve({
+            phone:
+              where._id.toHexString() === '507f1f77bcf86cd799439021'
+                ? '0384589387'
+                : '0912345678',
+          })
+      ),
+    })
+    Reflect.set(service, 'apartmentRepository', {
+      findOne: jest
+        .fn()
+        .mockResolvedValue({ ownershipCertificate: ' CS 12345 ' }),
+    })
+
+    const locked = await service.lockContractContent(
+      contract._id.toString(),
+      '507f1f77bcf86cd799439021',
+      1,
+      false
+    )
+
+    expect(locked.landlordPhone).toBe('0384589387')
+    expect(locked.tenantPhone).toBe('0912345678')
+    expect(locked.propertyOwnershipCertificate).toBe('CS 12345')
+  })
+
+  it('ignores parties whose KYC is not verified when locking', async () => {
+    const { service, contract } = createContentService()
+    contract.editorContent = validContent
+    contract.contentRevision = 1
+    contract.landlordId = 'landlord-1'
+    contract.landlordName = null
+    Reflect.set(service, 'kycService', {
+      findByUserId: jest
+        .fn()
+        .mockResolvedValue({ status: 'pending', fullName: 'Chưa duyệt' }),
+    })
+
+    const locked = await service.lockContractContent(
+      contract._id.toString(),
+      'landlord-1',
+      1,
+      false
+    )
+
+    expect(locked.landlordName).toBeNull()
   })
 
   it('forbids tenant from locking contract content', async () => {

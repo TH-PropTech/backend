@@ -105,7 +105,6 @@ describe('CreateApartmentDto validation (design §8)', () => {
     ['fractional bedrooms', { bedrooms: 1.5 }, 'bedrooms'],
     ['negative bathrooms', { bathrooms: -1 }, 'bathrooms'],
     ['empty city', { city: '' }, 'city'],
-    ['empty district', { district: '' }, 'district'],
     ['empty ward', { ward: '' }, 'ward'],
     ['empty street', { street: '' }, 'street'],
     [
@@ -130,6 +129,15 @@ describe('CreateApartmentDto validation (design §8)', () => {
     expect(
       await invalidFields(withoutDescription as typeof validPayload)
     ).toEqual([])
+  })
+
+  it('accepts a payload without district (administrative structure since 2025-07-01)', async () => {
+    const withoutDistrict: Record<string, unknown> = { ...validPayload }
+    delete withoutDistrict['district']
+    expect(await invalidFields(withoutDistrict as typeof validPayload)).toEqual(
+      []
+    )
+    expect(await invalidFields({ ...validPayload, district: '' })).toEqual([])
   })
 
   it.each([
