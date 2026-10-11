@@ -103,7 +103,7 @@ function buildCms(input: {
     digestAlgorithm: forge.pki.oids['sha256'] as string,
     authenticatedAttributes: [
       {
-        type: forge.pki.oids['contentType'],
+        type: forge.pki.oids['contentType'] as string,
         value: forge.pki.oids['data'],
       },
       {
