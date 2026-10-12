@@ -661,6 +661,11 @@ export class SmartCaSigningService {
       signerRole: context.signerRole,
       signerPem: material.signerPem,
       chainPem: material.chainPem,
+      signerName:
+        (context.signerRole === 'landlord'
+          ? context.contract.landlordName
+          : context.contract.tenantName) || 'Người ký',
+      certificateSerial,
     })
     return { id: prepared.id, digest: prepared.signedAttrsDigest }
   }

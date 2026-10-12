@@ -182,6 +182,9 @@ export function drawTable(
   pdf.x = theme.left
 }
 
+/** Vị trí ô chữ ký trên trang (hệ tọa độ PDFKit, gốc ở góc trên trái, đơn vị pt). */
+export type SignatureBoxRect = { x: number; y: number; w: number; h: number }
+
 /** Ô chữ ký nét đứt: hợp đồng đã khóa nên chỗ này chỉ báo trước nơi chữ ký số sẽ hiển thị. */
 export function drawSignatureBox(
   pdf: PdfDoc,
@@ -193,7 +196,7 @@ export function drawSignatureBox(
     title: string
     name: string | null
   }
-): void {
+): SignatureBoxRect {
   const boxWidth = Math.min(180, input.width - 20)
   const boxX = input.x + (input.width - boxWidth) / 2
   pdf
@@ -234,4 +237,5 @@ export function drawSignatureBox(
       width: input.width,
       align: 'center',
     })
+  return { x: boxX, y: input.top + 38, w: boxWidth, h: 66 }
 }

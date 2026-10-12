@@ -131,6 +131,8 @@ describe('SignedArtifactService', () => {
       signerRole: 'tenant',
       signerPem: certPem,
       chainPem: [],
+      signerName: 'Người ký',
+      certificateSerial: 'SERIAL-001',
     })
     const ok = await service.finalize(
       prepared.id,
@@ -162,6 +164,8 @@ describe('SignedArtifactService', () => {
       signerRole: 'landlord',
       signerPem: certPem,
       chainPem: [],
+      signerName: 'Người ký',
+      certificateSerial: 'SERIAL-001',
     })
     await service.finalize(
       first.id,
@@ -173,6 +177,8 @@ describe('SignedArtifactService', () => {
       signerRole: 'tenant',
       signerPem: certPem,
       chainPem: [],
+      signerName: 'Người ký',
+      certificateSerial: 'SERIAL-001',
     })
     await service.finalize(
       second.id,
@@ -202,6 +208,8 @@ describe('SignedArtifactService', () => {
       signerRole: 'tenant',
       signerPem: certPem,
       chainPem: [],
+      signerName: 'Người ký',
+      certificateSerial: 'SERIAL-001',
     })
 
     const ok = await service.finalize(prepared.id, 'A'.repeat(40_000))

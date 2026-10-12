@@ -17,6 +17,7 @@ import {
 } from '../contract-artifact.storage'
 import { Contract } from '../schemas/contract.schema'
 import { ContractSignedArtifact } from './contract-signed-artifact.schema'
+import { buildSignableBase } from './signature-fields'
 import {
   embedPadesSignature,
   preparePadesSigning,
@@ -29,6 +30,9 @@ export type PrepareSignedArtifactInput = {
   signerRole: 'tenant' | 'landlord'
   signerPem: string
   chainPem: string[]
+  /** Họ tên và serial chứng thư hiển thị trong khung "Đã xác thực SmartCA". */
+  signerName: string
+  certificateSerial: string
 }
 
 export type PreparedSignedArtifact = {
@@ -92,13 +96,22 @@ export class SignedArtifactService {
       input.contract
     )
     const latest = await this.findLatestReady(contractId)
-    const base = latest ? await this.readSigned(latest) : canonical.bytes
+    // Lần ký đầu dựng bản nền có hai trường chữ ký đặt đúng ô chữ ký; các lần sau nối thêm lên bản đã ký trước.
+    const base = latest
+      ? await this.readSigned(latest)
+      : ((await buildSignableBase(canonical.bytes)) ?? canonical.bytes)
 
     const prepared = preparePadesSigning(
       base,
       signatureMeta(),
       input.signerPem,
-      input.chainPem
+      input.chainPem,
+      new Date(),
+      {
+        role: input.signerRole,
+        signerName: input.signerName,
+        certificateSerial: input.certificateSerial,
+      }
     )
     const preparedFileId = await this.storage.upload(
       prepared.pdf,

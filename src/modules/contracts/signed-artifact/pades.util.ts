@@ -2,6 +2,11 @@ import { createHash } from 'node:crypto'
 import { plainAddPlaceholder } from '@signpdf/placeholder-plain'
 import { SUBFILTER_ETSI_CADES_DETACHED, findByteRange } from '@signpdf/utils'
 import forge from 'node-forge'
+import {
+  appendVisibleSignature,
+  hasSignatureFields,
+  type VisibleSignatureInput,
+} from './signature-fields'
 
 /** Thông tin chữ ký theo quy định NEAC (hiển thị trong thuộc tính chữ ký của PDF). */
 export type PadesSignatureMeta = {
@@ -47,8 +52,8 @@ export function addSignaturePlaceholder(
 }
 
 function locateContentsGap(pdf: Buffer): Gap {
-  const { byteRangePlaceholderPosition } = findByteRange(pdf)
-  const from = byteRangePlaceholderPosition ?? pdf.indexOf('/ByteRange')
+  // Chữ ký đang xử lý luôn là chữ ký nối thêm sau cùng (các chữ ký trước đã có /ByteRange thật).
+  const from = pdf.lastIndexOf('/ByteRange')
   const contents = pdf.indexOf('/Contents', from)
   const start = pdf.indexOf('<', contents)
   const end = pdf.indexOf('>', start) + 1
@@ -131,13 +136,17 @@ export function preparePadesSigning(
   meta: PadesSignatureMeta,
   signerPem: string,
   chainPem: string[] = [],
-  signingTime: Date = new Date()
+  signingTime: Date = new Date(),
+  visible?: Pick<
+    VisibleSignatureInput,
+    'role' | 'signerName' | 'certificateSerial'
+  >
 ): PreparedPades {
-  const withPlaceholder = addSignaturePlaceholder(
-    canonicalPdf,
-    meta,
-    signingTime
-  )
+  // Có trường chữ ký (bản nền đã dựng): nối chữ ký hiển thị đúng ô; ngược lại dùng chữ ký ẩn như trước.
+  const withPlaceholder =
+    visible && hasSignatureFields(canonicalPdf)
+      ? appendVisibleSignature(canonicalPdf, { ...visible, signingTime, meta })
+      : addSignaturePlaceholder(canonicalPdf, meta, signingTime)
   const gap = locateContentsGap(withPlaceholder)
   const pdf = writeByteRange(withPlaceholder, gap)
   const contentDigestHex = hashRange(pdf, gap)

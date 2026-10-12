@@ -13,7 +13,10 @@ import {
 import { buildRentSchedule } from './contract-payment-schedule'
 import { vndInWords } from './legal/vnd-in-words'
 
-export const CONTRACT_PDF_RENDERER_VERSION = 'th-proptech-pdf-v3'
+export const CONTRACT_PDF_RENDERER_VERSION = 'th-proptech-pdf-v4'
+
+/** Khóa trong Info dictionary lưu vị trí hai ô chữ ký (JSON). */
+export const SIGNATURE_BOXES_INFO_KEY = 'THSignatureBoxes'
 
 export const LEGAL_BASIS_LINES: readonly string[] = [
   'Căn cứ Bộ luật Dân sự số 91/2015/QH13 ngày 24/11/2015;',
@@ -448,20 +451,29 @@ export function renderContractPdf(
       )
       const blockTop = pdf.y
       const colWidth = contentWidth / 2
-      drawSignatureBox(pdf, theme, {
+      const signaturePage = pdf.bufferedPageRange().count - 1
+      const landlordBox = drawSignatureBox(pdf, theme, {
         x: MARGIN_LEFT,
         top: blockTop,
         width: colWidth,
         title: 'ĐẠI DIỆN BÊN CHO THUÊ (BÊN A)',
         name: contract.landlordName,
       })
-      drawSignatureBox(pdf, theme, {
+      const tenantBox = drawSignatureBox(pdf, theme, {
         x: MARGIN_LEFT + colWidth,
         top: blockTop,
         width: colWidth,
         title: 'ĐẠI DIỆN BÊN THUÊ (BÊN B)',
         name: contract.tenantName,
       })
+      // Ghi vị trí ô chữ ký vào metadata để bản đã ký đặt chữ ký số hiển thị đúng chỗ.
+      ;(pdf.info as Record<string, unknown>)[SIGNATURE_BOXES_INFO_KEY] =
+        JSON.stringify({
+          page: signaturePage,
+          height: pdf.page.height,
+          landlord: landlordBox,
+          tenant: tenantBox,
+        })
 
       // Chân trang: mã băm nội dung đã khóa + số trang.
       const range = pdf.bufferedPageRange()
