@@ -17,7 +17,8 @@ export type ContractSignature = {
   biometricGrantId?: string | null
   otpSessionId?: string | null
   deviceId?: string | null
-  provider?: 'smartca' | 'platform-consent'
+  /** `dev-test`: ký thử nghiệm (ENABLE_TEST_SIGN_BYPASS), không phải chữ ký số có chứng thư. */
+  provider?: 'smartca' | 'platform-consent' | 'dev-test'
   providerTransactionId?: string | null
   certificateSerial?: string | null
   certificateSubject?: string | null

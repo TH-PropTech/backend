@@ -203,6 +203,37 @@ describe('ContractsService.signContractForTest', () => {
     ).rejects.toThrow('TEST_SIGN_BYPASS_DISABLED')
   })
 
+  it('records dev-test signature evidence with a timestamp so the UI is not blank', async () => {
+    process.env['ENABLE_TEST_SIGN_BYPASS'] = 'true'
+    process.env['NODE_ENV'] = 'development'
+    const service = Object.create(
+      ContractsService.prototype
+    ) as ContractsService
+    const contract = {
+      tenantId: 'tenant-1',
+      landlordId: 'landlord-1',
+      contentLockedHash: 'a'.repeat(64),
+      artifactRef: { artifactHash: 'b'.repeat(64) },
+      tenantSignature: null,
+    } as unknown as Contract
+    const save = jest.fn((value: Contract) => Promise.resolve(value))
+    Reflect.set(service, 'contractRepository', { save })
+    jest.spyOn(service, 'findOne').mockResolvedValue(contract)
+    jest.spyOn(service, 'signContract').mockResolvedValue(contract)
+
+    const saved = await service.signContractForTest('contract-id', 'tenant-1')
+
+    expect(saved.tenantSignature).toMatchObject({
+      signerId: 'tenant-1',
+      role: 'tenant',
+      provider: 'dev-test',
+      providerStatus: 'signed',
+      contentHash: 'a'.repeat(64),
+      artifactHash: 'b'.repeat(64),
+    })
+    expect(saved.tenantSignature?.signedAt).toBeInstanceOf(Date)
+  })
+
   it('rejects a non-participant when the bypass is enabled', async () => {
     process.env['ENABLE_TEST_SIGN_BYPASS'] = 'true'
     process.env['NODE_ENV'] = 'development'

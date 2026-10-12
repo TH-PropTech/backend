@@ -266,8 +266,11 @@ export class ContractPartyViewDto {
   @ApiProperty({ nullable: true })
   signatureHash!: string | null
 
-  @ApiProperty({ enum: ['smartca', 'platform-consent'], nullable: true })
-  provider!: 'smartca' | 'platform-consent' | null
+  @ApiProperty({
+    enum: ['smartca', 'platform-consent', 'dev-test'],
+    nullable: true,
+  })
+  provider!: 'smartca' | 'platform-consent' | 'dev-test' | null
 
   @ApiProperty({ nullable: true })
   providerTransactionId!: string | null
