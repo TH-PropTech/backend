@@ -578,25 +578,9 @@ export class ContractsService {
     )
     grant.consumedAt = consumed.consumedAt
     await this.signingGrantRepository.save(grant)
-    await this.signContract(contractId, role)
-    // Ghi dấu vết ký thử nghiệm để giao diện hiển thị thời điểm và nhãn "Ký thử nghiệm" thay vì để trống.
-    const afterSign = await this.findOne(contractId)
-    const signedAt = new Date()
-    const evidence: ContractSignature = {
-      signerId: userId,
-      role,
-      signedAt,
-      contentHash: afterSign.contentLockedHash ?? '',
-      provider: 'dev-test',
-      providerStatus: 'signed',
-      artifactHash: afterSign.artifactRef?.artifactHash ?? null,
-      verifiedAt: signedAt,
-    }
-    if (role === 'tenant') afterSign.tenantSignature = evidence
-    else afterSign.landlordSignature = evidence
-    const saved = await this.contractRepository.save(afterSign)
+    const signed = await this.signContract(contractId, role)
     await this.flowNotificationService?.notifyForContract(contractId)
-    return saved
+    return signed
   }
 
   /**
@@ -621,9 +605,25 @@ export class ContractsService {
     if (!contract.contentLockedHash) {
       throw new BadRequestException('CONTRACT_CONTENT_NOT_LOCKED')
     }
-    const signed = await this.signContract(contractId, role)
+    await this.signContract(contractId, role)
+    // Ghi dấu vết ký thử nghiệm để giao diện hiển thị thời điểm và nhãn "Ký thử nghiệm" thay vì để trống.
+    const afterSign = await this.findOne(contractId)
+    const signedAt = new Date()
+    const evidence: ContractSignature = {
+      signerId: userId,
+      role,
+      signedAt,
+      contentHash: afterSign.contentLockedHash ?? '',
+      provider: 'dev-test',
+      providerStatus: 'signed',
+      artifactHash: afterSign.artifactRef?.artifactHash ?? null,
+      verifiedAt: signedAt,
+    }
+    if (role === 'tenant') afterSign.tenantSignature = evidence
+    else afterSign.landlordSignature = evidence
+    const saved = await this.contractRepository.save(afterSign)
     await this.flowNotificationService?.notifyForContract(contractId)
-    return signed
+    return saved
   }
 
   async recordSmartCaSignature(
