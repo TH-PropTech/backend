@@ -45,7 +45,7 @@ describe('renderContractPdf', () => {
 
     const bytes = await renderContractPdf(contract, document)
 
-    expect(bytes.toString('latin1')).toContain('DejaVuSans')
+    expect(bytes.toString('latin1')).toContain('Tinos')
   })
 
   it('takes the signing place from the province at the end of the property address', () => {

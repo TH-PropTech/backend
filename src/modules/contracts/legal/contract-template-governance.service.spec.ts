@@ -141,6 +141,40 @@ describe('ContractTemplateGovernanceService', () => {
     ).resolves.toEqual(expect.objectContaining({ version: 1 }))
   })
 
+  it('upgrades an untouched bootstrap template to the next version when the seed changes', async () => {
+    const { service } = context()
+    await service.seedReviewedTemplatesIfMissing()
+    const first = await service.getPublishedVersion(
+      'VN_INDIVIDUAL_RESIDENTIAL_LEASE'
+    )
+    first.reviewReference = 'PROP-321-LEGAL-REVIEW-OLD'
+
+    await service.seedReviewedTemplatesIfMissing()
+
+    const latest = await service.getPublishedVersion(
+      'VN_INDIVIDUAL_RESIDENTIAL_LEASE'
+    )
+    expect(latest.version).toBe(2)
+    expect(latest.createdBy).toBe('system-legal-bootstrap')
+    expect(latest.clauses[0]?.content).toContain('{{property}}')
+  })
+
+  it('never upgrades a template that an admin published', async () => {
+    const { service } = context()
+    await service.seedReviewedTemplatesIfMissing()
+    const first = await service.getPublishedVersion(
+      'VN_INDIVIDUAL_RESIDENTIAL_LEASE'
+    )
+    first.reviewReference = 'PROP-321-LEGAL-REVIEW-OLD'
+    first.publishedBy = 'admin-1'
+
+    await service.seedReviewedTemplatesIfMissing()
+
+    await expect(
+      service.getPublishedVersion('VN_INDIVIDUAL_RESIDENTIAL_LEASE')
+    ).resolves.toEqual(expect.objectContaining({ version: 1 }))
+  })
+
   it('publishes a validated immutable revision and retains audit history', async () => {
     const { service, audits, getPublished } = context()
     await service.saveDraft(templateKey, input, 'admin-1', 0)

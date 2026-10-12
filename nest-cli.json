@@ -6,6 +6,12 @@
     "deleteOutDir": true,
     "webpack": false,
     "tsConfigPath": "tsconfig.build.json",
-    "builder": "swc"
+    "builder": "swc",
+    "assets": [
+      {
+        "include": "modules/contracts/fonts/*.ttf",
+        "outDir": "dist"
+      }
+    ]
   }
 }

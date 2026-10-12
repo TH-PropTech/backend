@@ -1,4 +1,5 @@
 import { createHash } from 'crypto'
+import { vndInWords } from './vnd-in-words'
 import type { Contract } from '../schemas/contract.schema'
 import {
   validateDocumentManifest,
@@ -234,7 +235,9 @@ export class ContractDocumentProjector {
   }
 
   private static formatTemplateMoney(amount: number): string {
-    return `${new Intl.NumberFormat('vi-VN').format(amount)} VNĐ`
+    const words = vndInWords(amount)
+    const formatted = `${new Intl.NumberFormat('vi-VN').format(amount)} VNĐ`
+    return words ? `${formatted} (bằng chữ: ${words})` : formatted
   }
 
   private static formatTemplateDate(value?: Date | string | null): string {
