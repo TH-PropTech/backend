@@ -464,6 +464,9 @@ describe('ContractsService contract content', () => {
                 fullName: 'Nguyễn Văn Chủ',
                 idCardNumber: '001204000001',
                 placeOfResidence: 'Phường Vườn Lài, TP.HCM',
+                dateOfBirth: '12/04/2000',
+                issueDate: '10/05/2021',
+                placeOfIssue: 'Cục Cảnh sát QLHC về TTXH',
               }
             : {
                 status: 'verified',
@@ -485,6 +488,11 @@ describe('ContractsService contract content', () => {
     expect(locked.landlordName).toBe('Nguyễn Văn Chủ')
     expect(locked.landlordCccd).toBe('001204000001')
     expect(locked.landlordAddress).toBe('Phường Vườn Lài, TP.HCM')
+    expect(locked.landlordBirthDate).toBe('12/04/2000')
+    expect(locked.landlordIdIssued).toBe(
+      'cấp ngày 10/05/2021 tại Cục Cảnh sát QLHC về TTXH'
+    )
+    expect(locked.tenantIdIssued).toBeNull()
     expect(locked.tenantName).toBe('Tên do nhân viên nhập')
     expect(locked.tenantCccd).toBe('001204000002')
   })
