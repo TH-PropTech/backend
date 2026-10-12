@@ -953,18 +953,33 @@ export class ContractsService {
       contract.tenantCccd ||= tenantKyc.idCardNumber ?? null
       contract.tenantAddress ||= tenantKyc.placeOfResidence ?? null
     }
-    contract.landlordPhone ||= await this.findUserPhone(contract.landlordId)
-    contract.tenantPhone ||= await this.findUserPhone(contract.tenantId)
+    // Tài khoản chưa có KYC đã duyệt vẫn có họ tên/điện thoại đăng ký: dùng làm giá trị thay thế
+    // để hợp đồng không để trống thông tin các bên (CCCD/địa chỉ vẫn chỉ lấy từ KYC đã duyệt).
+    const [landlordUser, tenantUser] = await Promise.all([
+      this.findUserContact(contract.landlordId),
+      this.findUserContact(contract.tenantId),
+    ])
+    contract.landlordName ||= landlordUser.fullName
+    contract.tenantName ||= tenantUser.fullName
+    contract.landlordPhone ||= landlordUser.phone
+    contract.tenantPhone ||= tenantUser.phone
     contract.propertyOwnershipCertificate ||=
       await this.findOwnershipCertificate(contract.propertyId)
   }
 
-  private async findUserPhone(userId: string): Promise<string | null> {
-    if (!this.userRepository || !ObjectId.isValid(userId)) return null
+  private async findUserContact(
+    userId: string
+  ): Promise<{ fullName: string | null; phone: string | null }> {
+    if (!this.userRepository || !ObjectId.isValid(userId)) {
+      return { fullName: null, phone: null }
+    }
     const user = await this.userRepository.findOne({
       where: { _id: new ObjectId(userId) },
     })
-    return user?.phone?.trim() || null
+    return {
+      fullName: user?.fullName?.trim() || null,
+      phone: user?.phone?.trim() || null,
+    }
   }
 
   private async findOwnershipCertificate(
