@@ -113,6 +113,21 @@ export class ContractTemplateGovernanceService implements OnApplicationBootstrap
     for (const [templateKey, legalProfile] of profiles) {
       const existing = await this.latestPublished(templateKey)
       if (existing) {
+        // Bản do bootstrap tạo mà chưa ai chỉnh: nâng lên bản seed mới (phiên bản kế tiếp, không ghi đè).
+        // Hợp đồng đã khóa vẫn giữ đúng phiên bản cũ qua contractTemplateRef.
+        const seed = buildReviewedLeaseTemplateSeed(legalProfile)
+        if (
+          existing.createdBy === 'system-legal-bootstrap' &&
+          existing.publishedBy === 'system-legal-bootstrap' &&
+          existing.reviewReference !== seed.reviewReference
+        ) {
+          await this.publishSeedVersion(
+            templateKey,
+            legalProfile,
+            existing.version + 1
+          )
+          continue
+        }
         if (
           existing.schemaVersion < CONTRACT_TEMPLATE_SCHEMA_VERSION ||
           !existing.annexDefinitions?.length ||
@@ -125,46 +140,54 @@ export class ContractTemplateGovernanceService implements OnApplicationBootstrap
         continue
       }
 
-      const seed = buildReviewedLeaseTemplateSeed(legalProfile)
-      const template = this.templateRepository.create({
-        templateKey,
-        version: 1,
-        status: 'published',
-        legalProfile: seed.legalProfile,
-        clauses: seed.clauses,
-        schemaVersion: seed.schemaVersion,
-        effectiveFrom: new Date(),
-        referenceOnly: seed.referenceOnly,
-        reviewStatus: 'published',
-        reviewReference: seed.reviewReference,
-        annexDefinitions: seed.annexDefinitions,
-        allowedVariables: seed.allowedVariables,
-        addenda: seed.addenda,
-        citationIds: seed.citationIds,
-        contentHash: hashCanonicalTemplateBody({
-          legalProfile: seed.legalProfile,
-          schemaVersion: seed.schemaVersion,
-          clauses: seed.clauses,
-          annexDefinitions: seed.annexDefinitions,
-          citationIds: seed.citationIds,
-        }),
-        createdBy: 'system-legal-bootstrap',
-        publishedBy: 'system-legal-bootstrap',
-        publishedAt: new Date(),
-        draftRevision: 1,
-      })
-      const saved = await this.templateRepository.save(template)
-      await this.recordAudit({
-        templateKey,
-        version: saved.version,
-        action: 'legal-release-published',
-        actorId: 'system-legal-bootstrap',
-        reason: 'mongodb-bootstrap-seed',
-        reviewReference: seed.reviewReference,
-        afterHash: saved.contentHash,
-      })
-      this.logger.log(`Seeded canonical lease template ${templateKey}@1`)
+      await this.publishSeedVersion(templateKey, legalProfile, 1)
     }
+  }
+
+  private async publishSeedVersion(
+    templateKey: string,
+    legalProfile: LegalProfile,
+    version: number
+  ): Promise<void> {
+    const seed = buildReviewedLeaseTemplateSeed(legalProfile)
+    const template = this.templateRepository.create({
+      templateKey,
+      version,
+      status: 'published',
+      legalProfile: seed.legalProfile,
+      clauses: seed.clauses,
+      schemaVersion: seed.schemaVersion,
+      effectiveFrom: new Date(),
+      referenceOnly: seed.referenceOnly,
+      reviewStatus: 'published',
+      reviewReference: seed.reviewReference,
+      annexDefinitions: seed.annexDefinitions,
+      allowedVariables: seed.allowedVariables,
+      addenda: seed.addenda,
+      citationIds: seed.citationIds,
+      contentHash: hashCanonicalTemplateBody({
+        legalProfile: seed.legalProfile,
+        schemaVersion: seed.schemaVersion,
+        clauses: seed.clauses,
+        annexDefinitions: seed.annexDefinitions,
+        citationIds: seed.citationIds,
+      }),
+      createdBy: 'system-legal-bootstrap',
+      publishedBy: 'system-legal-bootstrap',
+      publishedAt: new Date(),
+      draftRevision: 1,
+    })
+    const saved = await this.templateRepository.save(template)
+    await this.recordAudit({
+      templateKey,
+      version: saved.version,
+      action: 'legal-release-published',
+      actorId: 'system-legal-bootstrap',
+      reason: 'mongodb-bootstrap-seed',
+      reviewReference: seed.reviewReference,
+      afterHash: saved.contentHash,
+    })
+    this.logger.log(`Seeded canonical lease template ${templateKey}@${version}`)
   }
 
   async saveDraft(
