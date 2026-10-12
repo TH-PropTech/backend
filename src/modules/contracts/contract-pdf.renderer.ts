@@ -31,6 +31,9 @@ function formatDate(value?: Date | string | null): string {
     : date.toLocaleDateString('vi-VN')
 }
 
+/** Thông tin chưa có khi chốt hợp đồng: nói rõ thay vì để một dấu gạch khó hiểu. */
+const PENDING_VALUE = '(chưa cập nhật)'
+
 function partyLines(
   role: string,
   name: string | null,
@@ -40,10 +43,10 @@ function partyLines(
 ): string[] {
   return [
     role,
-    `Họ và tên: ${name || '—'}`,
-    `Số CCCD: ${cccd || '—'}`,
-    `Địa chỉ: ${address || '—'}`,
-    `Điện thoại: ${phone || '—'}`,
+    `Họ và tên: ${name || PENDING_VALUE}`,
+    `Số CCCD: ${cccd || PENDING_VALUE}`,
+    `Địa chỉ thường trú: ${address || PENDING_VALUE}`,
+    `Điện thoại: ${phone || PENDING_VALUE}`,
   ]
 }
 

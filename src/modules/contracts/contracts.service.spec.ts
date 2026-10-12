@@ -547,6 +547,42 @@ describe('ContractsService contract content', () => {
     expect(locked.landlordName).toBeNull()
   })
 
+  it('falls back to the account full name for parties without verified KYC, but never takes CCCD from it', async () => {
+    const { service, contract } = createContentService()
+    contract.editorContent = validContent
+    contract.contentRevision = 1
+    contract.landlordId = '507f1f77bcf86cd799439031'
+    contract.tenantId = '507f1f77bcf86cd799439032'
+    contract.landlordName = null
+    contract.tenantName = null
+    contract.landlordCccd = null
+    Reflect.set(service, 'kycService', {
+      findByUserId: jest.fn().mockResolvedValue(null),
+    })
+    Reflect.set(service, 'userRepository', {
+      findOne: jest.fn(
+        ({ where }: { where: { _id: { toHexString: () => string } } }) =>
+          Promise.resolve({
+            fullName:
+              where._id.toHexString() === '507f1f77bcf86cd799439031'
+                ? ' Nguyễn Văn Chủ '
+                : 'Trần Thị Khách',
+          })
+      ),
+    })
+
+    const locked = await service.lockContractContent(
+      contract._id.toString(),
+      '507f1f77bcf86cd799439031',
+      1,
+      false
+    )
+
+    expect(locked.landlordName).toBe('Nguyễn Văn Chủ')
+    expect(locked.tenantName).toBe('Trần Thị Khách')
+    expect(locked.landlordCccd).toBeNull()
+  })
+
   it('forbids tenant from locking contract content', async () => {
     const { service, contract } = createContentService()
     contract.editorContent = validContent
