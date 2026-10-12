@@ -102,6 +102,13 @@ export class Contract {
   @Column({ nullable: true })
   landlordPhone?: string | null
 
+  /** Ngày sinh và thông tin cấp CCCD, chốt từ eKYC đã duyệt khi khóa hợp đồng. */
+  @Column({ nullable: true })
+  landlordBirthDate?: string | null
+
+  @Column({ nullable: true })
+  landlordIdIssued?: string | null
+
   /** Giấy chứng nhận quyền sở hữu/sử dụng căn hộ, chốt cùng nội dung khi khóa hợp đồng. */
   @Column({ nullable: true })
   propertyOwnershipCertificate?: string | null
@@ -120,6 +127,12 @@ export class Contract {
 
   @Column({ nullable: true })
   tenantPhone?: string | null
+
+  @Column({ nullable: true })
+  tenantBirthDate?: string | null
+
+  @Column({ nullable: true })
+  tenantIdIssued?: string | null
 
   // ── Thời hạn hợp đồng ──
 

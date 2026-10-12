@@ -160,6 +160,18 @@ export type SmartCaSignatureRecordInput = {
   signedAt: Date
 }
 
+/** "ngày cấp, nơi cấp" của CCCD từ hồ sơ eKYC; null nếu thiếu cả hai. */
+function describeIdIssuance(kyc: {
+  issueDate?: string
+  placeOfIssue?: string
+}): string | null {
+  const parts = [
+    kyc.issueDate ? `cấp ngày ${kyc.issueDate}` : '',
+    kyc.placeOfIssue ? `tại ${kyc.placeOfIssue}` : '',
+  ].filter(Boolean)
+  return parts.length > 0 ? parts.join(' ') : null
+}
+
 @Injectable()
 export class ContractsService {
   private readonly logger = new Logger(ContractsService.name)
@@ -947,11 +959,15 @@ export class ContractsService {
       contract.landlordName ||= landlordKyc.fullName ?? null
       contract.landlordCccd ||= landlordKyc.idCardNumber ?? null
       contract.landlordAddress ||= landlordKyc.placeOfResidence ?? null
+      contract.landlordBirthDate ||= landlordKyc.dateOfBirth ?? null
+      contract.landlordIdIssued ||= describeIdIssuance(landlordKyc)
     }
     if (tenantKyc?.status === 'verified') {
       contract.tenantName ||= tenantKyc.fullName ?? null
       contract.tenantCccd ||= tenantKyc.idCardNumber ?? null
       contract.tenantAddress ||= tenantKyc.placeOfResidence ?? null
+      contract.tenantBirthDate ||= tenantKyc.dateOfBirth ?? null
+      contract.tenantIdIssued ||= describeIdIssuance(tenantKyc)
     }
     // Tài khoản chưa có KYC đã duyệt vẫn có họ tên/điện thoại đăng ký: dùng làm giá trị thay thế
     // để hợp đồng không để trống thông tin các bên (CCCD/địa chỉ vẫn chỉ lấy từ KYC đã duyệt).
