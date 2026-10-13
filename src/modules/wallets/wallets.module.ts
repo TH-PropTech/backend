@@ -1,16 +1,22 @@
 import { Module } from '@nestjs/common'
 import { TypeOrmModule } from '@nestjs/typeorm'
-import { MockWallet } from '../mock-bank/schemas/mock-wallet.schema'
+import { NotificationsModule } from '../notifications/notifications.module'
 import { Payment } from '../payments/schemas/payment.schema'
 import { User } from '../users/schemas/user.schema'
-import { WalletTransaction } from './schemas/wallet-transaction.schema'
-import { WalletsService } from './wallets.service'
+import { PayoutsController } from './controllers/payouts.controller'
+import { WalletController } from './controllers/wallet.controller'
+import { Payout } from './schemas/payout.schema'
+import { Wallet } from './schemas/wallet.schema'
+import { PayoutsService } from './services/payouts.service'
+import { WalletsService } from './services/wallets.service'
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([MockWallet, WalletTransaction, User, Payment]),
+    TypeOrmModule.forFeature([Wallet, User, Payment, Payout]),
+    NotificationsModule,
   ],
-  providers: [WalletsService],
-  exports: [WalletsService],
+  controllers: [PayoutsController, WalletController],
+  providers: [WalletsService, PayoutsService],
+  exports: [WalletsService, PayoutsService],
 })
 export class WalletsModule {}

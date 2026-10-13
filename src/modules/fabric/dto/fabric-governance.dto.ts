@@ -9,7 +9,7 @@ import type {
 import type {
   GovernanceVerification,
   GovernanceVerificationStatus,
-} from '../fabric-governance.service'
+} from '../services/fabric-governance.service'
 
 /** Mã lỗi ổn định của nhóm governance (D9). */
 export const GOVERNANCE_ERROR_CODES = [

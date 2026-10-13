@@ -1,17 +1,17 @@
 import { Module } from '@nestjs/common'
 import { TypeOrmModule } from '@nestjs/typeorm'
-import { ApartmentsModule } from '../apartments/apartments.module'
-import { RecommendationsController } from './recommendations.controller'
-import { RecommendationsService } from './recommendations.service'
+import { PropertiesModule } from '../properties/properties.module'
+import { RecommendationsController } from './controllers/recommendations.controller'
+import { RecommendationsService } from './services/recommendations.service'
 import { NaiveBayesEngine } from './engine/naive-bayes.engine'
 import { RecommendationHistory } from './schemas/recommendation-history.schema'
 import { RecommendationConfig } from './entities/recommendation-config.entity'
-import { RecommendationConfigService } from './recommendation-config.service'
+import { RecommendationConfigService } from './services/recommendation-config.service'
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([RecommendationHistory, RecommendationConfig]),
-    ApartmentsModule,
+    PropertiesModule,
   ],
   controllers: [RecommendationsController],
   providers: [

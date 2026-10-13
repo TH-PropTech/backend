@@ -5,7 +5,7 @@ import {
   ObjectId,
   ObjectIdColumn,
 } from 'typeorm'
-import type { SigningRole } from '../signing-grant.util'
+import type { SigningRole } from '../utils/signing-grant.util'
 
 @Entity('signing_grants')
 export class SigningGrant {

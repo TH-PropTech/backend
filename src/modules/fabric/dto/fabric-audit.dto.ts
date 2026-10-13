@@ -15,7 +15,7 @@ import {
   type AuditDeliveryState,
   type AuditExplorerAction,
   type AuditVerificationState,
-} from '../ledger-audit-center.types'
+} from '../utils/ledger-audit-center.types'
 
 /** Mã lỗi ổn định của Audit Center (D9). */
 export const AUDIT_ERROR_CODES = [

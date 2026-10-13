@@ -7,7 +7,7 @@ import {
   ObjectIdColumn,
   UpdateDateColumn,
 } from 'typeorm'
-import type { PlatformFeeScheduleRules } from '../platform-fee.types'
+import type { PlatformFeeScheduleRules } from '../utils/platform-fee.types'
 
 @Entity('platform_fee_schedules')
 @Index(['scheduleId', 'version'], { unique: true })

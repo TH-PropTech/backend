@@ -66,6 +66,38 @@ src/
 test/                   # Supertest e2e setup
 ```
 
+## Cấu trúc module backend
+
+`src/modules` gồm 27 module, chia theo 4 vai trò. `AppModule` import cả 27 module theo nhóm này.
+
+Quy ước mỗi module (mẫu `server_do_an_new`):
+
+- Đúng 1 file `<module>.module.ts` ở gốc thư mục module; không có `*.module.ts` ở thư mục con.
+- Thư mục con theo vai trò file, chỉ tạo khi có file: `controllers/`, `services/`, `dto/`, `schemas/`, `utils/` (module adapter/đặc thù có thêm như `providers/`, `gateways/`, `engine/`).
+- `*.spec.ts` nằm cạnh file nguồn.
+- `index.ts` chỉ có ở module dùng chung (hiện là `activity-log`, `rbac`).
+- File lẻ ở gốc ngoài `*.module.ts`/`index.ts`: `jobs/base-job.ts`, `rbac/rbac.constants.ts`.
+- Guards, decorators, interceptors, filters, logger dùng chung vẫn ở `src/common`.
+
+| Vai trò       | Module                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Cắt ngang     | `auth` (gồm two-factor, smart-otp), `rbac` (role/permission lưu DB), `activity-log`, `health` (gồm redis)                                                                                                                                                                                                                                                                                                      |
+| Domain        | `users` (gồm hồ sơ KYC), `properties` (căn hộ, tòa nhà, dự án, tin đăng, saved-searches), `bookings`, `rental` (rental-applications, rental-transactions), `rental-flow-config`, `move-in-settlements`, `contracts`, `property-ownership-transfer`, `payments`, `platform-fees`, `wallets` (gồm payouts), `legal`, `insights`, `recommendations`, `community` (gồm support-tickets, disputes), `notifications` |
+| Adapter ngoài | `fabric`, `digital-signature` (SmartCA provider/gateway), `ekyc` (eKYC proxy, OCR, biometric), `ai` (Groq, ai-chats, ai-consultation), `mock-bank`                                                                                                                                                                                                                                                             |
+| Vận hành      | `admin` (controller admin lẻ), `jobs` (scheduler/job, lịch sử chạy)                                                                                                                                                                                                                                                                                                                                            |
+
+Bốn module lá được giữ riêng vì gộp vào module domain tương ứng sẽ tạo vòng phụ thuộc module: `platform-fees`, `property-ownership-transfer`, `rental-flow-config`, `move-in-settlements`. Toàn bộ `src` không dùng `forwardRef`.
+
+### `wallets` — không lưu ký (non-custodial)
+
+Sàn **không giữ tiền** của người dùng. Entity `Wallet` (`wallets/schemas/wallet.schema.ts`, collection `mock_bank_wallets`) chỉ là **liên kết tới tài khoản ngân hàng** nhận tiền của chủ nhà (ngân hàng, chủ tài khoản, 4 số cuối, trạng thái `linked`/`unlinked`) — không có số dư, không có sổ cái nội bộ.
+
+- **Payout** (`wallets/services/payouts.service.ts`) chỉ ghi nhận trạng thái chuyển tiền tới tài khoản liên kết (`pending` → `paid-out`/`failed`), không cộng số dư.
+- **Sao kê** (`GET /wallet/transactions`) dựng động từ `Payout` (`paid-out`) và `Payment` (hóa đơn `platform-fee` đã trả) của đúng người dùng, không đọc từ sổ cái.
+- **Hoa hồng sàn** chỉ trả qua cổng thanh toán (`POST /bank/invoice/init` + callback), không còn trả bằng số dư ví; route cũ `POST /bank/wallet/pay-invoice` trả `410 Gone`.
+- Entity `WalletTransaction` (`wallet_transactions`) và các trường `balance`/`totalReceived`/`totalFeesPaid` cũ trong document Mongo được **giữ nguyên, đánh dấu `@deprecated`**, không bị xóa hay đọc/ghi nữa — dùng cho đối chiếu dữ liệu lịch sử nếu cần, không phải nguồn sự thật cho API.
+- Xem `openspec/changes/non-custodial-wallets` (hoặc bản đã archive trong `openspec/specs/landlord-wallet`, `openspec/specs/landlord-payout`) để biết đầy đủ quyết định thiết kế.
+
 ## Environment
 
 Copy `.env.example` to `.env`.

@@ -12,7 +12,7 @@ import {
   MinLength,
 } from 'class-validator'
 import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto'
-import { RECONCILIATION_EVENT_TYPES } from '../ledger-reconciliation.sources'
+import { RECONCILIATION_EVENT_TYPES } from '../utils/ledger-reconciliation.sources'
 import type {
   LedgerReconciliationFinding,
   LedgerReconciliationFindingCategory,

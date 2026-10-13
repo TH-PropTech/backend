@@ -1,58 +1,49 @@
 import { Module } from '@nestjs/common'
+import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core'
 import { ConfigModule, ConfigService } from '@nestjs/config'
 import { TypeOrmModule } from '@nestjs/typeorm'
 import { configuration } from './config/configuration'
 import smartCaConfig from './config/smartca.config'
 import { envValidationSchema } from './config/env.validation'
+import { AppController } from './app.controller'
+import { ActivityLogInterceptor } from './common/interceptors/activity-log.interceptor'
 import { LoggerModule } from './common/logger/logger.module'
 import { ThrottlerModule } from '@nestjs/throttler'
+import { HttpThrottlerGuard } from './common/guards/http-throttler.guard'
+import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard'
 import { ScheduleModule } from '@nestjs/schedule'
 
+// Cắt ngang
 import { HealthModule } from './modules/health/health.module'
+import { AuthModule } from './modules/auth/auth.module'
+import { RbacModule } from './modules/rbac/rbac.module'
+import { ActivityLogModule } from './modules/activity-log/activity-log.module'
+// Domain
 import { UsersModule } from './modules/users/users.module'
-import { KycModule } from './modules/kyc/kyc.module'
-import { ProjectsModule } from './modules/projects/projects.module'
-import { BuildingsModule } from './modules/buildings/buildings.module'
-import { ApartmentsModule } from './modules/apartments/apartments.module'
+import { PropertiesModule } from './modules/properties/properties.module'
 import { BookingsModule } from './modules/bookings/bookings.module'
+import { RentalModule } from './modules/rental/rental.module'
+import { RentalFlowConfigModule } from './modules/rental-flow-config/rental-flow-config.module'
+import { MoveInSettlementsModule } from './modules/move-in-settlements/move-in-settlements.module'
 import { ContractsModule } from './modules/contracts/contracts.module'
+import { PropertyOwnershipTransferModule } from './modules/property-ownership-transfer/property-ownership-transfer.module'
 import { PaymentsModule } from './modules/payments/payments.module'
-import { MockBankModule } from './modules/mock-bank/mock-bank.module'
-import { MaintenanceModule } from './modules/maintenance/maintenance.module'
+import { PlatformFeesModule } from './modules/platform-fees/platform-fees.module'
+import { WalletsModule } from './modules/wallets/wallets.module'
+import { LegalModule } from './modules/legal/legal.module'
+import { InsightsModule } from './modules/insights/insights.module'
+import { RecommendationsModule } from './modules/recommendations/recommendations.module'
 import { CommunityModule } from './modules/community/community.module'
 import { NotificationsModule } from './modules/notifications/notifications.module'
-import { AiChatsModule } from './modules/ai-chats/ai-chats.module'
-import { DisputesModule } from './modules/disputes/disputes.module'
-import { ReviewsModule } from './modules/reviews/reviews.module'
-import { AuthModule } from './modules/auth/auth.module'
-import { SmartOtpModule } from './modules/smart-otp/smart-otp.module'
-import { TwoFactorModule } from './modules/two-factor/two-factor.module'
+// Adapter
 import { FabricModule } from './modules/fabric/fabric.module'
-import { PoliciesModule } from './modules/policies/policies.module'
-import { LegalTermsModule } from './modules/legal-terms/legal-terms.module'
-import { LegalSourcesModule } from './modules/legal-sources/legal-sources.module'
-import { AiConsultationModule } from './modules/ai-consultation/ai-consultation.module'
-import { GroqModule } from './modules/groq/groq.module'
-import { RedisModule } from './modules/redis/redis.module'
-import { RecommendationsModule } from './modules/recommendations/recommendations.module'
-import { SafetyReportsModule } from './modules/safety-reports/safety-reports.module'
-import { SavedSearchesModule } from './modules/saved-searches/saved-searches.module'
-import { LivingCostModule } from './modules/living-cost/living-cost.module'
-import { SupportTicketsModule } from './modules/support-tickets/support-tickets.module'
-import { ListingFreshnessModule } from './modules/listing-freshness/listing-freshness.module'
-import { PriceBenchmarkModule } from './modules/price-benchmark/price-benchmark.module'
-import { ViewingNotesModule } from './modules/viewing-notes/viewing-notes.module'
-import { AreaProfilesModule } from './modules/area-profiles/area-profiles.module'
-import { RentalApplicationsModule } from './modules/rental-applications/rental-applications.module'
-import { ConditionAnalysisModule } from './modules/condition-analysis/condition-analysis.module'
-import { LocationRiskModule } from './modules/location-risk/location-risk.module'
-import { OperationsModule } from './modules/operations/operations.module'
-import { RentalFlowConfigModule } from './modules/rental-flow-config/rental-flow-config.module'
-import { PropertyOwnershipTransferModule } from './modules/property-ownership-transfer/property-ownership-transfer.module'
-import { PlatformFeesModule } from './modules/platform-fees/platform-fees.module'
-import { PayoutsModule } from './modules/payouts/payouts.module'
-import { RentalTransactionsModule } from './modules/rental-transactions/rental-transactions.module'
-import { LegalKnowledgeModule } from './modules/legal-knowledge/legal-knowledge.module'
+import { DigitalSignatureModule } from './modules/digital-signature/digital-signature.module'
+import { EkycModule } from './modules/ekyc/ekyc.module'
+import { AiModule } from './modules/ai/ai.module'
+import { MockBankModule } from './modules/mock-bank/mock-bank.module'
+// Vận hành
+import { AdminModule } from './modules/admin/admin.module'
+import { JobsModule } from './modules/jobs/jobs.module'
 
 @Module({
   imports: [
@@ -76,60 +67,62 @@ import { LegalKnowledgeModule } from './modules/legal-knowledge/legal-knowledge.
         autoLoadEntities: true,
       }),
     }),
-    ThrottlerModule.forRoot([
-      {
-        ttl: 60000,
-        limit: 10,
-      },
-    ]),
+    // Rate limiting toàn cục (có thể chỉnh qua RATE_LIMIT_TTL_MS / RATE_LIMIT_MAX)
+    ThrottlerModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (configService: ConfigService) => [
+        {
+          ttl: configService.getOrThrow<number>('security.rateLimitTtl'),
+          limit: configService.getOrThrow<number>('security.rateLimitMax'),
+        },
+      ],
+    }),
 
     ScheduleModule.forRoot(),
     LoggerModule,
+    // Cắt ngang
     HealthModule,
+    AuthModule,
+    RbacModule,
+    ActivityLogModule,
+    // Domain
     UsersModule,
-    KycModule,
-    ProjectsModule,
-    BuildingsModule,
-    ApartmentsModule,
+    PropertiesModule,
     BookingsModule,
+    RentalModule,
+    RentalFlowConfigModule,
+    MoveInSettlementsModule,
     ContractsModule,
+    PropertyOwnershipTransferModule,
     PaymentsModule,
-    MockBankModule,
-    MaintenanceModule,
+    PlatformFeesModule,
+    WalletsModule,
+    LegalModule,
+    InsightsModule,
+    RecommendationsModule,
     CommunityModule,
     NotificationsModule,
-    AiChatsModule,
-    DisputesModule,
-    ReviewsModule,
-    AuthModule,
-    SmartOtpModule,
-    TwoFactorModule,
+    // Adapter
     FabricModule,
-    PoliciesModule,
-    LegalTermsModule,
-    LegalSourcesModule,
-    AiConsultationModule,
-    RedisModule,
-    GroqModule,
-    RecommendationsModule,
-    SafetyReportsModule,
-    SavedSearchesModule,
-    LivingCostModule,
-    SupportTicketsModule,
-    ListingFreshnessModule,
-    PriceBenchmarkModule,
-    ViewingNotesModule,
-    AreaProfilesModule,
-    RentalApplicationsModule,
-    ConditionAnalysisModule,
-    LocationRiskModule,
-    OperationsModule,
-    RentalFlowConfigModule,
-    PropertyOwnershipTransferModule,
-    PlatformFeesModule,
-    PayoutsModule,
-    RentalTransactionsModule,
-    LegalKnowledgeModule,
+    DigitalSignatureModule,
+    EkycModule,
+    AiModule,
+    MockBankModule,
+    // Vận hành
+    AdminModule,
+    JobsModule,
+  ],
+  controllers: [AppController],
+  providers: [
+    // Rate limiting áp dụng toàn cục cho mọi route HTTP
+    { provide: APP_GUARD, useClass: HttpThrottlerGuard },
+    // Xác thực JWT toàn cục; route công khai phải đánh @Public()
+    { provide: APP_GUARD, useClass: JwtAuthGuard },
+    // Ghi nhật ký thao tác ghi dữ liệu của admin/staff vào DB (fire-and-forget)
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: ActivityLogInterceptor,
+    },
   ],
 })
 export class AppModule {}

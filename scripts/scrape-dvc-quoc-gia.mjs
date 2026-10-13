@@ -7,7 +7,7 @@
  *
  * Chạy: node backend/scripts/scrape-dvc-quoc-gia.mjs
  * Cần Playwright (có sẵn ở frontend/node_modules) và Microsoft Edge.
- * Kết quả: backend/src/modules/legal-knowledge/data/dvc-quoc-gia.json, được
+ * Kết quả: backend/src/modules/legal/data/dvc-quoc-gia.json, được
  * `pnpm seed:legal` nạp vào kho tri thức.
  */
 import { createRequire } from 'node:module'
@@ -20,10 +20,7 @@ const require = createRequire(resolve(here, '../../frontend/package.json'))
 const { chromium } = require('playwright')
 
 const PORTAL = 'https://dichvucong.gov.vn'
-const OUTPUT = resolve(
-  here,
-  '../src/modules/legal-knowledge/data/dvc-quoc-gia.json'
-)
+const OUTPUT = resolve(here, '../src/modules/legal/data/dvc-quoc-gia.json')
 
 /** Từ khoá tìm trên cổng; `match` lọc tên thủ tục để chỉ lấy đúng chủ đề thuê nhà. */
 const QUERIES = [

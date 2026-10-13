@@ -12,7 +12,18 @@ export type WalletTransactionType =
   | 'platform-fee-debit'
   | 'platform-fee-refund'
 
-/** Sao kê ví: chỉ thêm, không sửa. (refType, refId) duy nhất để mỗi sự kiện chỉ ghi một lần. */
+/**
+ * @deprecated (non-custodial-wallets, D6) Sổ cái ví cũ — KHÔNG đọc entity này
+ * cho sao kê mới. `WalletsService.listTransactions` nay dựng sao kê từ
+ * `Payout` (paid-out) + `Payment` (platform-fee đã trả), xem design.md D5.
+ * Nhóm 4 (task 4.2) đã xóa `debitInvoice`/`refundInvoice`/`applyEntry`/
+ * `findEntry` khỏi `wallets.service.ts` (chuỗi gọi duy nhất của entity này,
+ * qua `mock-bank.service.ts#payInvoiceFromWallet` — route đã gỡ) và đã bỏ
+ * `WalletTransaction` khỏi `TypeOrmModule.forFeature` của `WalletsModule`;
+ * không còn repository nào inject entity này. Dữ liệu cũ trong collection
+ * `wallet_transactions` được giữ nguyên trong Mongo để đối soát thủ công
+ * ngoài ứng dụng (không xóa dữ liệu), xem D6.
+ */
 @Entity('wallet_transactions')
 @Index(['refType', 'refId'], { unique: true })
 @Index(['userId', 'createdAt'])

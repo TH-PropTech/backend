@@ -12,7 +12,7 @@ import { User, UserStatus } from '../../users/schemas/user.schema'
 import { EmailOtp } from '../schemas/email-otp.schema'
 import { EmailService } from './email.service'
 import { TokenResponse, UserPayload } from '../interfaces/auth.interface'
-import { TwoFactorService } from '../../two-factor/two-factor.service'
+import { TwoFactorService } from './two-factor.service'
 
 interface TwoFactorTempPayload {
   _id: string

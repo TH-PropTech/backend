@@ -14,7 +14,7 @@ import type { PadesSignatureMeta } from './pades.util'
 
 export type SignatureRole = 'landlord' | 'tenant'
 
-import { SIGNATURE_BOXES_INFO_KEY } from '../contract-pdf.renderer'
+import { SIGNATURE_BOXES_INFO_KEY } from '../utils/contract-pdf.renderer'
 const FIELD_NAMES: Record<SignatureRole, string> = {
   landlord: 'SigLandlord',
   tenant: 'SigTenant',

@@ -10,7 +10,7 @@ import type {
   RentalExecutionPolicyDisclosure,
   RentalExecutionPolicyStatus,
   RentalExecutionStrategy,
-} from '../rental-execution-policy.util'
+} from '../utils/rental-execution-policy.util'
 
 @Entity('rental_execution_policies')
 export class RentalExecutionPolicy {

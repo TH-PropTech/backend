@@ -4,15 +4,13 @@ import { RentalFlowProfile } from './schemas/rental-flow-profile.schema'
 import { RentalFlowAssignment } from './schemas/rental-flow-assignment.schema'
 import { RentalFlowAudit } from './schemas/rental-flow-audit.schema'
 import { Contract } from '../contracts/schemas/contract.schema'
-import { RentalFlowProfilesService } from './rental-flow-profiles.service'
-import { RentalFlowAssignmentsService } from './rental-flow-assignments.service'
-import { RentalFlowConfigResolver } from './rental-flow-config-resolver.service'
-import { ContractImpactAnalyzer } from './contract-impact-analyzer.service'
-import { RentalFlowProfilesController } from './rental-flow-profiles.controller'
-import { RentalFlowAssignmentsController } from './rental-flow-assignments.controller'
+import { RentalFlowProfilesService } from './services/rental-flow-profiles.service'
+import { RentalFlowAssignmentsService } from './services/rental-flow-assignments.service'
+import { RentalFlowConfigResolver } from './services/rental-flow-config-resolver.service'
+import { ContractImpactAnalyzer } from './services/contract-impact-analyzer.service'
 import { RentalExecutionPolicy } from './schemas/rental-execution-policy.schema'
-import { RentalExecutionPoliciesService } from './rental-execution-policies.service'
-import { RentalExecutionPoliciesController } from './rental-execution-policies.controller'
+import { RentalExecutionPoliciesService } from './services/rental-execution-policies.service'
+import { RentalExecutionPoliciesController } from './controllers/rental-execution-policies.controller'
 
 @Module({
   imports: [
@@ -24,11 +22,7 @@ import { RentalExecutionPoliciesController } from './rental-execution-policies.c
       RentalExecutionPolicy,
     ]),
   ],
-  controllers: [
-    RentalFlowProfilesController,
-    RentalFlowAssignmentsController,
-    RentalExecutionPoliciesController,
-  ],
+  controllers: [RentalExecutionPoliciesController],
   providers: [
     RentalFlowProfilesService,
     RentalFlowAssignmentsService,

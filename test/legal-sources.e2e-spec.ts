@@ -12,10 +12,10 @@ import type { App as SupertestApp } from 'supertest/types'
 import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter'
 import { ResponseEnvelopeInterceptor } from '../src/common/interceptors/response-envelope.interceptor'
 import { JwtAuthGuard } from '../src/modules/auth/guards/jwt-auth.guard'
-import { LegalSourcesController } from '../src/modules/legal-sources/legal-sources.controller'
-import { LegalSourcesService } from '../src/modules/legal-sources/legal-sources.service'
-import { PlatformRegulationsController } from '../src/modules/legal-sources/platform-regulations.controller'
-import { PlatformRegulationsService } from '../src/modules/legal-sources/platform-regulations.service'
+import { LegalSourcesController } from '../src/modules/legal/controllers/legal-sources.controller'
+import { LegalSourcesService } from '../src/modules/legal/services/legal-sources.service'
+import { PlatformRegulationsController } from '../src/modules/admin/controllers/platform-regulations.controller'
+import { PlatformRegulationsService } from '../src/modules/admin/services/platform-regulations.service'
 
 /** Thay JWT bằng header `x-test-role`; không có header → 401. RolesGuard giữ nguyên bản thật. */
 const fakeJwtGuard = {

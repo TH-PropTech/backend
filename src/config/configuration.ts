@@ -73,6 +73,10 @@ export const configuration = (): {
     corsOrigins: string[]
     recommendationApiUrl: string
   }
+  security: {
+    rateLimitTtl: number
+    rateLimitMax: number
+  }
   database: {
     url: string
     logging: boolean
@@ -165,6 +169,10 @@ export const configuration = (): {
     ),
     recommendationApiUrl:
       process.env.RECOMMENDATION_API_URL ?? 'http://localhost:5001/api',
+  },
+  security: {
+    rateLimitTtl: Number(process.env.RATE_LIMIT_TTL_MS ?? 60000),
+    rateLimitMax: Number(process.env.RATE_LIMIT_MAX ?? 100),
   },
   database: {
     url: process.env.DATABASE_URL ?? 'mongodb://localhost:27017/th_proptech',

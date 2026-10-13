@@ -10,17 +10,16 @@ import { ContractAmendment } from '../contracts/schemas/contract-amendment.schem
 import { DepositAgreement } from '../contracts/schemas/deposit-agreement.schema'
 import { Payment } from '../payments/schemas/payment.schema'
 import { MoveInSettlement } from '../move-in-settlements/schemas/move-in-settlement.schema'
-import { FabricService } from './fabric.service'
-import { FabricController } from './fabric.controller'
-import { LedgerOutboxService } from './ledger-outbox.service'
-import { LedgerAuditQueryService } from './ledger-audit-query.service'
-import { LedgerProjectionService } from './ledger-projection.service'
-import { LedgerOutboxWorker } from './ledger-outbox.worker'
-import { LedgerEvidenceQueryService } from './ledger-evidence-query.service'
-import { FabricGovernanceService } from './fabric-governance.service'
-import { LedgerReconciliationService } from './ledger-reconciliation.service'
-import { LegalTermsModule } from '../legal-terms/legal-terms.module'
-import { PoliciesModule } from '../policies/policies.module'
+import { FabricService } from './services/fabric.service'
+import { FabricController } from './controllers/fabric.controller'
+import { LedgerOutboxService } from './services/ledger-outbox.service'
+import { LedgerAuditQueryService } from './services/ledger-audit-query.service'
+import { LedgerProjectionService } from './services/ledger-projection.service'
+import { LedgerOutboxWorker } from './services/ledger-outbox.worker'
+import { LedgerEvidenceQueryService } from './services/ledger-evidence-query.service'
+import { FabricGovernanceService } from './services/fabric-governance.service'
+import { LedgerReconciliationService } from './services/ledger-reconciliation.service'
+import { LegalModule } from '../legal/legal.module'
 import { PlatformFeesModule } from '../platform-fees/platform-fees.module'
 import { RentalFlowConfigModule } from '../rental-flow-config/rental-flow-config.module'
 
@@ -40,8 +39,7 @@ import { RentalFlowConfigModule } from '../rental-flow-config/rental-flow-config
     ]),
     // Nguồn governance (D2). ContractTemplate/Layout nằm trong ContractsModule (import FabricModule)
     // nên được tra cứu lazy bằng ModuleRef trong FabricGovernanceService để tránh vòng phụ thuộc.
-    LegalTermsModule,
-    PoliciesModule,
+    LegalModule,
     PlatformFeesModule,
     RentalFlowConfigModule,
   ],
