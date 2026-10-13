@@ -1,7 +1,7 @@
 import { ObjectId } from 'mongodb'
 import { GatewayCallbackService } from './gateway-callback.service'
-import { GatewayVerificationError } from './providers/payment-provider.port'
-import { testConfigService } from './providers/gateway-test.util'
+import { GatewayVerificationError } from '../providers/payment-provider.port'
+import { testConfigService } from '../providers/gateway-test.util'
 
 describe('GatewayCallbackService', () => {
   function createContext(attemptOverrides: Record<string, unknown> = {}): {

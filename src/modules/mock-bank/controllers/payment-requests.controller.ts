@@ -1,12 +1,15 @@
 import { Controller, Get, Param, UseGuards } from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
-import { CurrentUser } from '../../common/decorators/current-user.decorator'
-import { Roles } from '../../common/decorators/roles.decorator'
-import { RolesGuard } from '../../common/guards/roles.guard'
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
-import type { UserPayload } from '../auth/interfaces/auth.interface'
-import { MockBankService, type ReceiptView } from './mock-bank.service'
-import type { PaymentRequestView } from './payment-request.builder'
+import { CurrentUser } from '../../../common/decorators/current-user.decorator'
+import { Roles } from '../../../common/decorators/roles.decorator'
+import { RolesGuard } from '../../../common/guards/roles.guard'
+import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard'
+import type { UserPayload } from '../../auth/interfaces/auth.interface'
+import {
+  MockBankService,
+  type ReceiptView,
+} from '../services/mock-bank.service'
+import type { PaymentRequestView } from '../utils/payment-request.builder'
 
 @ApiTags('payment-requests')
 @ApiBearerAuth()

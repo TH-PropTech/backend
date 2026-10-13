@@ -17,36 +17,35 @@ import {
   timingSafeEqual,
 } from 'node:crypto'
 import { Repository } from 'typeorm'
-import { DepositAgreementsService } from '../contracts/deposit-agreements.service'
-import { evaluatePayDeposit } from '../contracts/flow/flow-guards'
-import { Payment } from '../payments/schemas/payment.schema'
+import { DepositAgreementsService } from '../../contracts/services/deposit-agreements.service'
+import { evaluatePayDeposit } from '../../contracts/flow/flow-guards'
+import { Payment } from '../../payments/schemas/payment.schema'
 import {
   PaymentAttempt,
   type PaymentAttemptStatus,
   type PaymentClientChannel,
-} from '../payments/schemas/payment-attempt.schema'
-import type { PaymentCallbackDto } from './dto/init-payment.dto'
+} from '../../payments/schemas/payment-attempt.schema'
+import type { PaymentCallbackDto } from '../dto/init-payment.dto'
 import { ObjectId } from 'mongodb'
-import { PaymentProviderRegistry } from './providers/payment-provider.registry'
+import { PaymentProviderRegistry } from '../providers/payment-provider.registry'
 import type {
   GatewayVerdict,
   MomoPaymentMethod,
   PaymentProviderName,
-} from './providers/payment-provider.port'
-import type { PaymentsConfig } from '../../config/configuration'
-import { LedgerOutboxService } from '../fabric/ledger-outbox.service'
+} from '../providers/payment-provider.port'
+import type { PaymentsConfig } from '../../../config/configuration'
+import { LedgerOutboxService } from '../../fabric/services/ledger-outbox.service'
 import {
   buildPaymentRequest,
   type PaymentRequestView,
-} from './payment-request.builder'
-import type { DepositAgreement } from '../contracts/schemas/deposit-agreement.schema'
-import { Contract } from '../contracts/schemas/contract.schema'
-import { MoveInSettlement } from '../move-in-settlements/schemas/move-in-settlement.schema'
-import { MoveInSettlementsService } from '../move-in-settlements/move-in-settlements.service'
-import { PayoutsService } from '../payouts/payouts.service'
-import { WalletsService } from '../wallets/wallets.service'
-import { RentalTransactionEventService } from '../rental-transactions/rental-transaction-event.service'
-import type { RentalTransactionActorRole } from '../rental-transactions/schemas/rental-transaction-event.schema'
+} from '../utils/payment-request.builder'
+import type { DepositAgreement } from '../../contracts/schemas/deposit-agreement.schema'
+import { Contract } from '../../contracts/schemas/contract.schema'
+import { MoveInSettlement } from '../../move-in-settlements/schemas/move-in-settlement.schema'
+import { MoveInSettlementsService } from '../../move-in-settlements/services/move-in-settlements.service'
+import { PayoutsService } from '../../wallets/services/payouts.service'
+import { RentalTransactionEventService } from '../../rental/services/rental-transaction-event.service'
+import type { RentalTransactionActorRole } from '../../rental/schemas/rental-transaction-event.schema'
 
 const CALLBACK_WINDOW_MS = 5 * 60 * 1000
 
@@ -132,7 +131,6 @@ export class MockBankService {
     private readonly paymentRepository: Repository<Payment>,
     @InjectRepository(PaymentAttempt)
     private readonly attemptRepository: Repository<PaymentAttempt>,
-    private readonly walletsService: WalletsService,
     private readonly providerRegistry: PaymentProviderRegistry,
     private readonly configService: ConfigService,
     private readonly ledgerOutboxService: LedgerOutboxService,
@@ -852,61 +850,6 @@ export class MockBankService {
       this.logger.warn(
         `Payout creation failed for payment ${payment._id.toHexString()}: ${error instanceof Error ? error.message : 'unknown'}`
       )
-    }
-  }
-
-  /** Chủ nhà trả hóa đơn hoa hồng sàn bằng số dư ví: trừ ví rồi ghi nhận paid, lỗi thì hoàn ví. */
-  async payInvoiceFromWallet(
-    paymentId: string,
-    currentUserId: string
-  ): Promise<Payment> {
-    const invoice = await this.findPayment(paymentId)
-    this.assertWalletPayable(invoice, currentUserId)
-    const id = invoice._id.toHexString()
-    await this.walletsService.debitInvoice({
-      userId: currentUserId,
-      paymentId: id,
-      amount: invoice.amount,
-      contractId: invoice.contractId ?? null,
-      description: invoice.description,
-    })
-    try {
-      await this.markPaymentPaid(
-        invoice,
-        { txRef: `WALLET-${id}` },
-        new Date(),
-        this.receiptSecret('mock-bank'),
-        { receiptType: 'platform-fee', hashType: 'platform-fee' }
-      )
-    } catch (error) {
-      await this.walletsService.refundInvoice({
-        userId: currentUserId,
-        paymentId: id,
-        amount: invoice.amount,
-        contractId: invoice.contractId ?? null,
-      })
-      throw error
-    }
-    await this.recordTransactionEvent({
-      transactionKey: invoice.contractId ?? id,
-      contractId: invoice.contractId,
-      eventType: 'payment.succeeded',
-      actorRole: 'landlord',
-      actorId: currentUserId,
-      refs: { paymentId: id },
-      transitionKey: `payment:wallet:${id}:succeeded`,
-    })
-    return invoice
-  }
-
-  private assertWalletPayable(invoice: Payment, currentUserId: string): void {
-    const isLandlordFee =
-      invoice.type === 'platform-fee' && invoice.payerRole === 'landlord'
-    if (!isLandlordFee || invoice.payerId !== currentUserId) {
-      throw new ForbiddenException('PAYMENT_ACCESS_DENIED')
-    }
-    if (invoice.status === 'paid' || invoice.status === 'waived') {
-      throw new ConflictException('PAYMENT_ALREADY_PAID')
     }
   }
 

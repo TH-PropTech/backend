@@ -1,6 +1,6 @@
 import { ObjectId } from 'mongodb'
-import { PayoutsService } from '../src/modules/payouts/payouts.service'
-import type { Payout } from '../src/modules/payouts/schemas/payout.schema'
+import { PayoutsService } from '../src/modules/wallets/services/payouts.service'
+import type { Payout } from '../src/modules/wallets/schemas/payout.schema'
 
 /** [uc_landlord_payout] Luồng giả lập: khách trả xong -> pending -> success/failed -> retry. */
 
@@ -90,8 +90,7 @@ function setup(options: { walletLinked: boolean }): {
   const service = new PayoutsService(
     payoutRepository as never,
     walletRepository as never,
-    notificationsService as never,
-    { creditPayout: () => Promise.resolve({}) } as never
+    notificationsService as never
   )
   return {
     service,

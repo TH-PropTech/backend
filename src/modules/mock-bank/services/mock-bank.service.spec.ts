@@ -3,8 +3,8 @@ import { ObjectId } from 'mongodb'
 import { ConflictException } from '@nestjs/common'
 import { createHash } from 'node:crypto'
 import { MockBankService } from './mock-bank.service'
-import { RentalTransactionEventService } from '../rental-transactions/rental-transaction-event.service'
-import type { RentalTransactionEvent } from '../rental-transactions/schemas/rental-transaction-event.schema'
+import { RentalTransactionEventService } from '../../rental/services/rental-transaction-event.service'
+import type { RentalTransactionEvent } from '../../rental/schemas/rental-transaction-event.schema'
 
 function createInMemoryTransactionEventService(): {
   service: RentalTransactionEventService
@@ -87,11 +87,6 @@ describe('MockBankService', () => {
     paymentRepository: { findOne: jest.Mock; save: jest.Mock }
     settlementRepository: { findOne: jest.Mock; save: jest.Mock }
     contractRepository: { findOne: jest.Mock }
-    walletsService: {
-      creditPayout: jest.Mock
-      debitInvoice: jest.Mock
-      refundInvoice: jest.Mock
-    }
     providerRegistry: {
       isEnabled: jest.Mock
       get: jest.Mock
@@ -159,11 +154,6 @@ describe('MockBankService', () => {
       markPaymentPending: jest.fn(),
       recordDepositPaid: jest.fn(),
     }
-    const walletsService = {
-      creditPayout: jest.fn().mockResolvedValue({}),
-      debitInvoice: jest.fn().mockResolvedValue({}),
-      refundInvoice: jest.fn().mockResolvedValue({}),
-    }
     const configService = {
       get: jest.fn((key: string) =>
         key === 'rentalFlow.mockBankSecret'
@@ -199,7 +189,6 @@ describe('MockBankService', () => {
       depositAgreementsService as never,
       paymentRepository as never,
       attemptRepository as never,
-      walletsService as never,
       providerRegistry as never,
       configService as never,
       ledgerOutboxService as never,
@@ -214,7 +203,6 @@ describe('MockBankService', () => {
       paymentRepository,
       settlementRepository,
       contractRepository,
-      walletsService,
       providerRegistry,
       configService,
       ledgerOutboxService,
@@ -297,6 +285,64 @@ describe('MockBankService', () => {
     context.attempt.status = 'succeeded'
     const replay = await context.service.handleInvoiceCallback(body, headers)
     expect(replay.replayed).toBe(true)
+    expect(context.paymentRepository.save).toHaveBeenCalledTimes(1)
+  })
+
+  /**
+   * Task 4.1 (D4): kênh duy nhất để chủ nhà trả hóa đơn `platform-fee` là
+   * `POST /bank/invoice/init` + `POST /bank/invoice-callback`. Khẳng định
+   * toàn bộ chuỗi tạo payment intent -> callback thành công -> replay vẫn
+   * chỉ đánh dấu `paid` đúng một lần, và `MockBankService` không còn phụ
+   * thuộc `WalletsService` (constructor 8 tham số, không tham số nào ghi
+   * số dư) nên không có cách nào trừ/cộng ví trong luồng này.
+   */
+  it('pays a landlord platform-fee invoice through the gateway (init + callback) exactly once, with no wallet-balance dependency', async () => {
+    const context = createContext()
+    context.payment.type = 'platform-fee'
+    context.payment.payerId = 'landlord-1'
+    context.payment.payerRole = 'landlord'
+    context.payment.payeeRole = 'platform'
+    context.attemptRepository.findOne.mockResolvedValueOnce(null)
+
+    const init = await context.service.initInvoicePayment(
+      paymentId,
+      'landlord-1'
+    )
+    expect(init.purpose).toBe('PLATFORM_FEE')
+
+    // The attempt created by `initInvoicePayment` (not the fixture
+    // `context.attempt`) is what the callback must look up by `txRef`.
+    const saveCalls = context.attemptRepository.save.mock.calls as Array<
+      [{ txRef: string; amount: number }]
+    >
+    const lastCall = saveCalls.at(-1)
+    if (!lastCall) throw new Error('attemptRepository.save was not called')
+    context.attemptRepository.findOne.mockResolvedValue(lastCall[0])
+
+    const body = {
+      txRef: init.txRef,
+      amount: init.amount,
+      status: 'success' as const,
+    }
+    const timestamp = Date.now().toString()
+    const headers = {
+      timestamp,
+      nonce: 'platform-fee-nonce',
+      signature: context.service.signCallback(
+        body,
+        timestamp,
+        'platform-fee-nonce'
+      ),
+    }
+
+    const first = await context.service.handleInvoiceCallback(body, headers)
+    expect(first.replayed).toBe(false)
+    expect(context.payment.status).toBe('paid')
+    expect(context.paymentRepository.save).toHaveBeenCalledTimes(1)
+
+    const replay = await context.service.handleInvoiceCallback(body, headers)
+    expect(replay.replayed).toBe(true)
+    // Idempotent: the callback replaying does not mark the invoice paid again.
     expect(context.paymentRepository.save).toHaveBeenCalledTimes(1)
   })
 
@@ -833,7 +879,7 @@ describe('MockBankService', () => {
   })
 
   it('rejects a callback with an invalid HMAC before any business mutation', async () => {
-    const { service, walletsService } = createContext()
+    const { service, attemptRepository, paymentRepository } = createContext()
     const body = {
       txRef: 'MOCK-RENT-1',
       amount: 2_000_000,
@@ -847,7 +893,8 @@ describe('MockBankService', () => {
         signature: 'invalid',
       })
     ).rejects.toThrow('INVALID_BANK_SIGNATURE')
-    expect(walletsService.creditPayout).not.toHaveBeenCalled()
+    expect(attemptRepository.save).not.toHaveBeenCalled()
+    expect(paymentRepository.save).not.toHaveBeenCalled()
   })
 
   it('confirms a valid callback once and returns the previous result on replay', async () => {
@@ -988,102 +1035,6 @@ describe('MockBankService', () => {
       expect(result.replayed).toBe(false)
       expect(context.payment.status).toBe('paid')
       expect(payoutsService.createForPayment).toHaveBeenCalledTimes(1)
-    })
-
-    describe('payInvoiceFromWallet', () => {
-      const landlordId = 'landlord-1'
-      const makeInvoice = (
-        overrides: Record<string, unknown> = {}
-      ): unknown => ({
-        _id: new ObjectId(),
-        contractId: 'contract-1',
-        tenantId: 'tenant-1',
-        landlordId,
-        payerId: landlordId,
-        payerRole: 'landlord',
-        payeeRole: 'platform',
-        type: 'platform-fee',
-        amount: 1_100_000,
-        vatAmount: 100_000,
-        description: 'Landlord platform commission',
-        status: 'unpaid',
-        ...overrides,
-      })
-
-      it('debits the wallet once and marks the commission invoice paid', async () => {
-        const context = createContext()
-        const invoice = makeInvoice() as { _id: ObjectId; status: string }
-        context.paymentRepository.findOne.mockResolvedValueOnce(invoice)
-
-        await context.service.payInvoiceFromWallet(
-          invoice._id.toHexString(),
-          landlordId
-        )
-
-        expect(context.walletsService.debitInvoice).toHaveBeenCalledWith(
-          expect.objectContaining({
-            userId: landlordId,
-            paymentId: invoice._id.toHexString(),
-            amount: 1_100_000,
-          })
-        )
-        expect(invoice.status).toBe('paid')
-        expect(context.walletsService.refundInvoice).not.toHaveBeenCalled()
-      })
-
-      it('refunds the wallet when recording the payment fails', async () => {
-        const context = createContext()
-        const invoice = makeInvoice() as { _id: ObjectId }
-        context.paymentRepository.findOne.mockResolvedValueOnce(invoice)
-        context.paymentRepository.save.mockRejectedValueOnce(
-          new Error('db down')
-        )
-
-        await expect(
-          context.service.payInvoiceFromWallet(
-            invoice._id.toHexString(),
-            landlordId
-          )
-        ).rejects.toThrow('db down')
-        expect(context.walletsService.refundInvoice).toHaveBeenCalledTimes(1)
-      })
-
-      it("refuses another user's invoice and tenant-side invoices", async () => {
-        const context = createContext()
-        const mine = makeInvoice() as { _id: ObjectId }
-        context.paymentRepository.findOne.mockResolvedValueOnce(mine)
-        await expect(
-          context.service.payInvoiceFromWallet(
-            mine._id.toHexString(),
-            'someone-else'
-          )
-        ).rejects.toThrow('PAYMENT_ACCESS_DENIED')
-
-        const tenantFee = makeInvoice({
-          payerId: 'tenant-1',
-          payerRole: 'tenant',
-        }) as { _id: ObjectId }
-        context.paymentRepository.findOne.mockResolvedValueOnce(tenantFee)
-        await expect(
-          context.service.payInvoiceFromWallet(
-            tenantFee._id.toHexString(),
-            'tenant-1'
-          )
-        ).rejects.toThrow('PAYMENT_ACCESS_DENIED')
-        expect(context.walletsService.debitInvoice).not.toHaveBeenCalled()
-      })
-
-      it('rejects an invoice that is already paid', async () => {
-        const context = createContext()
-        const paid = makeInvoice({ status: 'paid' }) as { _id: ObjectId }
-        context.paymentRepository.findOne.mockResolvedValueOnce(paid)
-        await expect(
-          context.service.payInvoiceFromWallet(
-            paid._id.toHexString(),
-            landlordId
-          )
-        ).rejects.toThrow('PAYMENT_ALREADY_PAID')
-      })
     })
   })
 
@@ -1241,8 +1192,8 @@ describe('MockBankService', () => {
     )
   })
 
-  it('does not credit or debit any wallet when a tenant pays rent (only payouts move wallet money)', async () => {
-    const { service, walletsService } = createContext()
+  it('does not credit or debit any wallet when a tenant pays rent (only payouts move wallet money; MockBankService no longer depends on WalletsService)', async () => {
+    const { service } = createContext()
     const body = {
       txRef: 'MOCK-RENT-1',
       amount: 2_000_000,
@@ -1258,7 +1209,6 @@ describe('MockBankService', () => {
     await expect(service.handleRentCallback(body, headers)).resolves.toEqual(
       expect.objectContaining({ status: 'succeeded' })
     )
-    expect(walletsService.creditPayout).not.toHaveBeenCalled()
   })
 
   it('fails closed when an unimplemented external provider is selected', async () => {

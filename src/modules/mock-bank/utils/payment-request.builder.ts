@@ -1,4 +1,4 @@
-import type { MockPaymentInit } from './mock-bank.service'
+import type { MockPaymentInit } from '../services/mock-bank.service'
 
 export type PaymentPurpose =
   | 'DEPOSIT'

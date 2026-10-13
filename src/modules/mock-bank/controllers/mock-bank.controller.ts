@@ -1,7 +1,11 @@
+import { SkipThrottle } from '@nestjs/throttler'
 import {
   Controller,
   Get,
   Headers,
+  HttpCode,
+  HttpException,
+  HttpStatus,
   Ip,
   Param,
   Post,
@@ -19,44 +23,44 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger'
-import { CurrentUser } from '../../common/decorators/current-user.decorator'
-import { Roles } from '../../common/decorators/roles.decorator'
-import { RolesGuard } from '../../common/guards/roles.guard'
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
-import { Payment } from '../payments/schemas/payment.schema'
-import { PayInvoiceFromWalletDto } from '../wallets/dto/wallet.dto'
-import type { UserPayload } from '../auth/interfaces/auth.interface'
+import { CurrentUser } from '../../../common/decorators/current-user.decorator'
+import { Roles } from '../../../common/decorators/roles.decorator'
+import { RolesGuard } from '../../../common/guards/roles.guard'
+import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard'
+import type { UserPayload } from '../../auth/interfaces/auth.interface'
 import {
   InitDepositPaymentDto,
   InitInvoicePaymentDto,
   InitRentPaymentDto,
   InitSettlementPaymentDto,
   PaymentCallbackDto,
-} from './dto/init-payment.dto'
+} from '../dto/init-payment.dto'
 import {
   MockBankService,
   type MockPaymentCallbackResult,
   type MockPaymentInit,
   type GatewayPaymentResult,
-} from './mock-bank.service'
-import type { PaymentRequestView } from './payment-request.builder'
+} from '../services/mock-bank.service'
+import type { PaymentRequestView } from '../utils/payment-request.builder'
 import {
   PaymentProviderRegistry,
   type PaymentProviderOption,
-} from './providers/payment-provider.registry'
+} from '../providers/payment-provider.registry'
 import {
   GatewayCallbackService,
   type VnpayIpnAck,
   type ZalopayCallbackAck,
-} from './gateway-callback.service'
+} from '../services/gateway-callback.service'
 import {
   PayoutsService,
   type PayoutSettleResult,
-} from '../payouts/payouts.service'
+} from '../../wallets/services/payouts.service'
+import { Public } from '../../../common/decorators/public.decorator'
 
 type GatewayQuery = Record<string, string | string[] | undefined>
 
 @ApiTags('mock-bank')
+@SkipThrottle()
 @Controller('bank')
 export class MockBankController {
   constructor(
@@ -161,6 +165,7 @@ export class MockBankController {
     })
   }
 
+  @Public()
   @Post('deposit-callback')
   callbackDeposit(
     @Body() body: PaymentCallbackDto,
@@ -172,6 +177,7 @@ export class MockBankController {
     )
   }
 
+  @Public()
   @Post('rent-callback')
   callbackRent(
     @Body() body: PaymentCallbackDto,
@@ -183,6 +189,7 @@ export class MockBankController {
     )
   }
 
+  @Public()
   @Post('settlement-callback')
   callbackSettlement(
     @Body() body: PaymentCallbackDto,
@@ -194,6 +201,7 @@ export class MockBankController {
     )
   }
 
+  @Public()
   @Post('invoice-callback')
   callbackInvoice(
     @Body() body: PaymentCallbackDto,
@@ -205,6 +213,7 @@ export class MockBankController {
     )
   }
 
+  @Public()
   @Get('vnpay/return')
   @ApiOperation({ summary: 'VNPAY browser return (signed)' })
   @ApiResponse({ status: 302, description: 'Redirect to client result URL' })
@@ -218,6 +227,7 @@ export class MockBankController {
     )
   }
 
+  @Public()
   @Get('vnpay/ipn')
   @ApiOperation({ summary: 'VNPAY IPN (server-to-server, signed)' })
   @ApiOkResponse({ description: '{ RspCode, Message } per VNPAY spec' })
@@ -232,6 +242,7 @@ export class MockBankController {
     response.status(200).json(ack)
   }
 
+  @Public()
   @Get('momo/return')
   @ApiOperation({ summary: 'MoMo browser return (signed)' })
   @ApiResponse({ status: 302, description: 'Redirect to client result URL' })
@@ -245,6 +256,7 @@ export class MockBankController {
     )
   }
 
+  @Public()
   @Post('momo/ipn')
   @ApiOperation({ summary: 'MoMo IPN (server-to-server, signed)' })
   @ApiResponse({ status: 204, description: 'Notification handled' })
@@ -257,6 +269,7 @@ export class MockBankController {
     response.status(this.gatewayCallbackService.toMomoStatus(result)).end()
   }
 
+  @Public()
   @Get('zalopay/return')
   @ApiOperation({ summary: 'ZaloPay browser return (checksum-signed)' })
   @ApiResponse({ status: 302, description: 'Redirect to client result URL' })
@@ -270,6 +283,7 @@ export class MockBankController {
     )
   }
 
+  @Public()
   @Post('zalopay/callback')
   @ApiOperation({ summary: 'ZaloPay callback (server-to-server, key2 MAC)' })
   @ApiOkResponse({
@@ -317,19 +331,28 @@ export class MockBankController {
     return this.payoutsService.settleForLandlord(txRef, 'failed', user._id)
   }
 
+  /**
+   * REMOVED (D4): wallets no longer hold a balance, so a platform-fee
+   * invoice can no longer be paid by debiting it. Use `POST invoice/init`
+   * + `POST invoice-callback` (the payment gateway flow) instead. Route
+   * kept (same path) so old clients get a clear, typed error instead of a
+   * 404.
+   */
   @Post('wallet/pay-invoice')
+  @HttpCode(HttpStatus.GONE)
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('landlord')
   @ApiOperation({
-    summary: 'Pay a platform-fee invoice from the wallet balance',
+    summary:
+      'REMOVED: use POST invoice/init instead. Wallets no longer hold a balance.',
   })
-  payInvoiceFromWallet(
-    @Body() dto: PayInvoiceFromWalletDto,
-    @CurrentUser() user: UserPayload
-  ): Promise<Payment> {
-    if (!user._id) throw new UnauthorizedException('USER_ID_REQUIRED')
-    return this.mockBankService.payInvoiceFromWallet(dto.paymentId, user._id)
+  @ApiResponse({
+    status: HttpStatus.GONE,
+    description: '{ "message": "WALLET_BALANCE_PAYMENT_REMOVED" }',
+  })
+  payInvoiceFromWallet(): never {
+    throw new HttpException('WALLET_BALANCE_PAYMENT_REMOVED', HttpStatus.GONE)
   }
 
   private callbackHeaders(headers: Record<string, string>): {

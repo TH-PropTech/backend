@@ -6,10 +6,16 @@ import {
   ObjectIdColumn,
   UpdateDateColumn,
 } from 'typeorm'
-import type { PaymentProviderName } from '../providers/payment-provider.port'
+import type { PaymentProviderName } from '../../mock-bank/providers/payment-provider.port'
 
+/**
+ * Ví = liên kết tài khoản ngân hàng, không lưu ký (xem openspec
+ * `non-custodial-wallets`). Collection giữ nguyên `mock_bank_wallets` để
+ * không cần migration; document cũ còn `balance`/`totalReceived`/
+ * `totalFeesPaid` trong Mongo nhưng các trường này không còn ý nghĩa.
+ */
 @Entity('mock_bank_wallets')
-export class MockWallet {
+export class Wallet {
   @ObjectIdColumn()
   _id!: ObjectId
 
@@ -40,16 +46,6 @@ export class MockWallet {
 
   @Column({ type: 'string', nullable: true })
   accountNumberMasked!: string | null
-
-  /** Số dư khả dụng (VND, số nguyên). Chỉ đổi qua WalletsService. */
-  @Column({ default: 0 })
-  balance!: number
-
-  @Column({ default: 0 })
-  totalReceived!: number
-
-  @Column({ default: 0 })
-  totalFeesPaid!: number
 
   @Column({ nullable: true })
   linkedAt!: Date | null

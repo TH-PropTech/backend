@@ -1,4 +1,9 @@
-import { ForbiddenException, NotFoundException } from '@nestjs/common'
+import {
+  ForbiddenException,
+  HttpException,
+  HttpStatus,
+  NotFoundException,
+} from '@nestjs/common'
 import { MockBankController } from './mock-bank.controller'
 
 const headers = {
@@ -152,10 +157,23 @@ describe('MockBankController', () => {
     )
   })
 
-  it('rejects wallet invoice payment when the JWT has no user id', () => {
-    expect(() =>
-      createController().payInvoiceFromWallet({ paymentId: 'p' }, {})
-    ).toThrow('USER_ID_REQUIRED')
+  it('returns 410 Gone with WALLET_BALANCE_PAYMENT_REMOVED for the removed wallet-balance payment route (D4)', () => {
+    const service = { payInvoiceFromWallet: jest.fn() }
+    const controller = createController(service)
+
+    let thrown: unknown
+    try {
+      controller.payInvoiceFromWallet()
+    } catch (error) {
+      thrown = error
+    }
+
+    expect(thrown).toBeInstanceOf(HttpException)
+    const exception = thrown as HttpException
+    expect(exception.getStatus()).toBe(HttpStatus.GONE)
+    expect(exception.getResponse()).toBe('WALLET_BALANCE_PAYMENT_REMOVED')
+    // No delegation to the service: the invoice/payment is never touched.
+    expect(service.payInvoiceFromWallet).not.toHaveBeenCalled()
   })
 
   it('lists enabled providers from the registry', () => {

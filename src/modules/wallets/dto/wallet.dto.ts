@@ -3,7 +3,6 @@ import { Transform } from 'class-transformer'
 import {
   IsIn,
   IsInt,
-  IsMongoId,
   IsOptional,
   IsString,
   Matches,
@@ -11,7 +10,7 @@ import {
   Min,
   MinLength,
 } from 'class-validator'
-import { SUPPORTED_BANK_CODES } from '../supported-banks'
+import { SUPPORTED_BANK_CODES } from '../utils/supported-banks'
 
 export class LinkWalletDto {
   @ApiProperty({ enum: SUPPORTED_BANK_CODES })
@@ -30,12 +29,6 @@ export class LinkWalletDto {
   @MinLength(2)
   @MaxLength(100)
   accountHolder!: string
-}
-
-export class PayInvoiceFromWalletDto {
-  @ApiProperty()
-  @IsMongoId()
-  paymentId!: string
 }
 
 export class WalletTransactionsQueryDto {

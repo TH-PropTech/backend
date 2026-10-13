@@ -3,16 +3,16 @@ import { ConfigService } from '@nestjs/config'
 import { InjectRepository } from '@nestjs/typeorm'
 import { createHash } from 'node:crypto'
 import { Repository } from 'typeorm'
-import type { PaymentsConfig } from '../../config/configuration'
-import { PaymentAttempt } from '../payments/schemas/payment-attempt.schema'
+import type { PaymentsConfig } from '../../../config/configuration'
+import { PaymentAttempt } from '../../payments/schemas/payment-attempt.schema'
 import { MockBankService, type SettlementOutcome } from './mock-bank.service'
-import { PaymentProviderRegistry } from './providers/payment-provider.registry'
+import { PaymentProviderRegistry } from '../providers/payment-provider.registry'
 import {
   GatewayVerificationError,
   type GatewayCallbackKind,
   type GatewayFailureReason,
   type GatewayProviderName,
-} from './providers/payment-provider.port'
+} from '../providers/payment-provider.port'
 
 export type GatewayCallbackResult =
   | { ok: true; outcome: SettlementOutcome; attempt: PaymentAttempt }
