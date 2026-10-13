@@ -9,8 +9,8 @@ import { Repository } from 'typeorm'
 import { ObjectId } from 'mongodb'
 import * as bcrypt from 'bcryptjs'
 import { User } from '../../users/schemas/user.schema'
-import { SmartOtpService } from '../../smart-otp/services/smart-otp.service'
-import { OtpActionType } from '../../smart-otp/enums/otp-action-type.enum'
+import { SmartOtpService } from './smart-otp.service'
+import { OtpActionType } from '../enums/otp-action-type.enum'
 
 /**
  * PIN Service

@@ -74,6 +74,9 @@ importers:
       cloudinary:
         specifier: ^2.11.0
         version: 2.11.0
+      cron:
+        specifier: 4.4.0
+        version: 4.4.0
       dejavu-fonts-ttf:
         specifier: ^2.37.3
         version: 2.37.3

@@ -1,5 +1,5 @@
 import { ObjectId } from 'mongodb'
-import { NotificationsService } from '../../notifications/notifications.service'
+import { NotificationsService } from '../../notifications/services/notifications.service'
 import type { Notification } from '../../notifications/schemas/notification.schema'
 import type { ContractFlowStageDto } from '../dto/contract-view.dto'
 import { FlowNotificationService } from './flow-notification.service'

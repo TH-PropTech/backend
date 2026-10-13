@@ -15,19 +15,19 @@ if (dnsServers.length > 0) {
 
 import { NestFactory } from '@nestjs/core'
 import { AppModule } from '../app.module'
-import { LegalKnowledgeService } from '../modules/legal-knowledge/legal-knowledge.service'
-import { LEGAL_SEED_ENTRIES } from '../modules/legal-knowledge/legal-knowledge.seed-data'
-import { extractMainText } from '../modules/legal-knowledge/html-extract'
+import { LegalKnowledgeService } from '../modules/legal/services/legal-knowledge.service'
+import { LEGAL_SEED_ENTRIES } from '../modules/legal/utils/legal-knowledge.seed-data'
+import { extractMainText } from '../modules/legal/utils/html-extract'
 import {
   cleanPortalProcedure,
   cleanSourceText,
-} from '../modules/legal-knowledge/legal-seed-clean'
-import type { LegalSeedEntry } from '../modules/legal-knowledge/legal-knowledge.seed-data'
-import { fetchPageHtml } from '../modules/legal-knowledge/safe-fetch'
+} from '../modules/legal/utils/legal-seed-clean'
+import type { LegalSeedEntry } from '../modules/legal/utils/legal-knowledge.seed-data'
+import { fetchPageHtml } from '../modules/legal/utils/safe-fetch'
 import {
   LEGAL_CONTENT_MAX,
   LEGAL_CONTENT_MIN,
-} from '../modules/legal-knowledge/dto/legal-knowledge.dto'
+} from '../modules/legal/dto/legal-knowledge.dto'
 
 interface PortalProcedure {
   href: string
@@ -44,7 +44,7 @@ const PORTAL_FILE = path.join(
   __dirname,
   '..',
   'modules',
-  'legal-knowledge',
+  'legal',
   'data',
   'dvc-quoc-gia.json'
 )

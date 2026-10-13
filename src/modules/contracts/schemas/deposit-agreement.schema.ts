@@ -6,8 +6,8 @@ import {
   ObjectIdColumn,
   UpdateDateColumn,
 } from 'typeorm'
-import type { RentalPackageSnapshot } from '../../apartments/rental-package.util'
-import type { RentalExecutionPolicyRef } from '../../rental-flow-config/rental-execution-policy.util'
+import type { RentalPackageSnapshot } from '../../properties/utils/rental-package.util'
+import type { RentalExecutionPolicyRef } from '../../rental-flow-config/utils/rental-execution-policy.util'
 
 export type DepositAgreementStatus =
   | 'draft'

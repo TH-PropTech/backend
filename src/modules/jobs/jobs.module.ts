@@ -1,0 +1,58 @@
+import { Module } from '@nestjs/common'
+import { TypeOrmModule } from '@nestjs/typeorm'
+import { PropertiesModule } from '../properties/properties.module'
+import { MoveInSettlementsModule } from '../move-in-settlements/move-in-settlements.module'
+import { RentalModule } from '../rental/rental.module'
+import { BaseJob } from './base-job'
+import { JobsController } from './controllers/jobs.controller'
+import {
+  ApartmentExpireOverdueListingsJob,
+  ApartmentRemindExpiringListingsJob,
+} from './jobs/apartment-expiration.job'
+import { MoveInSettlementOverdueJob } from './jobs/move-in-settlement.job'
+import {
+  RentalOpsApplyDueAmendmentsJob,
+  RentalOpsExpireAttemptsJob,
+  RentalOpsExpireDepositAgreementsJob,
+  RentalOpsMarkSettlementsOverdueJob,
+  RentalOpsProcessPaymentRemindersJob,
+} from './jobs/rental-ops.job'
+import { JobConfig } from './schemas/job-config.schema'
+import { JobRunHistory } from './schemas/job-run-history.schema'
+import { JOBS, JobManagerService } from './services/job-manager.service'
+
+const JOB_CLASSES = [
+  ApartmentExpireOverdueListingsJob,
+  ApartmentRemindExpiringListingsJob,
+  MoveInSettlementOverdueJob,
+  RentalOpsExpireAttemptsJob,
+  RentalOpsExpireDepositAgreementsJob,
+  RentalOpsProcessPaymentRemindersJob,
+  RentalOpsMarkSettlementsOverdueJob,
+  RentalOpsApplyDueAmendmentsJob,
+]
+
+/**
+ * Vận hành: gom mọi tác vụ theo lịch. Chỉ import một chiều các module domain
+ * để lấy service; không module domain nào import JobsModule.
+ */
+@Module({
+  imports: [
+    TypeOrmModule.forFeature([JobConfig, JobRunHistory]),
+    PropertiesModule,
+    MoveInSettlementsModule,
+    RentalModule,
+  ],
+  controllers: [JobsController],
+  providers: [
+    ...JOB_CLASSES,
+    {
+      provide: JOBS,
+      useFactory: (...jobs: BaseJob[]): BaseJob[] => jobs,
+      inject: JOB_CLASSES,
+    },
+    JobManagerService,
+  ],
+  exports: [JobManagerService],
+})
+export class JobsModule {}

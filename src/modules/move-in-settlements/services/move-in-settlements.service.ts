@@ -1,0 +1,621 @@
+import {
+  ConflictException,
+  Injectable,
+  Logger,
+  NotFoundException,
+  Optional,
+} from '@nestjs/common'
+import { InjectRepository } from '@nestjs/typeorm'
+import { createHash } from 'node:crypto'
+import { ObjectId } from 'mongodb'
+import { Repository } from 'typeorm'
+import { Contract } from '../../contracts/schemas/contract.schema'
+import { Payment } from '../../payments/schemas/payment.schema'
+import { NotificationsService } from '../../notifications/services/notifications.service'
+import { RentalTransactionEventService } from '../../rental/services/rental-transaction-event.service'
+import type { RentalTransactionActorRole } from '../../rental/schemas/rental-transaction-event.schema'
+import {
+  MoveInSettlement,
+  type LedgerEvidenceRef,
+  type SettlementLine,
+} from '../schemas/move-in-settlement.schema'
+import { LedgerOutboxService } from '../../fabric/services/ledger-outbox.service'
+import type { LedgerOutbox } from '../../fabric/schemas/ledger-outbox.schema'
+import {
+  MOVE_IN_SETTLEMENT_EVIDENCE_SCHEMA_VERSION,
+  buildMoveInSettlementEvidenceEnvelope,
+  hashMoveInSettlementEvidenceEnvelope,
+} from '../../fabric/utils/move-in-evidence-envelope'
+import {
+  MOVE_IN_HANDOVER_EVIDENCE_SCHEMA_VERSION,
+  buildMoveInHandoverEvidenceEnvelope,
+  hashMoveInHandoverEvidenceEnvelope,
+} from '../../fabric/utils/move-in-handover-evidence-envelope'
+import {
+  buildHandoverArgs,
+  buildMoveInSettlementArgs,
+} from '../../fabric/utils/ledger-action-args'
+
+@Injectable()
+export class MoveInSettlementsService {
+  private readonly logger = new Logger(MoveInSettlementsService.name)
+
+  constructor(
+    @InjectRepository(MoveInSettlement)
+    private readonly settlementRepo: Repository<MoveInSettlement>,
+    @InjectRepository(Contract)
+    private readonly contractRepo: Repository<Contract>,
+    @InjectRepository(Payment)
+    private readonly paymentRepo: Repository<Payment>,
+    private readonly notifications: NotificationsService,
+    @Optional()
+    private readonly transactionEventService?: RentalTransactionEventService,
+    @Optional()
+    private readonly ledgerOutboxService?: LedgerOutboxService
+  ) {}
+
+  /**
+   * PROP-399 D3 (MOVE_IN_SETTLED): gọi đúng một lần khi settlement vừa chuyển sang `paid`
+   * và đã được lưu. Lưu `settlementEvidence` rồi mới enqueue; mọi lỗi chỉ được log —
+   * giao dịch nghiệp vụ không bao giờ thất bại vì sổ cái (reconciliation sẽ phát hiện).
+   */
+  async recordSettlementPaidEvidence(
+    settlement: MoveInSettlement
+  ): Promise<void> {
+    if (
+      !this.ledgerOutboxService ||
+      settlement.status !== 'paid' ||
+      settlement.settlementEvidence
+    ) {
+      return
+    }
+    const settlementId = settlement._id.toHexString()
+    try {
+      const { manifestHash, paidAt } = this.buildSettlementEvidence(settlement)
+      settlement.settlementEvidence = this.pendingEvidence(
+        MOVE_IN_SETTLEMENT_EVIDENCE_SCHEMA_VERSION,
+        manifestHash
+      )
+      await this.settlementRepo.save(settlement)
+      await this.enqueueSettlementEvidence(settlement, manifestHash, paidAt)
+    } catch (error) {
+      this.logLedgerEvidenceFailure('settlement', settlementId, error)
+    }
+  }
+
+  /**
+   * PROP-399 D7 (repair): tạo lại đúng một outbox item MOVE_IN_SETTLED từ trạng thái nghiệp vụ còn
+   * hợp lệ. Idempotent theo khoá outbox; trả null khi điều kiện nghiệp vụ không còn (không paid).
+   */
+  async ensureSettlementEvidenceQueued(
+    settlementId: string
+  ): Promise<LedgerOutbox | null> {
+    if (!this.ledgerOutboxService) return null
+    const settlement = await this.findOrNull(settlementId)
+    if (!settlement || settlement.status !== 'paid') return null
+    const { manifestHash, paidAt } = this.buildSettlementEvidence(settlement)
+    if (!settlement.settlementEvidence) {
+      settlement.settlementEvidence = this.pendingEvidence(
+        MOVE_IN_SETTLEMENT_EVIDENCE_SCHEMA_VERSION,
+        manifestHash
+      )
+      await this.settlementRepo.save(settlement)
+    } else if (settlement.settlementEvidence.manifestHash !== manifestHash) {
+      throw new ConflictException('SETTLEMENT_EVIDENCE_HASH_CONFLICT')
+    }
+    return this.enqueueSettlementEvidence(settlement, manifestHash, paidAt)
+  }
+
+  private buildSettlementEvidence(settlement: MoveInSettlement): {
+    manifestHash: string
+    paidAt: string
+  } {
+    const paidTimes = settlement.lines
+      .map(line => (line.paidAt ? new Date(line.paidAt).getTime() : NaN))
+      .filter(time => !Number.isNaN(time))
+    const paidAt = new Date(
+      paidTimes.length > 0 ? Math.max(...paidTimes) : Date.now()
+    ).toISOString()
+    const envelope = buildMoveInSettlementEvidenceEnvelope({
+      settlementId: settlement._id.toHexString(),
+      contractId: settlement.contractId,
+      statementHash: settlement.statementHash,
+      lines: settlement.lines.map(line => ({
+        kind: line.kind,
+        amount: line.amount,
+        paymentId: line.paymentId,
+      })),
+      total: settlement.total,
+      paidAt,
+    })
+    return {
+      manifestHash: hashMoveInSettlementEvidenceEnvelope(envelope),
+      paidAt,
+    }
+  }
+
+  private enqueueSettlementEvidence(
+    settlement: MoveInSettlement,
+    manifestHash: string,
+    paidAt: string
+  ): Promise<LedgerOutbox> {
+    const settlementId = settlement._id.toHexString()
+    return this.ledgerOutboxService!.enqueue({
+      aggregateType: 'move-in-settlement',
+      aggregateId: settlementId,
+      eventType: 'move-in.settled',
+      action: 'recordMoveInSettlement',
+      args: buildMoveInSettlementArgs({
+        settlementId,
+        contractId: settlement.contractId,
+        manifestHash,
+        manifestSchemaVersion: MOVE_IN_SETTLEMENT_EVIDENCE_SCHEMA_VERSION,
+        occurredAt: paidAt,
+      }),
+      dependencyKeys: [`contract:${settlement.contractId}:contract.activated`],
+      metadata: {
+        contractId: settlement.contractId,
+        settlementId,
+        schemaVersion: MOVE_IN_SETTLEMENT_EVIDENCE_SCHEMA_VERSION,
+        payloadHash: manifestHash,
+      },
+    })
+  }
+
+  /** PROP-399 D3 (HANDOVER_RECORDED): tương tự — chỉ gọi khi `completedAt` vừa được đặt và lưu. */
+  private async recordHandoverCompletedEvidence(
+    settlement: MoveInSettlement
+  ): Promise<void> {
+    const handover = settlement.handover
+    if (
+      !this.ledgerOutboxService ||
+      !handover?.completedAt ||
+      settlement.handoverEvidence
+    ) {
+      return
+    }
+    const settlementId = settlement._id.toHexString()
+    try {
+      const { manifestHash, completedAt, overrideUsed } =
+        this.buildHandoverEvidence(settlement)
+      settlement.handoverEvidence = this.pendingEvidence(
+        MOVE_IN_HANDOVER_EVIDENCE_SCHEMA_VERSION,
+        manifestHash
+      )
+      await this.settlementRepo.save(settlement)
+      await this.enqueueHandoverEvidence(
+        settlement,
+        manifestHash,
+        completedAt,
+        overrideUsed
+      )
+    } catch (error) {
+      this.logLedgerEvidenceFailure('handover', settlementId, error)
+    }
+  }
+
+  /** PROP-399 D7 (repair): như ensureSettlementEvidenceQueued nhưng cho bàn giao đã hoàn tất. */
+  async ensureHandoverEvidenceQueued(
+    settlementId: string
+  ): Promise<LedgerOutbox | null> {
+    if (!this.ledgerOutboxService) return null
+    const settlement = await this.findOrNull(settlementId)
+    if (!settlement?.handover?.completedAt) return null
+    const { manifestHash, completedAt, overrideUsed } =
+      this.buildHandoverEvidence(settlement)
+    if (!settlement.handoverEvidence) {
+      settlement.handoverEvidence = this.pendingEvidence(
+        MOVE_IN_HANDOVER_EVIDENCE_SCHEMA_VERSION,
+        manifestHash
+      )
+      await this.settlementRepo.save(settlement)
+    } else if (settlement.handoverEvidence.manifestHash !== manifestHash) {
+      throw new ConflictException('HANDOVER_EVIDENCE_HASH_CONFLICT')
+    }
+    return this.enqueueHandoverEvidence(
+      settlement,
+      manifestHash,
+      completedAt,
+      overrideUsed
+    )
+  }
+
+  private buildHandoverEvidence(settlement: MoveInSettlement): {
+    manifestHash: string
+    completedAt: string
+    overrideUsed: boolean
+  } {
+    const handover = settlement.handover!
+    const completedAt = new Date(handover.completedAt!).toISOString()
+    const overrideUsed = Boolean(handover.overrideReason?.trim())
+    const envelope = buildMoveInHandoverEvidenceEnvelope({
+      settlementId: settlement._id.toHexString(),
+      contractId: settlement.contractId,
+      revision: handover.revision,
+      handoverHash: handover.handoverHash,
+      tenantConfirmationHash: handover.tenantConfirmation?.hash ?? '',
+      landlordConfirmationHash: handover.landlordConfirmation?.hash ?? '',
+      completedAt,
+      overrideUsed,
+    })
+    return {
+      manifestHash: hashMoveInHandoverEvidenceEnvelope(envelope),
+      completedAt,
+      overrideUsed,
+    }
+  }
+
+  private enqueueHandoverEvidence(
+    settlement: MoveInSettlement,
+    manifestHash: string,
+    completedAt: string,
+    overrideUsed: boolean
+  ): Promise<LedgerOutbox> {
+    const settlementId = settlement._id.toHexString()
+    const handover = settlement.handover!
+    return this.ledgerOutboxService!.enqueue({
+      aggregateType: 'move-in-handover',
+      aggregateId: settlementId,
+      eventType: 'handover.completed',
+      action: 'recordHandover',
+      args: buildHandoverArgs({
+        settlementId,
+        contractId: settlement.contractId,
+        handoverHash: handover.handoverHash,
+        manifestSchemaVersion: MOVE_IN_HANDOVER_EVIDENCE_SCHEMA_VERSION,
+        revision: handover.revision,
+        overrideUsed,
+        occurredAt: completedAt,
+      }),
+      dependencyKeys: [`contract:${settlement.contractId}:contract.activated`],
+      metadata: {
+        contractId: settlement.contractId,
+        settlementId,
+        handoverRevision: handover.revision,
+        schemaVersion: MOVE_IN_HANDOVER_EVIDENCE_SCHEMA_VERSION,
+        payloadHash: manifestHash,
+      },
+    })
+  }
+
+  private async findOrNull(id: string): Promise<MoveInSettlement | null> {
+    if (!ObjectId.isValid(id)) return null
+    return this.settlementRepo.findOne({ where: { _id: new ObjectId(id) } })
+  }
+
+  private pendingEvidence(
+    manifestVersion: number,
+    manifestHash: string
+  ): LedgerEvidenceRef {
+    return {
+      manifestVersion,
+      manifestHash,
+      ledgerStatus: 'pending',
+      txHash: null,
+      blockNumber: null,
+      recordedAt: new Date(),
+    }
+  }
+
+  private logLedgerEvidenceFailure(
+    kind: 'settlement' | 'handover',
+    settlementId: string,
+    error: unknown
+  ): void {
+    const message = error instanceof Error ? error.message : String(error)
+    this.logger.warn(
+      `Ledger evidence for ${kind} [${settlementId}] was not queued; business state is unaffected and reconciliation will recover it: ${message}`
+    )
+  }
+
+  private async recordTransactionEvent(input: {
+    contractId: string
+    eventType: string
+    actorRole: RentalTransactionActorRole
+    actorId?: string | null
+    refs?: Record<string, string>
+    transitionKey: string
+  }): Promise<void> {
+    if (!this.transactionEventService) return
+    try {
+      await this.transactionEventService.record({
+        transactionKey: input.contractId,
+        contractId: input.contractId,
+        eventType: input.eventType,
+        actorRole: input.actorRole,
+        actorId: input.actorId ?? null,
+        refs: { contractId: input.contractId, ...(input.refs ?? {}) },
+        transitionKey: input.transitionKey,
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      this.logger.warn(
+        `Rental transaction audit failed for settlement event [${input.eventType}] on contract [${input.contractId}]: ${message}`
+      )
+    }
+  }
+
+  async createForContract(
+    contract: Contract,
+    activatedAt = new Date()
+  ): Promise<MoveInSettlement | null> {
+    const contractId = contract._id.toHexString()
+    const existing = await this.settlementRepo.findOne({
+      where: { contractId },
+    })
+    if (existing) return existing
+    const policy = contract.packageSnapshot?.settlementPolicy
+    const tenantFee = contract.feeSnapshot?.quote?.find(
+      line => line.payerRole === 'tenant'
+    )
+    if (!policy && !tenantFee) return null
+    const payments = await this.paymentRepo.find({
+      where: { contractId, type: 'rent' },
+    })
+    const firstRent = payments.sort((a, b) =>
+      (a.periodKey ?? '').localeCompare(b.periodKey ?? '')
+    )[0]
+    const dueAt = new Date(contract.startDate)
+    dueAt.setDate(dueAt.getDate() - (policy?.firstPaymentDueOffsetDays ?? 3))
+    const minimumDue = new Date(activatedAt)
+    minimumDue.setDate(minimumDue.getDate() + 1)
+    if (dueAt < minimumDue) dueAt.setTime(minimumDue.getTime())
+    const lines: SettlementLine[] = []
+    const holding =
+      contract.packageSnapshot?.resolvedHoldingDepositAmount ?? contract.deposit
+    const topUp = Math.max(0, contract.deposit - holding)
+    if (topUp > 0) {
+      const topUpPayment = await this.createSettlementPayment({
+        contract,
+        contractId,
+        amount: topUp,
+        dueAt,
+        type: 'deposit-topup',
+        periodKey: 'SETTLEMENT:DEPOSIT_TOPUP',
+        description: 'Move-in security deposit top-up',
+      })
+      lines.push({
+        kind: 'DEPOSIT_TOPUP',
+        amount: topUp,
+        paymentId: topUpPayment._id.toHexString(),
+      })
+    }
+    if (firstRent)
+      lines.push({
+        kind: 'FIRST_RENT',
+        amount: firstRent.amount,
+        paymentId: firstRent._id.toHexString(),
+      })
+    if (tenantFee && tenantFee.amount > 0) {
+      const existingFeeInvoice = await this.paymentRepo.findOne({
+        where: { contractId, type: 'platform-fee', feeKind: 'TENANT_SERVICE' },
+      })
+      const feeInvoice =
+        existingFeeInvoice ??
+        (await this.createSettlementPayment({
+          contract,
+          contractId,
+          amount: tenantFee.amount,
+          dueAt,
+          type: 'platform-fee',
+          periodKey: 'SETTLEMENT:TENANT_SERVICE',
+          description: 'Tenant move-in service fee',
+          feeKind: 'TENANT_SERVICE',
+          payeeRole: 'platform',
+        }))
+      lines.push({
+        kind: 'TENANT_SERVICE_FEE',
+        amount: tenantFee.amount,
+        paymentId: feeInvoice._id.toHexString(),
+      })
+    }
+    if (!lines.length) return null
+    const total = lines.reduce((sum, line) => sum + line.amount, 0)
+    const canonical = JSON.stringify({
+      contractId,
+      lines,
+      total,
+      dueAt: dueAt.toISOString(),
+    })
+    const settlement = this.settlementRepo.create({
+      contractId,
+      tenantId: contract.tenantId,
+      landlordId: contract.landlordId,
+      lines,
+      total,
+      dueAt,
+      status: 'pending',
+      statementHash: createHash('sha256').update(canonical).digest('hex'),
+      handover: null,
+    })
+    const saved = await this.settlementRepo.save(settlement)
+    contract.settlementId = saved._id.toHexString()
+    await this.contractRepo.save(contract)
+    await this.recordTransactionEvent({
+      contractId,
+      eventType: 'settlement.created',
+      actorRole: 'system',
+      refs: { settlementId: saved._id.toHexString() },
+      transitionKey: `settlement:${saved._id.toHexString()}:created`,
+    })
+    return saved
+  }
+
+  async updateHandover(
+    id: string,
+    actorId: string,
+    input: {
+      handedOverAt: string
+      electricity: number
+      water: number
+      keyCount: number
+      inventoryReference?: string
+      notes?: string
+      overrideReason?: string
+      isStaff?: boolean
+    }
+  ): Promise<MoveInSettlement> {
+    const settlement = await this.find(id)
+    if (actorId !== settlement.landlordId && !input.isStaff)
+      throw new ConflictException('HANDOVER_ACCESS_DENIED')
+    if (settlement.handover?.completedAt)
+      throw new ConflictException('HANDOVER_COMPLETED_IMMUTABLE')
+    if (
+      settlement.status !== 'paid' &&
+      !(input.isStaff && input.overrideReason?.trim())
+    )
+      throw new ConflictException('HANDOVER_REQUIRES_SETTLEMENT')
+    const revision = (settlement.handover?.revision ?? 0) + 1
+    const body = {
+      revision,
+      handedOverAt: new Date(input.handedOverAt).toISOString(),
+      electricity: input.electricity,
+      water: input.water,
+      keyCount: input.keyCount,
+      inventoryReference: input.inventoryReference ?? null,
+      notes: input.notes ?? null,
+    }
+    const handoverHash = createHash('sha256')
+      .update(JSON.stringify(body))
+      .digest('hex')
+    settlement.handover = {
+      revision,
+      handedOverAt: new Date(input.handedOverAt),
+      meterReadings: { electricity: input.electricity, water: input.water },
+      keyCount: input.keyCount,
+      inventoryReference: input.inventoryReference ?? null,
+      notes: input.notes ?? null,
+      handoverHash,
+      recordedBy: actorId,
+      tenantConfirmation: null,
+      landlordConfirmation: null,
+      discrepancyNote: null,
+      overrideReason: input.overrideReason ?? null,
+      completedAt: null,
+    }
+    const saved = await this.settlementRepo.save(settlement)
+    await this.recordTransactionEvent({
+      contractId: saved.contractId,
+      eventType: 'settlement.handover-recorded',
+      actorRole: input.isStaff ? 'staff' : 'landlord',
+      actorId,
+      refs: { settlementId: saved._id.toHexString() },
+      transitionKey: `settlement:${saved._id.toHexString()}:handover-recorded:${revision}`,
+    })
+    return saved
+  }
+
+  async confirmHandover(
+    id: string,
+    actorId: string,
+    role: 'tenant' | 'landlord',
+    handoverHash: string,
+    discrepancyNote?: string
+  ): Promise<MoveInSettlement> {
+    const settlement = await this.find(id)
+    const handover = settlement.handover
+    if (!handover) throw new ConflictException('HANDOVER_NOT_RECORDED')
+    if (handover.completedAt) return settlement
+    if (handover.handoverHash !== handoverHash)
+      throw new ConflictException('HANDOVER_REVISION_STALE')
+    if (
+      (role === 'tenant' && settlement.tenantId !== actorId) ||
+      (role === 'landlord' && settlement.landlordId !== actorId)
+    )
+      throw new ConflictException('HANDOVER_ACCESS_DENIED')
+    if (role === 'tenant')
+      handover.tenantConfirmation = { at: new Date(), hash: handoverHash }
+    else handover.landlordConfirmation = { at: new Date(), hash: handoverHash }
+    if (discrepancyNote) handover.discrepancyNote = discrepancyNote
+    const justCompleted =
+      !handover.completedAt &&
+      handover.tenantConfirmation?.hash === handoverHash &&
+      handover.landlordConfirmation?.hash === handoverHash
+    if (justCompleted) {
+      handover.completedAt = new Date()
+    }
+    const saved = await this.settlementRepo.save(settlement)
+    if (justCompleted) {
+      await this.recordTransactionEvent({
+        contractId: saved.contractId,
+        eventType: 'settlement.handover-completed',
+        actorRole: role,
+        actorId,
+        refs: { settlementId: saved._id.toHexString() },
+        transitionKey: `settlement:${saved._id.toHexString()}:handover-completed`,
+      })
+      await this.recordHandoverCompletedEvidence(saved)
+    }
+    return saved
+  }
+
+  async processOverdue(now = new Date()): Promise<number> {
+    const rows = await this.settlementRepo.find({
+      where: { status: 'pending' },
+    })
+    let count = 0
+    for (const row of rows) {
+      if (row.dueAt >= now || row.overdueNotifiedAt) continue
+      row.status = 'overdue'
+      row.overdueNotifiedAt = now
+      await this.settlementRepo.save(row)
+      await Promise.all(
+        [row.tenantId, row.landlordId].map(id =>
+          this.notifications.createNotification(
+            id,
+            'Move-in settlement overdue',
+            `Settlement ${row.contractId} is overdue.`,
+            'PAYMENT_REMINDER',
+            { contractId: row.contractId }
+          )
+        )
+      )
+      count += 1
+    }
+    return count
+  }
+
+  private async createSettlementPayment(input: {
+    contract: Contract
+    contractId: string
+    amount: number
+    dueAt: Date
+    type: 'deposit-topup' | 'platform-fee'
+    periodKey: string
+    description: string
+    feeKind?: 'TENANT_SERVICE'
+    payeeRole?: 'landlord' | 'platform'
+  }): Promise<Payment> {
+    const payment = this.paymentRepo.create({
+      contractId: input.contractId,
+      tenantId: input.contract.tenantId,
+      landlordId: input.contract.landlordId,
+      payerId: input.contract.tenantId,
+      payerRole: 'tenant',
+      payeeRole: input.payeeRole ?? 'landlord',
+      amount: input.amount,
+      amountBeforeVat: input.amount,
+      vatAmount: 0,
+      description: input.description,
+      dueDate: input.dueAt,
+      paidAt: null,
+      status: 'unpaid',
+      txHash: null,
+      type: input.type,
+      feeKind: input.feeKind ?? null,
+      periodKey: input.periodKey,
+      ledgerStatus: 'not-required',
+    })
+    return this.paymentRepo.save(payment)
+  }
+
+  private async find(id: string): Promise<MoveInSettlement> {
+    if (!ObjectId.isValid(id))
+      throw new NotFoundException('MOVE_IN_SETTLEMENT_NOT_FOUND')
+    const row = await this.settlementRepo.findOne({
+      where: { _id: new ObjectId(id) },
+    })
+    if (!row) throw new NotFoundException('MOVE_IN_SETTLEMENT_NOT_FOUND')
+    return row
+  }
+}

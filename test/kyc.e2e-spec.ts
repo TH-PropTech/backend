@@ -9,10 +9,10 @@ import type { ApiResponse } from '../src/common/interfaces/api-response.interfac
 import { ResponseEnvelopeInterceptor } from '../src/common/interceptors/response-envelope.interceptor'
 import { RolesGuard } from '../src/common/guards/roles.guard'
 import { JwtAuthGuard } from '../src/modules/auth/guards/jwt-auth.guard'
-import { BiometricGrantService } from '../src/modules/kyc/biometric-grant.service'
-import { EkycProxyService } from '../src/modules/kyc/ekyc-proxy.service'
-import { KycController } from '../src/modules/kyc/kyc.controller'
-import { KycService } from '../src/modules/kyc/kyc.service'
+import { BiometricGrantService } from '../src/modules/ekyc/services/biometric-grant.service'
+import { EkycProxyService } from '../src/modules/ekyc/services/ekyc-proxy.service'
+import { KycController } from '../src/modules/users/controllers/kyc.controller'
+import { KycService } from '../src/modules/users/services/kyc.service'
 
 type AuthenticatedRequest = ExpressRequest & {
   user?: { _id: string; roles: string[] }

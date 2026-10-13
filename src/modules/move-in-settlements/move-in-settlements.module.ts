@@ -5,9 +5,8 @@ import { FabricModule } from '../fabric/fabric.module'
 import { Contract } from '../contracts/schemas/contract.schema'
 import { Payment } from '../payments/schemas/payment.schema'
 import { MoveInSettlement } from './schemas/move-in-settlement.schema'
-import { MoveInSettlementsController } from './move-in-settlements.controller'
-import { MoveInSettlementsService } from './move-in-settlements.service'
-import { MoveInSettlementScheduler } from './move-in-settlement.scheduler'
+import { MoveInSettlementsController } from './controllers/move-in-settlements.controller'
+import { MoveInSettlementsService } from './services/move-in-settlements.service'
 
 @Module({
   imports: [
@@ -16,7 +15,7 @@ import { MoveInSettlementScheduler } from './move-in-settlement.scheduler'
     FabricModule,
   ],
   controllers: [MoveInSettlementsController],
-  providers: [MoveInSettlementsService, MoveInSettlementScheduler],
+  providers: [MoveInSettlementsService],
   exports: [MoveInSettlementsService],
 })
 export class MoveInSettlementsModule {}

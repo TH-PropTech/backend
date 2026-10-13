@@ -15,9 +15,9 @@ import { NestFactory } from '@nestjs/core'
 import { ObjectId } from 'mongodb'
 import { DataSource } from 'typeorm'
 import { AppModule } from '../app.module'
-import { Apartment } from '../modules/apartments/schemas/apartment.schema'
+import { Apartment } from '../modules/properties/schemas/apartment.schema'
 import { Contract } from '../modules/contracts/schemas/contract.schema'
-import { RentalApplication } from '../modules/rental-applications/schemas/rental-application.schema'
+import { RentalApplication } from '../modules/rental/schemas/rental-application.schema'
 
 /**
  * Trả căn hộ về "Đang trống" bằng cách gỡ `rentalReservation` còn sót lại sau khi

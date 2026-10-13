@@ -4,7 +4,7 @@ import PDFDocument from 'pdfkit'
 import type { Contract } from '../schemas/contract.schema'
 import { ContractDocumentProjector } from '../legal/contract-document.projector'
 import { buildReviewedLeaseTemplateSeed } from '../legal/lease-template.seed'
-import { renderContractPdf } from '../contract-pdf.renderer'
+import { renderContractPdf } from '../utils/contract-pdf.renderer'
 import { embedPadesSignature, preparePadesSigning } from './pades.util'
 import {
   buildSignableBase,

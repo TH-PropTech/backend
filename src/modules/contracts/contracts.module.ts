@@ -1,29 +1,25 @@
 import { Module } from '@nestjs/common'
 import { User } from '../users/schemas/user.schema'
-import { ConfigService } from '@nestjs/config'
 import { TypeOrmModule } from '@nestjs/typeorm'
 import { Contract } from './schemas/contract.schema'
 import { SigningGrant } from './schemas/signing-grant.schema'
 import { DepositAgreement } from './schemas/deposit-agreement.schema'
-import { Apartment } from '../apartments/schemas/apartment.schema'
-import { PoliciesModule } from '../policies/policies.module'
+import { Apartment } from '../properties/schemas/apartment.schema'
+import { LegalModule } from '../legal/legal.module'
 import { FabricModule } from '../fabric/fabric.module'
-import { KycModule } from '../kyc/kyc.module'
-import { ContractsService } from './contracts.service'
-import { ContractsController } from './contracts.controller'
-import { DepositAgreementsController } from './deposit-agreements.controller'
-import { DepositAgreementsService } from './deposit-agreements.service'
+import { UsersModule } from '../users/users.module'
+import { EkycModule } from '../ekyc/ekyc.module'
+import { ContractsService } from './services/contracts.service'
+import { ContractsController } from './controllers/contracts.controller'
+import { DepositAgreementsController } from './controllers/deposit-agreements.controller'
+import { DepositAgreementsService } from './services/deposit-agreements.service'
 import { PaymentsModule } from '../payments/payments.module'
-import { ContractArtifactService } from './contract-artifact.service'
+import { ContractArtifactService } from './services/contract-artifact.service'
 import { ContractDocumentProjector } from './legal/contract-document.projector'
-import { ContractViewService } from './contract-view.service'
-import { SmartOtpModule } from '../smart-otp/smart-otp.module'
-import { SmartCaSigningSession } from './smartca/smartca-signing-session.schema'
-import { SmartCaProvider } from './smartca/smartca.provider'
-import { MockSmartCaProvider } from './smartca/mock-smartca.provider'
-import { SmartCaSigningService } from './smartca/smartca-signing.service'
-import { SmartCaEventsGateway } from './smartca/smartca-events.gateway'
-import { SMARTCA_EVENTS_PUBLISHER } from './smartca/smartca-events.publisher'
+import { ContractViewService } from './services/contract-view.service'
+import { AuthModule } from '../auth/auth.module'
+import { SmartCaSigningService } from './services/smartca-signing.service'
+import { DigitalSignatureModule } from '../digital-signature/digital-signature.module'
 import { ContractTemplate } from './legal/contract-template.schema'
 import { ContractTemplateAudit } from './legal/contract-template-audit.schema'
 import { ContractTemplateGovernanceService } from './legal/contract-template-governance.service'
@@ -34,13 +30,13 @@ import { Payment } from '../payments/schemas/payment.schema'
 import {
   CONTRACT_ARTIFACT_STORAGE,
   MongoGridFsArtifactStorage,
-} from './contract-artifact.storage'
+} from './services/contract-artifact.storage'
 import { PropertyOwnershipTransferModule } from '../property-ownership-transfer/property-ownership-transfer.module'
-import { ContractCommercialEditorService } from './contract-commercial-editor.service'
-import { ContractCommercialEditorController } from './contract-commercial-editor.controller'
-import { ContractAmendmentService } from './contract-amendment.service'
-import { ContractAmendmentController } from './contract-amendment.controller'
-import { DepositConfirmationResolver } from './deposit-confirmation.resolver'
+import { ContractCommercialEditorService } from './services/contract-commercial-editor.service'
+import { ContractCommercialEditorController } from './controllers/contract-commercial-editor.controller'
+import { ContractAmendmentService } from './services/contract-amendment.service'
+import { ContractAmendmentController } from './controllers/contract-amendment.controller'
+import { DepositConfirmationResolver } from './services/deposit-confirmation.resolver'
 import { FlowNotificationService } from './flow/flow-notification.service'
 import { NotificationsModule } from '../notifications/notifications.module'
 import { MoveInSettlementsModule } from '../move-in-settlements/move-in-settlements.module'
@@ -51,8 +47,8 @@ import { ContractLayoutService } from './layout/contract-layout.service'
 import { ContractLayoutsController } from './layout/contract-layouts.controller'
 import { ContractSignedArtifact } from './signed-artifact/contract-signed-artifact.schema'
 import { SignedArtifactService } from './signed-artifact/signed-artifact.service'
-import { ContractEvidencePackageService } from './contract-evidence-package.service'
-import { ContractEvidencePackageExportService } from './contract-evidence-package.export.service'
+import { ContractEvidencePackageService } from './services/contract-evidence-package.service'
+import { ContractEvidencePackageExportService } from './services/contract-evidence-package.export.service'
 
 @Module({
   imports: [
@@ -61,7 +57,6 @@ import { ContractEvidencePackageExportService } from './contract-evidence-packag
       SigningGrant,
       DepositAgreement,
       Apartment,
-      SmartCaSigningSession,
       ContractSignedArtifact,
       ContractTemplate,
       ContractTemplateAudit,
@@ -73,11 +68,13 @@ import { ContractEvidencePackageExportService } from './contract-evidence-packag
       ContractLayoutAudit,
       User,
     ]),
-    PoliciesModule,
+    LegalModule,
+    DigitalSignatureModule,
     FabricModule,
-    KycModule,
+    UsersModule,
+    EkycModule,
     PaymentsModule,
-    SmartOtpModule,
+    AuthModule,
     PropertyOwnershipTransferModule,
     NotificationsModule,
     MoveInSettlementsModule,
@@ -96,25 +93,8 @@ import { ContractEvidencePackageExportService } from './contract-evidence-packag
     ContractArtifactService,
     ContractDocumentProjector,
     ContractViewService,
-    MockSmartCaProvider,
-    {
-      provide: SmartCaProvider,
-      inject: [ConfigService, MockSmartCaProvider],
-      useFactory: (
-        cfg: ConfigService,
-        mock: MockSmartCaProvider
-      ): SmartCaProvider | MockSmartCaProvider => {
-        const isMock = cfg.get<{ isMock?: boolean }>('smartCA')?.isMock
-        return isMock ? mock : new SmartCaProvider(cfg)
-      },
-    },
     SignedArtifactService,
     SmartCaSigningService,
-    SmartCaEventsGateway,
-    {
-      provide: SMARTCA_EVENTS_PUBLISHER,
-      useExisting: SmartCaEventsGateway,
-    },
     ContractTemplateGovernanceService,
     ContractCommercialEditorService,
     ContractAmendmentService,

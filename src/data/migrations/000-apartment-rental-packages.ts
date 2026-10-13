@@ -1,4 +1,4 @@
-import type { Apartment } from '../../modules/apartments/schemas/apartment.schema'
+import type { Apartment } from '../../modules/properties/schemas/apartment.schema'
 import type {
   MigrationOptions,
   MigrationReport,

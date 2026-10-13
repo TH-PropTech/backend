@@ -1,4 +1,4 @@
-import type { PlatformFeeScheduleRules } from '../modules/platform-fees/platform-fee.types'
+import type { PlatformFeeScheduleRules } from '../modules/platform-fees/utils/platform-fee.types'
 import type { PlatformFeeSchedule } from '../modules/platform-fees/schemas/platform-fee-schedule.schema'
 
 export const PLATFORM_FEE_DRAFT_SEED: PlatformFeeScheduleRules = {

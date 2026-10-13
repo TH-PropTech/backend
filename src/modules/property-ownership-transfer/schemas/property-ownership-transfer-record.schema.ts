@@ -6,7 +6,7 @@ import {
   ObjectId,
   ObjectIdColumn,
 } from 'typeorm'
-import type { OwnershipTransferManifestEntityType } from '../ownership-transfer.manifest'
+import type { OwnershipTransferManifestEntityType } from '../utils/ownership-transfer.manifest'
 
 export type OwnershipTransferRecordAction =
   | 'ownership-updated'

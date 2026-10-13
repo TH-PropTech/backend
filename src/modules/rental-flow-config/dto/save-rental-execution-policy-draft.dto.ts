@@ -10,7 +10,7 @@ import {
 import type {
   RentalExecutionPolicyDisclosure,
   RentalExecutionStrategy,
-} from '../rental-execution-policy.util'
+} from '../utils/rental-execution-policy.util'
 
 export class SaveRentalExecutionPolicyDraftDto {
   @IsString()

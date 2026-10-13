@@ -1,0 +1,18 @@
+import { Module } from '@nestjs/common'
+import { TypeOrmModule } from '@nestjs/typeorm'
+import { RbacController } from './controllers/rbac.controller'
+import { Permission } from './schemas/permission.schema'
+import { Role } from './schemas/role.schema'
+import { RbacService } from './services/rbac.service'
+
+/**
+ * Cắt ngang: role/permission lưu DB + API quản trị. `RolesGuard` (common/)
+ * vẫn đọc role từ JWT, không phụ thuộc module này.
+ */
+@Module({
+  imports: [TypeOrmModule.forFeature([Role, Permission])],
+  controllers: [RbacController],
+  providers: [RbacService],
+  exports: [RbacService],
+})
+export class RbacModule {}

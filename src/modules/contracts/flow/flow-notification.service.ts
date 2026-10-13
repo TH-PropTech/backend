@@ -1,8 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
-import { NotificationsService } from '../../notifications/notifications.service'
-import { ContractViewService } from '../contract-view.service'
+import { NotificationsService } from '../../notifications/services/notifications.service'
+import { ContractViewService } from '../services/contract-view.service'
 import type { ContractFlowStageDto } from '../dto/contract-view.dto'
 import { Contract } from '../schemas/contract.schema'
 

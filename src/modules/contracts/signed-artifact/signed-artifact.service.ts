@@ -10,11 +10,11 @@ import {
 import { InjectRepository } from '@nestjs/typeorm'
 import { ObjectId } from 'mongodb'
 import { Repository } from 'typeorm'
-import { ContractArtifactService } from '../contract-artifact.service'
+import { ContractArtifactService } from '../services/contract-artifact.service'
 import {
   CONTRACT_ARTIFACT_STORAGE,
   type ContractArtifactStorage,
-} from '../contract-artifact.storage'
+} from '../services/contract-artifact.storage'
 import { Contract } from '../schemas/contract.schema'
 import { ContractSignedArtifact } from './contract-signed-artifact.schema'
 import { buildSignableBase } from './signature-fields'
