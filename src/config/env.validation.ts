@@ -169,6 +169,8 @@ export const envValidationSchema = Joi.object({
   APP_PORT: Joi.number().port().default(3001),
   APP_URL: Joi.string().uri().default('http://localhost:3001'),
   APP_CORS_ORIGINS: Joi.string().default('http://localhost:3000'),
+  RATE_LIMIT_TTL_MS: Joi.number().integer().min(1000).default(60000),
+  RATE_LIMIT_MAX: Joi.number().integer().min(1).default(100),
   DATABASE_URL: Joi.string().uri().required(),
   DATABASE_LOGGING: Joi.boolean().default(false),
   DATABASE_SYNCHRONIZE: Joi.boolean().default(false),
