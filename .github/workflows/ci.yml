@@ -21,6 +21,7 @@ jobs:
       DATABASE_URL: mongodb://localhost:27017/th_proptech_test
       DATABASE_LOGGING: false
       DATABASE_SYNCHRONIZE: false
+      EKYC_SERVICE_URL: http://localhost:8000
     steps:
       - name: Checkout
         uses: actions/checkout@v4
