@@ -69,7 +69,15 @@ function matchesWhere(item: Record<string, unknown>, where: unknown): boolean {
         if (current instanceof ObjectId) return current.equals(value)
         return String(current) === value.toHexString()
       }
-      // TypeORM `FindOperator`s (only `IsNull()` is used anywhere this
+      // Mongo-style `{ $in: [...] }` (used by RentalTransactionsService).
+      if (
+        value &&
+        typeof value === 'object' &&
+        Array.isArray((value as { $in?: unknown }).$in)
+      ) {
+        return (value as { $in: unknown[] }).$in.includes(item[key])
+      }
+      // TypeORM `FindOperator`s (only `IsNull()` is used anywhere else this
       // fixture drives) - treat any other object-valued condition as
       // "field must currently be null/undefined".
       if (value && typeof value === 'object' && !(value instanceof Date)) {
