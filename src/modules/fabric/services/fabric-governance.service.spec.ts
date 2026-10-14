@@ -12,6 +12,7 @@ import {
 } from '../utils/governance-evidence-envelope'
 import { ContractTemplateGovernanceService } from '../../contracts/legal/contract-template-governance.service'
 import { ContractLayoutService } from '../../contracts/layout/contract-layout.service'
+import { PlatformFeesService } from '../../payments/services/platform-fees.service'
 import { POLICY_DEFINITIONS } from '../../legal/utils/policy-definitions'
 
 const H = (c: string): string => c.repeat(64)
@@ -156,6 +157,7 @@ function setup(
     get: jest.fn((token: unknown) => {
       if (token === ContractTemplateGovernanceService) return templateService
       if (token === ContractLayoutService) return layoutService
+      if (token === PlatformFeesService) return platformFees
       throw new Error('unexpected token')
     }),
   }
@@ -172,7 +174,6 @@ function setup(
     repository as never,
     legalTerms as never,
     policies as never,
-    platformFees as never,
     executionPolicies as never,
     outbox as never,
     fabric as never,
@@ -314,6 +315,26 @@ describe('FabricGovernanceService (PROP-399 tasks 4.1/4.2)', () => {
       await expect(m.service.publish(ADMIN)).rejects.toBeInstanceOf(
         UnprocessableEntityException
       )
+    })
+
+    it('throws a clear error (not a silent skip) when PlatformFeesService cannot be resolved via ModuleRef', async () => {
+      const m = setup()
+      m.moduleRef.get.mockImplementation(((token: unknown) => {
+        if (token === ContractTemplateGovernanceService)
+          return m.templateService
+        if (token === ContractLayoutService) return m.layoutService
+        if (token === PlatformFeesService) return undefined
+        throw new Error('unexpected token')
+      }) as never)
+
+      const error = await m.service.publish(ADMIN).catch((e: unknown) => e)
+
+      expect(error).toBeInstanceOf(UnprocessableEntityException)
+      expect(
+        (error as UnprocessableEntityException).getResponse()
+      ).toMatchObject({ code: 'GOVERNANCE_PLATFORM_FEES_UNAVAILABLE' })
+      expect(m.repository.save).not.toHaveBeenCalled()
+      expect(m.outbox.enqueue).not.toHaveBeenCalled()
     })
   })
 

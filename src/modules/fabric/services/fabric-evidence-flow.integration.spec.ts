@@ -1,6 +1,6 @@
 import { ObjectId } from 'mongodb'
 import { ContractsService } from '../../contracts/services/contracts.service'
-import { MoveInSettlementsService } from '../../move-in-settlements/services/move-in-settlements.service'
+import { MoveInSettlementsService } from '../../rental/services/move-in-settlements.service'
 import { FabricGovernanceService } from './fabric-governance.service'
 import { FabricService } from './fabric.service'
 import { LedgerEvidenceQueryService } from './ledger-evidence-query.service'
@@ -14,6 +14,7 @@ import {
 import { memoryRepository } from '../utils/fabric-memory-repository.fixtures'
 import { ContractTemplateGovernanceService } from '../../contracts/legal/contract-template-governance.service'
 import { ContractLayoutService } from '../../contracts/layout/contract-layout.service'
+import { PlatformFeesService } from '../../payments/services/platform-fees.service'
 
 /**
  * PROP-399 task 13.1: dòng bằng chứng end-to-end bằng service THẬT (governance, outbox, projection,
@@ -196,7 +197,6 @@ function buildWorld(
         },
       ]),
     } as never,
-    { getEffectiveSchedule: jest.fn().mockResolvedValue(null) } as never,
     {
       listActive: jest
         .fn()
@@ -218,7 +218,9 @@ function buildWorld(
             }
           : token === ContractLayoutService
             ? { listLatestPublished: jest.fn().mockResolvedValue([]) }
-            : undefined
+            : token === PlatformFeesService
+              ? { getEffectiveSchedule: jest.fn().mockResolvedValue(null) }
+              : undefined
       ),
     } as never
   )

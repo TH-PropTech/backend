@@ -10,8 +10,8 @@ import { ObjectId } from 'mongodb'
 import { Repository } from 'typeorm'
 import { LegalTermsService } from '../../legal/services/legal-terms.service'
 import { PoliciesService } from '../../legal/services/policies.service'
-import { PlatformFeesService } from '../../platform-fees/services/platform-fees.service'
-import { RentalExecutionPoliciesService } from '../../rental-flow-config/services/rental-execution-policies.service'
+import { PlatformFeesService } from '../../payments/services/platform-fees.service'
+import { RentalExecutionPoliciesService } from '../../rental/services/rental-execution-policies.service'
 import { ContractTemplateGovernanceService } from '../../contracts/legal/contract-template-governance.service'
 import { ContractLayoutService } from '../../contracts/layout/contract-layout.service'
 import { sha256Hex } from '../utils/canonical-json'
@@ -105,7 +105,6 @@ export class FabricGovernanceService {
     private readonly repository: Repository<FabricGovernanceSnapshot>,
     private readonly legalTermsService: LegalTermsService,
     private readonly policiesService: PoliciesService,
-    private readonly platformFeesService: PlatformFeesService,
     private readonly executionPoliciesService: RentalExecutionPoliciesService,
     private readonly ledgerOutboxService: LedgerOutboxService,
     private readonly fabricService: FabricService,
@@ -465,7 +464,23 @@ export class FabricGovernanceService {
     )
     if (executionPolicies.length === 0) missing.push('rentalExecutionPolicy')
 
-    const schedule = await this.platformFeesService.getEffectiveSchedule()
+    // platform-fees nằm trong PaymentsModule, không được fabric.module.ts
+    // import trực tiếp (né vòng) → tra cứu lazy qua ModuleRef. Khác với
+    // ContractTemplateGovernanceService/ContractLayoutService ở trên,
+    // provider này KHÔNG được coi là optional: publish governance mà thiếu
+    // phí sàn là lỗi cấu hình (wiring), phải ném lỗi rõ ràng, không âm thầm
+    // bỏ qua.
+    const platformFeesService = this.moduleRef.get(PlatformFeesService, {
+      strict: false,
+    })
+    if (!platformFeesService) {
+      throw new UnprocessableEntityException({
+        code: 'GOVERNANCE_PLATFORM_FEES_UNAVAILABLE',
+        message:
+          'PlatformFeesService không resolve được qua ModuleRef; không thể publish governance snapshot',
+      })
+    }
+    const schedule = await platformFeesService.getEffectiveSchedule()
     let feeSchedule: FabricGovernanceSnapshotComponents['feeSchedule'] = null
     if (schedule) {
       if (!schedule.contentHash) missing.push('feeSchedule')

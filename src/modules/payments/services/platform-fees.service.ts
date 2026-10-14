@@ -11,7 +11,7 @@ import { validateFeeRules } from '../utils/fee-rules.validator'
 import type { PlatformFeeScheduleRules } from '../utils/platform-fee.types'
 import { PlatformFeeAudit } from '../schemas/platform-fee-audit.schema'
 import { PlatformFeeSchedule } from '../schemas/platform-fee-schedule.schema'
-import { Payment } from '../../payments/schemas/payment.schema'
+import { Payment } from '../schemas/payment.schema'
 
 @Injectable()
 export class PlatformFeesService {

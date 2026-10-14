@@ -6,6 +6,7 @@ import {
   NotFoundException,
   Optional,
 } from '@nestjs/common'
+import { ModuleRef } from '@nestjs/core'
 import { InjectRepository } from '@nestjs/typeorm'
 import { ObjectId } from 'mongodb'
 import { createHash } from 'node:crypto'
@@ -16,7 +17,7 @@ import { NotificationsService } from '../../notifications/services/notifications
 import { generatePaymentSchedule } from '../utils/payment-schedule.util'
 import { reminderDateKey, vietnamDateKey } from '../utils/payment-reminder.util'
 import { Payment } from '../schemas/payment.schema'
-import { OwnershipTransferResolver } from '../../property-ownership-transfer/services/ownership-transfer.resolver'
+import { OwnershipTransferResolver } from '../../contracts/services/ownership-transfer.resolver'
 import { resolveEffectiveCommercial } from '../../contracts/commercial/resolve-effective-commercial'
 import { RentalTransactionEventService } from '../../rental/services/rental-transaction-event.service'
 import { PayoutsService } from '../../wallets/services/payouts.service'
@@ -33,11 +34,20 @@ export class PaymentsService {
     private readonly notificationsService?: NotificationsService,
     @Optional() private readonly ledgerOutboxService?: LedgerOutboxService,
     @Optional()
-    private readonly ownershipTransferResolver?: OwnershipTransferResolver,
-    @Optional()
     private readonly transactionEventService?: RentalTransactionEventService,
-    @Optional() private readonly payoutsService?: PayoutsService
+    @Optional() private readonly payoutsService?: PayoutsService,
+    // OwnershipTransferResolver nằm trong ContractsModule, không được
+    // payments.module.ts import trực tiếp (né vòng contracts <-> payments)
+    // → tra cứu lazy qua ModuleRef tại điểm gọi .canAccessPayment(...),
+    // giữ nguyên ngữ nghĩa optional cũ (không có thì dùng fallback check).
+    @Optional() private readonly moduleRef?: ModuleRef
   ) {}
+
+  private resolveOwnershipTransferResolver():
+    | OwnershipTransferResolver
+    | undefined {
+    return this.moduleRef?.get(OwnershipTransferResolver, { strict: false })
+  }
 
   private async recordTransactionEvent(input: {
     contractId: string
@@ -216,8 +226,9 @@ export class PaymentsService {
     isStaff: boolean
   ): Promise<Payment[]> {
     const contract = await this.findContract(contractId)
-    const canAccess = this.ownershipTransferResolver
-      ? await this.ownershipTransferResolver.canAccessPayment(
+    const ownershipTransferResolver = this.resolveOwnershipTransferResolver()
+    const canAccess = ownershipTransferResolver
+      ? await ownershipTransferResolver.canAccessPayment(
           actorId,
           {
             landlordId: contract.landlordId,

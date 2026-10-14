@@ -1,5 +1,5 @@
-import type { PlatformFeeScheduleRules } from '../modules/platform-fees/utils/platform-fee.types'
-import type { PlatformFeeSchedule } from '../modules/platform-fees/schemas/platform-fee-schedule.schema'
+import type { PlatformFeeScheduleRules } from '../modules/payments/utils/platform-fee.types'
+import type { PlatformFeeSchedule } from '../modules/payments/schemas/platform-fee-schedule.schema'
 
 export const PLATFORM_FEE_DRAFT_SEED: PlatformFeeScheduleRules = {
   landlordCommission: {
