@@ -11,7 +11,7 @@ import { FabricGovernanceSnapshot } from '../schemas/fabric-governance-snapshot.
 import {
   MoveInSettlement,
   type LedgerEvidenceRef,
-} from '../../move-in-settlements/schemas/move-in-settlement.schema'
+} from '../../rental/schemas/move-in-settlement.schema'
 
 export interface ProjectionResultInput {
   txHash: string

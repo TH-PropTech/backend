@@ -1,7 +1,7 @@
 import { Apartment } from '../schemas/apartment.schema'
 import { User } from '../../users/schemas/user.schema'
 import type { RentalPackageSnapshot } from '../utils/rental-package.util'
-import type { RentalExecutionPolicyRef } from '../../rental-flow-config/utils/rental-execution-policy.util'
+import type { RentalExecutionPolicyRef } from '../../rental/utils/rental-execution-policy.util'
 
 const VND_PER_MILLION = 1_000_000
 

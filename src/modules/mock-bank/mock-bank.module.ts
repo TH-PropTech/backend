@@ -17,8 +17,7 @@ import { ZalopayCallbackVerifier } from './providers/zalopay-callback.verifier'
 import { GatewayCallbackService } from './services/gateway-callback.service'
 import { FabricModule } from '../fabric/fabric.module'
 import { PaymentRequestsController } from './controllers/payment-requests.controller'
-import { MoveInSettlement } from '../move-in-settlements/schemas/move-in-settlement.schema'
-import { MoveInSettlementsModule } from '../move-in-settlements/move-in-settlements.module'
+import { MoveInSettlement } from '../rental/schemas/move-in-settlement.schema'
 import { WalletsModule } from '../wallets/wallets.module'
 import { Contract } from '../contracts/schemas/contract.schema'
 
@@ -27,7 +26,6 @@ import { Contract } from '../contracts/schemas/contract.schema'
     ConfigModule,
     ContractsModule,
     FabricModule,
-    MoveInSettlementsModule,
     WalletsModule,
     TypeOrmModule.forFeature([
       Payment,

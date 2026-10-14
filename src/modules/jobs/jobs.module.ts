@@ -1,7 +1,6 @@
 import { Module } from '@nestjs/common'
 import { TypeOrmModule } from '@nestjs/typeorm'
 import { PropertiesModule } from '../properties/properties.module'
-import { MoveInSettlementsModule } from '../move-in-settlements/move-in-settlements.module'
 import { RentalModule } from '../rental/rental.module'
 import { BaseJob } from './base-job'
 import { JobsController } from './controllers/jobs.controller'
@@ -40,7 +39,6 @@ const JOB_CLASSES = [
   imports: [
     TypeOrmModule.forFeature([JobConfig, JobRunHistory]),
     PropertiesModule,
-    MoveInSettlementsModule,
     RentalModule,
   ],
   controllers: [JobsController],

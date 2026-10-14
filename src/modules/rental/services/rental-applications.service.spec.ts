@@ -10,16 +10,16 @@ import { ObjectId } from 'mongodb'
 import type { Repository } from 'typeorm'
 import type { ApartmentsService } from '../../properties/services/apartments.service'
 import type { LegalTermsService } from '../../legal/services/legal-terms.service'
-import type { RentalFlowConfigResolver } from '../../rental-flow-config/services/rental-flow-config-resolver.service'
+import type { RentalFlowConfigResolver } from './rental-flow-config-resolver.service'
 import type { CreateRentalApplicationDto } from '../dto/create-rental-application.dto'
 import type { RentalApplication } from '../schemas/rental-application.schema'
 import { RentalApplicationsService } from './rental-applications.service'
-import type { OwnershipTransferResolver } from '../../property-ownership-transfer/services/ownership-transfer.resolver'
+import type { OwnershipTransferResolver } from '../../contracts/services/ownership-transfer.resolver'
 import {
   DEFAULT_RENTAL_EXECUTION_POLICY_INPUTS,
   computeRentalExecutionPolicyHash,
   getDefaultRentalExecutionPolicyRef,
-} from '../../rental-flow-config/utils/rental-execution-policy.util'
+} from '../utils/rental-execution-policy.util'
 import { RentalTransactionEventService } from './rental-transaction-event.service'
 import type { RentalTransactionEvent } from '../schemas/rental-transaction-event.schema'
 
@@ -206,6 +206,7 @@ describe('RentalApplicationsService', () => {
       ],
     }
     const platformFees = { quote: jest.fn().mockResolvedValue(feeSnapshot) }
+    const moduleRefStub = { get: jest.fn().mockReturnValue(platformFees) }
     const feeService = new RentalApplicationsService(
       repository as unknown as Repository<RentalApplication>,
       apartments as unknown as ApartmentsService,
@@ -218,7 +219,7 @@ describe('RentalApplicationsService', () => {
       undefined,
       undefined,
       undefined,
-      platformFees as never
+      moduleRefStub as never
     )
     apartments.findOne.mockResolvedValue(apartment)
     repository.findOne.mockResolvedValue(null)

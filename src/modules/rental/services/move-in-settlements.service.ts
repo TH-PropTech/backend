@@ -12,8 +12,8 @@ import { Repository } from 'typeorm'
 import { Contract } from '../../contracts/schemas/contract.schema'
 import { Payment } from '../../payments/schemas/payment.schema'
 import { NotificationsService } from '../../notifications/services/notifications.service'
-import { RentalTransactionEventService } from '../../rental/services/rental-transaction-event.service'
-import type { RentalTransactionActorRole } from '../../rental/schemas/rental-transaction-event.schema'
+import { RentalTransactionEventService } from '../services/rental-transaction-event.service'
+import type { RentalTransactionActorRole } from '../schemas/rental-transaction-event.schema'
 import {
   MoveInSettlement,
   type LedgerEvidenceRef,

@@ -5,19 +5,19 @@ import { RolesGuard } from '../../../common/guards/roles.guard'
 import { Roles } from '../../../common/decorators/roles.decorator'
 import { CurrentUser } from '../../../common/decorators/current-user.decorator'
 import type { UserPayload } from '../../auth/interfaces/auth.interface'
-import { RentalFlowAssignmentsService } from '../../rental-flow-config/services/rental-flow-assignments.service'
+import { RentalFlowAssignmentsService } from '../../rental/services/rental-flow-assignments.service'
 import {
   RentalFlowConfigResolver,
   type ResolvedFlowConfigResult,
-} from '../../rental-flow-config/services/rental-flow-config-resolver.service'
+} from '../../rental/services/rental-flow-config-resolver.service'
 import {
   ContractImpactAnalyzer,
   type ContractImpactReport,
-} from '../../rental-flow-config/services/contract-impact-analyzer.service'
-import { ActivateFlowAssignmentDto } from '../../rental-flow-config/dto/activate-flow-assignment.dto'
-import { PreviewFlowAssignmentDto } from '../../rental-flow-config/dto/preview-flow-assignment.dto'
-import type { RentalFlowAssignment } from '../../rental-flow-config/schemas/rental-flow-assignment.schema'
-import type { RentalFlowAudit } from '../../rental-flow-config/schemas/rental-flow-audit.schema'
+} from '../../rental/services/contract-impact-analyzer.service'
+import { ActivateFlowAssignmentDto } from '../../rental/dto/activate-flow-assignment.dto'
+import { PreviewFlowAssignmentDto } from '../../rental/dto/preview-flow-assignment.dto'
+import type { RentalFlowAssignment } from '../../rental/schemas/rental-flow-assignment.schema'
+import type { RentalFlowAudit } from '../../rental/schemas/rental-flow-audit.schema'
 
 @ApiTags('rental-flow-assignments')
 @ApiBearerAuth()

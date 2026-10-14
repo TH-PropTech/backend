@@ -26,7 +26,7 @@ export type SettlementPolicyInput = {
   firstPaymentDueOffsetDays: number
 }
 
-import type { RentalExecutionPolicyRef } from '../../rental-flow-config/utils/rental-execution-policy.util'
+import type { RentalExecutionPolicyRef } from '../../rental/utils/rental-execution-policy.util'
 
 export type RentalPackageInput = {
   packageId: string

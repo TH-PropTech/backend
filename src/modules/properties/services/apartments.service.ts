@@ -29,7 +29,7 @@ import { NotificationsService } from '../../notifications/services/notifications
 import { ProjectsService } from './projects.service'
 import { BuildingsService } from './buildings.service'
 import { SavedSearchesService } from './saved-searches.service'
-import { RentalExecutionPoliciesService } from '../../rental-flow-config/services/rental-execution-policies.service'
+import { RentalExecutionPoliciesService } from '../../rental/services/rental-execution-policies.service'
 
 interface ApartmentMongoQuery {
   $or?: Array<Record<string, unknown>>

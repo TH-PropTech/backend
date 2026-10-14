@@ -8,11 +8,12 @@ import {
   Optional,
 } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
+import { ModuleRef } from '@nestjs/core'
 import { InjectRepository } from '@nestjs/typeorm'
 import { ObjectId } from 'mongodb'
 import { Repository } from 'typeorm'
 import { BookingsService } from '../../bookings/services/bookings.service'
-import { PlatformFeesService } from '../../platform-fees/services/platform-fees.service'
+import { PlatformFeesService } from '../../payments/services/platform-fees.service'
 import { UnprocessableEntityException } from '@nestjs/common'
 import { ApartmentsService } from '../../properties/services/apartments.service'
 import type { RentalPackageRecord } from '../../properties/utils/rental-package.util'
@@ -20,14 +21,14 @@ import { ContractsService } from '../../contracts/services/contracts.service'
 import { DepositAgreementsService } from '../../contracts/services/deposit-agreements.service'
 import { NotificationsService } from '../../notifications/services/notifications.service'
 import { LegalTermsService } from '../../legal/services/legal-terms.service'
-import { RentalFlowConfigResolver } from '../../rental-flow-config/services/rental-flow-config-resolver.service'
-import { RentalExecutionPoliciesService } from '../../rental-flow-config/services/rental-execution-policies.service'
-import { OwnershipTransferResolver } from '../../property-ownership-transfer/services/ownership-transfer.resolver'
+import { RentalFlowConfigResolver } from './rental-flow-config-resolver.service'
+import { RentalExecutionPoliciesService } from '../../rental/services/rental-execution-policies.service'
+import { OwnershipTransferResolver } from '../../contracts/services/ownership-transfer.resolver'
 import { RentalTransactionEventService } from './rental-transaction-event.service'
 import {
   getDefaultRentalExecutionPolicyRef,
   type RentalExecutionPolicyRef,
-} from '../../rental-flow-config/utils/rental-execution-policy.util'
+} from '../utils/rental-execution-policy.util'
 import { CreateRentalApplicationDto } from '../dto/create-rental-application.dto'
 import type { RentalApplicationContext } from '../dto/rental-application-context.dto'
 import { RentalApplicationQueryDto } from '../dto/rental-application-query.dto'
@@ -76,10 +77,18 @@ export class RentalApplicationsService {
     @Optional()
     private readonly ownershipTransferResolver?: OwnershipTransferResolver,
     @Optional() private readonly bookingsService?: BookingsService,
-    @Optional() private readonly platformFeesService?: PlatformFeesService,
+    // platform-fees nằm trong PaymentsModule, không được rental.module.ts
+    // import trực tiếp (né vòng) → tra cứu lazy qua ModuleRef tại điểm gọi
+    // .quote(...), giữ nguyên ngữ nghĩa optional cũ (không có thì bỏ qua
+    // phần tính phí).
+    @Optional() private readonly moduleRef?: ModuleRef,
     @Optional()
     private readonly transactionEventService?: RentalTransactionEventService
   ) {}
+
+  private resolvePlatformFeesService(): PlatformFeesService | undefined {
+    return this.moduleRef?.get(PlatformFeesService, { strict: false })
+  }
 
   async getContext(
     tenantId: string,
@@ -137,7 +146,7 @@ export class RentalApplicationsService {
     }
     const packages = await Promise.all(
       this.getOfferedPackages(apartment).map(async packageItem => {
-        const feeSnapshot = await this.platformFeesService?.quote({
+        const feeSnapshot = await this.resolvePlatformFeesService()?.quote({
           durationMonths: packageItem.durationMonths,
           monthlyRent: packageItem.monthlyRent,
         })
@@ -231,7 +240,7 @@ export class RentalApplicationsService {
       throw new BadRequestException('PAYMENT_CYCLE_NOT_ALLOWED')
     }
 
-    const feeSnapshot = await this.platformFeesService?.quote({
+    const feeSnapshot = await this.resolvePlatformFeesService()?.quote({
       durationMonths: selectedPackage.durationMonths,
       monthlyRent: selectedPackage.monthlyRent,
     })

@@ -14,10 +14,10 @@ import { RolesGuard } from '../../../common/guards/roles.guard'
 import { Roles } from '../../../common/decorators/roles.decorator'
 import { CurrentUser } from '../../../common/decorators/current-user.decorator'
 import type { UserPayload } from '../../auth/interfaces/auth.interface'
-import { RentalFlowProfilesService } from '../../rental-flow-config/services/rental-flow-profiles.service'
-import { SaveFlowProfileDraftDto } from '../../rental-flow-config/dto/save-flow-profile-draft.dto'
-import { PublishFlowProfileDto } from '../../rental-flow-config/dto/publish-flow-profile.dto'
-import type { RentalFlowProfile } from '../../rental-flow-config/schemas/rental-flow-profile.schema'
+import { RentalFlowProfilesService } from '../../rental/services/rental-flow-profiles.service'
+import { SaveFlowProfileDraftDto } from '../../rental/dto/save-flow-profile-draft.dto'
+import { PublishFlowProfileDto } from '../../rental/dto/publish-flow-profile.dto'
+import type { RentalFlowProfile } from '../../rental/schemas/rental-flow-profile.schema'
 
 @ApiTags('rental-flow-profiles')
 @ApiBearerAuth()
