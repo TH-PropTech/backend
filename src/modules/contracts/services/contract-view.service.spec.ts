@@ -9,7 +9,7 @@ import { DepositAgreement } from '../schemas/deposit-agreement.schema'
 import { KycService } from '../../users/services/kyc.service'
 import type { KycRecord } from '../../users/schemas/kyc-record.schema'
 import { LedgerAuditQueryService } from '../../fabric/services/ledger-audit-query.service'
-import { OwnershipTransferResolver } from '../../property-ownership-transfer/services/ownership-transfer.resolver'
+import { OwnershipTransferResolver } from './ownership-transfer.resolver'
 import { ContractArtifactService } from './contract-artifact.service'
 
 describe('ContractViewService', () => {

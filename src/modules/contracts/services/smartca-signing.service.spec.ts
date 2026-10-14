@@ -6,7 +6,7 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common'
 import { ObjectId } from 'mongodb'
-import type { RentalExecutionPolicyRef } from '../../rental-flow-config/utils/rental-execution-policy.util'
+import type { RentalExecutionPolicyRef } from '../../rental/utils/rental-execution-policy.util'
 import type { SmartCaCertificate } from '../../digital-signature/providers/smartca.provider'
 import { SmartCaSigningService } from './smartca-signing.service'
 

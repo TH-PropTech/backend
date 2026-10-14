@@ -5,6 +5,9 @@ import { Contract } from './schemas/contract.schema'
 import { SigningGrant } from './schemas/signing-grant.schema'
 import { DepositAgreement } from './schemas/deposit-agreement.schema'
 import { Apartment } from '../properties/schemas/apartment.schema'
+import { Booking } from '../bookings/schemas/booking.schema'
+import { Dispute } from '../community/schemas/dispute.schema'
+import { RentalApplication } from '../rental/schemas/rental-application.schema'
 import { LegalModule } from '../legal/legal.module'
 import { FabricModule } from '../fabric/fabric.module'
 import { UsersModule } from '../users/users.module'
@@ -31,7 +34,6 @@ import {
   CONTRACT_ARTIFACT_STORAGE,
   MongoGridFsArtifactStorage,
 } from './services/contract-artifact.storage'
-import { PropertyOwnershipTransferModule } from '../property-ownership-transfer/property-ownership-transfer.module'
 import { ContractCommercialEditorService } from './services/contract-commercial-editor.service'
 import { ContractCommercialEditorController } from './controllers/contract-commercial-editor.controller'
 import { ContractAmendmentService } from './services/contract-amendment.service'
@@ -39,8 +41,7 @@ import { ContractAmendmentController } from './controllers/contract-amendment.co
 import { DepositConfirmationResolver } from './services/deposit-confirmation.resolver'
 import { FlowNotificationService } from './flow/flow-notification.service'
 import { NotificationsModule } from '../notifications/notifications.module'
-import { MoveInSettlementsModule } from '../move-in-settlements/move-in-settlements.module'
-import { MoveInSettlement } from '../move-in-settlements/schemas/move-in-settlement.schema'
+import { MoveInSettlement } from '../rental/schemas/move-in-settlement.schema'
 import { ContractLayoutProfile } from './layout/contract-layout-profile.schema'
 import { ContractLayoutAudit } from './layout/contract-layout-audit.schema'
 import { ContractLayoutService } from './layout/contract-layout.service'
@@ -49,6 +50,13 @@ import { ContractSignedArtifact } from './signed-artifact/contract-signed-artifa
 import { SignedArtifactService } from './signed-artifact/signed-artifact.service'
 import { ContractEvidencePackageService } from './services/contract-evidence-package.service'
 import { ContractEvidencePackageExportService } from './services/contract-evidence-package.export.service'
+import { OwnershipTransferController } from './controllers/ownership-transfer.controller'
+import { MongoOwnershipTransferStore } from './services/mongo-ownership-transfer.store'
+import { OwnershipTransferService } from './services/ownership-transfer.service'
+import { OwnershipTransferResolver } from './services/ownership-transfer.resolver'
+import { OWNERSHIP_TRANSFER_STORE } from './services/ownership-transfer.store'
+import { PropertyOwnershipTransfer } from './schemas/property-ownership-transfer.schema'
+import { PropertyOwnershipTransferRecord } from './schemas/property-ownership-transfer-record.schema'
 
 @Module({
   imports: [
@@ -67,6 +75,11 @@ import { ContractEvidencePackageExportService } from './services/contract-eviden
       ContractLayoutProfile,
       ContractLayoutAudit,
       User,
+      Booking,
+      Dispute,
+      RentalApplication,
+      PropertyOwnershipTransfer,
+      PropertyOwnershipTransferRecord,
     ]),
     LegalModule,
     DigitalSignatureModule,
@@ -75,9 +88,7 @@ import { ContractEvidencePackageExportService } from './services/contract-eviden
     EkycModule,
     PaymentsModule,
     AuthModule,
-    PropertyOwnershipTransferModule,
     NotificationsModule,
-    MoveInSettlementsModule,
   ],
   controllers: [
     ContractsController,
@@ -86,6 +97,7 @@ import { ContractEvidencePackageExportService } from './services/contract-eviden
     ContractCommercialEditorController,
     ContractAmendmentController,
     ContractLayoutsController,
+    OwnershipTransferController,
   ],
   providers: [
     ContractsService,
@@ -107,6 +119,13 @@ import { ContractEvidencePackageExportService } from './services/contract-eviden
     ContractLayoutService,
     ContractEvidencePackageService,
     ContractEvidencePackageExportService,
+    OwnershipTransferService,
+    OwnershipTransferResolver,
+    MongoOwnershipTransferStore,
+    {
+      provide: OWNERSHIP_TRANSFER_STORE,
+      useExisting: MongoOwnershipTransferStore,
+    },
   ],
   exports: [
     ContractsService,
@@ -120,6 +139,8 @@ import { ContractEvidencePackageExportService } from './services/contract-eviden
     ContractAmendmentService,
     DepositConfirmationResolver,
     ContractEvidencePackageService,
+    OwnershipTransferService,
+    OwnershipTransferResolver,
   ],
 })
 export class ContractsModule {}

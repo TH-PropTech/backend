@@ -4,7 +4,7 @@ import { AppModule } from '../app.module'
 import {
   OwnershipTransferService,
   type OwnershipTransferSummaryResponse,
-} from '../modules/property-ownership-transfer/services/ownership-transfer.service'
+} from '../modules/contracts/services/ownership-transfer.service'
 import {
   parseTransferLandlordArgs,
   type TransferLandlordArgs,

@@ -14,11 +14,11 @@ import { KycService } from '../../users/services/kyc.service'
 import { LedgerAuditQueryService } from '../../fabric/services/ledger-audit-query.service'
 import { FabricService } from '../../fabric/services/fabric.service'
 import { ContractDocumentProjector } from '../legal/contract-document.projector'
-import { OwnershipTransferResolver } from '../../property-ownership-transfer/services/ownership-transfer.resolver'
+import { OwnershipTransferResolver } from './ownership-transfer.resolver'
 import { ContractArtifactService } from './contract-artifact.service'
 import { ContractTemplateGovernanceService } from '../legal/contract-template-governance.service'
 import { ContractAmendment } from '../schemas/contract-amendment.schema'
-import { MoveInSettlement } from '../../move-in-settlements/schemas/move-in-settlement.schema'
+import { MoveInSettlement } from '../../rental/schemas/move-in-settlement.schema'
 import { resolveEffectiveCommercial } from '../commercial/resolve-effective-commercial'
 import {
   resolveDepositConfirmation,
