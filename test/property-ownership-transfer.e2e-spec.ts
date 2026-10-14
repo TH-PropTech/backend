@@ -1,7 +1,7 @@
 import { MongoClient, ObjectId, type Db } from 'mongodb'
 import type { ConfigService } from '@nestjs/config'
-import { MongoOwnershipTransferStore } from '../src/modules/property-ownership-transfer/services/mongo-ownership-transfer.store'
-import type { OwnershipTransferManifestRecord } from '../src/modules/property-ownership-transfer/utils/ownership-transfer.manifest'
+import { MongoOwnershipTransferStore } from '../src/modules/contracts/services/mongo-ownership-transfer.store'
+import type { OwnershipTransferManifestRecord } from '../src/modules/contracts/utils/ownership-transfer.manifest'
 
 const transactionMongoUri = process.env.OWNERSHIP_TRANSFER_MONGO_URI
 const describeTransactionIntegration = transactionMongoUri

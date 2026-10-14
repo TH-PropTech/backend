@@ -7,7 +7,7 @@ import {
 import { ObjectId } from 'mongodb'
 import { LedgerReconciliationService } from './ledger-reconciliation.service'
 import { memoryRepository } from '../utils/fabric-memory-repository.fixtures'
-import { MoveInSettlementsService } from '../../move-in-settlements/services/move-in-settlements.service'
+import { MoveInSettlementsService } from '../../rental/services/move-in-settlements.service'
 
 type Row = Record<string, unknown>
 const HASH = 'a'.repeat(64)

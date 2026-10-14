@@ -7,7 +7,6 @@ import { KycRecord } from '../users/schemas/kyc-record.schema'
 import { LegalSource } from '../legal/schemas/legal-source.schema'
 import { PlatformRegulation } from '../legal/schemas/platform-regulation.schema'
 import { PropertiesModule } from '../properties/properties.module'
-import { RentalFlowConfigModule } from '../rental-flow-config/rental-flow-config.module'
 import { SupportTicket } from '../community/schemas/support-ticket.schema'
 import { GroqKeysController } from './controllers/groq-keys.controller'
 import { ListingFreshnessController } from './controllers/listing-freshness.controller'
@@ -34,7 +33,6 @@ import { PlatformRegulationsService } from './services/platform-regulations.serv
       PlatformRegulation,
       LegalSource,
     ]),
-    RentalFlowConfigModule,
     PropertiesModule,
     AiModule,
   ],

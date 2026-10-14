@@ -22,7 +22,6 @@ import { BuildingsController } from './controllers/buildings.controller'
 import { ProjectsController } from './controllers/projects.controller'
 import { SavedSearchesController } from './controllers/saved-searches.controller'
 import { NotificationsModule } from '../notifications/notifications.module'
-import { RentalFlowConfigModule } from '../rental-flow-config/rental-flow-config.module'
 
 @Module({
   imports: [
@@ -38,7 +37,6 @@ import { RentalFlowConfigModule } from '../rental-flow-config/rental-flow-config
       SearchAlert,
     ]),
     NotificationsModule,
-    RentalFlowConfigModule,
   ],
   providers: [
     ApartmentsService,

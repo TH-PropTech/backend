@@ -16,7 +16,6 @@ describe('FabricGovernanceService.ensureLedgerEvidenceQueued (PROP-399 D7 repair
       {} as never,
       {} as never,
       {} as never,
-      {} as never,
       outbox as never,
       {} as never,
       {} as never

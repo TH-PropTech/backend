@@ -3,7 +3,7 @@ import type { Repository } from 'typeorm'
 import type { Contract } from '../../contracts/schemas/contract.schema'
 import type { DepositAgreement } from '../../contracts/schemas/deposit-agreement.schema'
 import type { Payment } from '../../payments/schemas/payment.schema'
-import type { MoveInSettlement } from '../../move-in-settlements/schemas/move-in-settlement.schema'
+import type { MoveInSettlement } from '../../rental/schemas/move-in-settlement.schema'
 import type { FabricGovernanceSnapshot } from '../schemas/fabric-governance-snapshot.schema'
 import type { LedgerReconciliationScope } from '../schemas/ledger-reconciliation-run.schema'
 

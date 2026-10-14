@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common'
 import { CronExpression } from '@nestjs/schedule'
-import { MoveInSettlementsService } from '../../move-in-settlements/services/move-in-settlements.service'
+import { MoveInSettlementsService } from '../../rental/services/move-in-settlements.service'
 import { BaseJob } from '../base-job'
 
 @Injectable()

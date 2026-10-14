@@ -4,8 +4,8 @@ import { MoveInSettlementsService } from './move-in-settlements.service'
 import { MoveInSettlement } from '../schemas/move-in-settlement.schema'
 import type { Contract } from '../../contracts/schemas/contract.schema'
 import type { Payment } from '../../payments/schemas/payment.schema'
-import { RentalTransactionEventService } from '../../rental/services/rental-transaction-event.service'
-import type { RentalTransactionEvent } from '../../rental/schemas/rental-transaction-event.schema'
+import { RentalTransactionEventService } from '../services/rental-transaction-event.service'
+import type { RentalTransactionEvent } from '../schemas/rental-transaction-event.schema'
 
 function createInMemoryTransactionEventService(): {
   service: RentalTransactionEventService

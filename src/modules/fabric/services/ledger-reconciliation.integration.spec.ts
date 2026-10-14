@@ -1,5 +1,5 @@
 import { ObjectId } from 'mongodb'
-import { MoveInSettlementsService } from '../../move-in-settlements/services/move-in-settlements.service'
+import { MoveInSettlementsService } from '../../rental/services/move-in-settlements.service'
 import { memoryRepository } from '../utils/fabric-memory-repository.fixtures'
 import { LedgerReconciliationService } from './ledger-reconciliation.service'
 

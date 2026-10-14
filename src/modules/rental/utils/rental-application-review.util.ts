@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import type { RentalPackageRecord } from '../../properties/utils/rental-package.util'
-import type { RentalExecutionPolicyRef } from '../../rental-flow-config/utils/rental-execution-policy.util'
+import type { RentalExecutionPolicyRef } from './rental-execution-policy.util'
 
 export const RENTAL_REVIEW_DISCLOSURE_VERSION = 'rental-review-v1'
 

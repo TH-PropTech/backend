@@ -9,7 +9,7 @@ import { Contract } from '../contracts/schemas/contract.schema'
 import { ContractAmendment } from '../contracts/schemas/contract-amendment.schema'
 import { DepositAgreement } from '../contracts/schemas/deposit-agreement.schema'
 import { Payment } from '../payments/schemas/payment.schema'
-import { MoveInSettlement } from '../move-in-settlements/schemas/move-in-settlement.schema'
+import { MoveInSettlement } from '../rental/schemas/move-in-settlement.schema'
 import { FabricService } from './services/fabric.service'
 import { FabricController } from './controllers/fabric.controller'
 import { LedgerOutboxService } from './services/ledger-outbox.service'
@@ -20,8 +20,6 @@ import { LedgerEvidenceQueryService } from './services/ledger-evidence-query.ser
 import { FabricGovernanceService } from './services/fabric-governance.service'
 import { LedgerReconciliationService } from './services/ledger-reconciliation.service'
 import { LegalModule } from '../legal/legal.module'
-import { PlatformFeesModule } from '../platform-fees/platform-fees.module'
-import { RentalFlowConfigModule } from '../rental-flow-config/rental-flow-config.module'
 
 @Module({
   imports: [
@@ -37,11 +35,10 @@ import { RentalFlowConfigModule } from '../rental-flow-config/rental-flow-config
       LedgerReconciliationRun,
       LedgerReconciliationFinding,
     ]),
-    // Nguồn governance (D2). ContractTemplate/Layout nằm trong ContractsModule (import FabricModule)
-    // nên được tra cứu lazy bằng ModuleRef trong FabricGovernanceService để tránh vòng phụ thuộc.
+    // Nguồn governance (D2). ContractTemplate/Layout nằm trong ContractsModule (import FabricModule);
+    // PlatformFeesService nằm trong PaymentsModule — cả hai được tra cứu lazy bằng ModuleRef trong
+    // FabricGovernanceService để tránh vòng phụ thuộc.
     LegalModule,
-    PlatformFeesModule,
-    RentalFlowConfigModule,
   ],
   controllers: [FabricController],
   providers: [

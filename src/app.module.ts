@@ -23,12 +23,8 @@ import { UsersModule } from './modules/users/users.module'
 import { PropertiesModule } from './modules/properties/properties.module'
 import { BookingsModule } from './modules/bookings/bookings.module'
 import { RentalModule } from './modules/rental/rental.module'
-import { RentalFlowConfigModule } from './modules/rental-flow-config/rental-flow-config.module'
-import { MoveInSettlementsModule } from './modules/move-in-settlements/move-in-settlements.module'
 import { ContractsModule } from './modules/contracts/contracts.module'
-import { PropertyOwnershipTransferModule } from './modules/property-ownership-transfer/property-ownership-transfer.module'
 import { PaymentsModule } from './modules/payments/payments.module'
-import { PlatformFeesModule } from './modules/platform-fees/platform-fees.module'
 import { WalletsModule } from './modules/wallets/wallets.module'
 import { LegalModule } from './modules/legal/legal.module'
 import { InsightsModule } from './modules/insights/insights.module'
@@ -90,12 +86,8 @@ import { JobsModule } from './modules/jobs/jobs.module'
     PropertiesModule,
     BookingsModule,
     RentalModule,
-    RentalFlowConfigModule,
-    MoveInSettlementsModule,
     ContractsModule,
-    PropertyOwnershipTransferModule,
     PaymentsModule,
-    PlatformFeesModule,
     WalletsModule,
     LegalModule,
     InsightsModule,

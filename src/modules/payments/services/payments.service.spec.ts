@@ -160,6 +160,73 @@ describe('PaymentsService', () => {
     ).rejects.toThrow(ForbiddenException)
   })
 
+  it('delegates access checks to the OwnershipTransferResolver resolved via ModuleRef when available', async () => {
+    const contract = { tenantId: 'tenant-1', landlordId: 'landlord-1' }
+    contractRepository.findOne.mockResolvedValue(contract)
+    paymentRepository.find.mockResolvedValue([])
+    const ownershipTransferResolver = {
+      canAccessPayment: jest.fn().mockResolvedValue(true),
+    }
+    const moduleRef = {
+      get: jest.fn().mockReturnValue(ownershipTransferResolver),
+    }
+    const serviceWithModuleRef = new PaymentsService(
+      paymentRepository as unknown as Repository<Payment>,
+      contractRepository as unknown as Repository<Contract>,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      moduleRef as unknown as import('@nestjs/core').ModuleRef
+    )
+
+    await serviceWithModuleRef.getByContract(
+      '507f1f77bcf86cd799439011',
+      'successor-landlord',
+      false
+    )
+
+    expect(moduleRef.get).toHaveBeenCalled()
+    expect(ownershipTransferResolver.canAccessPayment).toHaveBeenCalledWith(
+      'successor-landlord',
+      { landlordId: 'landlord-1', tenantId: 'tenant-1' },
+      contract,
+      false
+    )
+  })
+
+  it('falls back to the default participant check when ModuleRef cannot resolve an OwnershipTransferResolver', async () => {
+    const contract = { tenantId: 'tenant-1', landlordId: 'landlord-1' }
+    contractRepository.findOne.mockResolvedValue(contract)
+    paymentRepository.find.mockResolvedValue([])
+    const moduleRef = { get: jest.fn().mockReturnValue(undefined) }
+    const serviceWithModuleRef = new PaymentsService(
+      paymentRepository as unknown as Repository<Payment>,
+      contractRepository as unknown as Repository<Contract>,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      moduleRef as unknown as import('@nestjs/core').ModuleRef
+    )
+
+    await expect(
+      serviceWithModuleRef.getByContract(
+        '507f1f77bcf86cd799439011',
+        'tenant-1',
+        false
+      )
+    ).resolves.toEqual([])
+
+    await expect(
+      serviceWithModuleRef.getByContract(
+        '507f1f77bcf86cd799439011',
+        'outsider',
+        false
+      )
+    ).rejects.toThrow(ForbiddenException)
+  })
+
   it('normalizes legacy rent invoices to tenant payer and landlord payee', async () => {
     const legacy = {
       tenantId: 'tenant-1',

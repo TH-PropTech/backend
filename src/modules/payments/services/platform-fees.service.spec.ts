@@ -2,7 +2,7 @@ import type { Repository } from 'typeorm'
 import { PlatformFeesService } from './platform-fees.service'
 import type { PlatformFeeSchedule } from '../schemas/platform-fee-schedule.schema'
 import type { PlatformFeeAudit } from '../schemas/platform-fee-audit.schema'
-import type { Payment } from '../../payments/schemas/payment.schema'
+import type { Payment } from '../schemas/payment.schema'
 
 describe('PlatformFeesService.getEffectiveSchedule (PROP-399 governance source)', () => {
   const now = new Date('2026-10-02T00:00:00.000Z')
