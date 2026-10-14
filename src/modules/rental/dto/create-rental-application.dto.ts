@@ -18,7 +18,7 @@ import {
   Matches,
   ValidateNested,
 } from 'class-validator'
-import type { RentalExecutionPolicyRef } from '../../rental-flow-config/utils/rental-execution-policy.util'
+import type { RentalExecutionPolicyRef } from '../utils/rental-execution-policy.util'
 
 class SelectedExecutionPolicyRefDto implements RentalExecutionPolicyRef {
   @IsString()

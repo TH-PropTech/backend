@@ -14,7 +14,7 @@ import { FindOptionsWhere, Repository } from 'typeorm'
 import { Contract } from '../../contracts/schemas/contract.schema'
 import { DepositAgreement } from '../../contracts/schemas/deposit-agreement.schema'
 import { RentalApplication } from '../schemas/rental-application.schema'
-import { MoveInSettlement } from '../../move-in-settlements/schemas/move-in-settlement.schema'
+import { MoveInSettlement } from '../schemas/move-in-settlement.schema'
 import { LedgerOutbox } from '../../fabric/schemas/ledger-outbox.schema'
 import {
   RentalTransactionActorRole,
