@@ -11,6 +11,7 @@ import { RolesGuard } from '../src/common/guards/roles.guard'
 import { JwtAuthGuard } from '../src/modules/auth/guards/jwt-auth.guard'
 import { BiometricGrantService } from '../src/modules/ekyc/services/biometric-grant.service'
 import { EkycProxyService } from '../src/modules/ekyc/services/ekyc-proxy.service'
+import { GroqCccdOcrService } from '../src/modules/ekyc/services/groq-cccd-ocr.service'
 import { KycController } from '../src/modules/users/controllers/kyc.controller'
 import { KycService } from '../src/modules/users/services/kyc.service'
 
@@ -22,7 +23,7 @@ describe('KYC HTTP flow', () => {
   let app: INestApplication
   let status: 'pending' | 'verified' | null = null
   const grants = new BiometricGrantService()
-  const proxy = {
+  const ocr = {
     ocrFront: jest.fn().mockResolvedValue({
       idNumber: '079123456789',
       fullName: 'Nguyen Van A',
@@ -31,6 +32,8 @@ describe('KYC HTTP flow', () => {
       nationality: 'Viet Nam',
     }),
     ocrBack: jest.fn().mockResolvedValue({ success: true }),
+  }
+  const proxy = {
     verifyFace: jest.fn().mockResolvedValue({
       verified: true,
       faceMatch: true,
@@ -67,6 +70,7 @@ describe('KYC HTTP flow', () => {
       providers: [
         { provide: KycService, useValue: service },
         { provide: EkycProxyService, useValue: proxy },
+        { provide: GroqCccdOcrService, useValue: ocr },
         { provide: BiometricGrantService, useValue: grants },
       ],
     })
