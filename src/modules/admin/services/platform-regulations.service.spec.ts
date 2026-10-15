@@ -6,24 +6,12 @@ import {
 import type { Repository } from 'typeorm'
 import { ObjectId } from 'mongodb'
 import { PlatformRegulationsService } from './platform-regulations.service'
-import type { LegalSource } from '../../legal/schemas/legal-source.schema'
-import type { PlatformRegulation } from '../../legal/schemas/platform-regulation.schema'
+import type { LegalDocument } from '../../legal/schemas/legal-document.schema'
 import type { CreatePlatformRegulationDto } from '../../legal/dto/platform-regulation.dto'
-
-function mockRepo(): Record<string, jest.Mock> {
-  return {
-    find: jest.fn(),
-    findOne: jest.fn(),
-    count: jest.fn(),
-    // Như Mongo: gán _id khi insert bản ghi mới
-    save: jest.fn((entity: { _id?: ObjectId }) =>
-      Promise.resolve({ _id: new ObjectId(), ...entity })
-    ),
-    create: jest.fn((entity: unknown) => entity),
-    update: jest.fn(),
-    delete: jest.fn(),
-  }
-}
+import {
+  LegalDocumentMemoryRepository,
+  type LegalDocumentRow,
+} from '../../legal/utils/legal-document-memory-repository.fixtures'
 
 const DTO: CreatePlatformRegulationDto = {
   code: 'REG-NEW-01',
@@ -36,41 +24,61 @@ const DTO: CreatePlatformRegulationDto = {
   checklistItems: [{ id: 'c1', label: 'Việc cần làm' }],
 }
 
-function regulation(
-  overrides: Partial<PlatformRegulation> = {}
-): PlatformRegulation {
+/** Dòng `legal_documents` kind='regulation'. */
+function regulationRow(
+  overrides: Record<string, unknown> = {}
+): Record<string, unknown> {
   return {
+    kind: 'regulation',
     ...DTO,
-    _id: new ObjectId(),
     code: 'REG-RES-01',
     linkedSourceKey: '1.004194',
     order: 1,
     isActive: true,
     isDefault: true,
-    createdAt: new Date(),
-    updatedAt: new Date(),
+    ...overrides,
+  }
+}
+
+/** Dòng `legal_documents` kind='source' (có `code` riêng, không unique). */
+function sourceRow(
+  overrides: Record<string, unknown> = {}
+): Record<string, unknown> {
+  return {
+    kind: 'source',
+    docKind: 'procedure',
+    key: '1.004194',
+    code: 'TTHC 1.004194',
+    title: 'Đăng ký tạm trú',
+    order: 1,
+    isActive: true,
+    showInContractPanel: true,
     ...overrides,
   }
 }
 
 describe('PlatformRegulationsService', () => {
-  let regulations: Record<string, jest.Mock>
-  let sources: Record<string, jest.Mock>
+  let store: LegalDocumentMemoryRepository
   let service: PlatformRegulationsService
 
+  const regulationRows = (): LegalDocumentRow[] =>
+    store.rows.filter(row => row['kind'] === 'regulation')
+
   beforeEach(() => {
-    regulations = mockRepo()
-    sources = mockRepo()
+    store = new LegalDocumentMemoryRepository()
     service = new PlatformRegulationsService(
-      regulations as unknown as Repository<PlatformRegulation>,
-      sources as unknown as Repository<LegalSource>
+      store as unknown as Repository<LegalDocument>
     )
   })
 
   describe('create', () => {
     it('creates regulation linked to an existing source', async () => {
-      regulations.count!.mockResolvedValueOnce(0).mockResolvedValueOnce(5)
-      sources.count!.mockResolvedValue(1)
+      store.seed([
+        ...Array.from({ length: 5 }, (_, index) =>
+          regulationRow({ code: `REG-OLD-${index}`, order: index + 1 })
+        ),
+        sourceRow(),
+      ])
 
       const result = await service.create(DTO, 'admin-1')
 
@@ -81,24 +89,23 @@ describe('PlatformRegulationsService', () => {
         isDefault: false,
         updatedBy: 'admin-1',
       })
+      expect(regulationRows()).toHaveLength(6)
+      expect(
+        regulationRows().find(row => row['code'] === 'REG-NEW-01')
+      ).toMatchObject({ kind: 'regulation', order: 6 })
     })
 
     it('allows regulation without linked source', async () => {
-      regulations.count!.mockResolvedValue(0)
-
       const result = await service.create(
         { ...DTO, linkedSourceKey: null },
         'admin-1'
       )
 
       expect(result.linkedSourceKey).toBeNull()
-      expect(sources.count).not.toHaveBeenCalled()
+      expect(regulationRows()).toHaveLength(1)
     })
 
     it('rejects unknown linked source with LINKED_SOURCE_NOT_FOUND', async () => {
-      regulations.count!.mockResolvedValue(0)
-      sources.count!.mockResolvedValue(0)
-
       const error = await service
         .create({ ...DTO, linkedSourceKey: 'ghost' }, 'admin-1')
         .catch((e: unknown) => e)
@@ -107,44 +114,56 @@ describe('PlatformRegulationsService', () => {
       expect((error as BadRequestException).getResponse()).toMatchObject({
         code: 'LINKED_SOURCE_NOT_FOUND',
       })
-      expect(regulations.save).not.toHaveBeenCalled()
+      expect(regulationRows()).toHaveLength(0)
     })
 
     it('rejects duplicate code with 409', async () => {
-      regulations.count!.mockResolvedValue(1)
+      store.seed([regulationRow({ code: 'REG-NEW-01' })])
 
       await expect(service.create(DTO, 'admin-1')).rejects.toThrow(
         ConflictException
       )
+      expect(regulationRows()).toHaveLength(1)
+    })
+
+    it('a source row with the same code does not block a regulation (kind isolation)', async () => {
+      // nguồn liên kết (key 1.004194) có code trùng mã quy định mới
+      store.seed([sourceRow({ code: 'REG-NEW-01' })])
+
+      await expect(service.create(DTO, 'admin-1')).resolves.toMatchObject({
+        code: 'REG-NEW-01',
+      })
     })
   })
 
   describe('update', () => {
     it('updates fields without touching the original entity', async () => {
-      const existing = regulation()
-      regulations.findOne!.mockResolvedValue(existing)
+      store.seed([regulationRow()])
+      const existing = regulationRows()[0]!
 
       const result = await service.update(
-        existing._id.toString(),
+        String(existing['_id']),
         { isActive: false },
         'admin-2'
       )
 
       expect(result).toMatchObject({ isActive: false, updatedBy: 'admin-2' })
-      expect(existing.isActive).toBe(true)
+      expect(regulationRows()[0]).toMatchObject({
+        isActive: false,
+        kind: 'regulation',
+      })
     })
 
     it('checks code uniqueness only when code changes', async () => {
-      const existing = regulation()
-      regulations.findOne!.mockResolvedValue(existing)
-      regulations.count!.mockResolvedValue(1)
-      sources.count!.mockResolvedValue(1)
+      store.seed([regulationRow(), regulationRow({ code: 'REG-TAX-02' })])
+      const existing = regulationRows()[0]!
+      const id = String(existing['_id'])
 
       await expect(
-        service.update(existing._id.toString(), { code: 'REG-TAX-02' }, 'a')
+        service.update(id, { code: 'REG-TAX-02' }, 'a')
       ).rejects.toThrow(ConflictException)
       await expect(
-        service.update(existing._id.toString(), { code: 'REG-RES-01' }, 'a')
+        service.update(id, { code: 'REG-RES-01' }, 'a')
       ).resolves.toBeDefined()
     })
 
@@ -152,7 +171,6 @@ describe('PlatformRegulationsService', () => {
       await expect(service.update('not-an-id', {}, 'a')).rejects.toThrow(
         NotFoundException
       )
-      regulations.findOne!.mockResolvedValue(null)
       await expect(
         service.update(new ObjectId().toString(), {}, 'a')
       ).rejects.toThrow(NotFoundException)
@@ -160,31 +178,43 @@ describe('PlatformRegulationsService', () => {
   })
 
   describe('remove', () => {
-    it('deletes by object id', async () => {
-      const existing = regulation()
-      regulations.findOne!.mockResolvedValue(existing)
+    it('deletes by object id and leaves other kinds alone', async () => {
+      store.seed([regulationRow(), sourceRow()])
+      const existing = regulationRows()[0]!
 
-      await service.remove(existing._id.toString())
+      await service.remove(String(existing['_id']))
 
-      expect(regulations.delete).toHaveBeenCalledWith(existing._id)
+      expect(regulationRows()).toHaveLength(0)
+      expect(store.rows.filter(row => row['kind'] === 'source')).toHaveLength(1)
     })
   })
 
   describe('reorder', () => {
     it('assigns order by list position and rejects non-permutations', async () => {
-      const a = regulation()
-      const b = regulation({ code: 'REG-TAX-02' })
-      regulations.find!.mockResolvedValue([a, b])
+      store.seed([
+        regulationRow({ code: 'REG-RES-01', order: 1 }),
+        regulationRow({ code: 'REG-TAX-02', order: 2 }),
+      ])
+      const [a, b] = regulationRows()
+      const ids = [String(a!['_id']), String(b!['_id'])]
 
-      await service.reorder([b._id.toString(), a._id.toString()], 'admin-1')
-      expect(regulations.update).toHaveBeenCalledWith(b._id, {
-        order: 1,
-        updatedBy: 'admin-1',
-      })
+      await service.reorder([ids[1]!, ids[0]!], 'admin-1')
+      expect(
+        regulationRows().find(r => r['code'] === 'REG-TAX-02')
+      ).toMatchObject({ order: 1, updatedBy: 'admin-1' })
+
+      await expect(service.reorder([ids[0]!], 'admin-1')).rejects.toThrow(
+        BadRequestException
+      )
+    })
+
+    it('ignores source rows when checking the permutation (kind isolation)', async () => {
+      store.seed([regulationRow(), sourceRow()])
+      const [only] = regulationRows()
 
       await expect(
-        service.reorder([a._id.toString()], 'admin-1')
-      ).rejects.toThrow(BadRequestException)
+        service.reorder([String(only!['_id'])], 'admin-1')
+      ).resolves.toHaveLength(1)
     })
   })
 })

@@ -13,6 +13,9 @@ import { Logger } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 import { AiConsultationLog } from '../schemas/ai-consultation-log.schema'
+import { ActivityLog } from '../../activity-log/schemas/activity-log.schema'
+import { KindScopedActivityLogRepository } from '../../activity-log/utils/kind-scoped-activity-log.repository'
+import { toAiConsultationLog } from '../../activity-log/utils/legacy-log.mapper'
 import { AiConsultationService } from '../services/ai-consultation.service'
 import { SttService } from '../services/stt.service'
 import { TtsService } from '../services/tts.service'
@@ -37,15 +40,23 @@ export class AiConsultationGateway
   @WebSocketServer()
   server!: Server
 
+  private readonly logRepository: KindScopedActivityLogRepository<AiConsultationLog>
+
   constructor(
-    @InjectRepository(AiConsultationLog)
-    private readonly logRepository: Repository<AiConsultationLog>,
+    @InjectRepository(ActivityLog)
+    activityLogRepository: Repository<ActivityLog>,
     private readonly consultationService: AiConsultationService,
     private readonly sttService: SttService,
     private readonly ttsService: TtsService,
     private readonly vadService: VadService,
     private readonly groqLlmService: GroqLlmService
-  ) {}
+  ) {
+    this.logRepository = new KindScopedActivityLogRepository(
+      activityLogRepository,
+      'ai-consultation',
+      toAiConsultationLog
+    )
+  }
 
   handleConnection(client: WebSocket, request: IncomingMessage): void {
     const url = request.url || ''
@@ -301,12 +312,10 @@ export class AiConsultationGateway
       transferMsg
     )
 
-    if (logRepositoryUpdate) {
-      await this.logRepository.update(
-        { logId: session.logId },
-        { status: 'transferred' }
-      )
-    }
+    await this.logRepository.update(
+      { logId: session.logId },
+      { status: 'transferred' }
+    )
 
     const audio = await this.ttsService.textToSpeech(transferMsg)
     if (client.readyState === WebSocket.OPEN) {
@@ -337,6 +346,3 @@ QUY TẮC QUAN TRỌNG VÀ KỊCH BẢN TƯ VẤN:
     return [{ role: 'system' as const, content: systemPrompt }, ...messages]
   }
 }
-
-// Helper to keep variable usage clean
-const logRepositoryUpdate = true

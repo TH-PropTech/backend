@@ -34,6 +34,20 @@ export interface TransferHistoryItem {
   reason: string
 }
 
+/** Tin nhắn nhúng trong ticket (thay cho collection `ticket_messages`). */
+export interface TicketMessageEntry {
+  _id: ObjectId
+  senderId: string
+  senderRole: string
+  content: string
+  attachmentUrls: string[]
+  isInternal: boolean
+  createdAt: Date
+}
+
+/** Số tin nhắn tối đa trong một ticket (409 khi vượt). */
+export const MAX_TICKET_MESSAGES = 500
+
 @Entity('support_tickets')
 export class SupportTicket {
   @ObjectIdColumn()
@@ -98,6 +112,13 @@ export class SupportTicket {
 
   @Column('array')
   transferHistory!: TransferHistoryItem[]
+
+  /**
+   * Tin nhắn nhúng, ghi bằng `$push` nguyên tử. KHÔNG trả ra API ở danh sách
+   * và không được ghi đè bằng `save(ticket)`.
+   */
+  @Column('array', { nullable: true })
+  messages?: TicketMessageEntry[]
 
   @CreateDateColumn()
   createdAt!: Date

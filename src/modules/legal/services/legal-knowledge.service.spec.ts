@@ -1,25 +1,26 @@
+import { vi } from 'vitest'
 import {
   BadGatewayException,
   BadRequestException,
   NotFoundException,
 } from '@nestjs/common'
 import { ObjectId } from 'mongodb'
-import type { MongoRepository } from 'typeorm'
+import type { MongoRepository, Repository } from 'typeorm'
 import type { GroqKeyPool } from '../../ai/services/groq-key-pool.service'
 import { fetchPageHtml, SafeFetchError } from '../utils/safe-fetch'
 import { distillLegalPage } from '../utils/legal-distill'
 import { LegalKnowledgeService } from './legal-knowledge.service'
 import type { LegalKnowledgeChunk } from '../schemas/legal-knowledge-chunk.schema'
-import type { LegalKnowledgeDoc } from '../schemas/legal-knowledge-doc.schema'
+import type { LegalDocument } from '../schemas/legal-document.schema'
 
-jest.mock('../utils/safe-fetch', () => {
-  const actual = jest.requireActual<typeof import('../utils/safe-fetch')>(
+vi.mock('../utils/safe-fetch', async () => {
+  const actual = await vi.importActual<typeof import('../utils/safe-fetch')>(
     '../utils/safe-fetch'
   )
   return { ...actual, fetchPageHtml: jest.fn() }
 })
-jest.mock('../utils/legal-distill', () => {
-  const actual = jest.requireActual<typeof import('../utils/legal-distill')>(
+vi.mock('../utils/legal-distill', async () => {
+  const actual = await vi.importActual<typeof import('../utils/legal-distill')>(
     '../utils/legal-distill'
   )
   return { ...actual, distillLegalPage: jest.fn() }
@@ -110,7 +111,7 @@ function createService(): {
   const docStore = fakeRepo()
   const chunkStore = fakeRepo()
   const service = new LegalKnowledgeService(
-    docStore.repo as unknown as MongoRepository<LegalKnowledgeDoc>,
+    docStore.repo as unknown as Repository<LegalDocument>,
     chunkStore.repo as unknown as MongoRepository<LegalKnowledgeChunk>,
     {} as GroqKeyPool
   )
@@ -303,6 +304,56 @@ describe('LegalKnowledgeService', () => {
     expect(
       (await service.list({ category: 'noi-quy' })).map(item => item.title)
     ).toEqual(['Nội quy tòa nhà'])
+  })
+
+  it('never reads rows of other legal kinds in the same collection (kind isolation)', async () => {
+    const { service, docs } = createService()
+    // Bản ghi của loại khác nằm chung collection, cùng status/category dễ trùng.
+    const termsId = new ObjectId()
+    const regulationId = new ObjectId()
+    docs.set(termsId.toHexString(), {
+      _id: termsId,
+      kind: 'terms',
+      title: 'Điều khoản đặt cọc thuê nhà',
+      key: 'rental-service-terms',
+      version: 1,
+      status: 'published',
+      sections: [],
+      contentHash: 'h',
+      draftRevision: 1,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    })
+    docs.set(regulationId.toHexString(), {
+      _id: regulationId,
+      kind: 'regulation',
+      title: 'Quy định đặt cọc thuê nhà',
+      code: 'REG-DEPOSIT',
+      category: 'luat',
+      summary: 'đặt cọc thuê nhà',
+      status: 'published',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    })
+    const knowledge = await service.create({
+      ...baseDoc,
+      status: 'published',
+    })
+
+    const listed = await service.list({ status: 'published' })
+    expect(listed.map(item => item._id)).toEqual([knowledge._id])
+    expect(await service.list({ category: 'luat' })).toHaveLength(1)
+
+    const hits = await service.search('đặt cọc thuê nhà')
+    expect(hits.length).toBeGreaterThan(0)
+    expect(hits.every(hit => hit.docId === knowledge._id)).toBe(true)
+
+    await expect(
+      service.getDetail(termsId.toHexString())
+    ).rejects.toBeInstanceOf(NotFoundException)
+    await expect(
+      service.getDetail(regulationId.toHexString())
+    ).rejects.toBeInstanceOf(NotFoundException)
   })
 
   it('throws 400 for a malformed id and 404 for an unknown id', async () => {

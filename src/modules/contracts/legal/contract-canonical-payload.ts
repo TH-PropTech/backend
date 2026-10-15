@@ -3,7 +3,7 @@ import type {
   Contract,
   ContractCommercialDraft,
 } from '../schemas/contract.schema'
-import type { ContractTemplate } from './contract-template.schema'
+import type { ContractTemplate } from '../schemas/contract-template.schema'
 import { canonicalizeTipTapContent } from './tiptap-content'
 import { resolveEffectiveCommercial } from '../commercial/resolve-effective-commercial'
 

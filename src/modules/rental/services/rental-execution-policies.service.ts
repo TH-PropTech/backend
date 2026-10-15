@@ -6,8 +6,13 @@ import {
 } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
-import { RentalFlowAudit } from '../schemas/rental-flow-audit.schema'
-import { RentalExecutionPolicy } from '../schemas/rental-execution-policy.schema'
+import { ConfigAuditService } from '../../activity-log/services/config-audit.service'
+import { RentalFlowConfig } from '../schemas/rental-flow-config.schema'
+import {
+  asPolicyRow,
+  toPolicyView,
+  type RentalExecutionPolicyView,
+} from '../utils/rental-flow-config.mapper'
 import {
   computeRentalExecutionPolicyHash,
   DEFAULT_RENTAL_EXECUTION_POLICY_INPUTS,
@@ -21,16 +26,20 @@ import type { PublishRentalExecutionPolicyDto } from '../dto/publish-rental-exec
 @Injectable()
 export class RentalExecutionPoliciesService implements OnModuleInit {
   constructor(
-    @InjectRepository(RentalExecutionPolicy)
-    private readonly policyRepo: Repository<RentalExecutionPolicy>,
-    @InjectRepository(RentalFlowAudit)
-    private readonly auditRepo: Repository<RentalFlowAudit>
+    @InjectRepository(RentalFlowConfig)
+    private readonly policyRepo: Repository<RentalFlowConfig>,
+    private readonly configAudit: ConfigAuditService
   ) {}
 
   async onModuleInit(): Promise<void> {
     for (const input of DEFAULT_RENTAL_EXECUTION_POLICY_INPUTS) {
       const existing = await this.policyRepo.findOne({
-        where: { policyId: input.policyId, status: 'published', version: 1 },
+        where: {
+          kind: 'policy',
+          key: input.policyId,
+          status: 'published',
+          version: 1,
+        },
       })
       if (existing) continue
       const contentHash = computeRentalExecutionPolicyHash({
@@ -39,7 +48,8 @@ export class RentalExecutionPoliciesService implements OnModuleInit {
       })
       await this.policyRepo.save(
         this.policyRepo.create({
-          policyId: input.policyId,
+          kind: 'policy',
+          key: input.policyId,
           version: 1,
           status: 'published',
           strategy: input.strategy,
@@ -56,28 +66,34 @@ export class RentalExecutionPoliciesService implements OnModuleInit {
     }
   }
 
-  async listActive(): Promise<RentalExecutionPolicy[]> {
-    return this.policyRepo.find({
-      where: { status: 'published' },
-      order: { policyId: 'ASC', version: 'DESC' },
+  async listActive(): Promise<RentalExecutionPolicyView[]> {
+    const rows = await this.policyRepo.find({
+      where: { kind: 'policy', status: 'published' },
+      order: { key: 'ASC', version: 'DESC' },
     })
+    return rows.map(toPolicyView)
   }
 
-  async listAll(): Promise<RentalExecutionPolicy[]> {
-    return this.policyRepo.find({ order: { createdAt: 'DESC' } })
+  async listAll(): Promise<RentalExecutionPolicyView[]> {
+    const rows = await this.policyRepo.find({
+      where: { kind: 'policy' },
+      order: { createdAt: 'DESC' },
+    })
+    return rows.map(toPolicyView)
   }
 
   async saveDraft(
     policyId: string,
     dto: SaveRentalExecutionPolicyDraftDto,
     actorId: string
-  ): Promise<RentalExecutionPolicy> {
+  ): Promise<RentalExecutionPolicyView> {
     if (!isRentalExecutionStrategy(dto.strategy)) {
       throw new ConflictException('UNSUPPORTED_RENTAL_EXECUTION_STRATEGY')
     }
-    let draft = await this.policyRepo.findOne({
-      where: { policyId, status: 'draft' },
+    const existingDraft = await this.policyRepo.findOne({
+      where: { kind: 'policy', key: policyId, status: 'draft' },
     })
+    let draft = existingDraft ? asPolicyRow(existingDraft) : null
     if (draft) {
       if (draft.draftRevision !== dto.expectedRevision) {
         throw new ConflictException('RENTAL_EXECUTION_POLICY_REVISION_STALE')
@@ -89,48 +105,52 @@ export class RentalExecutionPoliciesService implements OnModuleInit {
       draft.draftRevision += 1
       draft.updatedBy = actorId
     } else {
-      draft = this.policyRepo.create({
-        policyId,
-        version: null,
-        status: 'draft',
-        strategy: dto.strategy,
-        name: dto.name,
-        description: dto.description,
-        disclosure: dto.disclosure,
-        contentHash: null,
-        draftRevision: 1,
-        createdBy: actorId,
-        updatedBy: actorId,
-      })
+      draft = asPolicyRow(
+        this.policyRepo.create({
+          kind: 'policy',
+          key: policyId,
+          version: null,
+          status: 'draft',
+          strategy: dto.strategy,
+          name: dto.name,
+          description: dto.description,
+          disclosure: dto.disclosure,
+          contentHash: null,
+          draftRevision: 1,
+          createdBy: actorId,
+          updatedBy: actorId,
+        })
+      )
     }
-    const saved = await this.policyRepo.save(draft)
-    await this.auditRepo.save(
-      this.auditRepo.create({
-        action: 'EXECUTION_POLICY_DRAFT_SAVED',
-        actorId,
-        targetType: 'execution-policy',
-        targetId: policyId,
-        version: null,
-        details: { draftRevision: saved.draftRevision },
-      })
-    )
-    return saved
+    const saved = asPolicyRow(await this.policyRepo.save(draft))
+    await this.configAudit.append({
+      scope: 'rental-flow',
+      action: 'EXECUTION_POLICY_DRAFT_SAVED',
+      actorId,
+      targetType: 'execution-policy',
+      key: policyId,
+      version: null,
+      details: { draftRevision: saved.draftRevision },
+    })
+    return toPolicyView(saved)
   }
 
   async publish(
     policyId: string,
     dto: PublishRentalExecutionPolicyDto,
     actorId: string
-  ): Promise<RentalExecutionPolicy> {
-    const draft = await this.policyRepo.findOne({
-      where: { policyId, status: 'draft' },
+  ): Promise<RentalExecutionPolicyView> {
+    const draftRow = await this.policyRepo.findOne({
+      where: { kind: 'policy', key: policyId, status: 'draft' },
     })
-    if (!draft) throw new NotFoundException('RENTAL_EXECUTION_POLICY_NOT_FOUND')
+    if (!draftRow)
+      throw new NotFoundException('RENTAL_EXECUTION_POLICY_NOT_FOUND')
+    const draft = asPolicyRow(draftRow)
     if (draft.draftRevision !== dto.expectedRevision) {
       throw new ConflictException('RENTAL_EXECUTION_POLICY_REVISION_STALE')
     }
     const latest = await this.policyRepo.findOne({
-      where: { policyId, status: 'published' },
+      where: { kind: 'policy', key: policyId, status: 'published' },
       order: { version: 'DESC' },
     })
     const version = (latest?.version ?? 0) + 1
@@ -144,7 +164,8 @@ export class RentalExecutionPoliciesService implements OnModuleInit {
     })
     const published = await this.policyRepo.save(
       this.policyRepo.create({
-        policyId,
+        kind: 'policy',
+        key: policyId,
         version,
         status: 'published',
         strategy: draft.strategy,
@@ -161,17 +182,16 @@ export class RentalExecutionPoliciesService implements OnModuleInit {
     draft.draftRevision += 1
     draft.updatedBy = actorId
     await this.policyRepo.save(draft)
-    await this.auditRepo.save(
-      this.auditRepo.create({
-        action: 'EXECUTION_POLICY_PUBLISHED',
-        actorId,
-        targetType: 'execution-policy',
-        targetId: policyId,
-        version,
-        details: { reason: dto.reason, contentHash },
-      })
-    )
-    return published
+    await this.configAudit.append({
+      scope: 'rental-flow',
+      action: 'EXECUTION_POLICY_PUBLISHED',
+      actorId,
+      targetType: 'execution-policy',
+      key: policyId,
+      version,
+      details: { reason: dto.reason, contentHash },
+    })
+    return toPolicyView(published)
   }
 
   async archive(
@@ -179,37 +199,37 @@ export class RentalExecutionPoliciesService implements OnModuleInit {
     version: number,
     actorId: string,
     reason: string
-  ): Promise<RentalExecutionPolicy> {
+  ): Promise<RentalExecutionPolicyView> {
     const policy = await this.policyRepo.findOne({
-      where: { policyId, status: 'published', version },
+      where: { kind: 'policy', key: policyId, status: 'published', version },
     })
     if (!policy)
       throw new NotFoundException('RENTAL_EXECUTION_POLICY_NOT_FOUND')
     policy.status = 'archived'
     policy.archivedAt = new Date()
     const saved = await this.policyRepo.save(policy)
-    await this.auditRepo.save(
-      this.auditRepo.create({
-        action: 'EXECUTION_POLICY_ARCHIVED',
-        actorId,
-        targetType: 'execution-policy',
-        targetId: policyId,
-        version,
-        details: { reason },
-      })
-    )
-    return saved
+    await this.configAudit.append({
+      scope: 'rental-flow',
+      action: 'EXECUTION_POLICY_ARCHIVED',
+      actorId,
+      targetType: 'execution-policy',
+      key: policyId,
+      version,
+      details: { reason },
+    })
+    return toPolicyView(saved)
   }
 
   async resolvePublishedRef(
     ref: RentalExecutionPolicyRef
-  ): Promise<RentalExecutionPolicy> {
+  ): Promise<RentalExecutionPolicyView> {
     if (!isRentalExecutionStrategy(ref.strategy)) {
       throw new ConflictException('UNSUPPORTED_RENTAL_EXECUTION_STRATEGY')
     }
     const policy = await this.policyRepo.findOne({
       where: {
-        policyId: ref.policyId,
+        kind: 'policy',
+        key: ref.policyId,
         status: 'published',
         version: ref.version,
       },
@@ -221,7 +241,7 @@ export class RentalExecutionPoliciesService implements OnModuleInit {
     ) {
       throw new ConflictException('RENTAL_EXECUTION_POLICY_INVALID')
     }
-    return policy
+    return toPolicyView(policy)
   }
 
   async validatePackagePolicies(
@@ -263,7 +283,7 @@ export class RentalExecutionPoliciesService implements OnModuleInit {
     }
   }
 
-  private toRef(policy: RentalExecutionPolicy): RentalExecutionPolicyRef {
+  private toRef(policy: RentalExecutionPolicyView): RentalExecutionPolicyRef {
     if (policy.version === null || policy.contentHash === null) {
       throw new ConflictException('RENTAL_EXECUTION_POLICY_INVALID')
     }

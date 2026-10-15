@@ -8,7 +8,7 @@ import {
 } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { ObjectId } from 'mongodb'
-import { FindOptionsWhere, MongoRepository } from 'typeorm'
+import { FindOptionsWhere, MongoRepository, Repository } from 'typeorm'
 import { GroqKeyPool } from '../../ai/services/groq-key-pool.service'
 import {
   normalizeKeywords,
@@ -34,7 +34,11 @@ import { extractMainText } from '../utils/html-extract'
 import { foldVietnamese, pickMainExcerpt } from '../utils/legal-text'
 import { fetchPageHtml, SafeFetchError } from '../utils/safe-fetch'
 import { LegalKnowledgeChunk } from '../schemas/legal-knowledge-chunk.schema'
-import { LegalKnowledgeDoc } from '../schemas/legal-knowledge-doc.schema'
+import {
+  LegalDocument,
+  type KnowledgeLegalDocument,
+} from '../schemas/legal-document.schema'
+import { LegalDocumentScope } from '../utils/legal-document.scope'
 
 const DEFAULT_SEARCH_LIMIT = 4
 /** BM25 score floor; keyword-boosted hits are at least +2 so they always pass. */
@@ -83,13 +87,21 @@ export class LegalKnowledgeService
   private indexBuiltAt = 0
   private refreshing = false
 
+  /** Kho tài liệu tri thức: facade lọc và gắn `kind='knowledge'` (G-LEG). */
+  private readonly docRepo: LegalDocumentScope<KnowledgeLegalDocument>
+
   constructor(
-    @InjectRepository(LegalKnowledgeDoc)
-    private readonly docRepo: MongoRepository<LegalKnowledgeDoc>,
+    @InjectRepository(LegalDocument)
+    documents: Repository<LegalDocument>,
     @InjectRepository(LegalKnowledgeChunk)
     private readonly chunkRepo: MongoRepository<LegalKnowledgeChunk>,
     private readonly groqKeyPool: GroqKeyPool
-  ) {}
+  ) {
+    this.docRepo = new LegalDocumentScope<KnowledgeLegalDocument>(
+      documents,
+      'knowledge'
+    )
+  }
 
   async onModuleInit(): Promise<void> {
     await this.refreshIndexSafely()
@@ -101,7 +113,7 @@ export class LegalKnowledgeService
     if (filters.category) where['category'] = filters.category
 
     const docs = await this.docRepo.find({
-      where: where as FindOptionsWhere<LegalKnowledgeDoc>,
+      where,
       order: { createdAt: 'DESC' },
     })
     // Mongo array `where` is unsupported and the text filter needs Vietnamese folding, so q is applied in memory.
@@ -293,9 +305,7 @@ export class LegalKnowledgeService
 
   private async rebuildIndex(): Promise<void> {
     const published = await this.docRepo.find({
-      where: {
-        status: 'published',
-      } as FindOptionsWhere<LegalKnowledgeDoc>,
+      where: { status: 'published' },
     })
     if (published.length === 0) {
       this.index.build([])
@@ -372,7 +382,7 @@ export class LegalKnowledgeService
     await this.chunkRepo.insertMany(entities)
   }
 
-  private async findById(id: string): Promise<LegalKnowledgeDoc> {
+  private async findById(id: string): Promise<KnowledgeLegalDocument> {
     if (!OBJECT_ID_PATTERN.test(id)) {
       throw new BadRequestException('id không hợp lệ')
     }
@@ -382,7 +392,7 @@ export class LegalKnowledgeService
   }
 }
 
-function toItem(doc: LegalKnowledgeDoc): LegalDocItem {
+function toItem(doc: KnowledgeLegalDocument): LegalDocItem {
   return {
     _id: doc._id.toHexString(),
     title: doc.title,
@@ -407,7 +417,7 @@ function toItem(doc: LegalKnowledgeDoc): LegalDocItem {
   }
 }
 
-function toDetail(doc: LegalKnowledgeDoc): LegalDocDetail {
+function toDetail(doc: KnowledgeLegalDocument): LegalDocDetail {
   return { ...toItem(doc), content: doc.content }
 }
 

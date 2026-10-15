@@ -1,7 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
 import { IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator'
-import type { SmartCaCertificate } from '../../digital-signature/providers/smartca.provider'
-import type { SmartCaSigningSession } from '../../digital-signature/schemas/smartca-signing-session.schema'
+import type { SmartCaCertificate } from '../providers/smartca.provider'
+import type { SmartCaSigningSession } from '../schemas/smartca-signing-session.schema'
 
 export class CreateSmartCaSigningSessionDto {
   @ApiPropertyOptional({ maxLength: 128 })

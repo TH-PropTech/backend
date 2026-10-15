@@ -43,6 +43,12 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
+      - name: Module structure
+        run: pnpm check:structure
+
+      - name: Module cycles
+        run: pnpm check:cycles
+
       - name: Lint
         run: pnpm lint
 

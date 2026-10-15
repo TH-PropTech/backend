@@ -28,6 +28,18 @@ export type ContractAmendmentChange = {
   after: unknown
 }
 
+/**
+ * Phần tử phụ lục nhúng trong `Contract.amendments[]` (G-AMD): như `ContractAmendment`
+ * nhưng không có `contractId` (hợp đồng cha mang khóa). `_id` được giữ nguyên.
+ */
+export type EmbeddedContractAmendment = Omit<ContractAmendment, 'contractId'>
+
+/**
+ * @deprecated G-AMD: phụ lục đã nhúng vào `Contract.amendments[]`. Entity này không
+ * còn được nạp (bỏ khỏi `forFeature`) và không còn ghi; giữ lại để đọc kiểu và để
+ * migration `027-contract-amendments-embed` đọc collection cũ `contract_amendments`.
+ * Không dùng cho truy vấn mới: dùng `ContractAmendmentStore`.
+ */
 @Entity('contract_amendments')
 @Index(['contractId', 'sequence'], { unique: true })
 @Index(['contractId', 'status', 'effectiveFrom'])

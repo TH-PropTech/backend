@@ -7,15 +7,13 @@ import { NotificationsModule } from '../notifications/notifications.module'
 import { LegalModule } from '../legal/legal.module'
 import { HealthModule } from '../health/health.module'
 import { FabricModule } from '../fabric/fabric.module'
+import { ActivityLogModule } from '../activity-log/activity-log.module'
 import { Contract } from '../contracts/schemas/contract.schema'
 import { DepositAgreement } from '../contracts/schemas/deposit-agreement.schema'
 import { LedgerOutbox } from '../fabric/schemas/ledger-outbox.schema'
 import { Payment } from '../payments/schemas/payment.schema'
 import { MoveInSettlement } from './schemas/move-in-settlement.schema'
-import { RentalFlowProfile } from './schemas/rental-flow-profile.schema'
-import { RentalFlowAssignment } from './schemas/rental-flow-assignment.schema'
-import { RentalFlowAudit } from './schemas/rental-flow-audit.schema'
-import { RentalExecutionPolicy } from './schemas/rental-execution-policy.schema'
+import { RentalFlowConfig } from './schemas/rental-flow-config.schema'
 import { RentalApplicationsController } from './controllers/rental-applications.controller'
 import { RentalTransactionsController } from './controllers/rental-transactions.controller'
 import { RentalExecutionPoliciesController } from './controllers/rental-execution-policies.controller'
@@ -44,10 +42,7 @@ import { RentalTransactionEvent } from './schemas/rental-transaction-event.schem
       LedgerOutbox,
       MoveInSettlement,
       Payment,
-      RentalFlowProfile,
-      RentalFlowAssignment,
-      RentalFlowAudit,
-      RentalExecutionPolicy,
+      RentalFlowConfig,
     ]),
     PropertiesModule,
     ContractsModule,
@@ -56,6 +51,7 @@ import { RentalTransactionEvent } from './schemas/rental-transaction-event.schem
     BookingsModule,
     HealthModule,
     FabricModule,
+    ActivityLogModule,
   ],
   controllers: [
     RentalApplicationsController,

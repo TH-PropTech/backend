@@ -124,15 +124,7 @@ describe('LedgerAuditQueryService Audit Center read model (PROP-399 tasks 7.1/7.
   beforeEach(() => {
     jest.useFakeTimers({
       now: NOW,
-      doNotFake: [
-        'nextTick',
-        'setImmediate',
-        'setTimeout',
-        'setInterval',
-        'clearTimeout',
-        'clearInterval',
-        'queueMicrotask',
-      ],
+      toFake: ['Date'],
     })
   })
   afterEach(() => jest.useRealTimers())

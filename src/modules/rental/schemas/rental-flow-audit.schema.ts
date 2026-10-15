@@ -17,6 +17,9 @@ export type FlowAuditAction =
   | 'EXECUTION_POLICY_PUBLISHED'
   | 'EXECUTION_POLICY_ARCHIVED'
 
+/**
+ * @deprecated Đã hợp nhất vào `ConfigAudit` (scope 'rental-flow') trong activity-log; giữ lại để đọc collection cũ và migration 010. Không đăng ký forFeature, không ghi mới.
+ */
 @Entity('rental_flow_audits')
 export class RentalFlowAudit {
   @ObjectIdColumn()

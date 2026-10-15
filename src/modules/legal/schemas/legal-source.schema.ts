@@ -16,6 +16,11 @@ import type {
 } from '../utils/legal-sources.types'
 
 /**
+ * @deprecated G-LEG: dữ liệu nay nằm ở `LegalDocument{kind:'source'}`
+ * (collection `legal_documents`, `kind` cũ nằm ở `docKind`). Giữ lại làm kiểu hình
+ * và để migration 020 / rollback tham chiếu collection cũ `legal_sources`; entity
+ * này KHÔNG còn nằm trong `TypeOrmModule.forFeature`.
+ *
  * Nguồn pháp lý / thủ tục Dịch vụ công hiển thị trên contract workspace
  * và được Admin quản trị.
  */

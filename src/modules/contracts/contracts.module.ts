@@ -1,8 +1,8 @@
 import { Module } from '@nestjs/common'
+import { ConfigService } from '@nestjs/config'
 import { User } from '../users/schemas/user.schema'
 import { TypeOrmModule } from '@nestjs/typeorm'
 import { Contract } from './schemas/contract.schema'
-import { SigningGrant } from './schemas/signing-grant.schema'
 import { DepositAgreement } from './schemas/deposit-agreement.schema'
 import { Apartment } from '../properties/schemas/apartment.schema'
 import { Booking } from '../bookings/schemas/booking.schema'
@@ -22,13 +22,15 @@ import { ContractDocumentProjector } from './legal/contract-document.projector'
 import { ContractViewService } from './services/contract-view.service'
 import { AuthModule } from '../auth/auth.module'
 import { SmartCaSigningService } from './services/smartca-signing.service'
-import { DigitalSignatureModule } from '../digital-signature/digital-signature.module'
-import { ContractTemplate } from './legal/contract-template.schema'
-import { ContractTemplateAudit } from './legal/contract-template-audit.schema'
+import { SmartCaSigningSession } from './schemas/smartca-signing-session.schema'
+import { SmartCaProvider } from './providers/smartca.provider'
+import { MockSmartCaProvider } from './providers/mock-smartca.provider'
+import { SmartCaEventsGateway } from './gateways/smartca-events.gateway'
+import { SMARTCA_EVENTS_PUBLISHER } from './gateways/smartca-events.publisher'
+import { ContractTemplate } from './schemas/contract-template.schema'
 import { ContractTemplateGovernanceService } from './legal/contract-template-governance.service'
 import { ContractTemplatesController } from './legal/contract-templates.controller'
-import { ContractArtifact } from './schemas/contract-artifact.schema'
-import { ContractAmendment } from './schemas/contract-amendment.schema'
+import { ContractDocument } from './schemas/contract-document.schema'
 import { Payment } from '../payments/schemas/payment.schema'
 import {
   CONTRACT_ARTIFACT_STORAGE,
@@ -37,16 +39,15 @@ import {
 import { ContractCommercialEditorService } from './services/contract-commercial-editor.service'
 import { ContractCommercialEditorController } from './controllers/contract-commercial-editor.controller'
 import { ContractAmendmentService } from './services/contract-amendment.service'
+import { ContractAmendmentStore } from './services/contract-amendment.store'
 import { ContractAmendmentController } from './controllers/contract-amendment.controller'
 import { DepositConfirmationResolver } from './services/deposit-confirmation.resolver'
 import { FlowNotificationService } from './flow/flow-notification.service'
 import { NotificationsModule } from '../notifications/notifications.module'
 import { MoveInSettlement } from '../rental/schemas/move-in-settlement.schema'
-import { ContractLayoutProfile } from './layout/contract-layout-profile.schema'
-import { ContractLayoutAudit } from './layout/contract-layout-audit.schema'
+import { ActivityLogModule } from '../activity-log/activity-log.module'
 import { ContractLayoutService } from './layout/contract-layout.service'
 import { ContractLayoutsController } from './layout/contract-layouts.controller'
-import { ContractSignedArtifact } from './signed-artifact/contract-signed-artifact.schema'
 import { SignedArtifactService } from './signed-artifact/signed-artifact.service'
 import { ContractEvidencePackageService } from './services/contract-evidence-package.service'
 import { ContractEvidencePackageExportService } from './services/contract-evidence-package.export.service'
@@ -62,18 +63,13 @@ import { PropertyOwnershipTransferRecord } from './schemas/property-ownership-tr
   imports: [
     TypeOrmModule.forFeature([
       Contract,
-      SigningGrant,
+      SmartCaSigningSession,
       DepositAgreement,
       Apartment,
-      ContractSignedArtifact,
       ContractTemplate,
-      ContractTemplateAudit,
-      ContractArtifact,
-      ContractAmendment,
+      ContractDocument,
       Payment,
       MoveInSettlement,
-      ContractLayoutProfile,
-      ContractLayoutAudit,
       User,
       Booking,
       Dispute,
@@ -82,8 +78,8 @@ import { PropertyOwnershipTransferRecord } from './schemas/property-ownership-tr
       PropertyOwnershipTransferRecord,
     ]),
     LegalModule,
-    DigitalSignatureModule,
     FabricModule,
+    ActivityLogModule,
     UsersModule,
     EkycModule,
     PaymentsModule,
@@ -107,9 +103,28 @@ import { PropertyOwnershipTransferRecord } from './schemas/property-ownership-tr
     ContractViewService,
     SignedArtifactService,
     SmartCaSigningService,
+    // Adapter ký số SmartCA (trước đây ở DigitalSignatureModule): provider thật/mock theo cấu hình
+    MockSmartCaProvider,
+    {
+      provide: SmartCaProvider,
+      inject: [ConfigService, MockSmartCaProvider],
+      useFactory: (
+        cfg: ConfigService,
+        mock: MockSmartCaProvider
+      ): SmartCaProvider | MockSmartCaProvider => {
+        const isMock = cfg.get<{ isMock?: boolean }>('smartCA')?.isMock
+        return isMock ? mock : new SmartCaProvider(cfg)
+      },
+    },
+    SmartCaEventsGateway,
+    {
+      provide: SMARTCA_EVENTS_PUBLISHER,
+      useExisting: SmartCaEventsGateway,
+    },
     ContractTemplateGovernanceService,
     ContractCommercialEditorService,
     ContractAmendmentService,
+    ContractAmendmentStore,
     DepositConfirmationResolver,
     {
       provide: CONTRACT_ARTIFACT_STORAGE,

@@ -4,12 +4,20 @@ import {
   NotFoundException,
   ForbiddenException,
   BadRequestException,
+  ConflictException,
 } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
-import { Repository, FindOptionsWhere } from 'typeorm'
+import { MongoRepository, FindOptionsWhere } from 'typeorm'
 import { ObjectId } from 'mongodb'
+import type {
+  Document,
+  PushOperator,
+  UpdateFilter,
+} from 'typeorm/driver/mongodb/typings'
 import {
+  MAX_TICKET_MESSAGES,
   SupportTicket,
+  TicketMessageEntry,
   TicketPriority,
   TransferHistoryItem,
 } from '../schemas/support-ticket.schema'
@@ -32,6 +40,61 @@ const SLA_HOURS: Record<TicketPriority, number> = {
   urgent: 4,
 }
 
+/**
+ * Mọi trường của ticket TRỪ `messages`. Danh sách/tra cứu thường chiếu theo
+ * danh sách này để không kéo theo (và không lộ ghi chú `isInternal` của)
+ * `messages[]` nhúng.
+ */
+const TICKET_FIELDS_WITHOUT_MESSAGES: (keyof SupportTicket)[] = [
+  '_id',
+  'requesterId',
+  'requesterRole',
+  'category',
+  'subject',
+  'description',
+  'linkedEntityType',
+  'linkedEntityId',
+  'priority',
+  'status',
+  'assignedTo',
+  'assignedAt',
+  'slaDeadline',
+  'firstResponseAt',
+  'resolvedAt',
+  'closedAt',
+  'resolutionNote',
+  'escalatedTo',
+  'escalatedAt',
+  'escalationReason',
+  'transferHistory',
+  'createdAt',
+  'updatedAt',
+]
+
+/** Bản sao ticket không có `messages` (hình dạng phản hồi cũ). */
+function omitMessages(ticket: SupportTicket): SupportTicket {
+  const copy = { ...ticket }
+  delete copy.messages
+  return copy
+}
+
+/** Ánh xạ tin nhúng sang hình `TicketMessage` cũ (có `ticketId`). */
+function toTicketMessage(
+  ticketId: string,
+  entry: TicketMessageEntry
+): TicketMessage {
+  return {
+    _id: entry._id,
+    ticketId,
+    senderId: entry.senderId,
+    senderRole: entry.senderRole,
+    content: entry.content,
+    attachmentUrls: entry.attachmentUrls,
+    isInternal: entry.isInternal,
+    createdAt: entry.createdAt,
+  }
+}
+
 export interface TicketListResult {
   items: SupportTicket[]
   total: number
@@ -51,9 +114,7 @@ export class SupportTicketsService {
 
   constructor(
     @InjectRepository(SupportTicket)
-    private readonly ticketRepository: Repository<SupportTicket>,
-    @InjectRepository(TicketMessage)
-    private readonly messageRepository: Repository<TicketMessage>,
+    private readonly ticketRepository: MongoRepository<SupportTicket>,
     private readonly notificationsService: NotificationsService
   ) {}
 
@@ -90,6 +151,18 @@ export class SupportTicketsService {
       status: 'open',
       slaDeadline,
       transferHistory: [],
+      // Tin đầu tiên (= description) nhúng ngay trong cùng lần ghi.
+      messages: [
+        {
+          _id: new ObjectId(),
+          senderId: requesterId,
+          senderRole: requesterRole,
+          content: dto.description,
+          attachmentUrls: [],
+          isInternal: false,
+          createdAt: new Date(),
+        },
+      ],
     }
     if (dto.linkedEntityType) ticketData.linkedEntityType = dto.linkedEntityType
     if (dto.linkedEntityId) ticketData.linkedEntityId = dto.linkedEntityId
@@ -97,17 +170,6 @@ export class SupportTicketsService {
     const ticket = this.ticketRepository.create(ticketData)
 
     const saved = await this.ticketRepository.save(ticket)
-
-    // Create initial message from description
-    const message = this.messageRepository.create({
-      ticketId: String(saved._id),
-      senderId: requesterId,
-      senderRole: requesterRole,
-      content: dto.description,
-      attachmentUrls: [],
-      isInternal: false,
-    })
-    await this.messageRepository.save(message)
 
     // Notify staff
     await this.notificationsService.createNotification(
@@ -118,7 +180,7 @@ export class SupportTicketsService {
       { ticketId: String(saved._id), category: dto.category, priority }
     )
 
-    return saved
+    return omitMessages(saved)
   }
 
   /**
@@ -134,6 +196,7 @@ export class SupportTicketsService {
 
     const allRecords = await this.ticketRepository.find({
       where: where as FindOptionsWhere<SupportTicket>,
+      select: TICKET_FIELDS_WITHOUT_MESSAGES,
       order: { createdAt: 'DESC' },
     })
 
@@ -155,6 +218,7 @@ export class SupportTicketsService {
 
     const allRecords = await this.ticketRepository.find({
       where: where as FindOptionsWhere<SupportTicket>,
+      select: TICKET_FIELDS_WITHOUT_MESSAGES,
       order: { createdAt: 'DESC' },
     })
 
@@ -181,7 +245,7 @@ export class SupportTicketsService {
     userId: string,
     userRole: string
   ): Promise<TicketDetailResult> {
-    const ticket = await this.findTicketOrThrow(ticketId)
+    const ticket = await this.findTicketOrThrow(ticketId, true)
 
     // Access check: requester OR staff/admin
     const isStaffOrAdmin = ['staff', 'admin'].includes(userRole)
@@ -189,17 +253,19 @@ export class SupportTicketsService {
       throw new ForbiddenException('Bạn không có quyền xem yêu cầu hỗ trợ này')
     }
 
-    const messages = await this.messageRepository.find({
-      where: { ticketId } as FindOptionsWhere<TicketMessage>,
-      order: { createdAt: 'ASC' },
-    })
+    const messages = [...(ticket.messages ?? [])]
+      .sort(
+        (a, b) =>
+          new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+      )
+      .map(entry => toTicketMessage(String(ticket._id), entry))
 
     // Filter internal notes for non-staff
     const sanitizedMessages = isStaffOrAdmin
       ? messages
       : messages.filter(m => !m.isInternal)
 
-    return { ticket, messages: sanitizedMessages }
+    return { ticket: omitMessages(ticket), messages: sanitizedMessages }
   }
 
   /**
@@ -228,28 +294,44 @@ export class SupportTicketsService {
       throw new BadRequestException('Yêu cầu hỗ trợ này đã được đóng')
     }
 
-    const message = this.messageRepository.create({
-      ticketId,
+    const now = new Date()
+    const entry: TicketMessageEntry = {
+      _id: new ObjectId(),
       senderId,
       senderRole,
       content: dto.content,
       attachmentUrls: dto.attachmentUrls ?? [],
       isInternal: dto.isInternal ?? false,
-    })
-
-    const savedMessage = await this.messageRepository.save(message)
-
-    // Update ticket timestamps and status
-    if (isStaffOrAdmin && !dto.isInternal) {
-      if (!ticket.firstResponseAt) {
-        ticket.firstResponseAt = new Date()
-      }
-      ticket.status = 'waiting_customer'
-    } else if (!isStaffOrAdmin) {
-      ticket.status = 'waiting_staff'
+      createdAt: now,
     }
 
-    await this.ticketRepository.save(ticket)
+    // Update ticket timestamps and status (ghi cùng lúc với `$push`)
+    const set: Partial<SupportTicket> = { updatedAt: now }
+    if (isStaffOrAdmin && !dto.isInternal) {
+      if (!ticket.firstResponseAt) {
+        set.firstResponseAt = now
+      }
+      set.status = 'waiting_customer'
+    } else if (!isStaffOrAdmin) {
+      set.status = 'waiting_staff'
+    }
+
+    // Một `updateOne` nguyên tử: `$push` có trần, không ghi đè `messages`.
+    const result = await this.ticketRepository.updateOne(
+      {
+        _id: ticket._id,
+        [`messages.${MAX_TICKET_MESSAGES - 1}`]: { $exists: false },
+      },
+      {
+        $push: { messages: entry } as unknown as PushOperator<Document>,
+        $set: set as Document,
+      }
+    )
+    if (result.matchedCount === 0) {
+      throw new ConflictException(
+        `Yêu cầu hỗ trợ đã đạt tối đa ${MAX_TICKET_MESSAGES} tin nhắn`
+      )
+    }
 
     // Notify recipient
     const recipientId = isStaffOrAdmin ? ticket.requesterId : ticket.assignedTo
@@ -263,7 +345,7 @@ export class SupportTicketsService {
       )
     }
 
-    return savedMessage
+    return toTicketMessage(String(ticket._id), entry)
   }
 
   /**
@@ -282,7 +364,11 @@ export class SupportTicketsService {
       ticket.status = 'in_progress'
     }
 
-    return this.ticketRepository.save(ticket)
+    return this.updateFields(ticket, {
+      assignedTo: ticket.assignedTo,
+      assignedAt: ticket.assignedAt,
+      status: ticket.status,
+    })
   }
 
   /**
@@ -309,7 +395,17 @@ export class SupportTicketsService {
     ticket.assignedTo = dto.toStaffId
     ticket.transferHistory = [...(ticket.transferHistory ?? []), transfer]
 
-    return this.ticketRepository.save(ticket)
+    return this.updateFields(
+      ticket,
+      {
+        status: ticket.status,
+        escalatedTo: ticket.escalatedTo,
+        escalatedAt: ticket.escalatedAt,
+        escalationReason: ticket.escalationReason,
+        assignedTo: ticket.assignedTo,
+      },
+      { transferHistory: transfer }
+    )
   }
 
   /**
@@ -326,7 +422,11 @@ export class SupportTicketsService {
     ticket.resolvedAt = new Date()
     ticket.resolutionNote = dto.resolutionNote
 
-    const updated = await this.ticketRepository.save(ticket)
+    const updated = await this.updateFields(ticket, {
+      status: ticket.status,
+      resolvedAt: ticket.resolvedAt,
+      resolutionNote: ticket.resolutionNote,
+    })
 
     await this.notificationsService.createNotification(
       ticket.requesterId,
@@ -357,16 +457,42 @@ export class SupportTicketsService {
     ticket.status = 'closed'
     ticket.closedAt = new Date()
 
-    return this.ticketRepository.save(ticket)
+    return this.updateFields(ticket, {
+      status: ticket.status,
+      closedAt: ticket.closedAt,
+    })
   }
 
   // ─── Private Helpers ───────────────────────────────────
 
-  private async findTicketOrThrow(ticketId: string): Promise<SupportTicket> {
+  /**
+   * Ghi từng trường bằng `updateOne` (không `save` toàn document) để không bao
+   * giờ ghi đè `messages[]` nhúng. `updatedAt` đặt tay vì bỏ qua TypeORM.
+   */
+  private async updateFields(
+    ticket: SupportTicket,
+    set: Partial<SupportTicket>,
+    push?: Record<string, unknown>
+  ): Promise<SupportTicket> {
+    ticket.updatedAt = new Date()
+    const update: UpdateFilter<Document> = {
+      $set: { ...set, updatedAt: ticket.updatedAt } as Document,
+    }
+    if (push) update.$push = push as unknown as PushOperator<Document>
+    await this.ticketRepository.updateOne({ _id: ticket._id }, update)
+    return ticket
+  }
+
+  /** Mặc định chiếu bỏ `messages`; chỉ `getTicketDetail` nạp đầy đủ. */
+  private async findTicketOrThrow(
+    ticketId: string,
+    includeMessages = false
+  ): Promise<SupportTicket> {
     let ticket: SupportTicket | null = null
     try {
       ticket = await this.ticketRepository.findOne({
         where: { _id: new ObjectId(ticketId) },
+        ...(includeMessages ? {} : { select: TICKET_FIELDS_WITHOUT_MESSAGES }),
       })
     } catch {
       throw new NotFoundException(`ID yêu cầu không hợp lệ: ${ticketId}`)
@@ -386,7 +512,7 @@ export class SupportTicketsService {
     const limit = query.limit ?? 20
     const totalPages = Math.ceil(total / limit)
     const skip = (page - 1) * limit
-    const items = records.slice(skip, skip + limit)
+    const items = records.slice(skip, skip + limit).map(omitMessages)
     return { items, total, page, limit, totalPages }
   }
 }

@@ -6,10 +6,18 @@ import {
   BadRequestException,
 } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
-import { Repository, FindOptionsWhere } from 'typeorm'
+import { Repository } from 'typeorm'
 import { ObjectId } from 'mongodb'
-import { SavedSearch, SavedSearchFilters } from '../schemas/saved-search.schema'
-import { SearchAlert, AlertTriggerType } from '../schemas/search-alert.schema'
+import type { SavedSearchFilters } from '../schemas/saved-search.schema'
+import type { AlertTriggerType } from '../schemas/search-alert.schema'
+import { SavedSearchRecord } from '../schemas/saved-search-record.schema'
+import { SavedSearchRecordRepository } from '../utils/saved-search-record.repository'
+import {
+  toSavedSearchView,
+  toSearchAlertView,
+  type SavedSearchView,
+  type SearchAlertView,
+} from '../mappers/saved-search-record.mapper'
 import {
   CreateSavedSearchDto,
   UpdateSavedSearchDto,
@@ -18,14 +26,14 @@ import { AlertQueryDto } from '../dto/alert-query.dto'
 import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto'
 import type { Apartment } from '../schemas/apartment.schema'
 
-/** Maximum saved searches per user */
+/** Maximum saved searches per user (chỉ đếm kind='search') */
 const MAX_SAVED_SEARCHES = 10
 
 /** Minimum interval (ms) between duplicate alerts for same listing */
 const DEDUP_WINDOW_MS = 4 * 60 * 60 * 1000 // 4 hours
 
 export interface SavedSearchListResult {
-  items: SavedSearch[]
+  items: SavedSearchView[]
   total: number
   page: number
   limit: number
@@ -33,7 +41,7 @@ export interface SavedSearchListResult {
 }
 
 export interface AlertListResult {
-  items: SearchAlert[]
+  items: SearchAlertView[]
   total: number
   page: number
   limit: number
@@ -44,12 +52,21 @@ export interface AlertListResult {
 export class SavedSearchesService {
   private readonly logger = new Logger(SavedSearchesService.name)
 
+  /** Bộ lọc đã lưu (kind 'search'): mọi truy vấn đã có `kind` qua facade. */
+  private readonly savedSearchRepository: SavedSearchRecordRepository
+  /** Cảnh báo (kind 'alert'): mọi truy vấn đã có `kind` qua facade. */
+  private readonly alertRepository: SavedSearchRecordRepository
+
   constructor(
-    @InjectRepository(SavedSearch)
-    private readonly savedSearchRepository: Repository<SavedSearch>,
-    @InjectRepository(SearchAlert)
-    private readonly alertRepository: Repository<SearchAlert>
-  ) {}
+    @InjectRepository(SavedSearchRecord)
+    records: Repository<SavedSearchRecord>
+  ) {
+    this.savedSearchRepository = new SavedSearchRecordRepository(
+      records,
+      'search'
+    )
+    this.alertRepository = new SavedSearchRecordRepository(records, 'alert')
+  }
 
   /**
    * Tạo saved search mới — tối đa 10 per user
@@ -58,11 +75,11 @@ export class SavedSearchesService {
   async createSavedSearch(
     userId: string,
     dto: CreateSavedSearchDto
-  ): Promise<SavedSearch> {
+  ): Promise<SavedSearchView> {
     this.logger.log(`User ${userId} creating saved search: ${dto.name}`)
 
     const existingSearches = await this.savedSearchRepository.find({
-      where: { userId } as FindOptionsWhere<SavedSearch>,
+      where: { userId },
     })
 
     if (existingSearches.length >= MAX_SAVED_SEARCHES) {
@@ -80,7 +97,7 @@ export class SavedSearchesService {
       matchCount: 0,
     })
 
-    return this.savedSearchRepository.save(search)
+    return toSavedSearchView(await this.savedSearchRepository.save(search))
   }
 
   /**
@@ -90,7 +107,7 @@ export class SavedSearchesService {
     searchId: string,
     userId: string,
     dto: UpdateSavedSearchDto
-  ): Promise<SavedSearch> {
+  ): Promise<SavedSearchView> {
     this.logger.log(`User ${userId} updating saved search ${searchId}`)
     const search = await this.findSearchOrThrow(searchId, userId)
 
@@ -98,7 +115,7 @@ export class SavedSearchesService {
     if (dto.filters) search.filters = dto.filters
     if (dto.alertFrequency) search.alertFrequency = dto.alertFrequency
 
-    return this.savedSearchRepository.save(search)
+    return toSavedSearchView(await this.savedSearchRepository.save(search))
   }
 
   /**
@@ -117,13 +134,13 @@ export class SavedSearchesService {
     searchId: string,
     userId: string,
     enabled: boolean
-  ): Promise<SavedSearch> {
+  ): Promise<SavedSearchView> {
     this.logger.log(
       `User ${userId} toggling alert ${enabled ? 'ON' : 'OFF'} for ${searchId}`
     )
     const search = await this.findSearchOrThrow(searchId, userId)
     search.alertEnabled = enabled
-    return this.savedSearchRepository.save(search)
+    return toSavedSearchView(await this.savedSearchRepository.save(search))
   }
 
   /**
@@ -134,7 +151,7 @@ export class SavedSearchesService {
     query: PaginationQueryDto
   ): Promise<SavedSearchListResult> {
     const allRecords = await this.savedSearchRepository.find({
-      where: { userId } as FindOptionsWhere<SavedSearch>,
+      where: { userId },
       order: { createdAt: 'DESC' },
     })
 
@@ -154,7 +171,7 @@ export class SavedSearchesService {
     }
 
     const allRecords = await this.alertRepository.find({
-      where: where as FindOptionsWhere<SearchAlert>,
+      where,
       order: { createdAt: 'DESC' },
     })
 
@@ -164,10 +181,13 @@ export class SavedSearchesService {
   /**
    * Đánh dấu alert đã đọc
    */
-  async markAlertRead(alertId: string, userId: string): Promise<SearchAlert> {
+  async markAlertRead(
+    alertId: string,
+    userId: string
+  ): Promise<SearchAlertView> {
     const alert = await this.findAlertOrThrow(alertId, userId)
     alert.isRead = true
-    return this.alertRepository.save(alert)
+    return toSearchAlertView(await this.alertRepository.save(alert))
   }
 
   /**
@@ -175,7 +195,7 @@ export class SavedSearchesService {
    */
   async markAllAlertsRead(userId: string): Promise<void> {
     const unread = await this.alertRepository.find({
-      where: { userId, isRead: false } as FindOptionsWhere<SearchAlert>,
+      where: { userId, isRead: false },
     })
 
     if (unread.length > 0) {
@@ -197,18 +217,18 @@ export class SavedSearchesService {
     )
 
     const activeSearches = await this.savedSearchRepository.find({
-      where: { alertEnabled: true } as FindOptionsWhere<SavedSearch>,
+      where: { alertEnabled: true },
     })
 
     const now = Date.now()
-    const alertsToCreate: SearchAlert[] = []
-    const matchedSearches: SavedSearch[] = []
+    const alertsToCreate: SavedSearchRecord[] = []
+    const matchedSearches: SavedSearchRecord[] = []
 
     for (const search of activeSearches) {
       if (
         !this.matchesFilters(
           apartment,
-          search.filters,
+          search.filters ?? {},
           triggerType !== 'status_change'
         )
       ) {
@@ -230,7 +250,7 @@ export class SavedSearchesService {
 
       const matchReason = this.buildMatchReason(triggerType, matchDetails)
 
-      const alertData: Partial<SearchAlert> = {
+      const alertData: Partial<SavedSearchRecord> = {
         savedSearchId,
         userId: search.userId,
         apartmentId,
@@ -379,8 +399,8 @@ export class SavedSearchesService {
   private async findSearchOrThrow(
     searchId: string,
     userId: string
-  ): Promise<SavedSearch> {
-    let search: SavedSearch | null = null
+  ): Promise<SavedSearchRecord> {
+    let search: SavedSearchRecord | null = null
     try {
       search = await this.savedSearchRepository.findOne({
         where: { _id: new ObjectId(searchId) },
@@ -400,8 +420,8 @@ export class SavedSearchesService {
   private async findAlertOrThrow(
     alertId: string,
     userId: string
-  ): Promise<SearchAlert> {
-    let alert: SearchAlert | null = null
+  ): Promise<SavedSearchRecord> {
+    let alert: SavedSearchRecord | null = null
     try {
       alert = await this.alertRepository.findOne({
         where: { _id: new ObjectId(alertId) },
@@ -419,7 +439,7 @@ export class SavedSearchesService {
   }
 
   private paginateSavedSearches(
-    records: SavedSearch[],
+    records: SavedSearchRecord[],
     query: PaginationQueryDto
   ): SavedSearchListResult {
     const total = records.length
@@ -427,12 +447,12 @@ export class SavedSearchesService {
     const limit = query.limit ?? 20
     const totalPages = Math.ceil(total / limit)
     const skip = (page - 1) * limit
-    const items = records.slice(skip, skip + limit)
+    const items = records.slice(skip, skip + limit).map(toSavedSearchView)
     return { items, total, page, limit, totalPages }
   }
 
   private paginateAlerts(
-    records: SearchAlert[],
+    records: SavedSearchRecord[],
     query: AlertQueryDto
   ): AlertListResult {
     const total = records.length
@@ -440,7 +460,7 @@ export class SavedSearchesService {
     const limit = query.limit ?? 20
     const totalPages = Math.ceil(total / limit)
     const skip = (page - 1) * limit
-    const items = records.slice(skip, skip + limit)
+    const items = records.slice(skip, skip + limit).map(toSearchAlertView)
     return { items, total, page, limit, totalPages }
   }
 }

@@ -7,6 +7,11 @@ import {
   UpdateDateColumn,
 } from 'typeorm'
 
+/**
+ * @deprecated G-MNT: thay bằng `Apartment.maintenanceTickets[]` (`schemas/apartment.schema.ts`).
+ * Giữ file để rollback/migration 012; không đăng ký trong `forFeature`.
+ * Collection `maintenance_tickets` không bị xóa.
+ */
 @Entity('maintenance_tickets')
 export class MaintenanceTicket {
   @ObjectIdColumn()

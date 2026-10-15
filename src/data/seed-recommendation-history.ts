@@ -6,7 +6,10 @@ import { getRepositoryToken } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 import { Logger } from '@nestjs/common'
 import { AppModule } from '../app.module'
-import { RecommendationHistory } from '../modules/recommendations/schemas/recommendation-history.schema'
+import type { RecommendationHistory } from '../modules/properties/recommendations/schemas/recommendation-history.schema'
+import { ActivityLog } from '../modules/activity-log/schemas/activity-log.schema'
+import { KindScopedActivityLogRepository } from '../modules/activity-log/utils/kind-scoped-activity-log.repository'
+import { toRecommendationHistory } from '../modules/activity-log/utils/legacy-log.mapper'
 
 dotenv.config({ path: path.join(__dirname, '..', '..', '.env') })
 
@@ -17,8 +20,10 @@ async function seedRecommendationHistory(): Promise<void> {
   const app = await NestFactory.createApplicationContext(AppModule)
 
   try {
-    const historyRepo = app.get<Repository<RecommendationHistory>>(
-      getRepositoryToken(RecommendationHistory)
+    const historyRepo = new KindScopedActivityLogRepository(
+      app.get<Repository<ActivityLog>>(getRepositoryToken(ActivityLog)),
+      'recommendation',
+      toRecommendationHistory
     )
 
     const existingCount = await historyRepo.count()
@@ -119,8 +124,7 @@ async function seedRecommendationHistory(): Promise<void> {
     const batchSize = 1000
     for (let i = 0; i < recordsToInsert.length; i += batchSize) {
       const batch = recordsToInsert.slice(i, i + batchSize)
-      const entities = historyRepo.create(batch)
-      await historyRepo.save(entities)
+      await historyRepo.saveAll(batch)
       logger.log(
         `Inserted batch ${i + 1} - ${Math.min(i + batchSize, recordsToInsert.length)} / ${recordsToInsert.length}`
       )

@@ -9,17 +9,18 @@ import { Repository } from 'typeorm'
 import { calculateFeeQuote } from '../utils/fee-calculator'
 import { validateFeeRules } from '../utils/fee-rules.validator'
 import type { PlatformFeeScheduleRules } from '../utils/platform-fee.types'
-import { PlatformFeeAudit } from '../schemas/platform-fee-audit.schema'
-import { PlatformFeeSchedule } from '../schemas/platform-fee-schedule.schema'
+import { ConfigAuditService } from '../../activity-log/services/config-audit.service'
+import {
+  PlatformFeeScheduleRepository,
+  type PlatformFeeScheduleView,
+} from '../utils/platform-fee-schedule.repository'
 import { Payment } from '../schemas/payment.schema'
 
 @Injectable()
 export class PlatformFeesService {
   constructor(
-    @InjectRepository(PlatformFeeSchedule)
-    private readonly scheduleRepo: Repository<PlatformFeeSchedule>,
-    @InjectRepository(PlatformFeeAudit)
-    private readonly auditRepo: Repository<PlatformFeeAudit>,
+    private readonly scheduleRepo: PlatformFeeScheduleRepository,
+    private readonly auditService: ConfigAuditService,
     @InjectRepository(Payment) private readonly paymentRepo: Repository<Payment>
   ) {}
 
@@ -33,7 +34,7 @@ export class PlatformFeesService {
     },
     actorId: string,
     version = 1
-  ): Promise<PlatformFeeSchedule> {
+  ): Promise<PlatformFeeScheduleView> {
     const existing = await this.scheduleRepo.findOne({
       where: { scheduleId: input.scheduleId, version },
     })
@@ -87,7 +88,7 @@ export class PlatformFeesService {
     effectiveFrom: Date,
     actorId: string,
     reason: string
-  ): Promise<PlatformFeeSchedule> {
+  ): Promise<PlatformFeeScheduleView> {
     const schedule = await this.find(scheduleId, version)
     if (schedule.status !== 'draft')
       throw new ConflictException('PLATFORM_FEE_SCHEDULE_IMMUTABLE')
@@ -133,7 +134,7 @@ export class PlatformFeesService {
     version: number,
     actorId: string,
     reason: string
-  ): Promise<PlatformFeeSchedule> {
+  ): Promise<PlatformFeeScheduleView> {
     const schedule = await this.find(scheduleId, version)
     schedule.status = 'archived'
     const saved = await this.scheduleRepo.save(schedule)
@@ -168,7 +169,7 @@ export class PlatformFeesService {
   /** Biểu phí published đã có hiệu lực (effectiveFrom mới nhất ≤ now); null nếu chưa có. */
   async getEffectiveSchedule(
     now: Date = new Date()
-  ): Promise<PlatformFeeSchedule | null> {
+  ): Promise<PlatformFeeScheduleView | null> {
     const schedules = await this.scheduleRepo.find({
       where: { status: 'published' },
     })
@@ -207,7 +208,7 @@ export class PlatformFeesService {
   private async find(
     scheduleId: string,
     version: number
-  ): Promise<PlatformFeeSchedule> {
+  ): Promise<PlatformFeeScheduleView> {
     const schedule = await this.scheduleRepo.findOne({
       where: { scheduleId, version },
     })
@@ -221,7 +222,7 @@ export class PlatformFeesService {
   }
 
   private async audit(
-    schedule: PlatformFeeSchedule,
+    schedule: PlatformFeeScheduleView,
     action: string,
     actorId: string,
     reason: string,
@@ -229,17 +230,16 @@ export class PlatformFeesService {
     beforeHash: string | null,
     afterHash: string | null
   ): Promise<void> {
-    await this.auditRepo.save(
-      this.auditRepo.create({
-        scheduleId: schedule.scheduleId,
-        version: schedule.version,
-        action,
-        actorId,
-        reason,
-        changedFields,
-        beforeHash,
-        afterHash,
-      })
-    )
+    await this.auditService.append({
+      scope: 'platform-fee',
+      key: schedule.scheduleId,
+      version: schedule.version,
+      action,
+      actorId,
+      reason,
+      beforeHash,
+      afterHash,
+      details: { changedFields },
+    })
   }
 }

@@ -6,8 +6,8 @@ import {
   LeaseDocumentManifest,
 } from './lease-template.manifest'
 import { resolveLegalProfile, LegalProfile } from './legal-profile.resolver'
-import type { ContractTemplate } from './contract-template.schema'
-import type { ContractLayoutProfile } from '../layout/contract-layout-profile.schema'
+import type { ContractTemplate } from '../schemas/contract-template.schema'
+import type { ContractLayoutProfile } from '../schemas/contract-layout-profile.schema'
 import {
   ContractDocumentSectionDto,
   ContractDocumentAnnexDto,

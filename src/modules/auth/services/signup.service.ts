@@ -7,7 +7,8 @@ import { Notification } from '../../notifications/schemas/notification.schema'
 import { EmailService } from './email.service'
 
 import { IsString, IsEmail, IsIn } from 'class-validator'
-import { EmailOtp } from '../schemas/email-otp.schema'
+import { Otp, EmailOtpRecord } from '../schemas/otp.schema'
+import { KindScopedOtpRepository } from '../utils/otp.repository'
 
 export class SignupDto {
   @IsEmail({}, { message: 'Email không hợp lệ' })
@@ -32,16 +33,22 @@ export class SignupDto {
 @Injectable()
 export class SignupService {
   private readonly logger = new Logger(SignupService.name)
+  private readonly emailOtpRepository: KindScopedOtpRepository<EmailOtpRecord>
 
   constructor(
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
     @InjectRepository(Notification)
     private readonly notificationRepository: Repository<Notification>,
-    @InjectRepository(EmailOtp)
-    private readonly emailOtpRepository: Repository<EmailOtp>,
+    @InjectRepository(Otp)
+    otpRepository: Repository<Otp>,
     private readonly emailService: EmailService
-  ) {}
+  ) {
+    this.emailOtpRepository = new KindScopedOtpRepository(
+      otpRepository,
+      'email'
+    )
+  }
 
   /**
    * Yêu cầu gửi mã OTP để đăng ký tài khoản mới

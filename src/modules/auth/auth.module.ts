@@ -3,9 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm'
 import { JwtModule } from '@nestjs/jwt'
 import { User } from '../users/schemas/user.schema'
 import { Notification } from '../notifications/schemas/notification.schema'
-import { EmailOtp } from './schemas/email-otp.schema'
-import { DeviceBinding } from './schemas/device-binding.schema'
-import { TransactionOtp } from './schemas/transaction-otp.schema'
+import { Otp } from './schemas/otp.schema'
 import { AuthService } from './services/auth.service'
 import { SignupService } from './services/signup.service'
 import { PinService } from './services/pin.service'
@@ -22,13 +20,7 @@ import { SmartOtpController } from './controllers/smart-otp.controller'
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([
-      User,
-      Notification,
-      EmailOtp,
-      DeviceBinding,
-      TransactionOtp,
-    ]),
+    TypeOrmModule.forFeature([User, Notification, Otp]),
     JwtModule.register({
       global: true,
       secret: process.env.JWT_SECRET || 'TH_PROPTECH_SECRET_JWT_KEY',

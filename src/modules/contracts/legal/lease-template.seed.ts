@@ -2,7 +2,7 @@ import type {
   ContractTemplateAddendum,
   ContractTemplateAnnexDefinition,
   ContractTemplateClause,
-} from './contract-template.schema'
+} from '../schemas/contract-template.schema'
 import type { LegalProfile } from './legal-profile.resolver'
 import { hashText } from './contract-template.canonical'
 import { LEASE_ARTICLE_DEFINITIONS } from './lease-template.articles'

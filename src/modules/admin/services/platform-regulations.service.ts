@@ -7,8 +7,12 @@ import {
 import { InjectRepository } from '@nestjs/typeorm'
 import type { Repository } from 'typeorm'
 import { ObjectId } from 'mongodb'
-import { LegalSource } from '../../legal/schemas/legal-source.schema'
-import { PlatformRegulation } from '../../legal/schemas/platform-regulation.schema'
+import {
+  LegalDocument,
+  type RegulationLegalDocument,
+  type SourceLegalDocument,
+} from '../../legal/schemas/legal-document.schema'
+import { LegalDocumentScope } from '../../legal/utils/legal-document.scope'
 import {
   toPlatformRegulationResponse,
   type CreatePlatformRegulationDto,
@@ -18,12 +22,24 @@ import {
 
 @Injectable()
 export class PlatformRegulationsService {
+  /** Quy định nền tảng (kind='regulation'); facade lọc và gắn kind (G-LEG). */
+  private readonly regulationRepository: LegalDocumentScope<RegulationLegalDocument>
+  /** Nguồn pháp lý (kind='source') để kiểm `linkedSourceKey`. */
+  private readonly sourceRepository: LegalDocumentScope<SourceLegalDocument>
+
   constructor(
-    @InjectRepository(PlatformRegulation)
-    private readonly regulationRepository: Repository<PlatformRegulation>,
-    @InjectRepository(LegalSource)
-    private readonly sourceRepository: Repository<LegalSource>
-  ) {}
+    @InjectRepository(LegalDocument)
+    documents: Repository<LegalDocument>
+  ) {
+    this.regulationRepository = new LegalDocumentScope<RegulationLegalDocument>(
+      documents,
+      'regulation'
+    )
+    this.sourceRepository = new LegalDocumentScope<SourceLegalDocument>(
+      documents,
+      'source'
+    )
+  }
 
   async findAllAdmin(): Promise<PlatformRegulationResponse[]> {
     const regulations = await this.regulationRepository.find({
@@ -104,7 +120,7 @@ export class PlatformRegulationsService {
     return this.findAllAdmin()
   }
 
-  private async findEntity(id: string): Promise<PlatformRegulation> {
+  private async findEntity(id: string): Promise<RegulationLegalDocument> {
     if (!ObjectId.isValid(id)) {
       throw new NotFoundException('Không tìm thấy quy định')
     }
@@ -116,7 +132,7 @@ export class PlatformRegulationsService {
   }
 
   private async assertCodeAvailable(code: string): Promise<void> {
-    if ((await this.regulationRepository.count({ where: { code } })) > 0) {
+    if ((await this.regulationRepository.countBy({ code })) > 0) {
       throw new ConflictException(`Mã quy định "${code}" đã tồn tại`)
     }
   }
@@ -125,7 +141,7 @@ export class PlatformRegulationsService {
     key: string | null | undefined
   ): Promise<void> {
     if (!key) return
-    if ((await this.sourceRepository.count({ where: { key } })) === 0) {
+    if ((await this.sourceRepository.countBy({ key })) === 0) {
       throw new BadRequestException({
         code: 'LINKED_SOURCE_NOT_FOUND',
         message: `Nguồn pháp lý "${key}" không tồn tại`,

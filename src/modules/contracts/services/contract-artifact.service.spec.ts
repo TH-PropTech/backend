@@ -8,7 +8,7 @@ import { ObjectId } from 'mongodb'
 import type { Repository } from 'typeorm'
 import { ContractArtifactService } from './contract-artifact.service'
 import type { Contract } from '../schemas/contract.schema'
-import type { ContractArtifact } from '../schemas/contract-artifact.schema'
+import type { ContractDocument } from '../schemas/contract-document.schema'
 import type { ContractArtifactStorage } from './contract-artifact.storage'
 
 describe('ContractArtifactService', () => {
@@ -110,7 +110,7 @@ describe('ContractArtifactService', () => {
       byteLength: bytes.length,
       contentType: 'application/pdf' as const,
       lockedAt: contract.contentLockedAt,
-    } as unknown as ContractArtifact
+    } as unknown as ContractDocument
     const contractRepository = {
       findOne: jest.fn().mockResolvedValue(contract),
       save: jest.fn().mockResolvedValue(contract),
@@ -138,8 +138,12 @@ describe('ContractArtifactService', () => {
       true,
       bytes
     )
-    expect(locked).toBe(savedArtifact)
+    expect(locked).toEqual(savedArtifact)
     expect(uploadMock).toHaveBeenCalledWith(bytes, 'CT-001-r2.pdf')
+    expect(artifactRepository.create).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'canonical' })
+    )
+    expect(locked).not.toHaveProperty('kind')
     expect(contract.artifactRef).toEqual(
       expect.objectContaining({
         artifactId: artifactId.toHexString(),
@@ -157,7 +161,7 @@ describe('ContractArtifactService', () => {
         true,
         bytes
       )
-    ).resolves.toBe(savedArtifact)
+    ).resolves.toEqual(savedArtifact)
     expect(uploadMock).toHaveBeenCalledTimes(1)
 
     contract.artifactRef = {
@@ -187,6 +191,9 @@ describe('ContractArtifactService', () => {
       })
     )
 
+    expect(artifactRepository.findOne).toHaveBeenCalledWith({
+      where: { _id: artifactId, kind: 'canonical' },
+    })
     savedArtifact.revision = 3
     await expect(service.resolveCanonicalArtifact(contract)).rejects.toThrow(
       'CONTRACT_ARTIFACT_SUPERSEDED'
@@ -311,7 +318,7 @@ describe('ContractArtifactService', () => {
       gridFsFileId: new ObjectId(),
       rendererVersion: 'uploaded-amendment-pdf-v1',
       sourceSchemaVersion: 2,
-    } as unknown as ContractArtifact
+    } as unknown as ContractDocument
     const amendmentRepository = {
       findOne: jest.fn().mockResolvedValue(amendment),
       save: jest.fn().mockResolvedValue(amendment),

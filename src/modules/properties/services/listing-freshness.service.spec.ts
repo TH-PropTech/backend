@@ -3,13 +3,28 @@ import { ObjectId } from 'mongodb'
 import type { Repository } from 'typeorm'
 import { ListingFreshnessService } from './listing-freshness.service'
 import type { Apartment } from '../schemas/apartment.schema'
-import type { ListingReviewCase } from '../schemas/listing-review-case.schema'
+import type { ReviewCase } from '../schemas/review-case.schema'
 
 type RepositoryMock<T> = {
   create: jest.Mock<T, [Partial<T>]>
   find: jest.Mock<Promise<T[]>, [unknown?]>
   findOne: jest.Mock<Promise<T | null>, [unknown?]>
   save: jest.Mock<Promise<T>, [T]>
+}
+
+/** Khớp `where` đơn giản như Mongo: mọi khóa phải bằng nhau (ObjectId so theo equals). */
+function matchesWhere(
+  row: object,
+  where: Record<string, unknown> = {}
+): boolean {
+  const record = row as Record<string, unknown>
+  return Object.entries(where).every(([key, expected]) => {
+    const actual = record[key]
+    if (expected instanceof ObjectId && actual instanceof ObjectId) {
+      return actual.equals(expected)
+    }
+    return actual === expected
+  })
 }
 
 function createApartment(overrides: Partial<Apartment> = {}): Apartment {
@@ -52,11 +67,10 @@ function createApartment(overrides: Partial<Apartment> = {}): Apartment {
   }
 }
 
-function createReviewCase(
-  overrides: Partial<ListingReviewCase> = {}
-): ListingReviewCase {
+function createReviewCase(overrides: Partial<ReviewCase> = {}): ReviewCase {
   return {
     _id: new ObjectId(),
+    kind: 'listing',
     apartmentId: new ObjectId().toString(),
     type: 'duplicate_photo',
     confidence: 1,
@@ -71,9 +85,30 @@ function createReviewCase(
   }
 }
 
+/** Bản ghi của hàng đợi safety nằm chung collection review_cases (kind khác). */
+function createSafetyRow(overrides: Partial<ReviewCase> = {}): ReviewCase {
+  return {
+    _id: new ObjectId(),
+    kind: 'safety',
+    reporterId: 'tenant-1',
+    reporterRole: 'tenant',
+    targetType: 'listing',
+    targetId: new ObjectId().toString(),
+    category: 'spam',
+    description: 'Tin spam',
+    evidenceUrls: [],
+    riskLevel: 'low',
+    status: 'pending',
+    isTargetHidden: false,
+    createdAt: new Date('2026-09-01T00:00:00.000Z'),
+    updatedAt: new Date('2026-09-01T00:00:00.000Z'),
+    ...overrides,
+  }
+}
+
 describe('ListingFreshnessService', () => {
   let apartmentRepository: RepositoryMock<Apartment>
-  let reviewCaseRepository: RepositoryMock<ListingReviewCase>
+  let reviewCaseRepository: RepositoryMock<ReviewCase>
   let service: ListingFreshnessService
 
   beforeEach(() => {
@@ -86,16 +121,16 @@ describe('ListingFreshnessService', () => {
       ),
     }
     reviewCaseRepository = {
-      create: jest.fn(value => value as ListingReviewCase),
-      find: jest.fn<Promise<ListingReviewCase[]>, [unknown?]>(),
-      findOne: jest.fn<Promise<ListingReviewCase | null>, [unknown?]>(),
-      save: jest.fn<Promise<ListingReviewCase>, [ListingReviewCase]>(value =>
+      create: jest.fn(value => value as ReviewCase),
+      find: jest.fn<Promise<ReviewCase[]>, [unknown?]>(),
+      findOne: jest.fn<Promise<ReviewCase | null>, [unknown?]>(),
+      save: jest.fn<Promise<ReviewCase>, [ReviewCase]>(value =>
         Promise.resolve(value)
       ),
     }
     service = new ListingFreshnessService(
       apartmentRepository as unknown as Repository<Apartment>,
-      reviewCaseRepository as unknown as Repository<ListingReviewCase>
+      reviewCaseRepository as unknown as Repository<ReviewCase>
     )
   })
 
@@ -182,6 +217,22 @@ describe('ListingFreshnessService', () => {
         status: 'pending',
       })
     )
+    // hình trả về giữ như cũ: không lộ kind
+    expect(result[0]).not.toHaveProperty('kind')
+    expect(reviewCaseRepository.create).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'listing' })
+    )
+    // chống trùng luôn lọc theo kind
+    const [dedupQuery] = reviewCaseRepository.findOne.mock.calls[0] as [
+      { where: Record<string, unknown> },
+    ]
+    expect(dedupQuery.where).toEqual({
+      kind: 'listing',
+      apartmentId: target._id.toString(),
+      relatedApartmentId: candidate._id.toString(),
+      type: 'duplicate_photo',
+      status: 'pending',
+    })
     expect(apartmentRepository.save).not.toHaveBeenCalled()
   })
 
@@ -204,7 +255,16 @@ describe('ListingFreshnessService', () => {
 
     const result = await service.detectDuplicates(target._id.toString())
 
-    expect(result).toContain(existingCase)
+    expect(result).toEqual([
+      expect.objectContaining({
+        _id: existingCase._id,
+        apartmentId: existingCase.apartmentId,
+        relatedApartmentId: existingCase.relatedApartmentId,
+        type: existingCase.type,
+        status: 'pending',
+      }),
+    ])
+    expect(result[0]).not.toHaveProperty('kind')
     expect(reviewCaseRepository.save).not.toHaveBeenCalled()
   })
 
@@ -219,9 +279,27 @@ describe('ListingFreshnessService', () => {
       'confirmed'
     )
 
+    const [reviewQuery] = reviewCaseRepository.findOne.mock.calls[0] as [
+      { where: Record<string, unknown> },
+    ]
+    expect(reviewQuery.where).toEqual({
+      _id: reviewCase._id,
+      kind: 'listing',
+    })
     expect(result.status).toBe('confirmed')
     expect(result.reviewedBy).toBe('staff-1')
     expect(result.reviewedAt).toEqual(new Date('2026-08-11T00:00:00.000Z'))
+    expect(result).not.toHaveProperty('kind')
+  })
+
+  it('rejects a second review of an already processed case', async () => {
+    const reviewCase = createReviewCase({ status: 'dismissed' })
+    reviewCaseRepository.findOne.mockResolvedValue(reviewCase)
+
+    await expect(
+      service.reviewCase(reviewCase._id.toString(), 'staff-1', 'confirmed')
+    ).rejects.toThrow('Review case đã được xử lý')
+    expect(reviewCaseRepository.save).not.toHaveBeenCalled()
   })
 
   it('paginates the staff review queue', async () => {
@@ -234,6 +312,71 @@ describe('ListingFreshnessService', () => {
     expect(result.items).toHaveLength(5)
     expect(result.total).toBe(12)
     expect(result.totalPages).toBe(3)
+    expect(reviewCaseRepository.find).toHaveBeenCalledWith({
+      where: { kind: 'listing' },
+      order: { createdAt: 'DESC' },
+    })
+  })
+
+  it('keeps safety reports out of the listing queue when both share the collection', async () => {
+    const rows: ReviewCase[] = [
+      createReviewCase({ type: 'stale', status: 'pending' }),
+      createSafetyRow({ status: 'pending' }),
+      createReviewCase({ type: 'duplicate_photo', status: 'confirmed' }),
+      createSafetyRow({ status: 'resolved' }),
+    ]
+    reviewCaseRepository.find.mockImplementation(options => {
+      const where = (options as { where?: Record<string, unknown> } | undefined)
+        ?.where
+      return Promise.resolve(rows.filter(row => matchesWhere(row, where)))
+    })
+
+    const all = await service.getReviewQueue({ page: 1, limit: 20 })
+    expect(all.total).toBe(2)
+    for (const item of all.items) expect(item).not.toHaveProperty('kind')
+    expect(all.items.map(item => item.type).sort()).toEqual([
+      'duplicate_photo',
+      'stale',
+    ])
+
+    const pendingStale = await service.getReviewQueue({
+      page: 1,
+      limit: 20,
+      type: 'stale',
+      status: 'pending',
+    })
+    expect(pendingStale.total).toBe(1)
+  })
+
+  it('does not treat a safety row as an existing listing case during detection', async () => {
+    const target = createApartment()
+    const candidate = createApartment({
+      _id: new ObjectId(),
+      description: 'Nội dung khác',
+      location: '20 Lê Lợi',
+      address: '20 Lê Lợi, Quận 3',
+      street: 'Lê Lợi',
+      gallery: [...target.gallery],
+    })
+    const safetyRow = createSafetyRow({
+      apartmentId: target._id.toString(),
+      relatedApartmentId: candidate._id.toString(),
+      type: 'duplicate_photo',
+      status: 'pending',
+    })
+    const rows: ReviewCase[] = [safetyRow]
+    apartmentRepository.findOne.mockResolvedValue(target)
+    apartmentRepository.find.mockResolvedValue([target, candidate])
+    reviewCaseRepository.findOne.mockImplementation(options => {
+      const where = (options as { where?: Record<string, unknown> }).where
+      return Promise.resolve(rows.find(row => matchesWhere(row, where)) ?? null)
+    })
+
+    const result = await service.detectDuplicates(target._id.toString())
+
+    expect(result).toHaveLength(1)
+    expect(result[0]?._id).not.toEqual(safetyRow._id)
+    expect(reviewCaseRepository.create).toHaveBeenCalledTimes(1)
   })
 
   it('returns not found for an invalid apartment identifier', async () => {

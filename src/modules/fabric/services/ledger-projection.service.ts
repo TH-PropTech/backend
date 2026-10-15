@@ -3,7 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 import { ObjectId } from 'mongodb'
 import { Contract } from '../../contracts/schemas/contract.schema'
-import { ContractAmendment } from '../../contracts/schemas/contract-amendment.schema'
+import { ContractAmendmentStore } from '../../contracts/services/contract-amendment.store'
 import { DepositAgreement } from '../../contracts/schemas/deposit-agreement.schema'
 import { Payment } from '../../payments/schemas/payment.schema'
 import { LedgerOutbox } from '../schemas/ledger-outbox.schema'
@@ -38,8 +38,7 @@ export class LedgerProjectionService {
     @InjectRepository(Payment)
     private readonly paymentRepository: Repository<Payment>,
     @Optional()
-    @InjectRepository(ContractAmendment)
-    private readonly amendmentRepository?: Repository<ContractAmendment>,
+    private readonly amendmentRepository?: ContractAmendmentStore,
     @Optional()
     @InjectRepository(FabricGovernanceSnapshot)
     private readonly governanceRepository?: Repository<FabricGovernanceSnapshot>,

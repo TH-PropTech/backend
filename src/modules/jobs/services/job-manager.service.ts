@@ -11,8 +11,11 @@ import { InjectRepository } from '@nestjs/typeorm'
 import { CronJob } from 'cron'
 import { Repository } from 'typeorm'
 import { BaseJob, type JobRunOutcome } from '../base-job'
-import { JobConfig } from '../schemas/job-config.schema'
-import { JobRunHistory } from '../schemas/job-run-history.schema'
+import { SystemConfig } from '../../properties/schemas/system-config.schema'
+import type { JobRunHistory } from '../schemas/job-run-history.schema'
+import { ActivityLog } from '../../activity-log/schemas/activity-log.schema'
+import { KindScopedActivityLogRepository } from '../../activity-log/utils/kind-scoped-activity-log.repository'
+import { toJobRunHistory } from '../../activity-log/utils/legacy-log.mapper'
 
 /** Token chứa danh sách mọi job được đăng ký (khai báo trong JobsModule). */
 export const JOBS = Symbol('JOBS')
@@ -33,14 +36,21 @@ export class JobManagerService implements OnModuleInit, OnModuleDestroy {
   private readonly jobs = new Map<string, BaseJob>()
   private readonly enabled = new Map<string, boolean>()
 
+  private readonly historyRepository: KindScopedActivityLogRepository<JobRunHistory>
+
   constructor(
     @Inject(JOBS) jobs: BaseJob[],
     private readonly schedulerRegistry: SchedulerRegistry,
-    @InjectRepository(JobConfig)
-    private readonly configRepository: Repository<JobConfig>,
-    @InjectRepository(JobRunHistory)
-    private readonly historyRepository: Repository<JobRunHistory>
+    @InjectRepository(SystemConfig)
+    private readonly configRepository: Repository<SystemConfig>,
+    @InjectRepository(ActivityLog)
+    activityLogRepository: Repository<ActivityLog>
   ) {
+    this.historyRepository = new KindScopedActivityLogRepository(
+      activityLogRepository,
+      'job-run',
+      toJobRunHistory
+    )
     for (const job of jobs) {
       if (this.jobs.has(job.name)) {
         throw new Error(`Duplicate job name: ${job.name}`)
@@ -153,7 +163,7 @@ export class JobManagerService implements OnModuleInit, OnModuleDestroy {
   private async loadEnabled(name: string): Promise<boolean> {
     try {
       const config = await this.configRepository.findOne({
-        where: { jobName: name },
+        where: { scope: 'job', key: name },
       })
       if (!config) {
         await this.saveEnabled(name, true)
@@ -171,14 +181,14 @@ export class JobManagerService implements OnModuleInit, OnModuleDestroy {
   private async saveEnabled(name: string, enabled: boolean): Promise<void> {
     try {
       const existing = await this.configRepository.findOne({
-        where: { jobName: name },
+        where: { scope: 'job', key: name },
       })
       if (existing) {
         existing.enabled = enabled
         await this.configRepository.save(existing)
       } else {
         await this.configRepository.save(
-          this.configRepository.create({ jobName: name, enabled })
+          this.configRepository.create({ scope: 'job', key: name, enabled })
         )
       }
     } catch (err) {

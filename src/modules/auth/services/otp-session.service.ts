@@ -3,16 +3,24 @@ import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 import * as crypto from 'crypto'
 import { ObjectId } from 'mongodb'
-import { TransactionOtp } from '../schemas/transaction-otp.schema'
+import { Otp, TransactionOtpRecord } from '../schemas/otp.schema'
+import { KindScopedOtpRepository } from '../utils/otp.repository'
 import { OtpActionType } from '../enums/otp-action-type.enum'
 import { OtpSessionStatus } from '../enums/otp-session-status.enum'
 
 @Injectable()
 export class OtpSessionService {
+  private readonly transactionOtpRepository: KindScopedOtpRepository<TransactionOtpRecord>
+
   constructor(
-    @InjectRepository(TransactionOtp)
-    private readonly transactionOtpRepository: Repository<TransactionOtp>
-  ) {}
+    @InjectRepository(Otp)
+    otpRepository: Repository<Otp>
+  ) {
+    this.transactionOtpRepository = new KindScopedOtpRepository(
+      otpRepository,
+      'transaction'
+    )
+  }
 
   /**
    * Tạo phiên OTP mới
@@ -28,7 +36,7 @@ export class OtpSessionService {
       contentLockedHash?: string
       contextHash?: string
     }
-  ): Promise<TransactionOtp> {
+  ): Promise<TransactionOtpRecord> {
     const challenge = crypto.randomBytes(16).toString('hex')
     const expiredAt = new Date(Date.now() + 5 * 60 * 1000) // Hết hạn trong 5 phút
 
@@ -55,7 +63,7 @@ export class OtpSessionService {
   /**
    * Tìm phiên OTP
    */
-  async getSession(sessionId: string): Promise<TransactionOtp | null> {
+  async getSession(sessionId: string): Promise<TransactionOtpRecord | null> {
     try {
       const parsedId = new ObjectId(sessionId)
       return this.transactionOtpRepository.findOne({
@@ -69,7 +77,7 @@ export class OtpSessionService {
   /**
    * Cập nhật số lần thử sai của phiên OTP
    */
-  async incrementAttempts(session: TransactionOtp): Promise<void> {
+  async incrementAttempts(session: TransactionOtpRecord): Promise<void> {
     session.attempts += 1
     if (session.attempts >= session.maxAttempts) {
       session.status = OtpSessionStatus.EXPIRED
@@ -80,7 +88,7 @@ export class OtpSessionService {
   /**
    * Đánh dấu phiên OTP đã xác thực thành công
    */
-  async markAsVerified(session: TransactionOtp): Promise<void> {
+  async markAsVerified(session: TransactionOtpRecord): Promise<void> {
     session.status = OtpSessionStatus.VERIFIED
     await this.transactionOtpRepository.save(session)
   }

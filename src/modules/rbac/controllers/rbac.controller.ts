@@ -18,8 +18,7 @@ import {
   SetPermissionsDto,
   UpdateRoleDto,
 } from '../dto/rbac.dto'
-import type { Permission } from '../schemas/permission.schema'
-import type { Role } from '../schemas/role.schema'
+import type { RolePermissionView, RoleView } from '../schemas/role.schema'
 import { RbacService } from '../services/rbac.service'
 
 /** Quản trị role/permission lưu DB — chỉ Admin. */
@@ -39,19 +38,19 @@ export class RbacController {
 
   @Get('roles')
   @ApiOperation({ summary: 'Danh sách role' })
-  listRoles(): Promise<Role[]> {
+  listRoles(): Promise<RoleView[]> {
     return this.rbacService.listRoles()
   }
 
   @Get('roles/:id')
   @ApiOperation({ summary: 'Chi tiết role' })
-  getRole(@Param('id') id: string): Promise<Role> {
+  getRole(@Param('id') id: string): Promise<RoleView> {
     return this.rbacService.getRole(id)
   }
 
   @Post('roles')
   @ApiOperation({ summary: 'Tạo role mới' })
-  createRole(@Body() dto: CreateRoleDto): Promise<Role> {
+  createRole(@Body() dto: CreateRoleDto): Promise<RoleView> {
     return this.rbacService.createRole(dto)
   }
 
@@ -60,7 +59,7 @@ export class RbacController {
   updateRole(
     @Param('id') id: string,
     @Body() dto: UpdateRoleDto
-  ): Promise<Role> {
+  ): Promise<RoleView> {
     return this.rbacService.updateRole(id, dto)
   }
 
@@ -72,7 +71,7 @@ export class RbacController {
 
   @Get('roles/:id/permissions')
   @ApiOperation({ summary: 'Quyền của một role' })
-  getPermissions(@Param('id') id: string): Promise<Permission[]> {
+  getPermissions(@Param('id') id: string): Promise<RolePermissionView[]> {
     return this.rbacService.getPermissions(id)
   }
 
@@ -81,7 +80,7 @@ export class RbacController {
   setPermissions(
     @Param('id') id: string,
     @Body() dto: SetPermissionsDto
-  ): Promise<Permission[]> {
+  ): Promise<RolePermissionView[]> {
     return this.rbacService.setPermissions(id, dto.permissions)
   }
 }

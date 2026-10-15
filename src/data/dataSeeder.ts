@@ -31,11 +31,15 @@ import * as bcrypt from 'bcryptjs'
 import * as fs from 'fs'
 import { User, UserStatus } from '../modules/users/schemas/user.schema'
 import { Apartment } from '../modules/properties/schemas/apartment.schema'
-import { KycRecord } from '../modules/users/schemas/kyc-record.schema'
+import type { KycInfo } from '../modules/users/schemas/user.schema'
+import { ObjectId } from 'mongodb'
 import { Contract } from '../modules/contracts/schemas/contract.schema'
 import { Project } from '../modules/properties/schemas/project.schema'
 import { Building } from '../modules/properties/schemas/building.schema'
-import { RecommendationHistory } from '../modules/recommendations/schemas/recommendation-history.schema'
+import type { RecommendationHistory } from '../modules/properties/recommendations/schemas/recommendation-history.schema'
+import { ActivityLog } from '../modules/activity-log/schemas/activity-log.schema'
+import { KindScopedActivityLogRepository } from '../modules/activity-log/utils/kind-scoped-activity-log.repository'
+import { toRecommendationHistory } from '../modules/activity-log/utils/legacy-log.mapper'
 import { Logger } from '@nestjs/common'
 
 async function bootstrap(): Promise<void> {
@@ -49,9 +53,6 @@ async function bootstrap(): Promise<void> {
     const apartmentRepository = app.get<Repository<Apartment>>(
       getRepositoryToken(Apartment)
     )
-    const kycRecordRepository = app.get<Repository<KycRecord>>(
-      getRepositoryToken(KycRecord)
-    )
     const contractRepository = app.get<Repository<Contract>>(
       getRepositoryToken(Contract)
     )
@@ -61,8 +62,10 @@ async function bootstrap(): Promise<void> {
     const buildingRepository = app.get<Repository<Building>>(
       getRepositoryToken(Building)
     )
-    const historyRepository = app.get<Repository<RecommendationHistory>>(
-      getRepositoryToken(RecommendationHistory)
+    const historyRepository = new KindScopedActivityLogRepository(
+      app.get<Repository<ActivityLog>>(getRepositoryToken(ActivityLog)),
+      'recommendation',
+      toRecommendationHistory
     )
 
     // 1. Dọn dẹp dữ liệu mẫu cũ (Tùy chọn)
@@ -175,41 +178,60 @@ async function bootstrap(): Promise<void> {
 
     // 3. Tạo KYC Record mẫu
     logger.log('Đang tạo hồ sơ KYC mẫu...')
-    await kycRecordRepository.delete({
-      userId: {
-        $in: [savedLandlord._id.toHexString(), savedTenant._id.toHexString()],
-      } as any,
+    // Hồ sơ KYC mẫu nhúng trong users.kyc (G-KYC): ghi đè hồ sơ cũ của hai user
+    const sampleKyc = (
+      fields: Partial<KycInfo> &
+        Pick<
+          KycInfo,
+          | 'idCardNumber'
+          | 'fullName'
+          | 'dateOfBirth'
+          | 'placeOfResidence'
+          | 'frontCardUrl'
+          | 'backCardUrl'
+          | 'selfieUrl'
+        >
+    ): KycInfo => {
+      const now = new Date()
+      return {
+        recordId: new ObjectId(),
+        status: 'verified',
+        rejectedReason: null,
+        verifiedAt: now,
+        createdAt: now,
+        updatedAt: now,
+        ...fields,
+      }
+    }
+    await userRepository.update(savedLandlord._id, {
+      kyc: sampleKyc({
+        idCardNumber: '012093005678',
+        fullName: 'LÊ HOÀNG MINH',
+        dateOfBirth: '20/12/1985',
+        placeOfResidence: '100 Nguyễn Hữu Cảnh, Phường 22, Bình Thạnh, TP.HCM',
+        frontCardUrl:
+          'https://images.unsplash.com/photo-1554774853-719586f82d77',
+        backCardUrl:
+          'https://images.unsplash.com/photo-1554774853-719586f82d77',
+        selfieUrl:
+          'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e',
+      }),
     })
 
-    const landlordKyc = kycRecordRepository.create({
-      userId: savedLandlord._id.toHexString(),
-      idCardNumber: '012093005678',
-      fullName: 'LÊ HOÀNG MINH',
-      dateOfBirth: '20/12/1985',
-      placeOfResidence: '100 Nguyễn Hữu Cảnh, Phường 22, Bình Thạnh, TP.HCM',
-      status: 'verified',
-      frontCardUrl: 'https://images.unsplash.com/photo-1554774853-719586f82d77',
-      backCardUrl: 'https://images.unsplash.com/photo-1554774853-719586f82d77',
-      selfieUrl: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e',
-      verifiedAt: new Date(),
-      rejectedReason: null,
+    await userRepository.update(savedTenant._id, {
+      kyc: sampleKyc({
+        idCardNumber: '038096001234',
+        fullName: 'NGUYỄN VĂN A',
+        dateOfBirth: '15/08/1996',
+        placeOfResidence: '720A Điện Biên Phủ, Phường 22, Bình Thạnh, TP.HCM',
+        frontCardUrl:
+          'https://images.unsplash.com/photo-1554774853-719586f82d77',
+        backCardUrl:
+          'https://images.unsplash.com/photo-1554774853-719586f82d77',
+        selfieUrl:
+          'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde',
+      }),
     })
-    await kycRecordRepository.save(landlordKyc)
-
-    const tenantKyc = kycRecordRepository.create({
-      userId: savedTenant._id.toHexString(),
-      idCardNumber: '038096001234',
-      fullName: 'NGUYỄN VĂN A',
-      dateOfBirth: '15/08/1996',
-      placeOfResidence: '720A Điện Biên Phủ, Phường 22, Bình Thạnh, TP.HCM',
-      status: 'verified',
-      frontCardUrl: 'https://images.unsplash.com/photo-1554774853-719586f82d77',
-      backCardUrl: 'https://images.unsplash.com/photo-1554774853-719586f82d77',
-      selfieUrl: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde',
-      verifiedAt: new Date(),
-      rejectedReason: null,
-    })
-    await kycRecordRepository.save(tenantKyc)
     logger.log('Tạo hồ sơ KYC mẫu thành công!')
 
     // 4. Tạo các dự án (Projects) mẫu
@@ -928,8 +950,7 @@ async function bootstrap(): Promise<void> {
         const batchSize = 1000
         for (let i = 0; i < recordsToInsert.length; i += batchSize) {
           const batch = recordsToInsert.slice(i, i + batchSize)
-          const entities = historyRepository.create(batch)
-          await historyRepository.save(entities)
+          await historyRepository.saveAll(batch)
         }
         logger.log(
           `Nạp thành công ${recordsToInsert.length} bản ghi lịch sử thuê nhà vào MongoDB!`

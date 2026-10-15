@@ -97,12 +97,11 @@ export class PinService {
     }
 
     // 3. Lưu hashed PIN vào MongoDB
-    user.pin = {
-      hash,
-      setAt: new Date(),
-    }
-
-    await this.userRepository.save(user)
+    // Ghi từng trường (không save toàn document) để không ghi đè smartOTP.devices
+    await this.userRepository.update(user._id, {
+      pin: { hash, setAt: new Date() },
+      updatedAt: new Date(),
+    })
     this.logger.log(`[PIN] User ${userId} setup PIN successfully`)
   }
 
@@ -176,12 +175,11 @@ export class PinService {
     }
 
     // 4. Save
-    user.pin = {
-      hash,
-      setAt: new Date(),
-    }
-
-    await this.userRepository.save(user)
+    // Ghi từng trường (không save toàn document) để không ghi đè smartOTP.devices
+    await this.userRepository.update(user._id, {
+      pin: { hash, setAt: new Date() },
+      updatedAt: new Date(),
+    })
     this.logger.log(`[PIN] User ${userId} changed PIN successfully`)
   }
 
@@ -224,12 +222,11 @@ export class PinService {
     }
 
     // 3. Save
-    user.pin = {
-      hash,
-      setAt: new Date(),
-    }
-
-    await this.userRepository.save(user)
+    // Ghi từng trường (không save toàn document) để không ghi đè smartOTP.devices
+    await this.userRepository.update(user._id, {
+      pin: { hash, setAt: new Date() },
+      updatedAt: new Date(),
+    })
     this.logger.log(
       `[PIN] User ${userId} reset PIN successfully (forgot PIN flow)`
     )

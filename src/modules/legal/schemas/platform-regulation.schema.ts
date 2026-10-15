@@ -14,7 +14,14 @@ import type {
   RegulationSeverity,
 } from '../utils/legal-sources.types'
 
-/** Quy định nền tảng do Admin quản trị, có thể liên kết tới một nguồn pháp lý */
+/**
+ * @deprecated G-LEG: dữ liệu nay nằm ở `LegalDocument{kind:'regulation'}`
+ * (collection `legal_documents`). Giữ lại làm kiểu hình và để migration 020 /
+ * rollback tham chiếu collection cũ `platform_regulations`; entity này KHÔNG còn
+ * nằm trong `TypeOrmModule.forFeature`.
+ *
+ * Quy định nền tảng do Admin quản trị, có thể liên kết tới một nguồn pháp lý
+ */
 @Entity('platform_regulations')
 @Index(['code'], { unique: true })
 export class PlatformRegulation {

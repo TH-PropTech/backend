@@ -8,8 +8,16 @@ import {
 } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import type { Repository } from 'typeorm'
-import { LegalSource } from '../schemas/legal-source.schema'
-import { PlatformRegulation } from '../schemas/platform-regulation.schema'
+import {
+  LegalDocument,
+  type RegulationLegalDocument,
+  type SourceLegalDocument,
+} from '../schemas/legal-document.schema'
+import {
+  toLegacyLegalSource,
+  toSourceDocumentFields,
+} from '../schemas/legal-document.mapper'
+import { LegalDocumentScope } from '../utils/legal-document.scope'
 import {
   buildSeedLegalSources,
   buildSeedPlatformRegulations,
@@ -28,13 +36,24 @@ const BY_ORDER = { order: 'ASC' } as const
 @Injectable()
 export class LegalSourcesService implements OnApplicationBootstrap {
   private readonly logger = new Logger(LegalSourcesService.name)
+  /** Nguồn pháp lý (kind='source'), facade lọc và gắn kind (G-LEG). */
+  private readonly sourceRepository: LegalDocumentScope<SourceLegalDocument>
+  /** Quy định nền tảng (kind='regulation'), facade lọc và gắn kind (G-LEG). */
+  private readonly regulationRepository: LegalDocumentScope<RegulationLegalDocument>
 
   constructor(
-    @InjectRepository(LegalSource)
-    private readonly sourceRepository: Repository<LegalSource>,
-    @InjectRepository(PlatformRegulation)
-    private readonly regulationRepository: Repository<PlatformRegulation>
-  ) {}
+    @InjectRepository(LegalDocument)
+    documents: Repository<LegalDocument>
+  ) {
+    this.sourceRepository = new LegalDocumentScope<SourceLegalDocument>(
+      documents,
+      'source'
+    )
+    this.regulationRepository = new LegalDocumentScope<RegulationLegalDocument>(
+      documents,
+      'regulation'
+    )
+  }
 
   async onApplicationBootstrap(): Promise<void> {
     await this.seedIfEmpty()
@@ -45,7 +64,9 @@ export class LegalSourcesService implements OnApplicationBootstrap {
     if ((await this.sourceRepository.count()) === 0) {
       const sources = buildSeedLegalSources()
       await this.sourceRepository.save(
-        sources.map(s => this.sourceRepository.create(s))
+        sources.map(s =>
+          this.sourceRepository.create(toSourceDocumentFields(s))
+        )
       )
       this.logger.log(`Seeded ${sources.length} legal sources`)
     }
@@ -64,7 +85,7 @@ export class LegalSourcesService implements OnApplicationBootstrap {
         ? { isActive: true, showInContractPanel: true }
         : { isActive: true }
     const sources = await this.sourceRepository.find({ where, order: BY_ORDER })
-    return sources.map(toPublicLegalSourceResponse)
+    return sources.map(s => toPublicLegalSourceResponse(toLegacyLegalSource(s)))
   }
 
   async findPublicByKey(key: string): Promise<PublicLegalSourceResponse> {
@@ -72,16 +93,16 @@ export class LegalSourcesService implements OnApplicationBootstrap {
       where: { key, isActive: true },
     })
     if (!source) throw new NotFoundException('Không tìm thấy nguồn pháp lý')
-    return toPublicLegalSourceResponse(source)
+    return toPublicLegalSourceResponse(toLegacyLegalSource(source))
   }
 
   async findAllAdmin(): Promise<LegalSourceResponse[]> {
     const sources = await this.sourceRepository.find({ order: BY_ORDER })
-    return sources.map(toLegalSourceResponse)
+    return sources.map(s => toLegalSourceResponse(toLegacyLegalSource(s)))
   }
 
   async exists(key: string): Promise<boolean> {
-    return (await this.sourceRepository.count({ where: { key } })) > 0
+    return (await this.sourceRepository.count({ where: { key } })) > 0 // facade LegalDocumentScope đã gọi countBy đúng
   }
 
   async create(
@@ -98,14 +119,14 @@ export class LegalSourcesService implements OnApplicationBootstrap {
     const nextOrder = (await this.sourceRepository.count()) + 1
     const saved = await this.sourceRepository.save(
       this.sourceRepository.create({
-        ...dto,
+        ...toSourceDocumentFields(dto),
         showInContractPanel: dto.showInContractPanel ?? false,
         isActive: dto.isActive ?? true,
         order: nextOrder,
         updatedBy: actorId,
       })
     )
-    return toLegalSourceResponse(saved)
+    return toLegalSourceResponse(toLegacyLegalSource(saved))
   }
 
   async update(
@@ -115,9 +136,13 @@ export class LegalSourcesService implements OnApplicationBootstrap {
   ): Promise<LegalSourceResponse> {
     const existing = await this.findEntity(key)
     const saved = await this.sourceRepository.save(
-      this.sourceRepository.create({ ...existing, ...dto, updatedBy: actorId })
+      this.sourceRepository.create({
+        ...existing,
+        ...toSourceDocumentFields(dto),
+        updatedBy: actorId,
+      })
     )
-    return toLegalSourceResponse(saved)
+    return toLegalSourceResponse(toLegacyLegalSource(saved))
   }
 
   async remove(key: string): Promise<void> {
@@ -164,7 +189,7 @@ export class LegalSourcesService implements OnApplicationBootstrap {
     return this.findAllAdmin()
   }
 
-  private async findEntity(key: string): Promise<LegalSource> {
+  private async findEntity(key: string): Promise<SourceLegalDocument> {
     const source = await this.sourceRepository.findOne({ where: { key } })
     if (!source) throw new NotFoundException('Không tìm thấy nguồn pháp lý')
     return source

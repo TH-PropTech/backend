@@ -1,9 +1,10 @@
+import { vi } from 'vitest'
 import { ServiceUnavailableException } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { v2 as cloudinary } from 'cloudinary'
 import { ApartmentMediaUploadService } from './apartment-media-upload.service'
 
-jest.mock('cloudinary', () => ({
+vi.mock('cloudinary', () => ({
   v2: {
     config: jest.fn(),
     uploader: { upload_stream: jest.fn() },

@@ -7,6 +7,10 @@ import {
   UpdateDateColumn,
 } from 'typeorm'
 
+/**
+ * @deprecated G-CMT: gộp vào `CommunityEntry` (collection `community_entries`, `kind`).
+ * Giữ lại để migration 009 đọc `community_posts` và làm kiểu phản hồi API.
+ */
 @Entity('community_posts')
 export class CommunityPost {
   @ObjectIdColumn()

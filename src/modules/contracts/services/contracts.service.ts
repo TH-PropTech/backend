@@ -14,8 +14,12 @@ import { Repository } from 'typeorm'
 import { ObjectId } from 'mongodb'
 import * as crypto from 'crypto'
 import { Contract, ContractSignature } from '../schemas/contract.schema'
-import { ContractAmendment } from '../schemas/contract-amendment.schema'
-import { SigningGrant } from '../schemas/signing-grant.schema'
+import { ContractAmendmentStore } from './contract-amendment.store'
+import { SmartCaSigningSession } from '../schemas/smartca-signing-session.schema'
+import {
+  KindScopedSmartCaSigningRepository,
+  type SigningGrantDoc,
+} from '../utils/signing-session.repository'
 import { DepositAgreement } from '../schemas/deposit-agreement.schema'
 import {
   consumeSigningGrant,
@@ -175,12 +179,14 @@ function describeIdIssuance(kyc: {
 @Injectable()
 export class ContractsService {
   private readonly logger = new Logger(ContractsService.name)
+  /** Vé ký (kind='grant') trên bảng SmartCa hợp nhất; xem migration 028. */
+  private readonly signingGrantRepository: KindScopedSmartCaSigningRepository<SigningGrantDoc>
 
   constructor(
     @InjectRepository(Contract)
     private readonly contractRepository: Repository<Contract>,
-    @InjectRepository(SigningGrant)
-    private readonly signingGrantRepository: Repository<SigningGrant>,
+    @InjectRepository(SmartCaSigningSession)
+    signingGrantStore: Repository<SmartCaSigningSession>,
     @InjectRepository(DepositAgreement)
     private readonly depositAgreementRepository: Repository<DepositAgreement>,
     @InjectRepository(Apartment)
@@ -199,8 +205,7 @@ export class ContractsService {
     @Optional()
     private readonly templateGovernanceService?: ContractTemplateGovernanceService,
     @Optional()
-    @InjectRepository(ContractAmendment)
-    private readonly amendmentRepository?: Repository<ContractAmendment>,
+    private readonly amendmentRepository?: ContractAmendmentStore,
     @Optional()
     private readonly flowNotificationService?: FlowNotificationService,
     @Optional()
@@ -214,7 +219,13 @@ export class ContractsService {
     @Optional()
     @InjectRepository(User)
     private readonly userRepository?: Repository<User>
-  ) {}
+  ) {
+    this.signingGrantRepository =
+      new KindScopedSmartCaSigningRepository<SigningGrantDoc>(
+        signingGrantStore,
+        'grant'
+      )
+  }
 
   private async recordTransactionEvent(input: {
     contractId: string

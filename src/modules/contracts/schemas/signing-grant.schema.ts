@@ -7,6 +7,10 @@ import {
 } from 'typeorm'
 import type { SigningRole } from '../utils/signing-grant.util'
 
+/**
+ * @deprecated G-GRT: grant đã gộp vào `SmartCaSigningSession` (`kind='grant'`,
+ * migration 028). Không còn trong `forFeature`; giữ file để tham chiếu lịch sử.
+ */
 @Entity('signing_grants')
 export class SigningGrant {
   @ObjectIdColumn()

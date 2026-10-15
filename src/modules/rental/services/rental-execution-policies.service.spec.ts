@@ -1,8 +1,10 @@
+import type { ActivityLog } from '../../activity-log/schemas/activity-log.schema'
 import { ConflictException } from '@nestjs/common'
 import type { Repository } from 'typeorm'
 import { RentalExecutionPoliciesService } from './rental-execution-policies.service'
-import { RentalExecutionPolicy } from '../schemas/rental-execution-policy.schema'
-import { RentalFlowAudit } from '../schemas/rental-flow-audit.schema'
+import type { RentalFlowConfig } from '../schemas/rental-flow-config.schema'
+import { ConfigAuditService } from '../../activity-log/services/config-audit.service'
+import type { ConfigAudit } from '../../activity-log/schemas/config-audit.schema'
 import {
   DEFAULT_RENTAL_EXECUTION_POLICY_INPUTS,
   computeRentalExecutionPolicyHash,
@@ -13,17 +15,17 @@ describe('RentalExecutionPoliciesService', () => {
   const policyRepo = {
     find: jest.fn(),
     findOne: jest.fn(),
-    create: jest.fn((value: RentalExecutionPolicy) => value),
-    save: jest.fn((value: RentalExecutionPolicy) => Promise.resolve(value)),
+    create: jest.fn((value: RentalFlowConfig) => value),
+    save: jest.fn((value: RentalFlowConfig) => Promise.resolve(value)),
   }
   const auditRepo = {
-    create: jest.fn((value: RentalFlowAudit) => value),
-    save: jest.fn((value: RentalFlowAudit) => Promise.resolve(value)),
+    create: jest.fn((value: ConfigAudit) => value),
+    save: jest.fn((value: ConfigAudit) => Promise.resolve(value)),
   }
 
   const service = new RentalExecutionPoliciesService(
-    policyRepo as unknown as Repository<RentalExecutionPolicy>,
-    auditRepo as unknown as Repository<RentalFlowAudit>
+    policyRepo as unknown as Repository<RentalFlowConfig>,
+    new ConfigAuditService(auditRepo as unknown as Repository<ActivityLog>)
   )
 
   beforeEach(() => {
@@ -38,14 +40,16 @@ describe('RentalExecutionPoliciesService', () => {
     expect(policyRepo.save).toHaveBeenCalledTimes(2)
     expect(policyRepo.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        policyId: 'deposit-first',
+        kind: 'policy',
+        key: 'deposit-first',
         strategy: 'DEPOSIT_FIRST',
         status: 'published',
       })
     )
     expect(policyRepo.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        policyId: 'sign-first',
+        kind: 'policy',
+        key: 'sign-first',
         strategy: 'SIGN_FIRST',
         status: 'published',
       })
@@ -54,7 +58,8 @@ describe('RentalExecutionPoliciesService', () => {
 
   it('rejects a stale draft revision before publishing', async () => {
     policyRepo.findOne.mockResolvedValue({
-      policyId: 'sign-first',
+      kind: 'policy',
+      key: 'sign-first',
       status: 'draft',
       draftRevision: 2,
     })
@@ -69,9 +74,38 @@ describe('RentalExecutionPoliciesService', () => {
     expect(policyRepo.save).not.toHaveBeenCalled()
   })
 
+  it('appends an audit row when a new draft is saved', async () => {
+    policyRepo.findOne.mockResolvedValue(null)
+
+    await service.saveDraft(
+      'sign-first',
+      {
+        strategy: 'SIGN_FIRST',
+        name: 'n',
+        description: 'd',
+        disclosure: 'x',
+        expectedRevision: 0,
+      } as never,
+      'admin-3'
+    )
+
+    expect(auditRepo.save).toHaveBeenCalledWith({
+      kind: 'config-audit',
+      scope: 'rental-flow',
+      key: 'sign-first',
+      action: 'EXECUTION_POLICY_DRAFT_SAVED',
+      actorId: 'admin-3',
+      targetType: 'execution-policy',
+      version: null,
+      details: { draftRevision: 1 },
+    })
+    expect(auditRepo.save).toHaveBeenCalledTimes(1)
+  })
+
   it('rejects a reference whose hash or strategy does not match published data', async () => {
     policyRepo.findOne.mockResolvedValue({
-      policyId: 'deposit-first',
+      kind: 'policy',
+      key: 'deposit-first',
       version: 1,
       status: 'published',
       strategy: 'DEPOSIT_FIRST',
@@ -91,7 +125,8 @@ describe('RentalExecutionPoliciesService', () => {
   it('normalizes an omitted package policy to deposit-first v1', async () => {
     const ref = getDefaultRentalExecutionPolicyRef()
     policyRepo.findOne.mockResolvedValue({
-      policyId: ref.policyId,
+      kind: 'policy',
+      key: ref.policyId,
       version: ref.version,
       status: 'published',
       strategy: ref.strategy,
@@ -109,7 +144,8 @@ describe('RentalExecutionPoliciesService', () => {
   it('computes a published hash from the immutable draft content', async () => {
     const input = DEFAULT_RENTAL_EXECUTION_POLICY_INPUTS[1]
     const draft = {
-      policyId: input.policyId,
+      kind: 'policy',
+      key: input.policyId,
       status: 'draft' as const,
       strategy: input.strategy,
       name: input.name,

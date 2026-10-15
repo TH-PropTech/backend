@@ -27,12 +27,13 @@ import {
   type ContractTemplateDraftInput,
   type ContractTemplateLegalReleaseInput,
 } from './contract-template-governance.service'
-import type {
-  ContractTemplateAddendum,
-  ContractTemplate,
-} from './contract-template.schema'
-import type { ContractTemplateAudit } from './contract-template-audit.schema'
+import type { ContractTemplateAddendum } from '../schemas/contract-template.schema'
+import type { ContractTemplateAuditView } from './contract-template-audit.mapper'
 import type { ContractTemplateValidation } from './contract-template-governance.service'
+import {
+  toContractTemplateResponse,
+  type ContractTemplateResponse,
+} from './contract-template-response.mapper'
 
 export class SaveContractTemplateDraftDto {
   @IsIn(['PRIVATE_CIVIL_APARTMENT_LEASE', 'REAL_ESTATE_BUSINESS_STANDARD'])
@@ -122,8 +123,10 @@ export class ContractTemplatesController {
   @Roles('admin', 'staff')
   getPublished(
     @Param('templateKey') templateKey: string
-  ): Promise<ContractTemplate> {
-    return this.governanceService.getPublishedVersion(templateKey)
+  ): Promise<ContractTemplateResponse> {
+    return this.governanceService
+      .getPublishedVersion(templateKey)
+      .then(toContractTemplateResponse)
   }
 
   @Get(':templateKey/versions/:version')
@@ -131,15 +134,17 @@ export class ContractTemplatesController {
   getPublishedVersion(
     @Param('templateKey') templateKey: string,
     @Param('version', ParseIntPipe) version: number
-  ): Promise<ContractTemplate> {
-    return this.governanceService.getPublishedVersion(templateKey, version)
+  ): Promise<ContractTemplateResponse> {
+    return this.governanceService
+      .getPublishedVersion(templateKey, version)
+      .then(toContractTemplateResponse)
   }
 
   @Get(':templateKey/audits')
   @Roles('admin', 'staff')
   getAuditHistory(
     @Param('templateKey') templateKey: string
-  ): Promise<ContractTemplateAudit[]> {
+  ): Promise<ContractTemplateAuditView[]> {
     return this.governanceService.getAuditHistory(templateKey)
   }
 
@@ -149,20 +154,22 @@ export class ContractTemplatesController {
     @Param('templateKey') templateKey: string,
     @Body() dto: SaveContractTemplateDraftDto,
     @CurrentUser('id') actorId: string
-  ): Promise<ContractTemplate> {
-    return this.governanceService.saveDraft(
-      templateKey,
-      {
-        legalProfile: dto.legalProfile,
-        clauses: dto.clauses ?? [],
-        allowedVariables: dto.allowedVariables,
-        addenda: dto.addenda,
-        citationIds: dto.citationIds,
-        expectedRevision: dto.expectedRevision,
-      },
-      actorId,
-      dto.expectedRevision
-    )
+  ): Promise<ContractTemplateResponse> {
+    return this.governanceService
+      .saveDraft(
+        templateKey,
+        {
+          legalProfile: dto.legalProfile,
+          clauses: dto.clauses ?? [],
+          allowedVariables: dto.allowedVariables,
+          addenda: dto.addenda,
+          citationIds: dto.citationIds,
+          expectedRevision: dto.expectedRevision,
+        },
+        actorId,
+        dto.expectedRevision
+      )
+      .then(toContractTemplateResponse)
   }
 
   @Post('admin/:templateKey/validate')
@@ -179,8 +186,10 @@ export class ContractTemplatesController {
     @Param('templateKey') templateKey: string,
     @Body() dto: PublishContractTemplateDto,
     @CurrentUser('id') actorId: string
-  ): Promise<ContractTemplate> {
-    return this.governanceService.publishDraft(templateKey, actorId, dto.reason)
+  ): Promise<ContractTemplateResponse> {
+    return this.governanceService
+      .publishDraft(templateKey, actorId, dto.reason)
+      .then(toContractTemplateResponse)
   }
 
   @Post('legal-release/:templateKey')
@@ -189,12 +198,9 @@ export class ContractTemplatesController {
     @Param('templateKey') templateKey: string,
     @Body() dto: PublishLegalReleaseDto,
     @CurrentUser('id') actorId: string
-  ): Promise<ContractTemplate> {
-    return this.governanceService.publishLegalRelease(
-      templateKey,
-      dto,
-      actorId,
-      dto.reviewReference
-    )
+  ): Promise<ContractTemplateResponse> {
+    return this.governanceService
+      .publishLegalRelease(templateKey, dto, actorId, dto.reviewReference)
+      .then(toContractTemplateResponse)
   }
 }

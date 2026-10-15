@@ -8,7 +8,7 @@ import { LedgerOutboxService } from './ledger-outbox.service'
 import { FabricGovernanceService } from './fabric-governance.service'
 import { LedgerAuditQueryService } from './ledger-audit-query.service'
 import { LedgerReconciliationService } from './ledger-reconciliation.service'
-import { BlockchainLog } from '../schemas/blockchain-log.schema'
+import { ActivityLog } from '../../activity-log/schemas/activity-log.schema'
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard'
 import { RolesGuard } from '../../../common/guards/roles.guard'
 
@@ -22,7 +22,7 @@ describe('OpenAPI contract for governance routes (PROP-399 task 4.4)', () => {
         { provide: FabricGovernanceService, useValue: {} },
         { provide: LedgerAuditQueryService, useValue: {} },
         { provide: LedgerReconciliationService, useValue: {} },
-        { provide: getRepositoryToken(BlockchainLog), useValue: {} },
+        { provide: getRepositoryToken(ActivityLog), useValue: {} },
         Reflector,
       ],
     })

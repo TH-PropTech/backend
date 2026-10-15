@@ -1,12 +1,12 @@
 import { Module } from '@nestjs/common'
 import { TypeOrmModule } from '@nestjs/typeorm'
-import { BlockchainLog } from './schemas/blockchain-log.schema'
+import { ActivityLog } from '../activity-log/schemas/activity-log.schema'
 import { LedgerOutbox } from './schemas/ledger-outbox.schema'
 import { FabricGovernanceSnapshot } from './schemas/fabric-governance-snapshot.schema'
 import { LedgerReconciliationRun } from './schemas/ledger-reconciliation-run.schema'
 import { LedgerReconciliationFinding } from './schemas/ledger-reconciliation-finding.schema'
 import { Contract } from '../contracts/schemas/contract.schema'
-import { ContractAmendment } from '../contracts/schemas/contract-amendment.schema'
+import { ContractAmendmentStore } from '../contracts/services/contract-amendment.store'
 import { DepositAgreement } from '../contracts/schemas/deposit-agreement.schema'
 import { Payment } from '../payments/schemas/payment.schema'
 import { MoveInSettlement } from '../rental/schemas/move-in-settlement.schema'
@@ -24,10 +24,9 @@ import { LegalModule } from '../legal/legal.module'
 @Module({
   imports: [
     TypeOrmModule.forFeature([
-      BlockchainLog,
+      ActivityLog,
       LedgerOutbox,
       Contract,
-      ContractAmendment,
       DepositAgreement,
       Payment,
       MoveInSettlement,
@@ -50,6 +49,7 @@ import { LegalModule } from '../legal/legal.module'
     LedgerEvidenceQueryService,
     FabricGovernanceService,
     LedgerReconciliationService,
+    ContractAmendmentStore,
   ],
   exports: [
     FabricService,

@@ -16,8 +16,8 @@ import {
 } from '../../rental/services/contract-impact-analyzer.service'
 import { ActivateFlowAssignmentDto } from '../../rental/dto/activate-flow-assignment.dto'
 import { PreviewFlowAssignmentDto } from '../../rental/dto/preview-flow-assignment.dto'
-import type { RentalFlowAssignment } from '../../rental/schemas/rental-flow-assignment.schema'
-import type { RentalFlowAudit } from '../../rental/schemas/rental-flow-audit.schema'
+import type { RentalFlowAssignmentView } from '../../rental/utils/rental-flow-config.mapper'
+import type { RentalFlowAuditView } from '../../rental/utils/rental-flow-audit.mapper'
 
 @ApiTags('rental-flow-assignments')
 @ApiBearerAuth()
@@ -35,7 +35,7 @@ export class RentalFlowAssignmentsController {
   @ApiOperation({
     summary: 'Admin/Staff xem danh sách gán cấu hình (assignments)',
   })
-  async listAssignments(): Promise<RentalFlowAssignment[]> {
+  async listAssignments(): Promise<RentalFlowAssignmentView[]> {
     return this.assignmentsService.listAssignments()
   }
 
@@ -65,7 +65,7 @@ export class RentalFlowAssignmentsController {
   async activateAssignment(
     @Body() dto: ActivateFlowAssignmentDto,
     @CurrentUser() user: UserPayload
-  ): Promise<RentalFlowAssignment> {
+  ): Promise<RentalFlowAssignmentView> {
     const actorId = user._id || user.email || 'system'
     return this.assignmentsService.activateAssignment(dto, actorId)
   }
@@ -75,7 +75,7 @@ export class RentalFlowAssignmentsController {
   @ApiOperation({
     summary: 'Admin/Staff truy vấn nhật ký kiểm toán thay đổi cấu hình',
   })
-  async getAudits(): Promise<RentalFlowAudit[]> {
+  async getAudits(): Promise<RentalFlowAuditView[]> {
     return this.assignmentsService.getAudits()
   }
 }

@@ -7,6 +7,10 @@ import {
   Index,
 } from 'typeorm'
 
+/**
+ * @deprecated G-LOG: gộp vào `ActivityLog` (collection `activity_logs`, `kind: 'blockchain'`).
+ * Giữ lại để đọc collection cũ và migration 023. Không đăng ký forFeature, không ghi mới.
+ */
 @Entity('blockchain_logs')
 @Index(['contractId', 'createdAt'])
 @Index(['eventType', 'createdAt'])

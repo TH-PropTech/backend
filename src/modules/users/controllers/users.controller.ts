@@ -18,6 +18,16 @@ import { Roles } from '../../../common/decorators/roles.decorator'
 import { UpdateUserPermissionsDto } from '../dto/update-user-permissions.dto'
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger'
 
+/** Bỏ `smartOTP.devices` (publicKey/deviceId nhạy cảm) khỏi phản hồi; giữ phần còn lại. */
+function withoutSmartOtpDevices(
+  smartOTP: User['smartOTP']
+): Record<string, unknown> {
+  if (!smartOTP) return {}
+  const { devices, ...rest } = smartOTP
+  void devices
+  return { smartOTP: rest }
+}
+
 @ApiTags('users')
 @ApiBearerAuth()
 @Controller('users')
@@ -46,11 +56,12 @@ export class UsersController {
     }
 
     // Loại bỏ các trường nhạy cảm trước khi trả về
-    const { passwordHash, pin, twoFactor, ...safeUser } = user
+    const { passwordHash, pin, twoFactor, smartOTP, ...safeUser } = user
 
     // Trả về pin status thay vì pin hash
     const result: Record<string, unknown> = {
       ...safeUser,
+      ...withoutSmartOtpDevices(smartOTP),
       hasPin: !!pin?.hash,
       pinSetAt: pin?.setAt || null,
       twoFactorEnabled: twoFactor?.enabled || false,
@@ -69,10 +80,11 @@ export class UsersController {
   async getAll(): Promise<Partial<User>[]> {
     const users = await this.userRepository.find()
     return users.map(user => {
-      const { passwordHash, pin, twoFactor, ...safeUser } = user
+      const { passwordHash, pin, twoFactor, smartOTP, ...safeUser } = user
       void passwordHash
       return {
         ...safeUser,
+        ...withoutSmartOtpDevices(smartOTP),
         hasPin: !!pin?.hash,
         twoFactorEnabled: twoFactor?.enabled || false,
       }
@@ -117,8 +129,11 @@ export class UsersController {
       permissions: dto.permissions,
     }
 
-    user.metadata = updatedMetadata
-    await this.userRepository.save(user)
+    // Ghi từng trường (không save toàn document) để không ghi đè smartOTP.devices
+    await this.userRepository.update(user._id, {
+      metadata: updatedMetadata as never,
+      updatedAt: new Date(),
+    })
 
     return {
       success: true,
@@ -154,8 +169,11 @@ export class UsersController {
       throw new NotFoundException('Người dùng không tồn tại')
     }
 
-    user.role = role
-    await this.userRepository.save(user)
+    // Ghi từng trường (không save toàn document) để không ghi đè smartOTP.devices
+    await this.userRepository.update(user._id, {
+      role,
+      updatedAt: new Date(),
+    })
 
     return { success: true, userId: id, role }
   }

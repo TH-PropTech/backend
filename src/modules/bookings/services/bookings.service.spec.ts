@@ -25,7 +25,7 @@ describe('BookingsService', () => {
     ),
     find: jest.fn(),
     findOne: jest.fn(),
-    count: jest.fn(),
+    countBy: jest.fn(),
   }
   const bookingRepo = mockBookingRepository
 
@@ -468,7 +468,7 @@ describe('BookingsService', () => {
       ]
 
       mockBookingRepository.find.mockResolvedValue(pageItems)
-      mockBookingRepository.count
+      mockBookingRepository.countBy
         .mockResolvedValueOnce(55) // total for query
         .mockResolvedValueOnce(10) // pending
         .mockResolvedValueOnce(25) // confirmed
@@ -530,7 +530,7 @@ describe('BookingsService', () => {
 
     it('xử lý khi không có bản ghi nào trả về', async () => {
       mockBookingRepository.find.mockResolvedValue([])
-      mockBookingRepository.count
+      mockBookingRepository.countBy
         .mockResolvedValueOnce(0)
         .mockResolvedValueOnce(0)
         .mockResolvedValueOnce(0)

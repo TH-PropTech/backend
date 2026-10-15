@@ -6,10 +6,10 @@ import {
   ForbiddenException,
 } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
-import { Repository, FindManyOptions, FindOptionsWhere } from 'typeorm'
+import { MongoRepository } from 'typeorm'
 import { ObjectId } from 'mongodb'
 import { KycRecord } from '../schemas/kyc-record.schema'
-import { User } from '../schemas/user.schema'
+import { User, type KycInfo } from '../schemas/user.schema'
 import { SubmitKycDto } from '../dto/submit-kyc.dto'
 import { BiometricGrantService } from '../../ekyc/services/biometric-grant.service'
 import {
@@ -18,8 +18,20 @@ import {
   KycMediaService,
 } from './kyc-media.service'
 
+/**
+ * Hồ sơ KYC nhúng trong `users.kyc` (G-KYC, migration 026). `KycRecord` vẫn là
+ * hình JSON trả về; `_id` là `kyc.recordId` (id công khai `/kyc/:id`).
+ * Mọi đọc đi qua truy vấn thô (aggregate) vì `User` bỏ `kyc` khi nạp entity.
+ */
+export interface KycListItem extends Omit<
+  KycRecord,
+  'frontCardUrl' | 'backCardUrl' | 'selfieUrl'
+> {
+  user?: { email: string; phone: string } | null
+}
+
 export interface KycListResult {
-  items: (KycRecord & { user?: { email: string; phone: string } | null })[]
+  items: KycListItem[]
   total: number
   page: number
   limit: number
@@ -54,22 +66,45 @@ export interface KycSubmissionFiles {
 
 export type KycMediaField = 'front-card' | 'back-card' | 'selfie'
 
+/** Hàng `users` thô có `kyc` (đã lọc `kyc` là object). */
+type UserKycRow = {
+  _id: ObjectId
+  email?: string
+  phone?: string
+  kycStatus?: string
+  kyc: KycInfo
+}
+
+const IMAGE_FIELDS = ['frontCardUrl', 'backCardUrl', 'selfieUrl'] as const
+
+const OPTIONAL_DTO_FIELDS = [
+  'fullName',
+  'dateOfBirth',
+  'gender',
+  'nationality',
+  'placeOfOrigin',
+  'placeOfResidence',
+  'issueDate',
+  'placeOfIssue',
+] as const
+
+const STATUSES = ['pending', 'verified', 'rejected'] as const
+
 @Injectable()
 export class KycService {
   private readonly logger = new Logger(KycService.name)
 
   constructor(
-    @InjectRepository(KycRecord)
-    private readonly kycRepository: Repository<KycRecord>,
     @InjectRepository(User)
-    private readonly userRepository: Repository<User>,
+    private readonly userRepository: MongoRepository<User>,
     private readonly kycMediaService: KycMediaService,
     private readonly biometricGrantService: BiometricGrantService
   ) {}
 
   /**
-   * Lấy danh sách hồ sơ KYC — Staff giám sát.
-   * Hỗ trợ lọc theo status, tìm kiếm theo tên/số CCCD, phân trang.
+   * Lấy danh sách hồ sơ KYC — Staff giám sát (hàng đợi duyệt).
+   * Quét `users` có `kyc`, lọc status/tìm kiếm, sắp xếp theo `kyc.createdAt`, phân trang
+   * ngay trong truy vấn. Không trả URL ảnh (lấy qua `/kyc/:id/media/:field`).
    */
   async findAll(query: {
     status?: string | undefined
@@ -81,95 +116,84 @@ export class KycService {
       `Fetching KYC records: status=${query.status ?? 'all'}, search=${query.search ?? ''}, page=${query.page}`
     )
 
-    const where: Record<string, unknown> = {}
+    const match: Record<string, unknown> = { kyc: { $type: 'object' } }
     if (query.status) {
-      where.status = query.status
+      match['kyc.status'] = query.status
     }
-
-    const options: FindManyOptions<KycRecord> = {
-      order: { createdAt: 'DESC' },
-    }
-    if (Object.keys(where).length > 0) {
-      options.where = where
-    }
-
-    // Lấy tất cả rồi filter bằng code (TypeORM MongoDB driver hạn chế regex)
-    const allRecords = await this.kycRepository.find(options)
-
-    // Lấy thông tin user tương ứng
-    const userIds = allRecords.map(r => r.userId).filter(Boolean)
-    const users =
-      userIds.length > 0
-        ? await this.userRepository.find({
-            where: {
-              _id: { $in: userIds.map(id => new ObjectId(id)) },
-            } as unknown as FindOptionsWhere<User>,
-          })
-        : []
-    const userMap = new Map(users.map(u => [u._id.toString(), u]))
-
-    const enrichedRecords = allRecords.map(record => ({
-      ...record,
-      user: userMap.has(record.userId)
-        ? {
-            email: userMap.get(record.userId)!.email,
-            phone: userMap.get(record.userId)!.phone,
-          }
-        : null,
-    }))
-
-    // Tìm kiếm theo tên hoặc số CCCD
-    let filtered = enrichedRecords
     if (query.search) {
-      const searchStr = query.search
-      const searchLower = searchStr.toLowerCase()
-      filtered = enrichedRecords.filter(
-        record =>
-          (record.fullName &&
-            record.fullName.toLowerCase().includes(searchLower)) ||
-          record.idCardNumber.includes(searchStr)
-      )
+      // Khớp chuỗi (không regex người dùng): tên không phân biệt hoa thường, CCCD đúng như cũ
+      const pattern = escapeRegex(query.search)
+      match.$or = [
+        { 'kyc.fullName': { $regex: pattern, $options: 'i' } },
+        { 'kyc.idCardNumber': { $regex: pattern } },
+      ]
     }
 
-    const total = filtered.length
-    const totalPages = Math.ceil(total / query.limit)
-    const skip = (query.page - 1) * query.limit
-    const items = filtered.slice(skip, skip + query.limit)
+    const page = query.page
+    const limit = query.limit
+    if (!(limit >= 1)) {
+      const counted = (await this.userRepository
+        .aggregate([{ $match: match }, { $count: 'n' }])
+        .toArray()) as Array<{ n: number }>
+      const total = counted[0]?.n ?? 0
+      return {
+        items: [],
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      }
+    }
 
+    const skip = Math.max(0, (page - 1) * limit)
+    const [facet] = (await this.userRepository
+      .aggregate([
+        { $match: match },
+        { $sort: { 'kyc.createdAt': -1, _id: -1 } },
+        {
+          $facet: {
+            items: [
+              { $skip: skip },
+              { $limit: limit },
+              { $project: { email: 1, phone: 1, kyc: 1 } },
+            ],
+            total: [{ $count: 'n' }],
+          },
+        },
+      ])
+      .toArray()) as Array<{
+      items: UserKycRow[]
+      total: Array<{ n: number }>
+    }>
+
+    const total = facet?.total[0]?.n ?? 0
     return {
-      items,
+      items: (facet?.items ?? []).map(toListItem),
       total,
-      page: query.page,
-      limit: query.limit,
-      totalPages,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
     }
   }
 
   /**
-   * Lấy chi tiết 1 hồ sơ KYC theo ID.
+   * Lấy chi tiết 1 hồ sơ KYC theo ID công khai (`kyc.recordId`).
    */
   async findOne(
     id: string
   ): Promise<KycRecord & { user?: { email: string; phone: string } | null }> {
     this.logger.log(`Fetching KYC record: ${id}`)
     try {
-      const record = await this.kycRepository.findOne({
-        where: { _id: new ObjectId(id) },
-      })
-      if (!record) {
+      const row = await this.findKycRowByRecordId(new ObjectId(id))
+      if (!row) {
         throw new NotFoundException(`Không tìm thấy hồ sơ KYC: ${id}`)
       }
-      const user = await this.userRepository.findOne({
-        where: { _id: new ObjectId(record.userId) },
-      })
       return {
-        ...record,
-        user: user
-          ? {
-              email: user.email,
-              phone: user.phone,
-            }
-          : null,
+        ...toKycRecord(row),
+        user: {
+          email: row.email as string,
+          phone: row.phone as string,
+        },
       }
     } catch (error) {
       if (error instanceof NotFoundException) throw error
@@ -181,9 +205,9 @@ export class KycService {
    * Lấy hồ sơ KYC của một người dùng theo userId.
    */
   async findByUserId(userId: string): Promise<KycRecord | null> {
-    return this.kycRepository.findOne({
-      where: { userId },
-    })
+    if (!ObjectId.isValid(userId)) return null
+    const row = await this.findKycRowByUser(new ObjectId(userId))
+    return row ? toKycRecord(row) : null
   }
 
   async findMine(userId: string): Promise<KycSelfResult | null> {
@@ -200,31 +224,29 @@ export class KycService {
     if (!ObjectId.isValid(id)) {
       throw new BadRequestException('ID KYC không hợp lệ')
     }
-    const record = await this.kycRepository.findOne({
-      where: { _id: new ObjectId(id) },
-    })
-    if (!record) {
+    const row = await this.findKycRowByRecordId(new ObjectId(id))
+    if (!row) {
       throw new NotFoundException(`Không tìm thấy hồ sơ KYC: ${id}`)
     }
 
     const canReview = requesterRoles.some(role =>
       ['staff', 'admin'].includes(role)
     )
-    if (record.userId !== requesterId && !canReview) {
+    if (row._id.toHexString() !== requesterId && !canReview) {
       throw new ForbiddenException('Bạn không có quyền xem ảnh KYC này')
     }
 
     const references: Record<KycMediaField, string> = {
-      'front-card': record.frontCardUrl,
-      'back-card': record.backCardUrl,
-      selfie: record.selfieUrl,
+      'front-card': row.kyc.frontCardUrl,
+      'back-card': row.kyc.backCardUrl,
+      selfie: row.kyc.selfieUrl,
     }
     return this.kycMediaService.read(references[field])
   }
 
   /**
    * Staff duyệt hoặc từ chối hồ sơ KYC.
-   * Đồng thời cập nhật kycStatus trên User entity.
+   * Một `updateOne` nguyên tử cập nhật `kyc.*` và `User.kycStatus` cùng lúc.
    */
   async review(
     id: string,
@@ -240,34 +262,50 @@ export class KycService {
       )
     }
 
-    const record = await this.kycRepository.findOne({
-      where: { _id: new ObjectId(id) },
-    })
-    if (!record) {
+    const recordId = new ObjectId(id)
+    const row = await this.findKycRowByRecordId(recordId)
+    if (!row) {
       throw new NotFoundException(`Không tìm thấy hồ sơ KYC: ${id}`)
     }
 
-    if (record.status !== 'pending') {
+    if (row.kyc.status !== 'pending') {
       throw new BadRequestException(
-        `Hồ sơ KYC đã ở trạng thái "${record.status}", không thể duyệt lại`
+        `Hồ sơ KYC đã ở trạng thái "${row.kyc.status}", không thể duyệt lại`
       )
     }
 
-    // Cập nhật KYC record
-    record.status = status
-    record.reviewedBy = reviewedBy
-    if (status === 'verified') {
-      record.verifiedAt = new Date()
-      record.rejectedReason = null
-    } else {
-      record.rejectedReason = rejectedReason ?? null
-      record.verifiedAt = null
+    const now = new Date()
+    const verified = status === 'verified'
+    const reason = verified ? null : (rejectedReason ?? null)
+    const result = await this.userRepository.updateOne(
+      {
+        _id: row._id,
+        'kyc.recordId': recordId,
+        'kyc.status': 'pending',
+      },
+      {
+        $set: {
+          'kyc.status': status,
+          'kyc.reviewedBy': reviewedBy,
+          'kyc.verifiedAt': verified ? now : null,
+          'kyc.rejectedReason': reason,
+          'kyc.updatedAt': now,
+          kycStatus: status,
+          kycRejectReason: reason,
+          updatedAt: now,
+        },
+      }
+    )
+    if (!isMatched(result)) {
+      // Không còn `pending` (staff khác đã duyệt/từ chối đồng thời) hoặc hồ sơ đã mất.
+      const current = await this.findKycRowByRecordId(recordId)
+      if (!current) {
+        throw new NotFoundException(`Không tìm thấy hồ sơ KYC: ${id}`)
+      }
+      throw new BadRequestException(
+        `Hồ sơ KYC đã ở trạng thái "${current.kyc.status}", không thể duyệt lại`
+      )
     }
-
-    await this.kycRepository.save(record)
-
-    // Đồng bộ kycStatus trên User
-    await this.syncUserKycStatus(record.userId, status, rejectedReason)
 
     return this.findOne(id)
   }
@@ -278,47 +316,27 @@ export class KycService {
   async countByStatus(): Promise<
     Record<'pending' | 'verified' | 'rejected' | 'total', number>
   > {
-    const all = await this.kycRepository.find()
-    const counts = { pending: 0, verified: 0, rejected: 0, total: all.length }
+    const rows = (await this.userRepository
+      .aggregate([
+        { $match: { kyc: { $type: 'object' } } },
+        { $group: { _id: '$kyc.status', count: { $sum: 1 } } },
+      ])
+      .toArray()) as Array<{ _id: unknown; count: number }>
 
-    for (const record of all) {
-      if (record.status in counts) {
-        counts[record.status]++
+    const counts = { pending: 0, verified: 0, rejected: 0, total: 0 }
+    for (const row of rows) {
+      counts.total += row.count
+      const status = String(row._id)
+      if ((STATUSES as readonly string[]).includes(status)) {
+        counts[status as (typeof STATUSES)[number]] += row.count
       }
     }
-
     return counts
   }
 
   /**
-   * Đồng bộ kycStatus trên User entity khi KYC record được duyệt/từ chối.
-   */
-  private async syncUserKycStatus(
-    userId: string,
-    status: 'verified' | 'rejected',
-    rejectReason?: string
-  ): Promise<void> {
-    try {
-      const user = await this.userRepository.findOne({
-        where: { _id: new ObjectId(userId) },
-      })
-      if (user) {
-        user.kycStatus = status
-        user.kycRejectReason =
-          status === 'rejected' ? (rejectReason ?? null) : null
-        await this.userRepository.save(user)
-        this.logger.log(`Synced user ${userId} kycStatus to "${status}"`)
-      }
-    } catch (err) {
-      this.logger.warn(
-        `Failed to sync user KYC status: ${err instanceof Error ? err.message : String(err)}`
-      )
-    }
-  }
-
-  /**
    * Người dùng nộp hồ sơ KYC.
-   * Tạo mới hoặc cập nhật hồ sơ cũ nếu đã có.
+   * Tạo mới hoặc cập nhật hồ sơ cũ nếu đã có (giữ `recordId`, `createdAt`).
    */
   async submitKyc(
     userId: string,
@@ -329,8 +347,9 @@ export class KycService {
     const biometric = this.biometricGrantService.consume(userId)
 
     // 1. Kiểm tra user có tồn tại không
+    const oid = new ObjectId(userId)
     const user = await this.userRepository.findOne({
-      where: { _id: new ObjectId(userId) },
+      where: { _id: oid },
     })
     if (!user) {
       throw new NotFoundException('Không tìm thấy tài khoản người dùng')
@@ -340,35 +359,35 @@ export class KycService {
       throw new BadRequestException('Tài khoản đã được xác minh KYC thành công')
     }
 
-    // 2. Tìm KYC record cũ của user này
-    let record = await this.kycRepository.findOne({
-      where: { userId },
-    })
-
-    if (!record) {
-      record = new KycRecord()
-      record.userId = userId
-    }
-
-    const previousReferences = record
-      ? [record.frontCardUrl, record.backCardUrl, record.selfieUrl]
+    // 2. Hồ sơ cũ (nếu có) nhúng trong user
+    const existing = await this.findKycRowByUser(oid)
+    const recordId = existing?.kyc.recordId ?? new ObjectId()
+    const previousReferences = existing
+      ? [
+          existing.kyc.frontCardUrl,
+          existing.kyc.backCardUrl,
+          existing.kyc.selfieUrl,
+        ]
       : []
 
     const storedReferences: string[] = []
+    let frontCardUrl: string
+    let backCardUrl: string
+    let selfieUrl: string
     try {
-      record.frontCardUrl = await this.storeMedia(
+      frontCardUrl = await this.storeMedia(
         userId,
         'front-card',
         files.frontCard,
         storedReferences
       )
-      record.backCardUrl = await this.storeMedia(
+      backCardUrl = await this.storeMedia(
         userId,
         'back-card',
         files.backCard,
         storedReferences
       )
-      record.selfieUrl = await this.storeMedia(
+      selfieUrl = await this.storeMedia(
         userId,
         'selfie',
         files.selfie,
@@ -379,44 +398,58 @@ export class KycService {
       throw error
     }
 
-    // 3. Cập nhật các trường từ DTO và kết quả do server xác minh
-    record.idCardNumber = dto.idCardNumber
-
-    if (dto.fullName !== undefined) record.fullName = dto.fullName
-    if (dto.dateOfBirth !== undefined) record.dateOfBirth = dto.dateOfBirth
-    if (dto.gender !== undefined) record.gender = dto.gender
-    if (dto.nationality !== undefined) record.nationality = dto.nationality
-    if (dto.placeOfOrigin !== undefined)
-      record.placeOfOrigin = dto.placeOfOrigin
-    if (dto.placeOfResidence !== undefined)
-      record.placeOfResidence = dto.placeOfResidence
-    if (dto.issueDate !== undefined) record.issueDate = dto.issueDate
-    if (dto.placeOfIssue !== undefined) record.placeOfIssue = dto.placeOfIssue
-    record.faceMatchResult = biometric.faceMatch
-    record.livenessResult = biometric.liveness
-    if (biometric.realConfidence === null) delete record.spoofScore
-    else record.spoofScore = biometric.realConfidence
-    delete record.ocrMatchRate
+    // 3. Trường của hồ sơ: giữ nguyên giá trị cũ cho trường DTO không gửi lên
+    const now = new Date()
+    const fields: Record<string, unknown> = {
+      idCardNumber: dto.idCardNumber,
+      frontCardUrl,
+      backCardUrl,
+      selfieUrl,
+    }
+    for (const key of OPTIONAL_DTO_FIELDS) {
+      if (dto[key] !== undefined) fields[key] = dto[key]
+    }
+    fields.faceMatchResult = biometric.faceMatch
+    fields.livenessResult = biometric.liveness
+    const unset: Record<string, ''> = { 'kyc.ocrMatchRate': '' }
+    if (biometric.realConfidence === null) {
+      unset['kyc.spoofScore'] = ''
+    } else if (biometric.realConfidence !== undefined) {
+      fields.spoofScore = biometric.realConfidence
+    }
 
     // Cập nhật trạng thái
-    record.status = 'pending'
-    record.reviewedBy = null
-    record.verifiedAt = null
-    record.rejectedReason = null
+    fields.status = 'pending'
+    fields.reviewedBy = null
+    fields.verifiedAt = null
+    fields.rejectedReason = null
+    fields.createdAt = existing?.kyc.createdAt ?? now
+    fields.updatedAt = now
 
-    // 4. Lưu KYC record
-    let savedRecord: KycRecord
+    // 4. Ghi hồ sơ và trạng thái KYC trên User bằng MỘT updateOne nguyên tử theo trường
+    const set: Record<string, unknown> = { 'kyc.recordId': recordId }
+    for (const [key, value] of Object.entries(fields)) {
+      if (value !== undefined) set[`kyc.${key}`] = value
+    }
+    set.kycStatus = 'pending'
+    set.kycRejectReason = null
+    set.updatedAt = now
+
     try {
-      savedRecord = await this.kycRepository.save(record)
+      const result = await this.userRepository.updateOne(
+        { _id: oid },
+        {
+          $set: set,
+          $unset: unset,
+        }
+      )
+      if (!isMatched(result)) {
+        throw new NotFoundException('Không tìm thấy tài khoản người dùng')
+      }
     } catch (error) {
       await this.cleanupMedia(storedReferences)
       throw error
     }
-
-    // 5. Cập nhật trạng thái trên User entity
-    user.kycStatus = 'pending'
-    user.kycRejectReason = null
-    await this.userRepository.save(user)
 
     await this.cleanupMedia(
       previousReferences.filter(reference =>
@@ -425,7 +458,35 @@ export class KycService {
     )
 
     this.logger.log(`KYC record submitted successfully for user: ${userId}`)
-    return savedRecord
+    return {
+      ...fields,
+      _id: recordId,
+      userId,
+    } as unknown as KycRecord
+  }
+
+  private async findKycRowByUser(oid: ObjectId): Promise<UserKycRow | null> {
+    return this.findKycRow({ _id: oid })
+  }
+
+  private async findKycRowByRecordId(
+    recordId: ObjectId
+  ): Promise<UserKycRow | null> {
+    return this.findKycRow({ 'kyc.recordId': recordId })
+  }
+
+  /** Đọc thô: TypeORM bỏ `kyc` khi nạp entity User (`@AfterLoad`). */
+  private async findKycRow(
+    match: Record<string, unknown>
+  ): Promise<UserKycRow | null> {
+    const rows = (await this.userRepository
+      .aggregate([
+        { $match: { ...match, kyc: { $type: 'object' } } },
+        { $project: { email: 1, phone: 1, kycStatus: 1, kyc: 1 } },
+        { $limit: 1 },
+      ])
+      .toArray()) as UserKycRow[]
+    return rows[0] ?? null
   }
 
   private async storeMedia(
@@ -446,6 +507,36 @@ export class KycService {
     if (results.some(result => result.status === 'rejected')) {
       this.logger.warn('Could not remove one or more private KYC media files')
     }
+  }
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function isMatched(result: unknown): boolean {
+  return ((result as { matchedCount?: number } | null)?.matchedCount ?? 0) > 0
+}
+
+/** Hình JSON `KycRecord` cũ từ hàng `users` (userId = id người dùng, _id = recordId). */
+function toKycRecord(row: UserKycRow): KycRecord {
+  const { recordId, ...fields } = row.kyc
+  return {
+    ...fields,
+    _id: recordId,
+    userId: row._id.toHexString(),
+  }
+}
+
+function toListItem(row: UserKycRow): KycListItem {
+  const record = toKycRecord(row) as unknown as Record<string, unknown>
+  for (const key of IMAGE_FIELDS) delete record[key]
+  return {
+    ...(record as Omit<
+      KycRecord,
+      'frontCardUrl' | 'backCardUrl' | 'selfieUrl'
+    >),
+    user: { email: row.email as string, phone: row.phone as string },
   }
 }
 

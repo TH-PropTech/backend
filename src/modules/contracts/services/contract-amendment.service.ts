@@ -8,8 +8,8 @@ import {
 } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { createHash } from 'node:crypto'
-import { ObjectId } from 'mongodb'
 import { Repository } from 'typeorm'
+import { ObjectId } from 'mongodb'
 import {
   Contract,
   type ContractCommercialDraft,
@@ -23,6 +23,7 @@ import { Payment } from '../../payments/schemas/payment.schema'
 import { PaymentsService } from '../../payments/services/payments.service'
 import { LedgerOutboxService } from '../../fabric/services/ledger-outbox.service'
 import { ContractArtifactService } from './contract-artifact.service'
+import { ContractAmendmentStore } from './contract-amendment.store'
 
 const AMENDABLE_FIELDS = new Set<keyof ContractCommercialDraft>([
   'monthlyRent',
@@ -47,8 +48,8 @@ type AmendmentActor = {
 @Injectable()
 export class ContractAmendmentService {
   constructor(
-    @InjectRepository(ContractAmendment)
-    private readonly amendmentRepository: Repository<ContractAmendment>,
+    // Phụ lục nhúng trong `Contract.amendments[]` (G-AMD), cùng dáng API repository cũ.
+    private readonly amendmentRepository: ContractAmendmentStore,
     @InjectRepository(Contract)
     private readonly contractRepository: Repository<Contract>,
     @InjectRepository(Payment)
@@ -141,6 +142,7 @@ export class ContractAmendmentService {
     return this.amendmentRepository.find({
       where: { contractId },
       order: { sequence: 'ASC' },
+      omitSnapshots: true,
     })
   }
 
@@ -405,6 +407,7 @@ export class ContractAmendmentService {
   async applyAllDueAmendments(now = new Date()): Promise<number> {
     const dueAmendments = await this.amendmentRepository.find({
       where: { status: 'effective' },
+      omitSnapshots: true,
     })
     const contractIds = new Set(
       dueAmendments

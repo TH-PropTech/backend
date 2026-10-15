@@ -6,6 +6,7 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   Index,
+  AfterLoad,
 } from 'typeorm'
 
 export enum UserStatus {
@@ -25,6 +26,23 @@ export interface PinInfo {
   setAt: Date
 }
 
+/**
+ * Thiết bị Smart OTP đã liên kết, nhúng trong `User.smartOTP.devices[]`
+ * (thay thế collection `device_bindings`). Khóa duy nhất trong mảng: `deviceId`.
+ * Chỉ được ghi bằng toán tử nguyên tử ($push có điều kiện / $set vị trí / $pull).
+ */
+export interface DeviceBindingInfo {
+  /** `_id` cũ của device_bindings (migration 007) hoặc id sinh khi bind mới. */
+  bindingId?: ObjectId
+  deviceId: string
+  deviceName: string
+  publicKey: string
+  /** Giá trị của enum DeviceStatus (PENDING | ACTIVE | BLOCKED). */
+  status: string
+  createdAt: Date
+  updatedAt: Date
+}
+
 export interface SmartOtpInfo {
   enabled: boolean
   maxDevices: number
@@ -32,6 +50,7 @@ export interface SmartOtpInfo {
   lockedUntil?: Date
   otpAttempts: number
   lastOtpAt?: Date
+  devices?: DeviceBindingInfo[]
 }
 
 export interface TwoFactorInfo {
@@ -57,6 +76,40 @@ export interface DigitalSignatureInfo {
   validTo?: Date // Ngày hết hạn hiệu lực
   provider?: string // Nhà cung cấp dịch vụ (ví dụ: VNPT SmartCA)
   status: 'active' | 'suspended' | 'expired' | 'revoked'
+}
+
+/**
+ * Hồ sơ KYC nhúng trong `User.kyc` (thay thế collection `kyc_records`, migration 026).
+ * `recordId` là `_id` cũ của `kyc_records`: id công khai của `GET/PATCH /kyc/:id` và
+ * `/kyc/:id/media/:field` vẫn tra được qua `kyc.recordId`. Chỉ ghi bằng `updateOne`
+ * với toán tử nguyên tử (`$set` theo trường `kyc.*`), không `save(User)` toàn document.
+ * Mọi đọc/liệt kê KYC đi qua truy vấn thô (aggregate) vì `User` bỏ `kyc` khi nạp entity.
+ */
+export interface KycInfo {
+  /** `_id` cũ của `kyc_records` (hoặc id sinh khi nộp mới). */
+  recordId: ObjectId
+  idCardNumber: string
+  frontCardUrl: string
+  backCardUrl: string
+  selfieUrl: string
+  fullName?: string
+  dateOfBirth?: string
+  gender?: string
+  nationality?: string
+  placeOfOrigin?: string
+  placeOfResidence?: string
+  ocrMatchRate?: number
+  issueDate?: string
+  placeOfIssue?: string
+  faceMatchResult?: boolean
+  livenessResult?: boolean
+  spoofScore?: number
+  status: 'pending' | 'verified' | 'rejected'
+  rejectedReason: string | null
+  verifiedAt: Date | null
+  reviewedBy?: string | null
+  createdAt: Date
+  updatedAt: Date
 }
 
 export interface KycUpdateRequest {
@@ -123,6 +176,14 @@ export class User {
   @Column({ type: 'json', nullable: true, default: null })
   kycData?: unknown
 
+  /**
+   * Hồ sơ KYC nhúng (G-KYC, thay `kyc_records`). CHỈ ghi bằng `updateOne` nguyên tử
+   * (`KycService`). `@AfterLoad` bỏ trường này khỏi entity vừa nạp để `save(User)` ở
+   * bất kỳ đâu không bao giờ ghi đè `kyc` bằng bản sao cũ.
+   */
+  @Column({ type: 'json', nullable: true })
+  kyc?: KycInfo
+
   @Column({ nullable: true })
   walletAddress!: string | null
 
@@ -163,4 +224,10 @@ export class User {
 
   @UpdateDateColumn()
   updatedAt!: Date
+
+  @AfterLoad()
+  // Tùy chọn (`?`) để literal/spread kiểu `User` không phải khai báo hook này.
+  stripKyc?(): void {
+    delete this.kyc
+  }
 }

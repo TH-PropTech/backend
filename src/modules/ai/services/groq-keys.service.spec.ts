@@ -1,3 +1,4 @@
+import { vi } from 'vitest'
 import {
   BadRequestException,
   NotFoundException,
@@ -5,8 +6,8 @@ import {
 } from '@nestjs/common'
 import type { ConfigService } from '@nestjs/config'
 import { ObjectId } from 'mongodb'
-import type { MongoRepository } from 'typeorm'
 import { encrypt, keyHash } from '../utils/groq-key-crypto'
+import type { GroqKeyRepository } from '../utils/groq-key.repository'
 import {
   GROQ_INVALID_KEY_MESSAGE,
   probeKey,
@@ -15,7 +16,7 @@ import {
 import { GroqKeysService } from './groq-keys.service'
 import type { GroqApiKey } from '../schemas/groq-api-key.schema'
 
-jest.mock('../utils/groq-probe', () => ({
+vi.mock('../utils/groq-probe', () => ({
   GROQ_INVALID_KEY_MESSAGE: 'Key không hợp lệ hoặc đã bị thu hồi',
   probeKey: jest.fn(),
 }))
@@ -76,7 +77,7 @@ function createRepo(): RepoMock {
 function createService(repo: RepoMock, secret = SECRET): GroqKeysService {
   const config = { get: jest.fn().mockReturnValue(secret) }
   return new GroqKeysService(
-    repo as unknown as MongoRepository<GroqApiKey>,
+    repo as unknown as GroqKeyRepository,
     config as unknown as ConfigService
   )
 }

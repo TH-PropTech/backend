@@ -14,6 +14,12 @@ export interface LegalTermsSection {
   order: number
 }
 
+/**
+ * @deprecated G-LEG: dữ liệu nay nằm ở `LegalDocument{kind:'terms'}`
+ * (collection `legal_documents`). Giữ lại làm kiểu hình và để migration 020 /
+ * rollback tham chiếu collection cũ `legal_terms_documents`; entity này KHÔNG còn
+ * nằm trong `TypeOrmModule.forFeature`.
+ */
 @Entity('legal_terms_documents')
 export class LegalTermsDocument {
   @ObjectIdColumn()

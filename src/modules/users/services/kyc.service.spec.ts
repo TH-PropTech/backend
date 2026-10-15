@@ -1,6 +1,8 @@
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment -- jest.Mock.calls và mock repo Mongo là any */
 import {
   BadRequestException,
   ForbiddenException,
+  NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common'
 import { ObjectId } from 'mongodb'
@@ -8,8 +10,6 @@ import { ObjectId } from 'mongodb'
 import type { BiometricGrantService } from '../../ekyc/services/biometric-grant.service'
 import type { KycMediaService } from './kyc-media.service'
 import { KycService } from './kyc.service'
-import type { KycRecord } from '../schemas/kyc-record.schema'
-import type { User } from '../schemas/user.schema'
 
 function createImage(fieldname: string): Express.Multer.File {
   const buffer = Buffer.from([0xff, 0xd8, 0xff, 0xdb])
@@ -27,39 +27,65 @@ function createImage(fieldname: string): Express.Multer.File {
   }
 }
 
+const USER_ID = '507f1f77bcf86cd799439011'
+const RECORD_ID = '507f1f77bcf86cd799439012'
+
+/** Hàng `users` thô (aggregate) có nhúng `kyc`, đúng hình KycService đọc. */
+function userRow(
+  overrides: Record<string, unknown> = {}
+): Record<string, unknown> {
+  return {
+    _id: new ObjectId(USER_ID),
+    email: 'a@example.com',
+    phone: '0901234567',
+    kycStatus: 'pending',
+    kyc: {
+      recordId: new ObjectId(RECORD_ID),
+      idCardNumber: '079123456789',
+      frontCardUrl: `kyc-media:${USER_ID}:front-card:1`,
+      backCardUrl: `kyc-media:${USER_ID}:back-card:1`,
+      selfieUrl: `kyc-media:${USER_ID}:selfie:1`,
+      fullName: 'Nguyen Van A',
+      status: 'pending',
+      rejectedReason: null,
+      verifiedAt: null,
+      createdAt: new Date('2026-09-01T00:00:00Z'),
+      updatedAt: new Date('2026-09-01T00:00:00Z'),
+      ...overrides,
+    },
+  }
+}
+
+function aggregateReturns(rows: unknown[]): jest.Mock {
+  return jest
+    .fn()
+    .mockReturnValue({ toArray: jest.fn().mockResolvedValue(rows) })
+}
+
 function createService(options?: { grantError?: Error }): {
   service: KycService
-  kycRepository: { find: jest.Mock; findOne: jest.Mock; save: jest.Mock }
-  userRepository: { find: jest.Mock; findOne: jest.Mock; save: jest.Mock }
+  userRepository: {
+    aggregate: jest.Mock
+    findOne: jest.Mock
+    updateOne: jest.Mock
+  }
   media: jest.Mocked<Pick<KycMediaService, 'store' | 'read' | 'remove'>>
+  grants: { consume: jest.Mock }
 } {
   const grantError = options?.grantError
-  const user = {
-    _id: new ObjectId('507f1f77bcf86cd799439011'),
-    kycStatus: 'not-started',
-  } as User
-  const kycRepository = {
-    find: jest.fn().mockResolvedValue([]),
-    findOne: jest.fn().mockResolvedValue(null),
-    save: jest.fn().mockImplementation((record: KycRecord) =>
-      Promise.resolve({
-        ...record,
-        _id: new ObjectId('507f1f77bcf86cd799439012'),
-        createdAt: new Date('2026-09-06T00:00:00Z'),
-        updatedAt: new Date('2026-09-06T00:00:00Z'),
-      })
-    ),
-  }
   const userRepository = {
-    find: jest.fn().mockResolvedValue([]),
-    findOne: jest.fn().mockResolvedValue(user),
-    save: jest.fn().mockImplementation(value => Promise.resolve(value)),
+    aggregate: aggregateReturns([]),
+    findOne: jest.fn().mockResolvedValue({
+      _id: new ObjectId(USER_ID),
+      kycStatus: 'not-started',
+    }),
+    updateOne: jest.fn().mockResolvedValue({ matchedCount: 1 }),
   }
   const media = {
     store: jest
       .fn()
       .mockImplementation((_userId: string, kind: string) =>
-        Promise.resolve(`kyc-media:507f1f77bcf86cd799439011:${kind}`)
+        Promise.resolve(`kyc-media:${USER_ID}:${kind}`)
       ),
     remove: jest.fn().mockResolvedValue(undefined),
     read: jest.fn().mockResolvedValue({
@@ -81,7 +107,6 @@ function createService(options?: { grantError?: Error }): {
   }
   const service = Object.create(KycService.prototype) as KycService
   Reflect.set(service, 'logger', { log: jest.fn(), warn: jest.fn() })
-  Reflect.set(service, 'kycRepository', kycRepository)
   Reflect.set(service, 'userRepository', userRepository)
   Reflect.set(service, 'kycMediaService', media as unknown as KycMediaService)
   Reflect.set(
@@ -90,11 +115,14 @@ function createService(options?: { grantError?: Error }): {
     grants as unknown as BiometricGrantService
   )
 
-  return { service, kycRepository, userRepository, media }
+  return { service, userRepository, media, grants }
+}
+
+function setOf(call: unknown[]): Record<string, unknown> {
+  return (call[1] as { $set: Record<string, unknown> }).$set
 }
 
 describe('KycService.submitKyc', () => {
-  const userId = '507f1f77bcf86cd799439011'
   const dto = {
     idCardNumber: '079123456789',
     fullName: 'Nguyen Van A',
@@ -105,73 +133,125 @@ describe('KycService.submitKyc', () => {
     selfie: createImage('selfie'),
   }
 
-  it('stores private references and server-owned biometric results', async () => {
-    const { service, kycRepository } = createService()
+  it('nhúng hồ sơ vào user bằng updateOne nguyên tử, không save toàn User', async () => {
+    const { service, userRepository } = createService()
+    userRepository.aggregate = aggregateReturns([])
 
-    const result = await service.submitKyc(userId, dto, files)
+    await service.submitKyc(USER_ID, dto, files)
 
-    expect(result.frontCardUrl).toBe(`kyc-media:${userId}:front-card`)
-    expect(result.faceMatchResult).toBe(true)
-    expect(result.livenessResult).toBe(true)
-    expect(result.spoofScore).toBe(0.93)
-    expect(kycRepository.save).toHaveBeenCalledTimes(1)
+    expect(userRepository.updateOne).toHaveBeenCalledTimes(1)
+    const [filter, update] = userRepository.updateOne.mock.calls[0] as [
+      Record<string, unknown>,
+      { $set: Record<string, unknown>; $unset: Record<string, unknown> },
+    ]
+    expect(filter).toEqual({ _id: new ObjectId(USER_ID) })
+    expect(update.$set['kyc.frontCardUrl']).toBe(
+      `kyc-media:${USER_ID}:front-card`
+    )
+    expect(update.$set['kyc.faceMatchResult']).toBe(true)
+    expect(update.$set['kyc.livenessResult']).toBe(true)
+    expect(update.$set['kyc.spoofScore']).toBe(0.93)
+    expect(update.$set['kyc.status']).toBe('pending')
+    expect(update.$set['kycStatus']).toBe('pending')
+    expect(update.$unset).toEqual({ 'kyc.ocrMatchRate': '' })
+    expect(userRepository.updateOne.mock.calls[0]?.[0]).not.toHaveProperty(
+      'save'
+    )
   })
 
-  it('does not persist without a current biometric grant', async () => {
-    const { service, kycRepository } = createService({
+  it('giữ recordId và createdAt của hồ sơ cũ khi nộp lại (không đổi id công khai)', async () => {
+    const { service, userRepository } = createService()
+    userRepository.aggregate = aggregateReturns([userRow()])
+
+    await service.submitKyc(USER_ID, dto, files)
+
+    const set = setOf(userRepository.updateOne.mock.calls[0] as unknown[])
+    expect(set['kyc.recordId']).toEqual(new ObjectId(RECORD_ID))
+    expect(set['kyc.createdAt']).toEqual(new Date('2026-09-01T00:00:00Z'))
+  })
+
+  it('không đè các trường DTO không gửi lên (giữ giá trị cũ như hành vi save cũ)', async () => {
+    const { service, userRepository } = createService()
+    userRepository.aggregate = aggregateReturns([userRow()])
+
+    await service.submitKyc(USER_ID, { idCardNumber: '079123456789' }, files)
+
+    const set = setOf(userRepository.updateOne.mock.calls[0] as unknown[])
+    expect(set).not.toHaveProperty('kyc.fullName')
+    expect(set).not.toHaveProperty('kyc.dateOfBirth')
+  })
+
+  it('bỏ spoofScore khi realConfidence là null', async () => {
+    const { service, userRepository, grants } = createService()
+    grants.consume.mockReturnValue({
+      verified: true,
+      faceMatch: true,
+      liveness: true,
+      realConfidence: null,
+    })
+
+    await service.submitKyc(USER_ID, dto, files)
+
+    const update = userRepository.updateOne.mock.calls[0]?.[1] as {
+      $unset: Record<string, unknown>
+    }
+    expect(update.$unset).toEqual({
+      'kyc.ocrMatchRate': '',
+      'kyc.spoofScore': '',
+    })
+  })
+
+  it('không ghi gì khi thiếu biometric grant', async () => {
+    const { service, userRepository } = createService({
       grantError: new UnprocessableEntityException('expired'),
     })
 
-    await expect(service.submitKyc(userId, dto, files)).rejects.toBeInstanceOf(
+    await expect(service.submitKyc(USER_ID, dto, files)).rejects.toBeInstanceOf(
       UnprocessableEntityException
     )
-    expect(kycRepository.save).not.toHaveBeenCalled()
+    expect(userRepository.updateOne).not.toHaveBeenCalled()
   })
 
-  it('removes newly stored media if database persistence fails', async () => {
-    const { service, kycRepository, media } = createService()
-    kycRepository.save.mockRejectedValue(new Error('database unavailable'))
+  it('xóa media vừa lưu nếu ghi DB thất bại', async () => {
+    const { service, userRepository, media } = createService()
+    userRepository.updateOne.mockRejectedValue(
+      new Error('database unavailable')
+    )
 
-    await expect(service.submitKyc(userId, dto, files)).rejects.toThrow(
+    await expect(service.submitKyc(USER_ID, dto, files)).rejects.toThrow(
       'database unavailable'
     )
     expect(media.remove).toHaveBeenCalledTimes(3)
   })
+
+  it('từ chối khi tài khoản đã xác minh KYC', async () => {
+    const { service, userRepository } = createService()
+    userRepository.findOne.mockResolvedValue({
+      _id: new ObjectId(USER_ID),
+      kycStatus: 'verified',
+    })
+
+    await expect(service.submitKyc(USER_ID, dto, files)).rejects.toBeInstanceOf(
+      BadRequestException
+    )
+    expect(userRepository.updateOne).not.toHaveBeenCalled()
+  })
 })
 
 describe('KycService monitoring and review', () => {
-  const recordId = '507f1f77bcf86cd799439012'
-  const userId = '507f1f77bcf86cd799439011'
+  const userId = USER_ID
 
-  const pendingRecord = (): KycRecord => {
-    const record: KycRecord = {
-      _id: new ObjectId(recordId),
-      userId,
-      idCardNumber: '079123456789',
-      frontCardUrl: 'kyc-media:front',
-      backCardUrl: 'kyc-media:back',
-      selfieUrl: 'kyc-media:selfie',
-      fullName: 'Nguyen Van A',
-      status: 'pending',
-      rejectedReason: null,
-      verifiedAt: null,
-      createdAt: new Date('2026-09-01T00:00:00Z'),
-      updatedAt: new Date('2026-09-01T00:00:00Z'),
-    }
-    return record
-  }
-
-  it('lists records with status/search filters and page metadata', async () => {
-    const { service, kycRepository, userRepository } = createService()
-    const record = pendingRecord()
-    kycRepository.find.mockResolvedValue([record])
-    userRepository.find.mockResolvedValue([
-      {
-        _id: new ObjectId(userId),
-        email: 'a@example.com',
-        phone: '0901234567',
-      },
-    ])
+  it('lọc theo trạng thái và tìm kiếm trên users.kyc, sắp xếp theo kyc.createdAt, phân trang', async () => {
+    const { service, userRepository } = createService()
+    const row = userRow()
+    userRepository.aggregate = jest.fn().mockReturnValue({
+      toArray: jest.fn().mockResolvedValue([
+        {
+          items: [row],
+          total: [{ n: 1 }],
+        },
+      ]),
+    })
 
     const result = await service.findAll({
       status: 'pending',
@@ -180,25 +260,51 @@ describe('KycService monitoring and review', () => {
       limit: 20,
     })
 
-    expect(kycRepository.find).toHaveBeenCalledWith({
-      order: { createdAt: 'DESC' },
-      where: { status: 'pending' },
+    const pipeline = userRepository.aggregate.mock.calls[0]?.[0] as Array<
+      Record<string, any>
+    >
+    const match = pipeline[0]?.['$match'] as Record<string, any>
+    expect(match['kyc.status']).toBe('pending')
+    expect(match.$or).toEqual([
+      { 'kyc.fullName': { $regex: 'nguyen', $options: 'i' } },
+      { 'kyc.idCardNumber': { $regex: 'nguyen' } },
+    ])
+    expect(pipeline.find(stage => '$sort' in stage)).toEqual({
+      $sort: { 'kyc.createdAt': -1, _id: -1 },
     })
     expect(result.total).toBe(1)
+    expect(result.totalPages).toBe(1)
     expect(result.items[0]?.fullName).toBe('Nguyen Van A')
+    expect(result.items[0]?._id).toEqual(new ObjectId(RECORD_ID))
+    expect(result.items[0]?.userId).toBe(userId)
     expect(result.items[0]?.user).toEqual({
       email: 'a@example.com',
       phone: '0901234567',
     })
   })
 
-  it('counts pending, verified, rejected and total records', async () => {
-    const { service, kycRepository } = createService()
-    kycRepository.find.mockResolvedValue([
-      { status: 'pending' },
-      { status: 'verified' },
-      { status: 'rejected' },
-      { status: 'pending' },
+  it('không đưa ảnh (URL media riêng tư) vào danh sách', async () => {
+    const { service, userRepository } = createService()
+    userRepository.aggregate = jest.fn().mockReturnValue({
+      toArray: jest
+        .fn()
+        .mockResolvedValue([{ items: [userRow()], total: [{ n: 1 }] }]),
+    })
+
+    const result = await service.findAll({ page: 1, limit: 20 })
+
+    const item = result.items[0]
+    expect(item).not.toHaveProperty('frontCardUrl')
+    expect(item).not.toHaveProperty('backCardUrl')
+    expect(item).not.toHaveProperty('selfieUrl')
+  })
+
+  it('đếm pending, verified, rejected và tổng từ users.kyc', async () => {
+    const { service, userRepository } = createService()
+    userRepository.aggregate = aggregateReturns([
+      { _id: 'pending', count: 2 },
+      { _id: 'verified', count: 1 },
+      { _id: 'rejected', count: 1 },
     ])
 
     await expect(service.countByStatus()).resolves.toEqual({
@@ -207,116 +313,212 @@ describe('KycService monitoring and review', () => {
       rejected: 1,
       total: 4,
     })
+    const pipeline = userRepository.aggregate.mock.calls[0]?.[0] as Array<
+      Record<string, any>
+    >
+    expect(pipeline[0]).toEqual({ $match: { kyc: { $type: 'object' } } })
   })
 
-  it('verifies a pending record and synchronizes the user status', async () => {
-    const { service, kycRepository, userRepository } = createService()
-    const record = pendingRecord()
-    let savedRecord: KycRecord | undefined
-    kycRepository.save.mockImplementation((value: KycRecord) => {
-      savedRecord = value
-      return Promise.resolve(value)
-    })
-    kycRepository.findOne.mockResolvedValue(record)
-
-    const result = await service.review(recordId, 'verified', 'staff-1')
-
-    expect(kycRepository.save).toHaveBeenCalledWith(
-      expect.objectContaining({
-        status: 'verified',
-        reviewedBy: 'staff-1',
-        rejectedReason: null,
+  it('duyệt hồ sơ: một updateOne nguyên tử cập nhật kyc và kycStatus của user', async () => {
+    const { service, userRepository } = createService()
+    userRepository.aggregate = jest
+      .fn()
+      .mockReturnValueOnce({
+        toArray: jest.fn().mockResolvedValue([userRow()]),
       })
-    )
-    expect(savedRecord?.verifiedAt).toBeInstanceOf(Date)
-    expect(userRepository.save).toHaveBeenCalledWith(
-      expect.objectContaining({
-        kycStatus: 'verified',
-        kycRejectReason: null,
+      .mockReturnValueOnce({
+        toArray: jest
+          .fn()
+          .mockResolvedValue([
+            userRow({ status: 'verified', reviewedBy: 'staff-1' }),
+          ]),
       })
+
+    const result = await service.review(RECORD_ID, 'verified', 'staff-1')
+
+    expect(userRepository.updateOne).toHaveBeenCalledWith(
+      {
+        _id: new ObjectId(USER_ID),
+        'kyc.recordId': new ObjectId(RECORD_ID),
+        'kyc.status': 'pending',
+      },
+      {
+        $set: expect.objectContaining({
+          'kyc.status': 'verified',
+          'kyc.reviewedBy': 'staff-1',
+          'kyc.rejectedReason': null,
+          'kyc.verifiedAt': expect.any(Date),
+          kycStatus: 'verified',
+          kycRejectReason: null,
+        }),
+      }
     )
     expect(result.status).toBe('verified')
   })
 
-  it('rejects with a reason and synchronizes the rejection reason', async () => {
-    const { service, kycRepository, userRepository } = createService()
-    const record = pendingRecord()
-    kycRepository.findOne.mockResolvedValue(record)
+  it('từ chối có lý do và đồng bộ lý do lên user', async () => {
+    const { service, userRepository } = createService()
+    userRepository.aggregate = jest
+      .fn()
+      .mockReturnValueOnce({
+        toArray: jest.fn().mockResolvedValue([userRow()]),
+      })
+      .mockReturnValueOnce({
+        toArray: jest
+          .fn()
+          .mockResolvedValue([
+            userRow({ status: 'rejected', rejectedReason: 'Ảnh CCCD bị lóa' }),
+          ]),
+      })
 
     const result = await service.review(
-      recordId,
+      RECORD_ID,
       'rejected',
       'staff-1',
       'Ảnh CCCD bị lóa'
     )
 
-    expect(kycRepository.save).toHaveBeenCalledWith(
-      expect.objectContaining({
-        status: 'rejected',
-        reviewedBy: 'staff-1',
-        rejectedReason: 'Ảnh CCCD bị lóa',
-        verifiedAt: null,
-      })
-    )
-    expect(userRepository.save).toHaveBeenCalledWith(
-      expect.objectContaining({
+    expect(userRepository.updateOne).toHaveBeenCalledWith(expect.any(Object), {
+      $set: expect.objectContaining({
+        'kyc.status': 'rejected',
+        'kyc.reviewedBy': 'staff-1',
+        'kyc.rejectedReason': 'Ảnh CCCD bị lóa',
+        'kyc.verifiedAt': null,
         kycStatus: 'rejected',
         kycRejectReason: 'Ảnh CCCD bị lóa',
-      })
-    )
+      }),
+    })
     expect(result.status).toBe('rejected')
   })
 
-  it('requires a reason before rejecting and does not persist', async () => {
-    const { service, kycRepository } = createService()
+  it('yêu cầu lý do trước khi từ chối và không đọc/ghi gì', async () => {
+    const { service, userRepository } = createService()
 
     await expect(
-      service.review(recordId, 'rejected', 'staff-1')
+      service.review(RECORD_ID, 'rejected', 'staff-1')
     ).rejects.toThrow(BadRequestException)
-    expect(kycRepository.findOne).not.toHaveBeenCalled()
-    expect(kycRepository.save).not.toHaveBeenCalled()
+    expect(userRepository.aggregate).not.toHaveBeenCalled()
+    expect(userRepository.updateOne).not.toHaveBeenCalled()
+  })
+
+  it('không duyệt lại hồ sơ đã có quyết định', async () => {
+    const { service, userRepository } = createService()
+    userRepository.aggregate = aggregateReturns([
+      userRow({ status: 'verified' }),
+    ])
+
+    await expect(
+      service.review(RECORD_ID, 'verified', 'staff-1')
+    ).rejects.toThrow(
+      'Hồ sơ KYC đã ở trạng thái "verified", không thể duyệt lại'
+    )
+    expect(userRepository.updateOne).not.toHaveBeenCalled()
+  })
+
+  it('duyệt hồ sơ chỉ khi còn pending: filter có kyc.status=pending', async () => {
+    const { service, userRepository } = createService()
+    userRepository.aggregate = jest
+      .fn()
+      .mockReturnValueOnce({
+        toArray: jest.fn().mockResolvedValue([userRow()]),
+      })
+      .mockReturnValueOnce({
+        toArray: jest
+          .fn()
+          .mockResolvedValue([
+            userRow({ status: 'verified', reviewedBy: 'staff-1' }),
+          ]),
+      })
+
+    await service.review(RECORD_ID, 'verified', 'staff-1')
+
+    expect(userRepository.updateOne).toHaveBeenCalledWith(
+      {
+        _id: new ObjectId(USER_ID),
+        'kyc.recordId': new ObjectId(RECORD_ID),
+        'kyc.status': 'pending',
+      },
+      expect.any(Object)
+    )
+  })
+
+  it('nếu staff khác đã quyết định trước (matchedCount=0) thì báo trạng thái hiện tại, không ghi đè', async () => {
+    const { service, userRepository } = createService()
+    userRepository.aggregate = jest
+      .fn()
+      .mockReturnValueOnce({
+        toArray: jest.fn().mockResolvedValue([userRow()]),
+      })
+      .mockReturnValueOnce({
+        toArray: jest
+          .fn()
+          .mockResolvedValue([
+            userRow({ status: 'rejected', rejectedReason: 'Ảnh mờ' }),
+          ]),
+      })
+    userRepository.updateOne = jest.fn().mockResolvedValue({ matchedCount: 0 })
+
+    await expect(
+      service.review(RECORD_ID, 'verified', 'staff-2')
+    ).rejects.toThrow(
+      new BadRequestException(
+        'Hồ sơ KYC đã ở trạng thái "rejected", không thể duyệt lại'
+      )
+    )
+    expect(userRepository.updateOne).toHaveBeenCalledTimes(1)
+  })
+
+  it('matchedCount=0 và hồ sơ đã mất thì báo không tìm thấy', async () => {
+    const { service, userRepository } = createService()
+    userRepository.aggregate = jest
+      .fn()
+      .mockReturnValueOnce({
+        toArray: jest.fn().mockResolvedValue([userRow()]),
+      })
+      .mockReturnValueOnce({ toArray: jest.fn().mockResolvedValue([]) })
+    userRepository.updateOne = jest.fn().mockResolvedValue({ matchedCount: 0 })
+
+    await expect(
+      service.review(RECORD_ID, 'verified', 'staff-2')
+    ).rejects.toBeInstanceOf(NotFoundException)
+  })
+
+  it('báo lỗi khi không tìm thấy hồ sơ theo id công khai', async () => {
+    const { service, userRepository } = createService()
+    userRepository.aggregate = aggregateReturns([])
+
+    await expect(service.findOne(RECORD_ID)).rejects.toBeInstanceOf(
+      NotFoundException
+    )
   })
 })
 
 describe('KycService.readMedia', () => {
-  const ownerId = '507f1f77bcf86cd799439011'
-  const recordId = '507f1f77bcf86cd799439012'
+  const ownerId = USER_ID
+  const recordId = RECORD_ID
 
-  it('allows the owner to read their encrypted media', async () => {
-    const { service, kycRepository, media } = createService()
-    kycRepository.findOne.mockResolvedValue({
-      _id: new ObjectId(recordId),
-      userId: ownerId,
-      frontCardUrl: `kyc-media:${ownerId}:front-card:123`,
-    })
+  it('cho chủ hồ sơ đọc ảnh của chính mình', async () => {
+    const { service, userRepository, media } = createService()
+    userRepository.aggregate = aggregateReturns([userRow()])
 
     await expect(
       service.readMedia(recordId, 'front-card', ownerId)
     ).resolves.toEqual({ buffer: Buffer.from('image'), mimetype: 'image/jpeg' })
-    expect(media.read).toHaveBeenCalledWith(
-      `kyc-media:${ownerId}:front-card:123`
-    )
+    expect(media.read).toHaveBeenCalledWith(`kyc-media:${ownerId}:front-card:1`)
   })
 
-  it('allows staff to read media owned by another user', async () => {
-    const { service, kycRepository } = createService()
-    kycRepository.findOne.mockResolvedValue({
-      _id: new ObjectId(recordId),
-      userId: ownerId,
-      selfieUrl: `kyc-media:${ownerId}:selfie:123`,
-    })
+  it('cho staff đọc ảnh của người khác', async () => {
+    const { service, userRepository } = createService()
+    userRepository.aggregate = aggregateReturns([userRow()])
 
     await expect(
       service.readMedia(recordId, 'selfie', 'another-user', ['staff'])
     ).resolves.toMatchObject({ mimetype: 'image/jpeg' })
   })
 
-  it('rejects a different unprivileged user', async () => {
-    const { service, kycRepository, media } = createService()
-    kycRepository.findOne.mockResolvedValue({
-      _id: new ObjectId(recordId),
-      userId: ownerId,
-    })
+  it('từ chối người dùng không có quyền', async () => {
+    const { service, userRepository, media } = createService()
+    userRepository.aggregate = aggregateReturns([userRow()])
 
     await expect(
       service.readMedia(recordId, 'front-card', 'another-user')

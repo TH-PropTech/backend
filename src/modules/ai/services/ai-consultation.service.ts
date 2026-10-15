@@ -1,24 +1,46 @@
-import { Injectable, Logger } from '@nestjs/common'
+import { ConflictException, Injectable, Logger } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 import { ObjectId } from 'mongodb'
 import { User } from '../../users/schemas/user.schema'
 import { AiConsultationLog } from '../schemas/ai-consultation-log.schema'
+import { ActivityLog } from '../../activity-log/schemas/activity-log.schema'
+import { KindScopedActivityLogRepository } from '../../activity-log/utils/kind-scoped-activity-log.repository'
+import { toAiConsultationLog } from '../../activity-log/utils/legacy-log.mapper'
 import { ConsultationEmailService } from './consultation-email.service'
 import { GroqLlmService } from './groq-llm.service'
+
+/** Trần số tin nhắn của một phiên tư vấn (D3: `messages[]` có trần); vượt trần thì 409. */
+export const AI_CONSULTATION_MAX_MESSAGES = 500
+
+/** Chỉ giữ trường có giá trị (undefined bỏ qua, null vẫn giữ) để `$set` không ghi đè ngoài ý muốn. */
+function definedFields(
+  fields: Record<string, unknown>
+): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(fields).filter(([, value]) => value !== undefined)
+  )
+}
 
 @Injectable()
 export class AiConsultationService {
   private readonly logger = new Logger(AiConsultationService.name)
+  private readonly logRepository: KindScopedActivityLogRepository<AiConsultationLog>
 
   constructor(
-    @InjectRepository(AiConsultationLog)
-    private readonly logRepository: Repository<AiConsultationLog>,
+    @InjectRepository(ActivityLog)
+    activityLogRepository: Repository<ActivityLog>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
     private readonly emailService: ConsultationEmailService,
     private readonly groqLlmService: GroqLlmService
-  ) {}
+  ) {
+    this.logRepository = new KindScopedActivityLogRepository(
+      activityLogRepository,
+      'ai-consultation',
+      toAiConsultationLog
+    )
+  }
 
   async startSession(userId?: string): Promise<AiConsultationLog> {
     const logId = `call_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`
@@ -39,25 +61,38 @@ export class AiConsultationService {
 
     return log
   }
+  /**
+   * Thêm tin nhắn bằng `$push` nguyên tử. Trần được kiểm TRONG filter: chỉ khớp khi
+   * phần tử thứ `MAX - 1` chưa tồn tại (tức mảng còn chỗ). Không khớp thì phân biệt
+   * phiên không tồn tại (bỏ qua) với phiên đã đủ trần (409).
+   */
   async addMessage(
     logId: string,
     role: 'user' | 'assistant' | 'system',
     content: string
   ): Promise<void> {
+    const matched = await this.logRepository.updateAtomic(
+      {
+        logId,
+        [`messages.${AI_CONSULTATION_MAX_MESSAGES - 1}`]: { $exists: false },
+      },
+      {
+        $push: {
+          messages: { role, content, timestamp: new Date() },
+        },
+      }
+    )
+    if (matched > 0) return
+
     const log = await this.logRepository.findOne({ where: { logId } })
     if (!log) return
-
-    log.messages = [
-      ...log.messages,
-      {
-        role,
-        content,
-        timestamp: new Date(),
-      },
-    ]
-    await this.logRepository.save(log)
+    throw new ConflictException('AI_CONSULTATION_MESSAGE_LIMIT_REACHED')
   }
 
+  /**
+   * Kết thúc phiên: chỉ `$set` các trường tóm tắt/trạng thái, KHÔNG ghi lại `messages`
+   * (tin nhắn có thể được thêm trong lúc chờ Groq phân tích).
+   */
   async completeSession(logId: string, durationSeconds: number): Promise<void> {
     const log = await this.logRepository.findOne({ where: { logId } })
     if (!log) return
@@ -69,7 +104,18 @@ export class AiConsultationService {
       await this.analyzeSessionWithAi(log)
     }
 
-    await this.logRepository.save(log)
+    await this.logRepository.updateAtomic(
+      { logId },
+      {
+        $set: definedFields({
+          duration: log.duration,
+          status: log.status,
+          result: log.result,
+          recommendedPackage: log.recommendedPackage,
+          notes: log.notes,
+        }),
+      }
+    )
     this.logger.log(`Completed consultation session: ${logId}`)
 
     if (log.userId && log.result === 'interested') {

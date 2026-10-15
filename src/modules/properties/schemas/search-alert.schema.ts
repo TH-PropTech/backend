@@ -12,6 +12,11 @@ export type AlertTriggerType =
   | 'status_change'
   | 'expiring_soon'
 
+/**
+ * @deprecated G-SAV: đã hợp nhất vào `SavedSearchRecord` (kind 'alert', collection
+ * `user_searches`); giữ lại để đọc collection cũ và migration 016. Không đăng ký
+ * forFeature, không ghi mới. `AlertTriggerType` vẫn dùng chung.
+ */
 @Entity('search_alerts')
 export class SearchAlert {
   @ObjectIdColumn()

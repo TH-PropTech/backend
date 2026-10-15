@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common'
 import { ObjectId } from 'mongodb'
 import type { RentalExecutionPolicyRef } from '../../rental/utils/rental-execution-policy.util'
-import type { SmartCaCertificate } from '../../digital-signature/providers/smartca.provider'
+import type { SmartCaCertificate } from '../providers/smartca.provider'
 import { SmartCaSigningService } from './smartca-signing.service'
 
 describe('SmartCaSigningService', () => {
@@ -61,7 +61,7 @@ describe('SmartCaSigningService', () => {
       save: jest.Mock
       remove: jest.Mock
     }
-    kycRepository: { findOne: jest.Mock }
+    kycService: { findByUserId: jest.Mock }
     provider: {
       listCertificates: jest.Mock
       requestSignature: jest.Mock
@@ -86,8 +86,8 @@ describe('SmartCaSigningService', () => {
       save: jest.fn((value: Record<string, unknown>) => Promise.resolve(value)),
       remove: jest.fn().mockResolvedValue(true),
     }
-    const kycRepository = {
-      findOne: jest.fn().mockResolvedValue({
+    const kycService = {
+      findByUserId: jest.fn().mockResolvedValue({
         userId: 'tenant-1',
         status: 'verified',
         idCardNumber: '000000000001',
@@ -132,7 +132,7 @@ describe('SmartCaSigningService', () => {
       service: new SmartCaSigningService(
         contractRepository as never,
         sessionRepository as never,
-        kycRepository as never,
+        kycService as never,
         provider as never,
         contractsService as never,
         artifactService as never,
@@ -141,7 +141,7 @@ describe('SmartCaSigningService', () => {
       ),
       contractRepository,
       sessionRepository,
-      kycRepository,
+      kycService,
       provider,
       contractsService,
       artifactService,
@@ -234,7 +234,7 @@ describe('SmartCaSigningService', () => {
     'rejects invalid KYC with $code before provider access',
     async ({ kyc, code }) => {
       const ctx = context()
-      ctx.kycRepository.findOne.mockResolvedValue(kyc)
+      ctx.kycService.findByUserId.mockResolvedValue(kyc)
 
       await expect(
         ctx.service.createSession(contractId, 'tenant-1', signingInput)

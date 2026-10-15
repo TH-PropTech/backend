@@ -1,10 +1,7 @@
 import { Module } from '@nestjs/common'
 import { TypeOrmModule } from '@nestjs/typeorm'
-import { LegalKnowledgeDoc } from './schemas/legal-knowledge-doc.schema'
+import { LegalDocument } from './schemas/legal-document.schema'
 import { LegalKnowledgeChunk } from './schemas/legal-knowledge-chunk.schema'
-import { LegalSource } from './schemas/legal-source.schema'
-import { PlatformRegulation } from './schemas/platform-regulation.schema'
-import { LegalTermsDocument } from './schemas/legal-terms-document.schema'
 import { Policy } from './schemas/policy.schema'
 import { LegalKnowledgeService } from './services/legal-knowledge.service'
 import { LegalSourcesService } from './services/legal-sources.service'
@@ -18,14 +15,7 @@ import { LEGAL_KNOWLEDGE_SEARCH } from './utils/legal-knowledge.types'
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([
-      LegalKnowledgeDoc,
-      LegalKnowledgeChunk,
-      LegalSource,
-      PlatformRegulation,
-      LegalTermsDocument,
-      Policy,
-    ]),
+    TypeOrmModule.forFeature([LegalDocument, LegalKnowledgeChunk, Policy]),
   ],
   controllers: [
     LegalKnowledgeController,

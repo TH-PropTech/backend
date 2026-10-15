@@ -12,6 +12,9 @@ import type {
   RentalExecutionStrategy,
 } from '../utils/rental-execution-policy.util'
 
+/**
+ * @deprecated Đã hợp nhất vào `RentalFlowConfig` (kind 'policy'); giữ lại để đọc collection cũ và migration 014. Không đăng ký forFeature, không ghi mới.
+ */
 @Entity('rental_execution_policies')
 export class RentalExecutionPolicy {
   @ObjectIdColumn() _id!: ObjectId

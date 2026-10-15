@@ -16,8 +16,8 @@ import {
   RentalOpsMarkSettlementsOverdueJob,
   RentalOpsProcessPaymentRemindersJob,
 } from './jobs/rental-ops.job'
-import { JobConfig } from './schemas/job-config.schema'
-import { JobRunHistory } from './schemas/job-run-history.schema'
+import { SystemConfig } from '../properties/schemas/system-config.schema'
+import { ActivityLog } from '../activity-log/schemas/activity-log.schema'
 import { JOBS, JobManagerService } from './services/job-manager.service'
 
 const JOB_CLASSES = [
@@ -37,7 +37,7 @@ const JOB_CLASSES = [
  */
 @Module({
   imports: [
-    TypeOrmModule.forFeature([JobConfig, JobRunHistory]),
+    TypeOrmModule.forFeature([SystemConfig, ActivityLog]),
     PropertiesModule,
     RentalModule,
   ],

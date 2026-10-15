@@ -1,15 +1,16 @@
+import { vi } from 'vitest'
 import { connect } from '@hyperledger/fabric-gateway'
 import { FabricService } from './fabric.service'
 import { BlockchainLog } from '../schemas/blockchain-log.schema'
 
-jest.mock('@hyperledger/fabric-gateway', () => ({
+vi.mock('@hyperledger/fabric-gateway', () => ({
   connect: jest.fn(),
   signers: {
     newPrivateKeySigner: jest.fn(() => ({})),
   },
 }))
 
-jest.mock('@grpc/grpc-js', () => ({
+vi.mock('@grpc/grpc-js', () => ({
   Client: jest.fn(() => ({
     close: jest.fn(),
   })),
@@ -18,26 +19,25 @@ jest.mock('@grpc/grpc-js', () => ({
   },
 }))
 
-jest.mock('crypto', () => {
-  const actualCrypto = jest.requireActual<typeof import('crypto')>('crypto')
+vi.mock('crypto', async () => {
+  const actualCrypto = await vi.importActual<typeof import('crypto')>('crypto')
   return {
     ...actualCrypto,
     createPrivateKey: jest.fn(() => ({})),
   }
 })
 
-jest.mock('fs', () => {
-  const actualFs = jest.requireActual<typeof import('fs')>('fs')
+vi.mock('fs', async () => {
+  const actualFs = await vi.importActual<typeof import('fs')>('fs')
+  const { TEST_IDENTITY_CERT_PEM } = await vi.importActual<
+    typeof import('../utils/fabric-identity.fixtures')
+  >('../utils/fabric-identity.fixtures')
   return {
     ...actualFs,
     readFileSync: jest.fn((p: string) =>
       // PROP-399 D5: identity phải là chứng chỉ X.509 hợp lệ (hạn 2126) mới được dùng để dựng gateway.
       /cert.pem$/.test(p)
-        ? Buffer.from(
-            jest.requireActual<
-              typeof import('../utils/fabric-identity.fixtures')
-            >('../utils/fabric-identity.fixtures').TEST_IDENTITY_CERT_PEM
-          )
+        ? Buffer.from(TEST_IDENTITY_CERT_PEM)
         : Buffer.from('mock-file-content:' + p)
     ),
     existsSync: jest.fn(() => true),
@@ -145,6 +145,7 @@ describe('FabricService', () => {
       expect(result.blockNumber).toBeNull()
       expect(logRepository.save).toHaveBeenCalledWith(
         expect.objectContaining({
+          kind: 'blockchain',
           action: 'recordDeposit',
           networkMode: 'simulation',
           blockNumber: null,
@@ -249,6 +250,12 @@ describe('FabricService', () => {
         reader.evaluateTransaction('verifyContract', ['c-1', 'b'.repeat(64)])
       ).resolves.toEqual(
         expect.objectContaining({ valid: false, isValid: false })
+      )
+      // Trạng thái mô phỏng chỉ đọc loại 'blockchain' của activity_logs.
+      expect(logRepository.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { contractId: 'c-1', kind: 'blockchain' },
+        })
       )
     })
   })
