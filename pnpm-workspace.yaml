@@ -2,6 +2,7 @@ allowBuilds:
   '@nestjs/core': true
   '@scarf/scarf': true
   '@swc/core': true
+  esbuild: set this to true or false
   pkcs11js: true
   protobufjs: true
   unrs-resolver: true

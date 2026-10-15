@@ -9,6 +9,8 @@ export default tseslint.config(
       'dist/**',
       'coverage/**',
       'scripts/**',
+      'vitest.config.ts',
+      'vitest.e2e.config.ts',
       'commitlint.config.cjs',
       'eslint.config.mjs',
       'jest.config.cjs',

@@ -6,8 +6,8 @@ import { Test } from '@nestjs/testing'
 import type { Server } from 'http'
 import type { AddressInfo } from 'net'
 import { WebSocket } from 'ws'
-import { SmartCaEventsGateway } from '../src/modules/digital-signature/gateways/smartca-events.gateway'
-import { SmartCaSigningSession } from '../src/modules/digital-signature/schemas/smartca-signing-session.schema'
+import { SmartCaEventsGateway } from '../src/modules/contracts/gateways/smartca-events.gateway'
+import { SmartCaSigningSession } from '../src/modules/contracts/schemas/smartca-signing-session.schema'
 
 describe('SmartCA realtime gateway (e2e)', () => {
   let app: INestApplication
