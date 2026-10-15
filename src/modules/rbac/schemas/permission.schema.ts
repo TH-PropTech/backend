@@ -8,7 +8,12 @@ import {
   UpdateDateColumn,
 } from 'typeorm'
 
-/** Quyền của một role: (action, subject) được phép hoặc bị từ chối. */
+/**
+ * Quyền của một role: (action, subject) được phép hoặc bị từ chối.
+ * @deprecated Đã nhúng vào `Role.permissions[]` (xem `role.schema.ts`, migration 019).
+ * Không còn đăng ký trong `TypeOrmModule.forFeature`; giữ file để tham chiếu và
+ * rollback. Collection `permissions` cũ không bị xóa.
+ */
 @Entity('permissions')
 @Index(['roleId', 'action', 'subject'], { unique: true })
 export class Permission {

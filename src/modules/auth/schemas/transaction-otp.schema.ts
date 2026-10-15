@@ -9,6 +9,11 @@ import {
 import { OtpActionType } from '../enums/otp-action-type.enum'
 import { OtpSessionStatus } from '../enums/otp-session-status.enum'
 
+/**
+ * @deprecated G-OTP: thay bằng `Otp` (kind 'transaction', collection `otps`,
+ * giữ `_id`, xem `otp.schema.ts`). Giữ file để migration 021 đọc
+ * `transaction_otps`; không còn đăng ký trong `TypeOrmModule.forFeature`.
+ */
 @Entity('transaction_otps')
 export class TransactionOtp {
   @ObjectIdColumn()

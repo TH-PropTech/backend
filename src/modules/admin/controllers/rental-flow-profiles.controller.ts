@@ -17,7 +17,7 @@ import type { UserPayload } from '../../auth/interfaces/auth.interface'
 import { RentalFlowProfilesService } from '../../rental/services/rental-flow-profiles.service'
 import { SaveFlowProfileDraftDto } from '../../rental/dto/save-flow-profile-draft.dto'
 import { PublishFlowProfileDto } from '../../rental/dto/publish-flow-profile.dto'
-import type { RentalFlowProfile } from '../../rental/schemas/rental-flow-profile.schema'
+import type { RentalFlowProfileView } from '../../rental/utils/rental-flow-config.mapper'
 
 @ApiTags('rental-flow-profiles')
 @ApiBearerAuth()
@@ -29,7 +29,7 @@ export class RentalFlowProfilesController {
   @Get()
   @Roles('admin', 'staff')
   @ApiOperation({ summary: 'Admin/Staff xem danh sách Flow Profiles' })
-  async listProfiles(): Promise<RentalFlowProfile[]> {
+  async listProfiles(): Promise<RentalFlowProfileView[]> {
     return this.profilesService.listProfiles()
   }
 
@@ -39,8 +39,8 @@ export class RentalFlowProfilesController {
     summary: 'Admin/Staff xem chi tiết profile gồm draft và published versions',
   })
   async getProfile(@Param('profileId') profileId: string): Promise<{
-    draft: RentalFlowProfile | null
-    publishedVersions: RentalFlowProfile[]
+    draft: RentalFlowProfileView | null
+    publishedVersions: RentalFlowProfileView[]
   }> {
     return this.profilesService.getProfile(profileId)
   }
@@ -52,7 +52,7 @@ export class RentalFlowProfilesController {
   })
   async getDraft(
     @Param('profileId') profileId: string
-  ): Promise<RentalFlowProfile> {
+  ): Promise<RentalFlowProfileView> {
     return this.profilesService.getDraft(profileId)
   }
 
@@ -62,7 +62,7 @@ export class RentalFlowProfilesController {
   async createOrSaveDraft(
     @Body() dto: SaveFlowProfileDraftDto,
     @CurrentUser() user: UserPayload
-  ): Promise<RentalFlowProfile> {
+  ): Promise<RentalFlowProfileView> {
     const actorId = user._id || user.email || 'system'
     const profileId = dto.profileId || `flow-${Date.now()}`
     return this.profilesService.saveDraft(profileId, dto, actorId)
@@ -77,7 +77,7 @@ export class RentalFlowProfilesController {
     @Param('profileId') profileId: string,
     @Body() dto: SaveFlowProfileDraftDto,
     @CurrentUser() user: UserPayload
-  ): Promise<RentalFlowProfile> {
+  ): Promise<RentalFlowProfileView> {
     const actorId = user._id || user.email || 'system'
     return this.profilesService.saveDraft(profileId, dto, actorId)
   }
@@ -105,7 +105,7 @@ export class RentalFlowProfilesController {
     @Param('profileId') profileId: string,
     @Body() dto: PublishFlowProfileDto,
     @CurrentUser() user: UserPayload
-  ): Promise<RentalFlowProfile> {
+  ): Promise<RentalFlowProfileView> {
     const actorId = user._id || user.email || 'system'
     return this.profilesService.publish(profileId, dto, actorId)
   }
@@ -119,7 +119,7 @@ export class RentalFlowProfilesController {
     @Param('profileId') profileId: string,
     @Param('version', ParseIntPipe) version: number,
     @CurrentUser() user: UserPayload
-  ): Promise<RentalFlowProfile> {
+  ): Promise<RentalFlowProfileView> {
     const actorId = user._id || user.email || 'system'
     return this.profilesService.restoreVersionAsDraft(
       profileId,

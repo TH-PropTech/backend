@@ -1,7 +1,6 @@
 import { Module } from '@nestjs/common'
 import { TypeOrmModule } from '@nestjs/typeorm'
 import { User } from './schemas/user.schema'
-import { KycRecord } from './schemas/kyc-record.schema'
 import { UsersController } from './controllers/users.controller'
 import { KycController } from './controllers/kyc.controller'
 import { KycService } from './services/kyc.service'
@@ -10,11 +9,7 @@ import { AuthModule } from '../auth/auth.module'
 import { EkycModule } from '../ekyc/ekyc.module'
 
 @Module({
-  imports: [
-    TypeOrmModule.forFeature([User, KycRecord]),
-    AuthModule,
-    EkycModule,
-  ],
+  imports: [TypeOrmModule.forFeature([User]), AuthModule, EkycModule],
   providers: [KycService, KycMediaService],
   controllers: [UsersController, KycController],
   exports: [

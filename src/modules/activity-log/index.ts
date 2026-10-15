@@ -1,3 +1,5 @@
 export * from './activity-log.module'
 export * from './services/activity-log.service'
 export * from './schemas/activity-log.schema'
+export * from './services/config-audit.service'
+export * from './schemas/config-audit.schema'

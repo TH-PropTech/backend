@@ -5,8 +5,9 @@ import { PropertiesModule } from '../properties/properties.module'
 import { BookingsModule } from '../bookings/bookings.module'
 import { HealthModule } from '../health/health.module'
 import { LegalModule } from '../legal/legal.module'
-import { AiConsultationLog } from './schemas/ai-consultation-log.schema'
-import { GroqApiKey } from './schemas/groq-api-key.schema'
+import { ActivityLog } from '../activity-log/schemas/activity-log.schema'
+import { SystemConfig } from '../properties/schemas/system-config.schema'
+import { GroqKeyRepository } from './utils/groq-key.repository'
 import { AiChatsController } from './controllers/ai-chats.controller'
 import { AiConsultationController } from './controllers/ai-consultation.controller'
 import { AiConsultationGateway } from './gateways/ai-consultation.gateway'
@@ -30,7 +31,7 @@ import { GROQ_KEY_STORE } from './utils/groq-key-store'
 @Global()
 @Module({
   imports: [
-    TypeOrmModule.forFeature([User, AiConsultationLog, GroqApiKey]),
+    TypeOrmModule.forFeature([User, ActivityLog, SystemConfig]),
     PropertiesModule,
     BookingsModule,
     HealthModule,
@@ -48,6 +49,7 @@ import { GROQ_KEY_STORE } from './utils/groq-key-store'
     ConsultationEmailService,
     AiConsultationGateway,
     GroqKeyPool,
+    GroqKeyRepository,
     GroqKeysService,
     { provide: GROQ_KEY_STORE, useExisting: GroqKeysService },
   ],

@@ -2,21 +2,37 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository, FindOptionsWhere } from 'typeorm'
 import { ObjectId } from 'mongodb'
-import { CommunityPost } from '../schemas/community-post.schema'
-import { CommunityComment } from '../schemas/community-comment.schema'
+import type { CommunityPost } from '../schemas/community-post.schema'
+import type { CommunityComment } from '../schemas/community-comment.schema'
+import {
+  CommunityEntry,
+  PostEntry,
+  CommentEntry,
+} from '../schemas/community-entry.schema'
 import { Notification } from '../../notifications/schemas/notification.schema'
 import { CreatePostDto } from '../dto/create-post.dto'
 import { CreateCommentDto } from '../dto/create-comment.dto'
+
+/** Bỏ `kind` khỏi phản hồi để giữ nguyên hình dạng JSON cũ. */
+function toPost(entry: PostEntry): CommunityPost {
+  const copy: Partial<PostEntry> = { ...entry }
+  delete copy.kind
+  return copy as unknown as CommunityPost
+}
+
+function toComment(entry: CommentEntry): CommunityComment {
+  const copy: Partial<CommentEntry> = { ...entry }
+  delete copy.kind
+  return copy as unknown as CommunityComment
+}
 
 @Injectable()
 export class CommunityService {
   private readonly logger = new Logger(CommunityService.name)
 
   constructor(
-    @InjectRepository(CommunityPost)
-    private readonly postRepository: Repository<CommunityPost>,
-    @InjectRepository(CommunityComment)
-    private readonly commentRepository: Repository<CommunityComment>,
+    @InjectRepository(CommunityEntry)
+    private readonly entryRepository: Repository<CommunityEntry>,
     @InjectRepository(Notification)
     private readonly notificationRepository: Repository<Notification>
   ) {}
@@ -28,7 +44,8 @@ export class CommunityService {
     dto: CreatePostDto
   ): Promise<CommunityPost> {
     this.logger.log(`Creating community post by user: ${authorId}`)
-    const post = new CommunityPost()
+    const post = new CommunityEntry() as PostEntry
+    post.kind = 'post'
     post.authorId = authorId
     post.authorName = authorName
     post.authorRole = authorRole
@@ -42,7 +59,7 @@ export class CommunityService {
     post.commentsCount = 0
     post.status = 'pending'
 
-    return this.postRepository.save(post)
+    return toPost(await this.entryRepository.save(post))
   }
 
   async findAllApproved(
@@ -52,7 +69,7 @@ export class CommunityService {
     this.logger.log(
       `Fetching approved community posts. Topic: ${topic}, search: ${search}`
     )
-    const query: Record<string, unknown> = { status: 'approved' }
+    const query: Record<string, unknown> = { kind: 'post', status: 'approved' }
 
     if (topic) {
       query.topic = topic
@@ -62,33 +79,41 @@ export class CommunityService {
       query.projectName = { $regex: search, $options: 'i' }
     }
 
-    return this.postRepository.find({
-      where: query as FindOptionsWhere<CommunityPost>,
+    const entries = await this.entryRepository.find({
+      where: query as FindOptionsWhere<CommunityEntry>,
       order: { createdAt: 'DESC' },
     })
+    return (entries as PostEntry[]).map(toPost)
   }
 
   async findPending(): Promise<CommunityPost[]> {
     this.logger.log('Fetching pending community posts for moderation')
-    return this.postRepository.find({
-      where: { status: 'pending' },
+    const entries = await this.entryRepository.find({
+      where: { kind: 'post', status: 'pending' },
       order: { createdAt: 'DESC' },
     })
+    return (entries as PostEntry[]).map(toPost)
   }
 
   async findMyPosts(authorId: string): Promise<CommunityPost[]> {
     this.logger.log(`Fetching posts for author: ${authorId}`)
-    return this.postRepository.find({
-      where: { authorId },
+    const entries = await this.entryRepository.find({
+      where: { kind: 'post', authorId },
       order: { createdAt: 'DESC' },
     })
+    return (entries as PostEntry[]).map(toPost)
   }
 
   async findOne(id: string): Promise<CommunityPost> {
+    return toPost(await this.findPostEntry(id))
+  }
+
+  /** Tra bài viết theo `_id` VÀ `kind: 'post'` (id bình luận => 404). */
+  private async findPostEntry(id: string): Promise<PostEntry> {
     try {
-      const post = await this.postRepository.findOne({
-        where: { _id: new ObjectId(id) },
-      })
+      const post = (await this.entryRepository.findOne({
+        where: { _id: new ObjectId(id), kind: 'post' },
+      })) as PostEntry | null
       if (!post) {
         throw new NotFoundException(`Không tìm thấy bài viết với ID: ${id}`)
       }
@@ -103,14 +128,14 @@ export class CommunityService {
     status: 'approved' | 'rejected'
   ): Promise<CommunityPost> {
     this.logger.log(`Updating status of post ${id} to ${status}`)
-    const post = await this.findOne(id)
+    const post = await this.findPostEntry(id)
     post.status = status
-    return this.postRepository.save(post)
+    return toPost(await this.entryRepository.save(post))
   }
 
   async upvote(id: string, userId: string): Promise<CommunityPost> {
     this.logger.log(`User ${userId} toggling upvote on post ${id}`)
-    const post = await this.findOne(id)
+    const post = await this.findPostEntry(id)
 
     if (!post.upvotes) {
       post.upvotes = []
@@ -123,15 +148,16 @@ export class CommunityService {
       post.upvotes.push(userId)
     }
 
-    return this.postRepository.save(post)
+    return toPost(await this.entryRepository.save(post))
   }
 
   async getComments(postId: string): Promise<CommunityComment[]> {
     this.logger.log(`Fetching comments for post: ${postId}`)
-    return this.commentRepository.find({
-      where: { postId },
+    const entries = await this.entryRepository.find({
+      where: { kind: 'comment', postId },
       order: { createdAt: 'ASC' },
     })
+    return (entries as CommentEntry[]).map(toComment)
   }
 
   async addComment(
@@ -142,9 +168,10 @@ export class CommunityService {
     dto: CreateCommentDto
   ): Promise<CommunityComment> {
     this.logger.log(`Adding comment to post ${postId} by user ${authorId}`)
-    const post = await this.findOne(postId)
+    const post = await this.findPostEntry(postId)
 
-    const comment = new CommunityComment()
+    const comment = new CommunityEntry() as CommentEntry
+    comment.kind = 'comment'
     comment.postId = postId
     comment.parentId = dto.parentId || null
     comment.authorId = authorId
@@ -153,18 +180,18 @@ export class CommunityService {
     comment.authorRole = authorRole === 'admin' ? 'staff' : authorRole
     comment.content = dto.content
 
-    const savedComment = await this.commentRepository.save(comment)
+    const savedComment = await this.entryRepository.save(comment)
 
     // Update post comment count
     post.commentsCount = (post.commentsCount || 0) + 1
-    await this.postRepository.save(post)
+    await this.entryRepository.save(post)
 
-    return savedComment
+    return toComment(savedComment)
   }
 
   async deletePost(id: string): Promise<void> {
     this.logger.log(`Deleting community post: ${id}`)
-    const post = await this.findOne(id)
+    const post = await this.findPostEntry(id)
 
     // Create and save bell notification for the author
     if (post.authorId) {
@@ -188,22 +215,22 @@ export class CommunityService {
 
     // Delete post comments
     try {
-      await this.commentRepository.delete({ postId: id })
+      await this.entryRepository.delete({ kind: 'comment', postId: id })
     } catch (err) {
       this.logger.warn(`Không thể xóa bình luận của bài viết ${id}:`, err)
     }
 
     // Delete the post
-    await this.postRepository.delete({ _id: new ObjectId(id) })
+    await this.entryRepository.delete({ _id: new ObjectId(id), kind: 'post' })
   }
 
   async deleteComment(id: string): Promise<void> {
     this.logger.log(`Deleting community comment: ${id}`)
-    let comment: CommunityComment | null = null
+    let comment: CommentEntry | null = null
     try {
-      comment = await this.commentRepository.findOne({
-        where: { _id: new ObjectId(id) },
-      })
+      comment = (await this.entryRepository.findOne({
+        where: { _id: new ObjectId(id), kind: 'comment' },
+      })) as CommentEntry | null
     } catch {
       throw new NotFoundException(`ID bình luận không hợp lệ: ${id}`)
     }
@@ -213,20 +240,23 @@ export class CommunityService {
     }
 
     // Delete comment
-    await this.commentRepository.delete({ _id: new ObjectId(id) })
+    await this.entryRepository.delete({
+      _id: new ObjectId(id),
+      kind: 'comment',
+    })
 
     // Also delete any child/nested comments (where parentId === id)
     try {
-      await this.commentRepository.delete({ parentId: id })
+      await this.entryRepository.delete({ kind: 'comment', parentId: id })
     } catch (err) {
       this.logger.warn(`Không thể xóa bình luận con của bình luận ${id}:`, err)
     }
 
     // Decrement commentsCount of the post
     try {
-      const post = await this.findOne(comment.postId)
+      const post = await this.findPostEntry(comment.postId)
       post.commentsCount = Math.max(0, (post.commentsCount || 0) - 1)
-      await this.postRepository.save(post)
+      await this.entryRepository.save(post)
     } catch (err) {
       this.logger.warn(
         `Không thể cập nhật commentsCount của bài viết ${comment.postId}:`,

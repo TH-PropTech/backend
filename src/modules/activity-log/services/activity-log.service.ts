@@ -1,15 +1,23 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
-import { Repository } from 'typeorm'
+import { FindOptionsWhere, Repository } from 'typeorm'
 import { ActivityLog } from '../schemas/activity-log.schema'
+import {
+  toHttpActivityLog,
+  type HttpActivityLog,
+} from '../utils/legacy-log.mapper'
 
+/** Đầu vào ghi nhật ký HTTP; `kind` do service gán ('http'). */
 export type CreateActivityLogInput = Omit<
   ActivityLog,
-  '_id' | 'createdAt' | 'updatedAt'
->
+  '_id' | 'createdAt' | 'updatedAt' | 'kind'
+> &
+  Required<
+    Pick<ActivityLog, 'userId' | 'userRole' | 'method' | 'path' | 'action'>
+  >
 
 export interface ActivityLogPage {
-  logs: ActivityLog[]
+  logs: HttpActivityLog[]
   total: number
   page: number
   limit: number
@@ -69,6 +77,7 @@ export class ActivityLogService {
       const { requestBody, ...rest } = data
       const entry = this.repository.create({
         ...rest,
+        kind: 'http',
         ...(requestBody
           ? {
               requestBody: redactSensitive(requestBody) as Record<
@@ -106,12 +115,18 @@ export class ActivityLogService {
   ): Promise<ActivityLogPage> {
     const safePage = clampPage(page)
     const safeLimit = clampLimit(limit)
-    const [logs, total] = await this.repository.findAndCount({
-      where,
+    // Chỉ đọc loại `http` (activity_logs còn chứa job-run, blockchain, ...); hình trả về không có `kind`.
+    const [rows, total] = await this.repository.findAndCount({
+      where: { ...where, kind: 'http' } as FindOptionsWhere<ActivityLog>,
       order: { createdAt: 'DESC' },
       skip: (safePage - 1) * safeLimit,
       take: safeLimit,
     })
-    return { logs, total, page: safePage, limit: safeLimit }
+    return {
+      logs: rows.map(toHttpActivityLog),
+      total,
+      page: safePage,
+      limit: safeLimit,
+    }
   }
 }

@@ -77,7 +77,7 @@ describe('ActivityLogService', () => {
     const result = await service.findAll(3, 20)
 
     expect(repo.findAndCount).toHaveBeenCalledWith({
-      where: {},
+      where: { kind: 'http' },
       order: { createdAt: 'DESC' },
       skip: 40,
       take: 20,
@@ -90,11 +90,32 @@ describe('ActivityLogService', () => {
     })
   })
 
+  it('asks only for http rows and strips kind and foreign columns from the page', async () => {
+    repo.findAndCount.mockResolvedValueOnce([
+      [
+        { userId: 'u1', kind: 'http', method: 'POST', path: '/p' },
+        { kind: 'job-run', jobName: 'rental-ops', userId: 'ignored' },
+      ],
+      2,
+    ])
+
+    const result = await service.findAll(1, 20)
+
+    expect(repo.findAndCount).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { kind: 'http' } })
+    )
+    expect(result.logs).toEqual([
+      { userId: 'u1', method: 'POST', path: '/p' },
+      { userId: 'ignored' },
+    ])
+    expect(result.logs[0]).not.toHaveProperty('kind')
+  })
+
   it('filters by user and clamps invalid paging', async () => {
     await service.findByUser('u9', 0, 5000)
 
     expect(repo.findAndCount).toHaveBeenCalledWith({
-      where: { userId: 'u9' },
+      where: { userId: 'u9', kind: 'http' },
       order: { createdAt: 'DESC' },
       skip: 0,
       take: 100,

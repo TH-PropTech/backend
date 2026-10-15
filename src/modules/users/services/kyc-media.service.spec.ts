@@ -1,10 +1,11 @@
+import { vi } from 'vitest'
 import type { ConfigService } from '@nestjs/config'
 import { promises as fs } from 'node:fs'
 import { v2 as cloudinary } from 'cloudinary'
 
 import { KycMediaService } from './kyc-media.service'
 
-jest.mock('node:fs', () => ({
+vi.mock('node:fs', () => ({
   promises: {
     mkdir: jest.fn(),
     writeFile: jest.fn(),
@@ -13,7 +14,7 @@ jest.mock('node:fs', () => ({
   },
 }))
 
-jest.mock('cloudinary', () => ({
+vi.mock('cloudinary', () => ({
   v2: {
     config: jest.fn(),
     url: jest.fn(),

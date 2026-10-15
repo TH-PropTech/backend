@@ -13,6 +13,10 @@ export interface MessageItem {
   timestamp: Date
 }
 
+/**
+ * @deprecated G-LOG: gộp vào `ActivityLog` (collection `activity_logs`, `kind: 'ai-consultation'`).
+ * Giữ lại để đọc collection cũ và migration 023. Không đăng ký forFeature, không ghi mới.
+ */
 @Entity('ai_consultation_logs')
 export class AiConsultationLog {
   @ObjectIdColumn()

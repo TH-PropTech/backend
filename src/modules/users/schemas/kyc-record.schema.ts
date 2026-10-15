@@ -7,6 +7,11 @@ import {
   UpdateDateColumn,
 } from 'typeorm'
 
+/**
+ * @deprecated G-KYC: hồ sơ KYC nay nhúng trong `User.kyc` (`KycInfo`, migration 026).
+ * Giữ class này làm kiểu hình JSON trả về; không còn `forFeature`. Collection
+ * `kyc_records` được giữ nguyên làm nguồn/đường lùi, không xóa.
+ */
 @Entity('kyc_records')
 export class KycRecord {
   @ObjectIdColumn()

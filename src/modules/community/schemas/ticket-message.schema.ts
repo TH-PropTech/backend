@@ -6,6 +6,10 @@ import {
   CreateDateColumn,
 } from 'typeorm'
 
+/**
+ * @deprecated G-TKT: tin nhắn nay nhúng trong `SupportTicket.messages[]`.
+ * Giữ lại để migration 008 đọc collection `ticket_messages` và làm kiểu trả về API.
+ */
 @Entity('ticket_messages')
 export class TicketMessage {
   @ObjectIdColumn()

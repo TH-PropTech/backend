@@ -27,13 +27,10 @@ import { ContractsModule } from './modules/contracts/contracts.module'
 import { PaymentsModule } from './modules/payments/payments.module'
 import { WalletsModule } from './modules/wallets/wallets.module'
 import { LegalModule } from './modules/legal/legal.module'
-import { InsightsModule } from './modules/insights/insights.module'
-import { RecommendationsModule } from './modules/recommendations/recommendations.module'
 import { CommunityModule } from './modules/community/community.module'
 import { NotificationsModule } from './modules/notifications/notifications.module'
 // Adapter
 import { FabricModule } from './modules/fabric/fabric.module'
-import { DigitalSignatureModule } from './modules/digital-signature/digital-signature.module'
 import { EkycModule } from './modules/ekyc/ekyc.module'
 import { AiModule } from './modules/ai/ai.module'
 import { MockBankModule } from './modules/mock-bank/mock-bank.module'
@@ -90,13 +87,10 @@ import { JobsModule } from './modules/jobs/jobs.module'
     PaymentsModule,
     WalletsModule,
     LegalModule,
-    InsightsModule,
-    RecommendationsModule,
     CommunityModule,
     NotificationsModule,
     // Adapter
     FabricModule,
-    DigitalSignatureModule,
     EkycModule,
     AiModule,
     MockBankModule,

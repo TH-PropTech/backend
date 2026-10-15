@@ -3,6 +3,12 @@ import type { CheckResult } from '../utils/groq-probe'
 
 export type GroqKeyStatus = 'active' | 'invalid' | 'disabled'
 
+/**
+ * @deprecated G-CFG2: thay bằng `SystemConfig{scope:'groq-key'}`
+ * (`properties/schemas/system-config.schema.ts`, facade `utils/groq-key.repository.ts`).
+ * Giữ file để migration 022 đọc collection cũ; không đăng ký trong `forFeature`.
+ * Collection `groq_api_keys` không bị xóa.
+ */
 @Entity('groq_api_keys')
 export class GroqApiKey {
   @ObjectIdColumn()

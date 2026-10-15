@@ -6,9 +6,7 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
-import { InjectRepository } from '@nestjs/typeorm'
 import { ObjectId } from 'mongodb'
-import { MongoRepository } from 'typeorm'
 import {
   GROQ_KEY_SECRET_MIN_LENGTH,
   decrypt,
@@ -30,7 +28,8 @@ import type {
   GroqKeyAction,
   GroqKeyItem,
 } from '../utils/groq-keys.types'
-import { GroqApiKey } from '../schemas/groq-api-key.schema'
+import type { GroqApiKey } from '../schemas/groq-api-key.schema'
+import { GroqKeyRepository } from '../utils/groq-key.repository'
 
 const DEFAULT_COOLDOWN_S = 600
 const MAX_COOLDOWN_S = 7 * 24 * 60 * 60
@@ -60,8 +59,7 @@ export class GroqKeysService implements GroqKeyStore {
   private readonly secret: string
 
   constructor(
-    @InjectRepository(GroqApiKey)
-    private readonly repo: MongoRepository<GroqApiKey>,
+    private readonly repo: GroqKeyRepository,
     configService: ConfigService
   ) {
     this.secret = configService.get<string>('groq.keyEncryptionSecret') ?? ''
@@ -80,11 +78,11 @@ export class GroqKeysService implements GroqKeyStore {
   async current(): Promise<string | null> {
     if (!this.isEnabled()) return null
     const now = Date.now()
-    const doc = (await this.repo.findOneAndUpdate(
+    const doc = await this.repo.findOneAndUpdate(
       { status: 'active', cooldownUntil: { $lte: now } },
       { $inc: { usageCount: 1 }, $set: { lastUsedAt: now } },
       { sort: { createdAt: 1 }, returnDocument: 'after' }
-    )) as GroqApiKey | null
+    )
     if (!doc) return null
     return decrypt(doc.keyEnc, this.secret)
   }

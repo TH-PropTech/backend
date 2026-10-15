@@ -8,6 +8,12 @@ import {
 } from 'typeorm'
 import { DeviceStatus } from '../enums/device-status.enum'
 
+/**
+ * @deprecated Đã gom vào `User.smartOTP.devices[]` (xem DeviceBindingInfo trong
+ * user.schema.ts và migration 007). Không còn đăng ký trong
+ * TypeOrmModule.forFeature; giữ file làm kiểu trả về của DeviceBindingService
+ * và để migration/rollback tham chiếu collection `device_bindings` cũ.
+ */
 @Entity('device_bindings')
 export class DeviceBinding {
   @ObjectIdColumn()

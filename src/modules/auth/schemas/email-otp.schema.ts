@@ -8,6 +8,11 @@ import {
   Index,
 } from 'typeorm'
 
+/**
+ * @deprecated G-OTP: thay bằng `Otp` (kind 'email', collection `otps`, xem
+ * `otp.schema.ts`). Giữ file để migration 021 đọc `email_otps`; không còn
+ * đăng ký trong `TypeOrmModule.forFeature`.
+ */
 @Entity('email_otps')
 @Index(['email', 'otpCode', 'action', 'isUsed'])
 export class EmailOtp {

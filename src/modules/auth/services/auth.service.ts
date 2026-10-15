@@ -9,7 +9,8 @@ import { JwtService } from '@nestjs/jwt'
 import { ObjectId } from 'mongodb'
 import * as bcrypt from 'bcryptjs'
 import { User, UserStatus } from '../../users/schemas/user.schema'
-import { EmailOtp } from '../schemas/email-otp.schema'
+import { Otp, EmailOtpRecord } from '../schemas/otp.schema'
+import { KindScopedOtpRepository } from '../utils/otp.repository'
 import { EmailService } from './email.service'
 import { TokenResponse, UserPayload } from '../interfaces/auth.interface'
 import { TwoFactorService } from './two-factor.service'
@@ -21,15 +22,22 @@ interface TwoFactorTempPayload {
 
 @Injectable()
 export class AuthService {
+  private readonly emailOtpRepository: KindScopedOtpRepository<EmailOtpRecord>
+
   constructor(
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
-    @InjectRepository(EmailOtp)
-    private readonly emailOtpRepository: Repository<EmailOtp>,
+    @InjectRepository(Otp)
+    otpRepository: Repository<Otp>,
     private readonly emailService: EmailService,
     private readonly jwtService: JwtService,
     private readonly twoFactorService: TwoFactorService
-  ) {}
+  ) {
+    this.emailOtpRepository = new KindScopedOtpRepository(
+      otpRepository,
+      'email'
+    )
+  }
 
   /**
    * Đăng nhập bằng Email/SĐT và Mật khẩu cục bộ
@@ -202,8 +210,11 @@ export class AuthService {
     }
 
     // Cập nhật mật khẩu mới
-    user.passwordHash = await bcrypt.hash(newPassword, 10)
-    await this.userRepository.save(user)
+    // Ghi từng trường (không save toàn document) để không ghi đè smartOTP.devices
+    await this.userRepository.update(user._id, {
+      passwordHash: await bcrypt.hash(newPassword, 10),
+      updatedAt: new Date(),
+    })
   }
 
   /**

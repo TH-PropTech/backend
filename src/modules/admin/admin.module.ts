@@ -3,9 +3,8 @@ import { TypeOrmModule } from '@nestjs/typeorm'
 import { Apartment } from '../properties/schemas/apartment.schema'
 import { Booking } from '../bookings/schemas/booking.schema'
 import { AiModule } from '../ai/ai.module'
-import { KycRecord } from '../users/schemas/kyc-record.schema'
-import { LegalSource } from '../legal/schemas/legal-source.schema'
-import { PlatformRegulation } from '../legal/schemas/platform-regulation.schema'
+import { UsersModule } from '../users/users.module'
+import { LegalDocument } from '../legal/schemas/legal-document.schema'
 import { PropertiesModule } from '../properties/properties.module'
 import { SupportTicket } from '../community/schemas/support-ticket.schema'
 import { GroqKeysController } from './controllers/groq-keys.controller'
@@ -26,15 +25,15 @@ import { PlatformRegulationsService } from './services/platform-regulations.serv
     TypeOrmModule.forFeature([
       // OperationsService
       Booking,
-      KycRecord,
       Apartment,
       SupportTicket,
-      // PlatformRegulationsService
-      PlatformRegulation,
-      LegalSource,
+      // PlatformRegulationsService (G-LEG: legal_documents, kind regulation/source)
+      LegalDocument,
     ]),
     PropertiesModule,
     AiModule,
+    // OperationsService: KYC nhúng trong users.kyc (G-KYC), đếm qua KycService
+    UsersModule,
   ],
   controllers: [
     PlatformRegulationsController,

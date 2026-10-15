@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 import { Booking } from '../../bookings/schemas/booking.schema'
-import { KycRecord } from '../../users/schemas/kyc-record.schema'
+import { KycService } from '../../users/services/kyc.service'
 import { Apartment } from '../../properties/schemas/apartment.schema'
 import { SupportTicket } from '../../community/schemas/support-ticket.schema'
 
@@ -60,8 +60,7 @@ export class OperationsService {
   constructor(
     @InjectRepository(Booking)
     private readonly bookingRepo: Repository<Booking>,
-    @InjectRepository(KycRecord)
-    private readonly kycRepo: Repository<KycRecord>,
+    private readonly kycService: KycService,
     @InjectRepository(Apartment)
     private readonly apartmentRepo: Repository<Apartment>,
     @InjectRepository(SupportTicket)
@@ -75,11 +74,13 @@ export class OperationsService {
   async getStats(): Promise<OperationsStats> {
     this.logger.log('Fetching operations stats')
 
-    const [bookings, kycRecords, apartments, tickets] = await Promise.all([
+    const [bookings, kycCounts, apartments, tickets] = await Promise.all([
       this.bookingRepo.find(),
-      this.kycRepo.find(),
+      // KYC nhúng trong users.kyc (G-KYC): đếm qua KycService
+      this.kycService.countByStatus(),
       this.apartmentRepo.find(),
-      this.ticketRepo.find(),
+      // Chỉ cần _id và status để đếm; không nạp messages[] (tối đa 500 tin/ticket).
+      this.ticketRepo.find({ select: ['_id', 'status'] }),
     ])
 
     return {
@@ -93,10 +94,10 @@ export class OperationsService {
         completed: bookings.filter(b => b.status === 'completed').length,
       },
       kyc: {
-        total: kycRecords.length,
-        pending: kycRecords.filter(k => k.status === 'pending').length,
-        verified: kycRecords.filter(k => k.status === 'verified').length,
-        rejected: kycRecords.filter(k => k.status === 'rejected').length,
+        total: kycCounts.total,
+        pending: kycCounts.pending,
+        verified: kycCounts.verified,
+        rejected: kycCounts.rejected,
       },
       apartments: {
         total: apartments.length,
