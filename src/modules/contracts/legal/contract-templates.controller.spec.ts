@@ -64,6 +64,41 @@ describe('ContractTemplatesController', () => {
     )
   })
 
+  it('does not expose the internal kind field on template responses', async () => {
+    const row = {
+      _id: 't1',
+      kind: 'template',
+      templateKey: 'template-1',
+      version: 2,
+      clauses: [],
+    }
+    service.getPublishedVersion.mockResolvedValue(row)
+    service.saveDraft.mockResolvedValue(row)
+    service.publishDraft.mockResolvedValue(row)
+
+    const latest = await controller.getPublished('template-1')
+    const versioned = await controller.getPublishedVersion('template-1', 2)
+    const draft = await controller.saveDraft(
+      'template-1',
+      {
+        legalProfile: 'PRIVATE_CIVIL_APARTMENT_LEASE',
+        clauses: [],
+        allowedVariables: [],
+        addenda: [],
+        citationIds: [],
+        expectedRevision: 0,
+      },
+      'admin-1'
+    )
+    const published = await controller.publishDraft('template-1', {}, 'admin-1')
+
+    for (const res of [latest, versioned, draft, published]) {
+      expect(res).not.toHaveProperty('kind')
+      expect(res).toMatchObject({ templateKey: 'template-1', version: 2 })
+    }
+    expect(row).toHaveProperty('kind', 'template')
+  })
+
   it('keeps staff read access separate from admin-only mutation routes', () => {
     const prototype = ContractTemplatesController.prototype
     const rolesFor = (methodName: string): unknown => {

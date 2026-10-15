@@ -89,7 +89,9 @@ describe('SmartCaEventsGateway', () => {
 
   it('rejects an invalid JWT without logging the token', () => {
     const ctx = context()
-    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation()
+    const warn = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined)
     ctx.jwtService.verify.mockImplementation(() => {
       throw new Error('invalid token')
     })

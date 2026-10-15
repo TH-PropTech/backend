@@ -17,7 +17,7 @@ import { ContractDocumentProjector } from '../legal/contract-document.projector'
 import { OwnershipTransferResolver } from './ownership-transfer.resolver'
 import { ContractArtifactService } from './contract-artifact.service'
 import { ContractTemplateGovernanceService } from '../legal/contract-template-governance.service'
-import { ContractAmendment } from '../schemas/contract-amendment.schema'
+import { ContractAmendmentStore } from './contract-amendment.store'
 import { MoveInSettlement } from '../../rental/schemas/move-in-settlement.schema'
 import { resolveEffectiveCommercial } from '../commercial/resolve-effective-commercial'
 import {
@@ -55,8 +55,7 @@ export class ContractViewService {
     @Optional()
     private readonly templateGovernanceService?: ContractTemplateGovernanceService,
     @Optional()
-    @InjectRepository(ContractAmendment)
-    private readonly amendmentRepository?: Repository<ContractAmendment>,
+    private readonly amendmentRepository?: ContractAmendmentStore,
     @Optional()
     @InjectRepository(MoveInSettlement)
     private readonly settlementRepository?: Repository<MoveInSettlement>

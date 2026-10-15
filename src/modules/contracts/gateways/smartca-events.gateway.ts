@@ -19,6 +19,7 @@ import type {
   SmartCaSessionUpdatedEvent,
 } from './smartca-events.publisher'
 import { SmartCaSigningSession } from '../schemas/smartca-signing-session.schema'
+import { KindScopedSmartCaSigningRepository } from '../utils/signing-session.repository'
 
 const AUTH_TIMEOUT_MS = 5_000
 const HEARTBEAT_INTERVAL_MS = 30_000
@@ -48,11 +49,19 @@ export class SmartCaEventsGateway
   private readonly clients = new Map<WebSocket, ClientSession>()
   private heartbeat?: ReturnType<typeof setInterval>
 
+  /** Phiên SmartCA (kind='session') trên bảng hợp nhất; truy vấn tự thêm kind. */
+  private readonly sessionRepository: KindScopedSmartCaSigningRepository
+
   constructor(
     private readonly jwtService: JwtService,
     @InjectRepository(SmartCaSigningSession)
-    private readonly sessionRepository: Repository<SmartCaSigningSession>
-  ) {}
+    sessionStore: Repository<SmartCaSigningSession>
+  ) {
+    this.sessionRepository = new KindScopedSmartCaSigningRepository(
+      sessionStore,
+      'session'
+    )
+  }
 
   afterInit(): void {
     this.heartbeat = setInterval(

@@ -64,6 +64,7 @@ describe('SignedArtifactService', () => {
 
   async function build(): Promise<{
     service: SignedArtifactService
+    repository: { create: jest.Mock; find: jest.Mock; findOne: jest.Mock }
     files: Map<string, Buffer>
     rows: Record<string, unknown>[]
     canonical: Buffer
@@ -117,11 +118,11 @@ describe('SignedArtifactService', () => {
       storage,
       artifactService as never
     )
-    return { service, files, rows, canonical }
+    return { service, repository, files, rows, canonical }
   }
 
   it('prepares, finalizes and serves a signed copy without touching the canonical bytes', async () => {
-    const { service, canonical } = await build()
+    const { service, repository, canonical } = await build()
     const before = createHash('sha256').update(canonical).digest('hex')
     const { privateKey, certPem } = makeIdentity()
 
@@ -140,6 +141,9 @@ describe('SignedArtifactService', () => {
     )
 
     expect(ok).toBe(true)
+    expect(repository.create).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'signed' })
+    )
     const download = await service.downloadForActor(
       contractId.toHexString(),
       'tenant-1',
@@ -148,6 +152,16 @@ describe('SignedArtifactService', () => {
     expect(download.bytes.subarray(0, 5).toString()).toBe('%PDF-')
     expect(download.revision).toBe(1)
     expect(download.canonicalHash).toBe(canonicalHash)
+    expect(repository.find).toHaveBeenCalledWith({
+      where: {
+        kind: 'signed',
+        contractId: contractId.toHexString(),
+        status: 'ready',
+      },
+    })
+    expect(repository.findOne).toHaveBeenCalledWith({
+      where: { _id: expect.any(ObjectId) as ObjectId, kind: 'signed' },
+    })
     expect(download.sha256).toBe(
       createHash('sha256').update(download.bytes).digest('hex')
     )

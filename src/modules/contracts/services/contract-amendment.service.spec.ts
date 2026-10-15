@@ -143,6 +143,32 @@ describe('ContractAmendmentService', () => {
     }
   }
 
+  it('lists amendments without snapshots and reads through the embedded store', async () => {
+    const { service, amendmentRepository } = setup()
+
+    await service.list(contractId.toHexString(), {
+      actorId: 'landlord-1',
+      isStaff: false,
+      role: 'landlord',
+    })
+
+    expect(amendmentRepository.find).toHaveBeenCalledWith(
+      expect.objectContaining({ omitSnapshots: true })
+    )
+  })
+
+  it('sweeps due amendments without loading snapshots', async () => {
+    const { service, amendmentRepository } = setup()
+
+    const processed = await service.applyAllDueAmendments()
+
+    expect(processed).toBe(0)
+    expect(amendmentRepository.find).toHaveBeenCalledWith({
+      where: { status: 'effective' },
+      omitSnapshots: true,
+    })
+  })
+
   it('creates a future commercial amendment and rejects protected fields', async () => {
     const { service, amendment } = setup()
     const future = new Date(Date.now() + 86_400_000).toISOString()

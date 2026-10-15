@@ -6,7 +6,7 @@ import { ContractsService } from './contracts.service'
 import { DepositAgreementsService } from './deposit-agreements.service'
 import { ContractArtifactService } from './contract-artifact.service'
 import { ContractViewService } from './contract-view.service'
-import type { ContractArtifact } from '../schemas/contract-artifact.schema'
+import type { ContractDocument } from '../schemas/contract-document.schema'
 import type { Payment } from '../../payments/schemas/payment.schema'
 import { PaymentsService } from '../../payments/services/payments.service'
 import type { MoveInSettlement } from '../../rental/schemas/move-in-settlement.schema'
@@ -186,7 +186,7 @@ type Context = {
   depositRepo: ReturnType<typeof createInMemoryRepo<DepositAgreement>>
   paymentRepo: ReturnType<typeof createInMemoryRepo<Payment>>
   settlementRepo: ReturnType<typeof createInMemoryRepo<MoveInSettlement>>
-  artifactRepo: ReturnType<typeof createInMemoryRepo<ContractArtifact>>
+  artifactRepo: ReturnType<typeof createInMemoryRepo<ContractDocument>>
   ledgerOutboxService: ReturnType<typeof buildLedgerOutboxService>
   contractsService: ContractsService
   depositAgreementsService: DepositAgreementsService
@@ -201,7 +201,7 @@ function buildContext(): Context {
   const depositRepo = createInMemoryRepo<DepositAgreement>()
   const paymentRepo = createInMemoryRepo<Payment>()
   const settlementRepo = createInMemoryRepo<MoveInSettlement>()
-  const artifactRepo = createInMemoryRepo<ContractArtifact>()
+  const artifactRepo = createInMemoryRepo<ContractDocument>()
   const ledgerOutboxService = buildLedgerOutboxService()
 
   const kycService = {

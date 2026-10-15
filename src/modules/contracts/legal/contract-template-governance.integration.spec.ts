@@ -7,12 +7,13 @@ import { ContractTemplateGovernanceService } from './contract-template-governanc
 import {
   ContractTemplate,
   type ContractTemplateClause,
-} from './contract-template.schema'
+} from '../schemas/contract-template.schema'
 import { ContractTemplatesController } from './contract-templates.controller'
 import { buildReviewedLeaseTemplateSeed } from './lease-template.seed'
 import { resolveLegalProfile } from './legal-profile.resolver'
 import type { Contract } from '../schemas/contract.schema'
-import { ContractTemplateAudit } from './contract-template-audit.schema'
+import { ConfigAuditService } from '../../activity-log/services/config-audit.service'
+import { ConfigAudit } from '../../activity-log/schemas/config-audit.schema'
 
 function getMethodTarget(prototype: object, methodName: string): object {
   const descriptor = Object.getOwnPropertyDescriptor(prototype, methodName)
@@ -32,10 +33,10 @@ describe('contract template governance integration', () => {
   function setup(): {
     service: ContractTemplateGovernanceService
     templates: Map<string, ContractTemplate[]>
-    audits: ContractTemplateAudit[]
+    audits: ConfigAudit[]
   } {
     const templates = new Map<string, ContractTemplate[]>()
-    const audits: ContractTemplateAudit[] = []
+    const audits: ConfigAudit[] = []
     const templateRepository = {
       findOne: jest.fn(({ where }: { where: Record<string, unknown> }) => {
         const rows = (templates.get(String(where.templateKey)) ?? [])
@@ -65,18 +66,22 @@ describe('contract template governance integration', () => {
       }),
     }
     const auditRepository = {
-      create: jest.fn((value: Partial<ContractTemplateAudit>) =>
-        Object.assign(new ContractTemplateAudit(), value)
+      create: jest.fn((value: Partial<ConfigAudit>) =>
+        Object.assign(new ConfigAudit(), value)
       ),
-      save: jest.fn((value: ContractTemplateAudit) => {
+      save: jest.fn((value: ConfigAudit) => {
         audits.push(value)
         return value
       }),
       find: jest.fn(({ where }: { where: Record<string, unknown> }) =>
-        audits.filter(audit =>
-          typeof where.version === 'number'
-            ? audit.version === where.version
-            : audit.templateKey === where.templateKey
+        Promise.resolve(
+          audits.filter(
+            audit =>
+              audit.scope === where.scope &&
+              audit.key === where.key &&
+              (typeof where.version !== 'number' ||
+                audit.version === where.version)
+          )
         )
       ),
     }
@@ -84,7 +89,7 @@ describe('contract template governance integration', () => {
     return {
       service: new ContractTemplateGovernanceService(
         templateRepository as never,
-        auditRepository as never
+        new ConfigAuditService(auditRepository as never)
       ),
       templates,
       audits,

@@ -1,3 +1,4 @@
+import type { ActivityLog } from '../../activity-log/schemas/activity-log.schema'
 import type { Repository } from 'typeorm'
 import {
   CONTRACT_TEMPLATE_ADDENDUM_ALLOWLIST,
@@ -5,8 +6,9 @@ import {
   ContractTemplateGovernanceService,
   type ContractTemplateDraftInput,
 } from './contract-template-governance.service'
-import { ContractTemplate } from './contract-template.schema'
-import { ContractTemplateAudit } from './contract-template-audit.schema'
+import { ContractTemplate } from '../schemas/contract-template.schema'
+import { ConfigAuditService } from '../../activity-log/services/config-audit.service'
+import { ConfigAudit } from '../../activity-log/schemas/config-audit.schema'
 
 describe('ContractTemplateGovernanceService', () => {
   const templateKey = 'VN_INDIVIDUAL_RESIDENTIAL_LEASE'
@@ -34,12 +36,12 @@ describe('ContractTemplateGovernanceService', () => {
 
   function context(): {
     service: ContractTemplateGovernanceService
-    audits: ContractTemplateAudit[]
+    audits: ConfigAudit[]
     getPublished: () => ContractTemplate | null
   } {
     let draft: ContractTemplate | null = null
     const published = new Map<string, ContractTemplate>()
-    const audits: ContractTemplateAudit[] = []
+    const audits: ConfigAudit[] = []
     const templateRepository = {
       findOne: jest.fn(({ where }: { where: Record<string, unknown> }) => {
         if (where.status === 'draft') return Promise.resolve(draft)
@@ -65,19 +67,21 @@ describe('ContractTemplateGovernanceService', () => {
       }),
     }
     const auditRepository = {
-      create: jest.fn((value: Partial<ContractTemplateAudit>) =>
-        Object.assign(new ContractTemplateAudit(), value)
+      create: jest.fn((value: Partial<ConfigAudit>) =>
+        Object.assign(new ConfigAudit(), value)
       ),
-      save: jest.fn((value: ContractTemplateAudit) => {
+      save: jest.fn((value: ConfigAudit) => {
         audits.push(value)
         return Promise.resolve(value)
       }),
       find: jest.fn(({ where }: { where: Record<string, unknown> }) =>
         Promise.resolve(
-          audits.filter(audit =>
-            typeof where.version === 'number'
-              ? audit.version === where.version
-              : audit.templateKey === where.templateKey
+          audits.filter(
+            audit =>
+              audit.scope === where.scope &&
+              audit.key === where.key &&
+              (typeof where.version !== 'number' ||
+                audit.version === where.version)
           )
         )
       ),
@@ -85,7 +89,9 @@ describe('ContractTemplateGovernanceService', () => {
     return {
       service: new ContractTemplateGovernanceService(
         templateRepository as unknown as Repository<ContractTemplate>,
-        auditRepository as unknown as Repository<ContractTemplateAudit>
+        new ConfigAuditService(
+          auditRepository as unknown as Repository<ActivityLog>
+        )
       ),
       audits,
       getPublished: () => published.get(templateKey) ?? null,
@@ -222,6 +228,44 @@ describe('ContractTemplateGovernanceService', () => {
       )
     ).rejects.toThrow('PROTECTED_LEGAL_CLAUSE_CHANGED')
   })
+
+  it('records a protected-change denial with deniedField and beforeHash', async () => {
+    const { service, audits } = context()
+    await service.saveDraft(templateKey, input, 'admin-1', 0)
+    const published = await service.publishDraft(templateKey, 'admin-1')
+    const changedClauses = input.clauses.map(clause =>
+      clause.number === 1 ? { ...clause, contentHash: 'b'.repeat(64) } : clause
+    )
+    await expect(
+      service.saveDraft(
+        templateKey,
+        { ...input, clauses: changedClauses },
+        'admin-9',
+        0
+      )
+    ).rejects.toThrow('PROTECTED_LEGAL_CLAUSE_CHANGED')
+
+    expect(audits[0]).toEqual(
+      expect.objectContaining({
+        scope: 'contract-template',
+        key: templateKey,
+        version: 0,
+        action: 'draft-created',
+        actorId: 'admin-1',
+      })
+    )
+    expect(audits[audits.length - 1]).toEqual(
+      expect.objectContaining({
+        scope: 'contract-template',
+        key: templateKey,
+        version: published.version,
+        action: 'protected-change-denied',
+        actorId: 'admin-9',
+        details: { deniedField: 'clauses' },
+        beforeHash: published.contentHash,
+      })
+    )
+  })
 })
 
 describe('ContractTemplateGovernanceService.listLatestPublished (PROP-399 governance source)', () => {
@@ -237,17 +281,206 @@ describe('ContractTemplateGovernanceService.listLatestPublished (PROP-399 govern
     }
     const service = new ContractTemplateGovernanceService(
       templateRepository as unknown as Repository<ContractTemplate>,
-      {} as unknown as Repository<ContractTemplateAudit>
+      {} as unknown as ConfigAuditService
     )
 
     const latest = await service.listLatestPublished()
 
     expect(templateRepository.find).toHaveBeenCalledWith({
-      where: { status: 'published' },
+      where: { status: 'published', kind: { $in: ['template', null] } },
     })
     expect(latest.map(t => `${t.templateKey}@${t.version}`)).toEqual([
       'VN_INDIVIDUAL@3',
       'VN_RE@1',
     ])
+  })
+})
+
+describe('ContractTemplateGovernanceService kind scoping (G-LAY)', () => {
+  type Stored = Record<string, unknown> & { kind?: string | null }
+  const matches = (row: Stored, where: Record<string, unknown>): boolean =>
+    Object.entries(where).every(([key, expected]) => {
+      const actual = row[key] ?? null
+      if (expected && typeof expected === 'object' && '$in' in expected) {
+        return (expected as { $in: unknown[] }).$in.includes(actual)
+      }
+      return actual === expected
+    })
+  function build(stored: Stored[]): {
+    service: ContractTemplateGovernanceService
+    find: jest.Mock
+    findOne: jest.Mock
+  } {
+    const find = jest.fn(({ where }: { where: Record<string, unknown> }) =>
+      Promise.resolve(stored.filter(row => matches(row, where)))
+    )
+    const findOne = jest.fn(({ where }: { where: Record<string, unknown> }) =>
+      Promise.resolve(stored.find(row => matches(row, where)) ?? null)
+    )
+    const service = new ContractTemplateGovernanceService(
+      { find, findOne } as unknown as Repository<ContractTemplate>,
+      {} as unknown as ConfigAuditService
+    )
+    return { service, find, findOne }
+  }
+
+  it('lists only template rows (kind template or legacy without kind), never layout rows', async () => {
+    const { service } = build([
+      {
+        templateKey: 'VN_RE',
+        version: 2,
+        status: 'published',
+        kind: 'template',
+      },
+      { templateKey: 'VN_RE', version: 1, status: 'published' },
+      // Layout đã published cùng trạng thái: không được xuất hiện trong governance template.
+      {
+        kind: 'layout',
+        profileKey: 'standard',
+        templateKey: 'VN_RE',
+        version: 7,
+        status: 'published',
+      },
+    ])
+
+    const latest = await service.listLatestPublished()
+
+    expect(latest.map(t => `${t.templateKey}@${t.version}`)).toEqual([
+      'VN_RE@2',
+    ])
+  })
+
+  it('does not resolve a published version from a layout row sharing the templateKey', async () => {
+    const { service, findOne } = build([
+      {
+        kind: 'layout',
+        profileKey: 'standard',
+        templateKey: 'VN_RE',
+        version: 1,
+        status: 'published',
+      },
+    ])
+
+    await expect(service.getPublishedVersion('VN_RE', 1)).rejects.toThrow(
+      'CONTRACT_TEMPLATE_NOT_FOUND'
+    )
+    expect(findOne).toHaveBeenCalledWith({
+      where: {
+        templateKey: 'VN_RE',
+        version: 1,
+        status: 'published',
+        kind: { $in: ['template', null] },
+      },
+    })
+  })
+})
+
+describe('ContractTemplateGovernanceService audit behaviour (characterization)', () => {
+  const legacyRows = [
+    {
+      templateKey: 'VN_RE',
+      version: 1,
+      action: 'draft-created',
+      actorId: 'admin-1',
+      afterHash: 'h1',
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    },
+    {
+      templateKey: 'VN_RE',
+      version: 1,
+      action: 'protected-change-denied',
+      actorId: 'admin-2',
+      beforeHash: 'h0',
+      deniedField: 'clauses',
+      createdAt: new Date('2026-01-02T00:00:00.000Z'),
+    },
+    {
+      templateKey: 'VN_RE',
+      version: 2,
+      action: 'legal-release-published',
+      actorId: 'system-legal-bootstrap',
+      reason: 'seed',
+      reviewReference: 'REV-1',
+      metadata: { a: 'b' },
+      createdAt: new Date('2026-01-03T00:00:00.000Z'),
+    },
+  ]
+
+  const storedRows = [
+    {
+      scope: 'contract-template',
+      key: 'VN_RE',
+      version: 1,
+      action: 'draft-created',
+      actorId: 'admin-1',
+      afterHash: 'h1',
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    },
+    {
+      scope: 'contract-template',
+      key: 'VN_RE',
+      version: 1,
+      action: 'protected-change-denied',
+      actorId: 'admin-2',
+      beforeHash: 'h0',
+      details: { deniedField: 'clauses' },
+      createdAt: new Date('2026-01-02T00:00:00.000Z'),
+    },
+    {
+      scope: 'contract-template',
+      key: 'VN_RE',
+      version: 2,
+      action: 'legal-release-published',
+      actorId: 'system-legal-bootstrap',
+      reason: 'seed',
+      details: { reviewReference: 'REV-1', metadata: { a: 'b' } },
+      createdAt: new Date('2026-01-03T00:00:00.000Z'),
+    },
+  ]
+
+  function build(): {
+    service: ContractTemplateGovernanceService
+    find: jest.Mock
+  } {
+    const find = jest.fn().mockResolvedValue(storedRows)
+    const service = new ContractTemplateGovernanceService(
+      {} as unknown as Repository<ContractTemplate>,
+      new ConfigAuditService({ find } as unknown as Repository<ActivityLog>)
+    )
+    return { service, find }
+  }
+
+  it('reads history by templateKey ordered by createdAt ASC, without paging', async () => {
+    const { service, find } = build()
+
+    const result = await service.getAuditHistory('VN_RE')
+
+    expect(find).toHaveBeenCalledTimes(1)
+    expect(find).toHaveBeenCalledWith({
+      where: { kind: 'config-audit', scope: 'contract-template', key: 'VN_RE' },
+      order: { createdAt: 'ASC' },
+    })
+    expect(result).toEqual(legacyRows)
+  })
+
+  it('narrows history by version when given and keeps the legacy JSON field names', async () => {
+    const { service, find } = build()
+
+    const result = await service.getAuditHistory('VN_RE', 2)
+
+    expect(find).toHaveBeenCalledWith({
+      where: {
+        kind: 'config-audit',
+        scope: 'contract-template',
+        key: 'VN_RE',
+        version: 2,
+      },
+      order: { createdAt: 'ASC' },
+    })
+    expect(JSON.parse(JSON.stringify(result))).toEqual(
+      JSON.parse(JSON.stringify(legacyRows))
+    )
+    expect(result[1]).not.toHaveProperty('scope')
+    expect(result[1]).not.toHaveProperty('key')
   })
 })

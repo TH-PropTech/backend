@@ -83,7 +83,7 @@ describe('SmartCaSigningService PAdES integration', () => {
       { findOne: jest.fn().mockResolvedValue(contract) } as never,
       sessionRepository as never,
       {
-        findOne: jest.fn().mockResolvedValue({
+        findByUserId: jest.fn().mockResolvedValue({
           status: 'verified',
           idCardNumber: '000000000001',
         }),

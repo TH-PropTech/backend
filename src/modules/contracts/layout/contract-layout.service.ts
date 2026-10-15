@@ -7,13 +7,17 @@ import { InjectRepository } from '@nestjs/typeorm'
 import { createHash } from 'node:crypto'
 import { Repository } from 'typeorm'
 import type { LegalProfile } from '../legal/legal-profile.resolver'
-import { ContractLayoutAudit } from './contract-layout-audit.schema'
-import {
+import { ConfigAuditService } from '../../activity-log/services/config-audit.service'
+import type { ContractLayoutAuditAction } from '../schemas/contract-layout-audit.schema'
+import type {
+  ContractLayoutBlock,
+  ContractLayoutDisclosure,
   ContractLayoutProfile,
-  type ContractLayoutBlock,
-  type ContractLayoutDisclosure,
-  type ContractLayoutSupplementaryClause,
-} from './contract-layout-profile.schema'
+  ContractLayoutSupplementaryClause,
+} from '../schemas/contract-layout-profile.schema'
+import { ContractTemplate } from '../schemas/contract-template.schema'
+import { ContractTemplateKindRepository } from '../utils/contract-template-kind.repository'
+import { toContractLayoutProfile } from './contract-layout.mapper'
 import { validateContractLayout } from './contract-layout.validator'
 
 export type ContractLayoutDraftInput = {
@@ -30,14 +34,29 @@ export type ContractLayoutValidation = {
   contentHash: string
 }
 
+/**
+ * Layout không bắt buộc có mẫu: `templateKey` null nghĩa là layout chung theo legalProfile.
+ * Trường entity khai báo `string` cho mẫu, nên ép kiểu ở đúng một chỗ.
+ */
+function layoutTemplateKey(key: string | null | undefined): string {
+  return (key ?? null) as unknown as string
+}
+
 @Injectable()
 export class ContractLayoutService {
+  /** G-LAY: layout nằm trong `contract_templates` (kind='layout'); facade cộng `kind` vào mọi truy vấn. */
+  private readonly profiles: ContractTemplateKindRepository
+
   constructor(
-    @InjectRepository(ContractLayoutProfile)
-    private readonly profileRepository: Repository<ContractLayoutProfile>,
-    @InjectRepository(ContractLayoutAudit)
-    private readonly auditRepository: Repository<ContractLayoutAudit>
-  ) {}
+    @InjectRepository(ContractTemplate)
+    templateRepository: Repository<ContractTemplate>,
+    private readonly auditService: ConfigAuditService
+  ) {
+    this.profiles = new ContractTemplateKindRepository(
+      templateRepository,
+      'layout'
+    )
+  }
 
   async saveDraft(
     profileKey: string,
@@ -45,7 +64,7 @@ export class ContractLayoutService {
     actorId: string,
     expectedRevision: number
   ): Promise<ContractLayoutProfile> {
-    const draft = await this.profileRepository.findOne({
+    const draft = await this.profiles.findOne({
       where: { profileKey, status: 'draft' },
     })
     if (draft && draft.draftRevision !== expectedRevision) {
@@ -54,12 +73,12 @@ export class ContractLayoutService {
     const contentHash = this.contentHash(input)
     const target =
       draft ??
-      this.profileRepository.create({
+      this.profiles.create({
         profileKey,
         version: 0,
         status: 'draft',
         legalProfile: input.legalProfile,
-        templateKey: input.templateKey ?? null,
+        templateKey: layoutTemplateKey(input.templateKey),
         blocks: input.blocks,
         supplementaryClauses: this.sanitizeClauses(input.supplementaryClauses),
         disclosures: input.disclosures ?? [],
@@ -69,7 +88,7 @@ export class ContractLayoutService {
       })
     if (draft) {
       target.legalProfile = input.legalProfile
-      target.templateKey = input.templateKey ?? null
+      target.templateKey = layoutTemplateKey(input.templateKey)
       target.blocks = input.blocks
       target.supplementaryClauses = this.sanitizeClauses(
         input.supplementaryClauses
@@ -79,7 +98,7 @@ export class ContractLayoutService {
       target.draftRevision += 1
       target.updatedBy = actorId
     }
-    const saved = await this.profileRepository.save(target)
+    const saved = await this.profiles.save(target)
     await this.recordAudit({
       profileKey,
       version: saved.version,
@@ -87,16 +106,16 @@ export class ContractLayoutService {
       actorId,
       afterHash: saved.contentHash,
     })
-    return saved
+    return toContractLayoutProfile(saved)
   }
 
   async validateDraft(profileKey: string): Promise<ContractLayoutValidation> {
     const draft = await this.getDraft(profileKey)
-    return this.validate(draft)
+    return this.validate(toContractLayoutProfile(draft))
   }
 
   async previewDraft(profileKey: string): Promise<ContractLayoutProfile> {
-    const draft = await this.getDraft(profileKey)
+    const draft = toContractLayoutProfile(await this.getDraft(profileKey))
     return { ...draft, supplementaryClauses: [...draft.supplementaryClauses] }
   }
 
@@ -106,15 +125,19 @@ export class ContractLayoutService {
     reason?: string
   ): Promise<ContractLayoutProfile> {
     const draft = await this.getDraft(profileKey)
-    const validation = this.validate(draft)
+    const validation = this.validate(toContractLayoutProfile(draft))
     if (!validation.valid)
       throw new ConflictException(validation.errors.join(','))
-    const latest = await this.profileRepository.findOne({
+    const latest = await this.profiles.findOne({
       where: { profileKey, status: 'published' },
       order: { version: 'DESC' },
     })
-    const published = this.profileRepository.create({
-      ...draft,
+    // Bản published là dòng MỚI: không mang `_id` của draft (nếu mang, save sẽ ghi đè
+    // chính draft rồi remove(draft) xóa luôn bản published).
+    const { _id: _draftId, ...draftFields } = draft
+    void _draftId
+    const published = this.profiles.create({
+      ...draftFields,
       version: (latest?.version ?? 0) + 1,
       status: 'published',
       contentHash: validation.contentHash,
@@ -122,7 +145,7 @@ export class ContractLayoutService {
       publishedBy: actorId,
       publishedAt: new Date(),
     })
-    const saved = await this.profileRepository.save(published)
+    const saved = await this.profiles.save(published)
     await this.recordAudit({
       profileKey,
       version: saved.version,
@@ -131,8 +154,8 @@ export class ContractLayoutService {
       reason: reason ?? null,
       afterHash: saved.contentHash,
     })
-    await this.profileRepository.remove(draft)
-    return saved
+    await this.profiles.remove(draft)
+    return toContractLayoutProfile(saved)
   }
 
   async archive(
@@ -141,12 +164,12 @@ export class ContractLayoutService {
     actorId: string,
     reason: string
   ): Promise<ContractLayoutProfile> {
-    const profile = await this.profileRepository.findOne({
+    const profile = await this.profiles.findOne({
       where: { profileKey, version, status: 'published' },
     })
     if (!profile) throw new NotFoundException('CONTRACT_LAYOUT_NOT_FOUND')
     profile.status = 'archived'
-    const saved = await this.profileRepository.save(profile)
+    const saved = await this.profiles.save(profile)
     await this.recordAudit({
       profileKey,
       version,
@@ -156,43 +179,44 @@ export class ContractLayoutService {
       beforeHash: saved.contentHash,
       afterHash: saved.contentHash,
     })
-    return saved
+    return toContractLayoutProfile(saved)
   }
 
   /** PROP-399: phiên bản published mới nhất của mỗi profileKey (nguồn của governance manifest). */
   async listLatestPublished(): Promise<ContractLayoutProfile[]> {
-    const published = await this.profileRepository.find({
+    const published = await this.profiles.find({
       where: { status: 'published' },
     })
-    const latest = new Map<string, ContractLayoutProfile>()
+    const latest = new Map<string, ContractTemplate>()
     for (const profile of published) {
-      const current = latest.get(profile.profileKey)
+      const key = profile.profileKey ?? ''
+      const current = latest.get(key)
       if (!current || profile.version > current.version) {
-        latest.set(profile.profileKey, profile)
+        latest.set(key, profile)
       }
     }
-    return [...latest.values()].sort((a, b) =>
-      a.profileKey.localeCompare(b.profileKey)
-    )
+    return [...latest.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([, profile]) => toContractLayoutProfile(profile))
   }
 
   async findPublishedForContract(
     legalProfile: LegalProfile,
     templateKey: string | null
   ): Promise<ContractLayoutProfile | null> {
-    const candidates = await this.profileRepository.find({
+    const candidates = await this.profiles.find({
       where: { legalProfile, status: 'published' },
       order: { version: 'DESC' },
     })
-    return (
+    const found =
       candidates.find(profile => profile.templateKey === templateKey) ??
       candidates.find(profile => !profile.templateKey) ??
       null
-    )
+    return found ? toContractLayoutProfile(found) : null
   }
 
-  private async getDraft(profileKey: string): Promise<ContractLayoutProfile> {
-    const draft = await this.profileRepository.findOne({
+  private async getDraft(profileKey: string): Promise<ContractTemplate> {
+    const draft = await this.profiles.findOne({
       where: { profileKey, status: 'draft' },
     })
     if (!draft) throw new NotFoundException('CONTRACT_LAYOUT_DRAFT_NOT_FOUND')
@@ -244,9 +268,22 @@ export class ContractLayoutService {
     }))
   }
 
-  private async recordAudit(
-    input: Omit<ContractLayoutAudit, '_id' | 'createdAt'>
-  ): Promise<void> {
-    await this.auditRepository.save(this.auditRepository.create(input))
+  private async recordAudit(input: {
+    profileKey: string
+    version: number
+    action: ContractLayoutAuditAction
+    actorId: string
+    reason?: string | null
+    beforeHash?: string | null
+    afterHash?: string | null
+    deniedField?: string | null
+  }): Promise<void> {
+    const { profileKey, deniedField, ...rest } = input
+    await this.auditService.append({
+      scope: 'contract-layout',
+      key: profileKey,
+      ...rest,
+      ...(deniedField !== undefined ? { details: { deniedField } } : {}),
+    })
   }
 }

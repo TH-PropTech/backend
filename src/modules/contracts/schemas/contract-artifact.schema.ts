@@ -7,6 +7,12 @@ import {
   ObjectIdColumn,
 } from 'typeorm'
 
+/**
+ * @deprecated G-DOC: dữ liệu nay nằm ở `ContractDocument{kind:'canonical'}`
+ * (collection `contract_documents`). Giữ lại làm kiểu hình trả về và để
+ * migration 011 / rollback tham chiếu collection cũ `contract_artifacts`; entity
+ * này KHÔNG còn nằm trong `TypeOrmModule.forFeature`.
+ */
 @Entity('contract_artifacts')
 @Index(['contractId', 'revision'])
 @Index(['contractId', 'revision', 'amendmentId'], { unique: true })

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { ObjectId } from 'mongodb'
-import { ContractArtifact } from '../schemas/contract-artifact.schema'
+import { ContractDocument } from '../schemas/contract-document.schema'
 import type { Contract } from '../schemas/contract.schema'
 import { ContractArtifactService } from './contract-artifact.service'
 import {
@@ -11,14 +11,14 @@ import {
 import { ContractDocumentProjector } from '../legal/contract-document.projector'
 import { buildReviewedLeaseTemplateSeed } from '../legal/lease-template.seed'
 import { hashText } from '../legal/contract-template.canonical'
-import { ContractTemplate } from '../legal/contract-template.schema'
+import { ContractTemplate } from '../schemas/contract-template.schema'
 import {
   assertSignedContractLedgerEvidence,
   buildSignedContractLedgerEvidence,
   hashSignedContractLedgerEvidence,
 } from '../../fabric/utils/ledger-evidence-envelope'
 import type { ContractArtifactStorage } from './contract-artifact.storage'
-import type { ContractArtifact as ContractArtifactRecord } from '../schemas/contract-artifact.schema'
+import type { ContractDocument as ContractArtifactRecord } from '../schemas/contract-document.schema'
 import { ContractViewService } from './contract-view.service'
 import { ContractsService } from './contracts.service'
 import { DepositAgreementsService } from './deposit-agreements.service'
@@ -127,7 +127,7 @@ describe('canonical contract workspace integration', () => {
     const artifactRepository = {
       findOne: jest.fn(() => savedArtifact),
       create: jest.fn((input: Partial<ContractArtifactRecord>) =>
-        Object.assign(new ContractArtifact(), input, { _id: artifactId })
+        Object.assign(new ContractDocument(), input, { _id: artifactId })
       ),
       save: jest.fn((value: ContractArtifactRecord) => {
         savedArtifact = value
@@ -266,7 +266,7 @@ describe('canonical contract workspace integration', () => {
       {
         findOne: jest.fn(() => savedArtifact),
         create: jest.fn((input: Partial<ContractArtifactRecord>) =>
-          Object.assign(new ContractArtifact(), input, {
+          Object.assign(new ContractDocument(), input, {
             _id: new ObjectId('507f1f77bcf86cd799439016'),
           })
         ),
@@ -348,7 +348,7 @@ describe('canonical contract workspace integration', () => {
         save: jest.fn((value: unknown) => Promise.resolve(value)),
       } as never,
       {
-        findOne: jest.fn().mockResolvedValue({
+        findByUserId: jest.fn().mockResolvedValue({
           status: 'verified',
           idCardNumber: '000000000001',
         }),

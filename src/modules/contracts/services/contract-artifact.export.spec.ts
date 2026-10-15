@@ -53,6 +53,7 @@ describe('ContractArtifactService.openCanonicalArtifactForExport (PROP-399 task 
   }): {
     service: ContractArtifactService
     storage: { download: jest.Mock; openDownloadStream: jest.Mock }
+    artifactRepository: { findOne: jest.Mock; find: jest.Mock }
   } {
     const storage = {
       download: jest.fn(),
@@ -68,7 +69,7 @@ describe('ContractArtifactService.openCanonicalArtifactForExport (PROP-399 task 
       artifactRepository as never,
       storage as never
     )
-    return { service, storage }
+    return { service, storage, artifactRepository }
   }
 
   it('returns the current artifact with a lazy stream opener and reads no bytes up front', async () => {
@@ -84,11 +85,19 @@ describe('ContractArtifactService.openCanonicalArtifactForExport (PROP-399 task 
 
   it('looks up an older canonical revision by contract and revision, ignoring amendment artifacts', async () => {
     const older = artifact({ revision: 1, artifactHash: 'b'.repeat(64) })
-    const { service } = build({
+    const { service, artifactRepository } = build({
       list: [artifact({ revision: 1, amendmentId: 'am-1' }), older],
     })
     const result = await service.openCanonicalArtifactForExport(contract(), 1)
-    expect(result.artifact).toBe(older)
+    expect(result.artifact).toEqual(older)
+    expect(artifactRepository.find).toHaveBeenCalledWith({
+      where: {
+        kind: 'canonical',
+        contractId: contractId.toHexString(),
+        revision: 1,
+      },
+    })
+    expect(result.artifact).not.toHaveProperty('kind')
     expect(result.recordedHash).toBe('b'.repeat(64))
   })
 

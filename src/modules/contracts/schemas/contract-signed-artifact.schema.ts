@@ -11,6 +11,11 @@ import {
 /**
  * Bản PDF đã ký PAdES: artifact riêng, song song với canonical artifact.
  * Không bao giờ sửa `Contract.artifactRef` hay `contentLockedHash`.
+ *
+ * @deprecated G-DOC: dữ liệu nay nằm ở `ContractDocument{kind:'signed'}`
+ * (collection `contract_documents`). Giữ lại làm kiểu hình cũ và để migration
+ * 011 / rollback tham chiếu collection cũ `contract_signed_artifacts`; entity
+ * này KHÔNG còn nằm trong `TypeOrmModule.forFeature`.
  */
 @Entity('contract_signed_artifacts')
 @Index(['contractId', 'revision'])

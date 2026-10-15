@@ -9,7 +9,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm'
 import { ObjectId } from 'mongodb'
 import { createHash } from 'node:crypto'
-import { IsNull, Repository } from 'typeorm'
+import { Repository } from 'typeorm'
 import type { FindOptionsWhere } from 'typeorm'
 import type { RentalPackageSnapshot } from '../../properties/utils/rental-package.util'
 import type { RentalExecutionPolicyRef } from '../../rental/utils/rental-execution-policy.util'
@@ -462,10 +462,11 @@ export class DepositAgreementsService {
   ): Promise<void> {
     if (!this.contractRepository || !agreement.paidAt) return
 
+    // Mongo: `null` thay IsNull() (FindOperator không khớp null khi tuần tự hóa BSON)
     await this.contractRepository.update(
       {
         depositAgreementId: agreement._id.toHexString(),
-        depositPaidAt: IsNull(),
+        depositPaidAt: null as unknown as Date,
       },
       { depositPaidAt: agreement.paidAt }
     )

@@ -75,6 +75,11 @@ export type ContractLayoutDisclosure = {
   content: string
 }
 
+/**
+ * @deprecated G-LAY: layout nằm trong `contract_templates` (kind='layout'), xem
+ * `ContractTemplate` và `layout/contract-layout.mapper.ts`. Không còn đăng ký trong
+ * `forFeature`; giữ class/collection cũ để migration 025 đọc và rollback.
+ */
 @Entity('contract_layout_profiles')
 @Index(['profileKey', 'version'], { unique: true })
 @Index(['profileKey', 'status'])

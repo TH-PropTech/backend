@@ -501,7 +501,7 @@ describe('DepositAgreementsService', () => {
     expect(contractRepository.update).toHaveBeenCalledWith(
       {
         depositAgreementId: agreementId,
-        depositPaidAt: expect.any(Object) as unknown,
+        depositPaidAt: null,
       },
       expect.objectContaining({
         depositPaidAt: expect.any(Date) as unknown,
@@ -701,7 +701,7 @@ describe('DepositAgreementsService', () => {
     expect(contractRepository.update).toHaveBeenCalledWith(
       {
         depositAgreementId: agreementId,
-        depositPaidAt: expect.any(Object) as unknown,
+        depositPaidAt: null,
       },
       expect.objectContaining({
         depositPaidAt: expect.any(Date) as unknown,

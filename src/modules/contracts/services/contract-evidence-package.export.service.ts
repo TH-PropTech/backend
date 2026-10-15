@@ -23,7 +23,7 @@ import {
 } from './contract-evidence-package.service'
 import { Contract } from '../schemas/contract.schema'
 import { DepositAgreement } from '../schemas/deposit-agreement.schema'
-import { ContractAmendment } from '../schemas/contract-amendment.schema'
+import { ContractAmendmentStore } from './contract-amendment.store'
 import { Payment } from '../../payments/schemas/payment.schema'
 import { MoveInSettlement } from '../../rental/schemas/move-in-settlement.schema'
 import { FabricService } from '../../fabric/services/fabric.service'
@@ -61,8 +61,7 @@ export class ContractEvidencePackageExportService {
     private readonly depositRepository: Repository<DepositAgreement>,
     @InjectRepository(Payment)
     private readonly paymentRepository: Repository<Payment>,
-    @InjectRepository(ContractAmendment)
-    private readonly amendmentRepository: Repository<ContractAmendment>,
+    private readonly amendmentRepository: ContractAmendmentStore,
     @InjectRepository(MoveInSettlement)
     private readonly settlementRepository: Repository<MoveInSettlement>,
     @Optional()

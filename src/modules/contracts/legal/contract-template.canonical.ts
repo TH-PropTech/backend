@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import type {
   ContractTemplateAnnexDefinition,
   ContractTemplateClause,
-} from './contract-template.schema'
+} from '../schemas/contract-template.schema'
 
 export const CONTRACT_TEMPLATE_SCHEMA_VERSION = 2
 

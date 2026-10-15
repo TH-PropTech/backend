@@ -67,7 +67,7 @@ describe('SmartCaSigningService v2', () => {
       { findOne: jest.fn().mockResolvedValue(contract) } as never,
       sessionRepository as never,
       {
-        findOne: jest.fn().mockResolvedValue({
+        findByUserId: jest.fn().mockResolvedValue({
           status: 'verified',
           idCardNumber: '000000000001',
         }),
@@ -168,9 +168,9 @@ describe('SmartCaSigningService v2', () => {
     process.env['SMARTCA_V2_ENABLED'] = 'true'
     const { service } = build()
     const kyc = (
-      service as unknown as { kycRepository: { findOne: jest.Mock } }
-    ).kycRepository
-    kyc.findOne.mockResolvedValue(null)
+      service as unknown as { kycService: { findByUserId: jest.Mock } }
+    ).kycService
+    kyc.findByUserId.mockResolvedValue(null)
 
     const methods = await service.listSigningMethods(contractId, 'tenant-1')
 

@@ -3,7 +3,7 @@ import {
   LAYOUT_FIELD_KEYS,
   type ContractLayoutBlock,
   type ContractLayoutSupplementaryClause,
-} from './contract-layout-profile.schema'
+} from '../schemas/contract-layout-profile.schema'
 
 const REQUIRED_BLOCKS = new Set([
   'PARTIES',

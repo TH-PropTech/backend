@@ -7,28 +7,31 @@ import {
   ObjectIdColumn,
 } from 'typeorm'
 
-export type ContractTemplateAuditAction =
+export type ContractLayoutAuditAction =
   | 'draft-created'
   | 'draft-updated'
   | 'validated'
   | 'published'
-  | 'legal-release-published'
+  | 'archived'
   | 'protected-change-denied'
 
-@Entity('contract_template_audits')
-@Index(['templateKey', 'version', 'createdAt'])
-export class ContractTemplateAudit {
+/**
+ * @deprecated Đã hợp nhất vào `ConfigAudit` (scope 'contract-layout') trong activity-log; giữ lại để đọc collection cũ và migration 010. Không đăng ký forFeature, không ghi mới.
+ */
+@Entity('contract_layout_audits')
+@Index(['profileKey', 'version', 'createdAt'])
+export class ContractLayoutAudit {
   @ObjectIdColumn()
   _id!: ObjectId
 
   @Column()
-  templateKey!: string
+  profileKey!: string
 
   @Column()
   version!: number
 
   @Column({ type: 'string' })
-  action!: ContractTemplateAuditAction
+  action!: ContractLayoutAuditAction
 
   @Column()
   actorId!: string
@@ -43,13 +46,7 @@ export class ContractTemplateAudit {
   afterHash?: string | null
 
   @Column({ nullable: true })
-  reviewReference?: string | null
-
-  @Column({ nullable: true })
   deniedField?: string | null
-
-  @Column({ nullable: true })
-  metadata?: Record<string, string> | null
 
   @CreateDateColumn()
   createdAt!: Date

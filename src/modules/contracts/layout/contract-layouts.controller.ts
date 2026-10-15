@@ -16,13 +16,13 @@ import type {
   ContractLayoutBlock,
   ContractLayoutDisclosure,
   ContractLayoutSupplementaryClause,
-} from './contract-layout-profile.schema'
+} from '../schemas/contract-layout-profile.schema'
 import {
   ContractLayoutService,
   type ContractLayoutDraftInput,
   type ContractLayoutValidation,
 } from './contract-layout.service'
-import type { ContractLayoutProfile } from './contract-layout-profile.schema'
+import type { ContractLayoutProfile } from '../schemas/contract-layout-profile.schema'
 
 export class SaveContractLayoutDraftDto implements ContractLayoutDraftInput {
   @IsIn(['PRIVATE_CIVIL_APARTMENT_LEASE', 'REAL_ESTATE_BUSINESS_STANDARD'])

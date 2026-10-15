@@ -12,11 +12,14 @@ import {
   type ContractTemplateAnnexDefinition,
   type ContractTemplateAddendum,
   type ContractTemplateClause,
-} from './contract-template.schema'
+} from '../schemas/contract-template.schema'
+import { ConfigAuditService } from '../../activity-log/services/config-audit.service'
+import type { ContractTemplateAuditAction } from '../schemas/contract-template-audit.schema'
+import { ContractTemplateKindRepository } from '../utils/contract-template-kind.repository'
 import {
-  ContractTemplateAudit,
-  type ContractTemplateAuditAction,
-} from './contract-template-audit.schema'
+  toContractTemplateAuditView,
+  type ContractTemplateAuditView,
+} from './contract-template-audit.mapper'
 import { getActiveLegalBasis } from './legal-basis.registry'
 import type { LegalProfile } from './legal-profile.resolver'
 import {
@@ -87,12 +90,19 @@ export type ContractTemplateValidation = {
 export class ContractTemplateGovernanceService implements OnApplicationBootstrap {
   private readonly logger = new Logger(ContractTemplateGovernanceService.name)
 
+  /** G-LAY: facade cộng `kind='template'` (bản thiếu kind là template) vào mọi truy vấn. */
+  private readonly templateRepository: ContractTemplateKindRepository
+
   constructor(
     @InjectRepository(ContractTemplate)
-    private readonly templateRepository: Repository<ContractTemplate>,
-    @InjectRepository(ContractTemplateAudit)
-    private readonly auditRepository: Repository<ContractTemplateAudit>
-  ) {}
+    rawTemplateRepository: Repository<ContractTemplate>,
+    private readonly auditService: ConfigAuditService
+  ) {
+    this.templateRepository = new ContractTemplateKindRepository(
+      rawTemplateRepository,
+      'template'
+    )
+  }
 
   async onApplicationBootstrap(): Promise<void> {
     await this.seedReviewedTemplatesIfMissing()
@@ -414,11 +424,13 @@ export class ContractTemplateGovernanceService implements OnApplicationBootstrap
   async getAuditHistory(
     templateKey: string,
     version?: number
-  ): Promise<ContractTemplateAudit[]> {
-    return this.auditRepository.find({
-      where: version ? { templateKey, version } : { templateKey },
-      order: { createdAt: 'ASC' },
-    })
+  ): Promise<ContractTemplateAuditView[]> {
+    const rows = await this.auditService.findByKey(
+      'contract-template',
+      templateKey,
+      version
+    )
+    return rows.map(toContractTemplateAuditView)
   }
 
   private async latestPublished(
@@ -579,6 +591,17 @@ export class ContractTemplateGovernanceService implements OnApplicationBootstrap
     deniedField?: string | null
     metadata?: Record<string, string> | null
   }): Promise<void> {
-    await this.auditRepository.save(this.auditRepository.create(input))
+    const { templateKey, reviewReference, deniedField, metadata, ...rest } =
+      input
+    const details: Record<string, unknown> = {}
+    if (reviewReference !== undefined) details.reviewReference = reviewReference
+    if (deniedField !== undefined) details.deniedField = deniedField
+    if (metadata !== undefined) details.metadata = metadata
+    await this.auditService.append({
+      scope: 'contract-template',
+      key: templateKey,
+      ...rest,
+      ...(Object.keys(details).length ? { details } : {}),
+    })
   }
 }

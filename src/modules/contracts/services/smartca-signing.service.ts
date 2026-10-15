@@ -13,7 +13,7 @@ import { InjectRepository } from '@nestjs/typeorm'
 import { createHash, randomUUID } from 'crypto'
 import { ObjectId } from 'mongodb'
 import { Repository } from 'typeorm'
-import { KycRecord } from '../../users/schemas/kyc-record.schema'
+import { KycService } from '../../users/services/kyc.service'
 import { ContractArtifactService } from './contract-artifact.service'
 import { ContractsService } from './contracts.service'
 import { DepositConfirmationResolver } from './deposit-confirmation.resolver'
@@ -29,13 +29,14 @@ import {
   SmartCaProvider,
   type SmartCaCertificate,
   type SmartCaSignature,
-} from '../../digital-signature/providers/smartca.provider'
-import { SmartCaSigningSession } from '../../digital-signature/schemas/smartca-signing-session.schema'
+} from '../providers/smartca.provider'
+import { SmartCaSigningSession } from '../schemas/smartca-signing-session.schema'
+import { KindScopedSmartCaSigningRepository } from '../utils/signing-session.repository'
 import {
   SMARTCA_EVENTS_PUBLISHER,
   type SmartCaEventsPublisher,
   type SmartCaSessionUpdatedEvent,
-} from '../../digital-signature/gateways/smartca-events.publisher'
+} from '../gateways/smartca-events.publisher'
 
 export type CreateSmartCaSessionInput = {
   idempotencyKey?: string
@@ -99,9 +100,8 @@ export class SmartCaSigningService {
     @InjectRepository(Contract)
     private readonly contractRepository: Repository<Contract>,
     @InjectRepository(SmartCaSigningSession)
-    private readonly sessionRepository: Repository<SmartCaSigningSession>,
-    @InjectRepository(KycRecord)
-    private readonly kycRepository: Repository<KycRecord>,
+    sessionStore: Repository<SmartCaSigningSession>,
+    private readonly kycService: KycService,
     private readonly provider: SmartCaProvider,
     @Optional() private readonly contractsService?: ContractsService,
     @Optional() private readonly artifactService?: ContractArtifactService,
@@ -112,7 +112,15 @@ export class SmartCaSigningService {
     private readonly eventsPublisher?: SmartCaEventsPublisher,
     @Optional()
     private readonly signedArtifactService?: SignedArtifactService
-  ) {}
+  ) {
+    this.sessionRepository = new KindScopedSmartCaSigningRepository(
+      sessionStore,
+      'session'
+    )
+  }
+
+  /** Phiên SmartCA (kind='session') trên bảng hợp nhất; mọi truy vấn tự thêm kind. */
+  private readonly sessionRepository: KindScopedSmartCaSigningRepository
 
   private readonly webhookInFlight = new Map<string, Promise<void>>()
   private readonly publishedTerminalEvents = new Set<string>()
@@ -526,10 +534,8 @@ export class SmartCaSigningService {
   }
 
   private async resolveCccd(userId: string): Promise<string> {
-    const kyc = await this.kycRepository.findOne({
-      where: { userId },
-      order: { createdAt: 'DESC' },
-    })
+    // Hồ sơ KYC nhúng trong User (G-KYC): một hồ sơ mỗi người dùng
+    const kyc = await this.kycService.findByUserId(userId)
     if (!kyc) throw new ConflictException('SMARTCA_KYC_REQUIRED')
     if (kyc.status !== 'verified' || !kyc.idCardNumber?.trim()) {
       throw new ConflictException('SMARTCA_KYC_NOT_VERIFIED')

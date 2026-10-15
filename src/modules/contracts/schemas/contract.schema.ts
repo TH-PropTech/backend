@@ -1,4 +1,5 @@
 import {
+  AfterLoad,
   Entity,
   ObjectIdColumn,
   ObjectId,
@@ -8,6 +9,10 @@ import {
 } from 'typeorm'
 import type { RentalPackageSnapshot } from '../../properties/utils/rental-package.util'
 import type { RentalExecutionPolicyRef } from '../../rental/utils/rental-execution-policy.util'
+import type { EmbeddedContractAmendment } from './contract-amendment.schema'
+
+/** Trần số phụ lục nhúng mỗi hợp đồng (G-AMD). Vượt trần thì trả 409, không cắt dữ liệu. */
+export const MAX_CONTRACT_AMENDMENTS = 100
 
 export type ContractSignature = {
   signerId: string
@@ -418,6 +423,15 @@ export class Contract {
     | 'authenticated'
     | 'rejected'
 
+  /**
+   * Phụ lục nhúng (G-AMD), ghi bằng `updateOne` nguyên tử (`$push` có trần,
+   * `$set` vị trí `amendments.$`). KHÔNG đọc/ghi qua entity này: `stripAmendments`
+   * bỏ mảng khỏi entity vừa nạp để `save(contract)` không bao giờ đè mảng.
+   * Đọc qua `ContractAmendmentStore`.
+   */
+  @Column('array', { nullable: true })
+  amendments?: EmbeddedContractAmendment[]
+
   // ── Timestamps ──
 
   @CreateDateColumn()
@@ -425,4 +439,10 @@ export class Contract {
 
   @UpdateDateColumn()
   updatedAt!: Date
+
+  @AfterLoad()
+  // Tùy chọn (`?`) để literal/spread kiểu `Contract` không phải khai báo hook này.
+  stripAmendments?(): void {
+    delete this.amendments
+  }
 }

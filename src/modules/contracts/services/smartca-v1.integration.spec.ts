@@ -1,6 +1,6 @@
 import { ConfigService } from '@nestjs/config'
 import { ObjectId } from 'mongodb'
-import { SmartCaProvider } from '../../digital-signature/providers/smartca.provider'
+import { SmartCaProvider } from '../providers/smartca.provider'
 import { SmartCaSigningService } from './smartca-signing.service'
 
 describe('SmartCA v1 provider-to-service integration', () => {
@@ -98,7 +98,7 @@ describe('SmartCA v1 provider-to-service integration', () => {
       { findOne: jest.fn().mockResolvedValue(contract) } as never,
       sessionRepository as never,
       {
-        findOne: jest.fn().mockResolvedValue({
+        findByUserId: jest.fn().mockResolvedValue({
           userId: 'tenant-1',
           status: 'verified',
           idCardNumber: '000000000001',

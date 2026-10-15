@@ -16,7 +16,10 @@ import { ObjectId } from 'mongodb'
 import { Repository } from 'typeorm'
 import { Contract } from '../schemas/contract.schema'
 import { ContractAmendment } from '../schemas/contract-amendment.schema'
-import { ContractArtifact } from '../schemas/contract-artifact.schema'
+import { ContractAmendmentStore } from './contract-amendment.store'
+import type { ContractArtifact } from '../schemas/contract-artifact.schema'
+import { ContractDocument } from '../schemas/contract-document.schema'
+import { toContractArtifact } from '../schemas/contract-document.mapper'
 import { evaluateLockArtifact } from '../flow/flow-guards'
 import {
   CONTRACT_ARTIFACT_STORAGE,
@@ -75,14 +78,13 @@ export class ContractArtifactService {
     @InjectTypeOrmRepository(Contract)
     private readonly contractRepository: Repository<Contract>,
     @Optional()
-    @InjectTypeOrmRepository(ContractArtifact)
-    private readonly artifactRepository?: Repository<ContractArtifact>,
+    @InjectTypeOrmRepository(ContractDocument)
+    private readonly artifactRepository?: Repository<ContractDocument>,
     @Optional()
     @Inject(CONTRACT_ARTIFACT_STORAGE)
     private readonly storage?: ContractArtifactStorage,
     @Optional()
-    @InjectTypeOrmRepository(ContractAmendment)
-    private readonly amendmentRepository?: Repository<ContractAmendment>,
+    private readonly amendmentRepository?: ContractAmendmentStore,
     @Optional()
     private readonly transactionEventService?: RentalTransactionEventService,
     @Optional()
@@ -138,23 +140,27 @@ export class ContractArtifactService {
         version: 1,
         contentHash: contract.contentLockedHash ?? amendment.contentHash,
       }
-    const artifact = await this.artifactRepository.save(
-      this.artifactRepository.create({
-        contractId,
-        amendmentId,
-        revision: amendment.revision + 1,
-        templateRef,
-        legalProfile:
-          contract.flowProfileRef?.profileId ?? 'PRIVATE_CIVIL_APARTMENT_LEASE',
-        gridFsFileId,
-        artifactHash,
-        canonicalContentHash: amendment.contentHash,
-        rendererVersion: 'uploaded-amendment-pdf-v1',
-        sourceSchemaVersion: contract.hashSchemaVersion ?? 2,
-        byteLength: bytes.length,
-        contentType: 'application/pdf',
-        lockedAt: new Date(),
-      })
+    const artifact = toContractArtifact(
+      await this.artifactRepository.save(
+        this.artifactRepository.create({
+          kind: 'canonical',
+          contractId,
+          amendmentId,
+          revision: amendment.revision + 1,
+          templateRef,
+          legalProfile:
+            contract.flowProfileRef?.profileId ??
+            'PRIVATE_CIVIL_APARTMENT_LEASE',
+          gridFsFileId,
+          artifactHash,
+          canonicalContentHash: amendment.contentHash,
+          rendererVersion: 'uploaded-amendment-pdf-v1',
+          sourceSchemaVersion: contract.hashSchemaVersion ?? 2,
+          byteLength: bytes.length,
+          contentType: 'application/pdf',
+          lockedAt: new Date(),
+        })
+      )
     )
     amendment.artifactId = artifact._id.toHexString()
     amendment.artifactHash = artifactHash
@@ -334,6 +340,7 @@ export class ContractArtifactService {
         contentHash: contract.contentLockedHash,
       }
     const artifact = this.artifactRepository.create({
+      kind: 'canonical',
       contractId,
       revision: contract.contentRevision ?? 1,
       templateRef,
@@ -348,7 +355,9 @@ export class ContractArtifactService {
       contentType: 'application/pdf',
       lockedAt: contract.contentLockedAt,
     })
-    const saved = await this.artifactRepository.save(artifact)
+    const saved = toContractArtifact(
+      await this.artifactRepository.save(artifact)
+    )
     contract.artifactRef = {
       artifactId: saved._id.toHexString(),
       revision: saved.revision,
@@ -484,10 +493,11 @@ export class ContractArtifactService {
       }
     } else {
       const candidates = await this.artifactRepository.find({
-        where: { contractId, revision },
+        where: { kind: 'canonical', contractId, revision },
       })
       // Chỉ bản canonical của hợp đồng (bản sửa đổi có amendmentId không thuộc gói này).
-      artifact = candidates.find(candidate => !candidate.amendmentId) ?? null
+      const found = candidates.find(candidate => !candidate.amendmentId)
+      artifact = found ? toContractArtifact(found) : null
       if (!artifact) {
         throw new NotFoundException({
           code: 'EVIDENCE_VERSION_NOT_FOUND',
@@ -573,9 +583,10 @@ export class ContractArtifactService {
     artifactId: string
   ): Promise<ContractArtifact | null> {
     if (!this.artifactRepository || !ObjectId.isValid(artifactId)) return null
-    return this.artifactRepository.findOne({
-      where: { _id: new ObjectId(artifactId) },
+    const document = await this.artifactRepository.findOne({
+      where: { _id: new ObjectId(artifactId), kind: 'canonical' },
     })
+    return document ? toContractArtifact(document) : null
   }
 
   private digest(bytes: Buffer): string {

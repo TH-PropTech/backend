@@ -16,7 +16,10 @@ import {
   type ContractArtifactStorage,
 } from '../services/contract-artifact.storage'
 import { Contract } from '../schemas/contract.schema'
-import { ContractSignedArtifact } from './contract-signed-artifact.schema'
+import {
+  ContractDocument,
+  type SignedContractDocument,
+} from '../schemas/contract-document.schema'
 import { buildSignableBase } from './signature-fields'
 import {
   embedPadesSignature,
@@ -71,8 +74,8 @@ export class SignedArtifactService {
   private readonly logger = new Logger(SignedArtifactService.name)
 
   constructor(
-    @InjectRepository(ContractSignedArtifact)
-    private readonly repository: Repository<ContractSignedArtifact>,
+    @InjectRepository(ContractDocument)
+    private readonly repository: Repository<ContractDocument>,
     @InjectRepository(Contract)
     private readonly contractRepository: Repository<Contract>,
     @Inject(CONTRACT_ARTIFACT_STORAGE)
@@ -118,6 +121,7 @@ export class SignedArtifactService {
       `contract-${contractId}-signed-prepared.pdf`
     )
     const record = this.repository.create({
+      kind: 'signed',
       contractId,
       signerId: input.signerId,
       signerRole: input.signerRole,
@@ -234,7 +238,7 @@ export class SignedArtifactService {
     }
   }
 
-  private async readSigned(record: ContractSignedArtifact): Promise<Buffer> {
+  private async readSigned(record: SignedContractDocument): Promise<Buffer> {
     if (!record.signedFileId) {
       throw new ServiceUnavailableException('SIGNED_ARTIFACT_UNAVAILABLE')
     }
@@ -250,18 +254,20 @@ export class SignedArtifactService {
 
   private async findLatestReady(
     contractId: string
-  ): Promise<ContractSignedArtifact | null> {
-    const ready = await this.repository.find({
-      where: { contractId, status: 'ready' },
-    })
-    return ready.reduce<ContractSignedArtifact | null>(
+  ): Promise<SignedContractDocument | null> {
+    const ready = (await this.repository.find({
+      where: { kind: 'signed', contractId, status: 'ready' },
+    })) as SignedContractDocument[]
+    return ready.reduce<SignedContractDocument | null>(
       (best, item) => (!best || item.revision > best.revision ? item : best),
       null
     )
   }
 
-  private async findById(id: string): Promise<ContractSignedArtifact | null> {
+  private async findById(id: string): Promise<SignedContractDocument | null> {
     if (!ObjectId.isValid(id)) return null
-    return this.repository.findOne({ where: { _id: new ObjectId(id) } })
+    return (await this.repository.findOne({
+      where: { _id: new ObjectId(id), kind: 'signed' },
+    })) as SignedContractDocument | null
   }
 }

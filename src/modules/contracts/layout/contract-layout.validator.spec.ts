@@ -1,7 +1,7 @@
 import {
   type ContractLayoutBlock,
   type ContractLayoutSupplementaryClause,
-} from './contract-layout-profile.schema'
+} from '../schemas/contract-layout-profile.schema'
 import {
   assertProtectedLegalContentUnchanged,
   validateContractLayout,
