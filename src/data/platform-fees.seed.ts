@@ -1,5 +1,8 @@
 import type { PlatformFeeScheduleRules } from '../modules/payments/utils/platform-fee.types'
-import type { PlatformFeeSchedule } from '../modules/payments/schemas/platform-fee-schedule.schema'
+import type {
+  PlatformFeeScheduleRepository,
+  PlatformFeeScheduleView,
+} from '../modules/payments/utils/platform-fee-schedule.repository'
 
 export const PLATFORM_FEE_DRAFT_SEED: PlatformFeeScheduleRules = {
   landlordCommission: {
@@ -35,11 +38,8 @@ export const PLATFORM_FEE_DRAFT_SEED: PlatformFeeScheduleRules = {
 }
 
 export async function seedPlatformFeeDraft(
-  repository: Pick<
-    import('typeorm').Repository<PlatformFeeSchedule>,
-    'findOne' | 'create' | 'save'
-  >
-): Promise<PlatformFeeSchedule> {
+  repository: Pick<PlatformFeeScheduleRepository, 'findOne' | 'create' | 'save'>
+): Promise<PlatformFeeScheduleView> {
   const existing = await repository.findOne({
     where: { scheduleId: 'platform-fee-default', version: 1 },
   })

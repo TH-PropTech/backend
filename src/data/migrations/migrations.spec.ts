@@ -131,6 +131,41 @@ describe('PROP-321 MongoDB data backfills', () => {
     expect(checkpointStore.markCompleted).not.toHaveBeenCalled()
   })
 
+  it('only checkpoints when the step report confirms it applied (dryRun === false)', async () => {
+    const base = {
+      migrationId: '000-test',
+      scanned: 1,
+      updated: 0,
+      skipped: 1,
+      errors: [] as string[],
+    }
+    const checkpointStore = {
+      hasCompleted: jest.fn().mockResolvedValue(false),
+      markCompleted: jest.fn(),
+    }
+    const defaultDryRun = jest.fn().mockResolvedValue({ ...base, dryRun: true })
+    await new MigrationRunner(
+      [{ id: '000-test', run: defaultDryRun }],
+      checkpointStore
+    ).run({})
+    expect(checkpointStore.markCompleted).not.toHaveBeenCalled()
+
+    // legacy steps (004-006) may not report dryRun at all: treated as applied
+    const legacy = jest.fn().mockResolvedValue(base)
+    await new MigrationRunner(
+      [{ id: '000-test', run: legacy }],
+      checkpointStore
+    ).run({})
+    expect(checkpointStore.markCompleted).toHaveBeenCalledTimes(1)
+
+    const applied = jest.fn().mockResolvedValue({ ...base, dryRun: false })
+    await new MigrationRunner(
+      [{ id: '000-test', run: applied }],
+      checkpointStore
+    ).run({ dryRun: false })
+    expect(checkpointStore.markCompleted).toHaveBeenCalledTimes(2)
+  })
+
   it('dry-runs ledger runtime migration without writing and applies null defaults idempotently', async () => {
     const rawOutbox = {
       _id: new ObjectId(),
