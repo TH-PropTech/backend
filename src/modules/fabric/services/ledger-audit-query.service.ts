@@ -78,7 +78,7 @@ export class LedgerAuditQueryService {
   async getOverview(): Promise<AuditOverview> {
     const status = this.fabricService?.getStatus()
     const count = (where: MongoWhere): Promise<number> =>
-      this.outboxRepository.countBy(asWhere(where))
+      this.outboxRepository.count({ where: asWhere(where) })
 
     const [
       pending,
@@ -276,7 +276,7 @@ export class LedgerAuditQueryService {
 
   private async getCoverage(): Promise<AuditOverview['coverage']> {
     const count = (where: MongoWhere): Promise<number> =>
-      this.outboxRepository.countBy(asWhere(where))
+      this.outboxRepository.count({ where: asWhere(where) })
     return Promise.all(
       AUDIT_EVENT_TYPES.map(async eventType => {
         const [total, pending, confirmed, failed] = await Promise.all([
@@ -298,7 +298,7 @@ export class LedgerAuditQueryService {
     }
     const [[latest], openFindings] = await Promise.all([
       this.runRepository.find({ order: { createdAt: 'DESC' }, take: 1 }),
-      this.findingRepository.countBy(asWhere({ status: 'open' })),
+      this.findingRepository.count({ where: asWhere({ status: 'open' }) }),
     ])
     return {
       latestRun: latest
