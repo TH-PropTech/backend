@@ -335,7 +335,7 @@ describe('023-activity-logs-merge', () => {
     expect(collections.blockchain_logs.docs.length).toBe(3)
   })
 
-  it('refuses to write a row whose _id already exists with another kind', async () => {
+  it('reports and keeps a row whose _id already exists with another kind', async () => {
     const collections = seed()
     collections.activity_logs.docs.push({
       _id: id(10),
@@ -347,9 +347,10 @@ describe('023-activity-logs-merge', () => {
     expect(dry.errors).toHaveLength(1)
     expect(dry.errors[0]).toContain('blockchain_logs:')
 
-    await expect(
-      migrateActivityLogs(buildDb(collections), { dryRun: false })
-    ).rejects.toThrow(/refusing to apply/)
+    const applied = await migrateActivityLogs(buildDb(collections), {
+      dryRun: false,
+    })
+    expect(applied.errors).toHaveLength(1)
     expect(
       collections.activity_logs.docs.find(d => String(d._id) === String(id(10)))
         ?.kind

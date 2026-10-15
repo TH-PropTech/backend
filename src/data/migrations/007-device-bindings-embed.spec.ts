@@ -127,7 +127,7 @@ describe('007 device bindings embed migration', () => {
 
   it('dry-runs by default without writing', async () => {
     const { bindings, users } = fixture()
-    const snapshot = structuredClone(users)
+    const snapshot = JSON.stringify(users)
     const report = await migrateDeviceBindingsToUsers(makeDb(bindings, users))
     expect(report).toMatchObject({
       dryRun: true,
@@ -136,7 +136,7 @@ describe('007 device bindings embed migration', () => {
       backfilledUsers: 1,
     })
     expect(report.orphans).toHaveLength(1)
-    expect(users).toEqual(snapshot)
+    expect(JSON.stringify(users)).toBe(snapshot)
   })
 
   it('applies, backfills defaults, syncs counts, verifies, and is idempotent', async () => {
@@ -218,11 +218,11 @@ describe('007 device bindings embed migration', () => {
       a.status = 'BLOCKED'
       a.updatedAt = day(3)
     }
-    const snapshot = structuredClone(users)
+    const snapshot = JSON.stringify(users)
 
     const dry = await rollbackDeviceBindingsEmbed(db)
     expect(dry).toMatchObject({ dryRun: true, updated: 4 })
-    expect(users).toEqual(snapshot)
+    expect(JSON.stringify(users)).toBe(snapshot)
     expect(bindings).toHaveLength(4)
 
     const report = await rollbackDeviceBindingsEmbed(db, { dryRun: false })

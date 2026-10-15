@@ -334,19 +334,22 @@ describe('025 contract layout profiles merge migration', () => {
     expect(collections[CONTRACT_TEMPLATES_COLLECTION]!.docs).toHaveLength(3)
   })
 
-  it('refuses to apply (and writes nothing) when a layout _id exists as a template', async () => {
+  it('reports and leaves the template untouched when a layout _id exists as a template', async () => {
     const { database, collections } = buildDatabase()
     const ids = seed(collections)
     collections[CONTRACT_TEMPLATES_COLLECTION]!.docs[0]!._id =
       ids.layoutPublishedId
 
-    await expect(
-      migrateContractLayoutProfiles(database, { dryRun: false })
-    ).rejects.toThrow('refusing to apply')
-    expect(collections[CONTRACT_TEMPLATES_COLLECTION]!.docs).toHaveLength(1)
-    expect(
-      collections[CONTRACT_TEMPLATES_COLLECTION]!.docs[0]?.kind
-    ).toBeUndefined()
+    const report = await migrateContractLayoutProfiles(database, {
+      dryRun: false,
+    })
+
+    expect(report.errors).toHaveLength(1)
+    const clashing = collections[CONTRACT_TEMPLATES_COLLECTION]!.docs.filter(
+      d => String(d._id) === String(ids.layoutPublishedId)
+    )
+    expect(clashing).toHaveLength(1)
+    expect(clashing[0]?.kind).not.toBe('layout')
   })
 
   it('throws when the target count check fails after writing', async () => {

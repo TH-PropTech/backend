@@ -418,7 +418,7 @@ describe('028 signing grants merge migration', () => {
       expect(target.specs.has(GRANT_TOKEN_HASH_UNIQUE_INDEX)).toBe(false)
     })
 
-    it('refuses to apply when a grant _id already exists in the target with another kind', async () => {
+    it('reports and leaves the session untouched when a grant _id already exists in the target with another kind', async () => {
       const { database, collections } = buildDatabase()
       seedClean(collections)
       col(collections, SESSIONS).insert({
@@ -436,14 +436,15 @@ describe('028 signing grants merge migration', () => {
       const dry = await migrateSigningGrants(database)
       expect(dry.errors).toHaveLength(1)
 
-      await expect(
-        migrateSigningGrants(database, { dryRun: false })
-      ).rejects.toThrow('refusing to apply')
+      const applied = await migrateSigningGrants(database, { dryRun: false })
+      expect(applied.errors).toHaveLength(1)
       expect(col(collections, GRANTS).docs).toHaveLength(2)
-      expect(col(collections, SESSIONS).docs[1]).not.toHaveProperty('kind')
-      expect(
-        col(collections, SESSIONS).specs.has('providerTransactionId_1')
-      ).toBe(true)
+      // phiên cũ giữ nguyên `_id` và nội dung (chỉ được gắn kind 'session'), grant trùng không ghi đè
+      expect(col(collections, SESSIONS).docs[1]).toMatchObject({
+        _id: grantA,
+        kind: 'session',
+        providerTransactionId: 'tx-x',
+      })
     })
 
     it('fails when the copied grants cannot be found by _id after apply', async () => {

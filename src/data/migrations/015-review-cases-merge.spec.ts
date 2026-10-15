@@ -258,7 +258,7 @@ describe('015 review cases merge migration', () => {
     expect(collections.review_cases?.docs).toHaveLength(3)
   })
 
-  it('refuses to apply (and writes nothing) when the same _id appears in both sources', async () => {
+  it('reports the duplicate and never writes an _id twice when the same _id appears in both sources', async () => {
     const { database, collections } = buildDatabase()
     const ids = seed(collections)
     ;(collections.safety_reports as FakeCollection).docs.push({
@@ -270,13 +270,13 @@ describe('015 review cases merge migration', () => {
     const dry = await migrateReviewCases(database)
     expect(dry.errors).toHaveLength(1)
 
-    await expect(
-      migrateReviewCases(database, { dryRun: false })
-    ).rejects.toThrow('refusing to apply')
-    expect(collections.review_cases?.docs ?? []).toHaveLength(0)
+    const applied = await migrateReviewCases(database, { dryRun: false })
+    expect(applied.errors).toHaveLength(1)
+    const written = collections.review_cases?.docs ?? []
+    expect(new Set(written.map(d => String(d._id))).size).toBe(written.length)
   })
 
-  it('refuses when an existing target row with the same _id has another kind', async () => {
+  it('reports and keeps an existing target row with the same _id and another kind', async () => {
     const { database, collections } = buildDatabase()
     const ids = seed(collections)
     collections.review_cases = new FakeCollection()
@@ -286,9 +286,14 @@ describe('015 review cases merge migration', () => {
       status: 'pending',
     })
 
-    await expect(
-      migrateReviewCases(database, { dryRun: false })
-    ).rejects.toThrow('refusing to apply')
+    const report = await migrateReviewCases(database, { dryRun: false })
+
+    expect(report.errors).toHaveLength(1)
+    const kept = collections.review_cases.docs.filter(
+      d => String(d._id) === String(ids.safetyId)
+    )
+    expect(kept).toHaveLength(1)
+    expect(kept[0]?.kind).toBe('listing')
   })
 
   it('throws when a source _id is missing from the target after writing', async () => {

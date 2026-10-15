@@ -409,7 +409,7 @@ describe('020 legal documents merge migration', () => {
     expect(target.indexes.size).toBe(LEGAL_DOCUMENT_INDEXES.length)
   })
 
-  it('refuses to apply (and writes nothing) when the same _id appears in two sources', async () => {
+  it('reports the duplicate and never writes an _id twice when the same _id appears in two sources', async () => {
     const { database, collections } = buildDatabase()
     const ids = seed(collections)
     ;(collections.platform_regulations as FakeCollection).docs.push({
@@ -421,10 +421,10 @@ describe('020 legal documents merge migration', () => {
     expect(dry.errors).toHaveLength(1)
     expect(dry.errors[0]).toContain('trùng _id')
 
-    await expect(
-      migrateLegalDocuments(database, { dryRun: false })
-    ).rejects.toThrow('refusing to apply')
-    expect(collections.legal_documents?.docs ?? []).toHaveLength(0)
+    const applied = await migrateLegalDocuments(database, { dryRun: false })
+    expect(applied.errors).toHaveLength(1)
+    const written = collections.legal_documents?.docs ?? []
+    expect(new Set(written.map(d => String(d._id))).size).toBe(written.length)
   })
 
   it('a same key in another kind is not a duplicate (kind isolation)', async () => {
@@ -446,7 +446,7 @@ describe('020 legal documents merge migration', () => {
     expect(report.counts.terms.target).toBe(3)
   })
 
-  it('refuses when an existing target row with the same _id has another kind', async () => {
+  it('reports and keeps an existing target row with the same _id and another kind', async () => {
     const { database, collections } = buildDatabase()
     const ids = seed(collections)
     collections.legal_documents = new FakeCollection()
@@ -456,9 +456,14 @@ describe('020 legal documents merge migration', () => {
       key: 'x',
     })
 
-    await expect(
-      migrateLegalDocuments(database, { dryRun: false })
-    ).rejects.toThrow('refusing to apply')
+    const report = await migrateLegalDocuments(database, { dryRun: false })
+
+    expect(report.errors).toHaveLength(1)
+    const kept = collections.legal_documents.docs.filter(
+      d => String(d._id) === String(ids.regulationId)
+    )
+    expect(kept).toHaveLength(1)
+    expect(kept[0]?.kind).toBe('source')
   })
 
   it('throws when a regulation _id is missing from the target after writing', async () => {

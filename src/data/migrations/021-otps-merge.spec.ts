@@ -234,7 +234,7 @@ describe('021 otps merge migration', () => {
       expect(col(collections, 'otps').docs).toHaveLength(2)
     })
 
-    it('refuses to apply (and writes nothing) when the same _id appears in both sources', async () => {
+    it('reports (and does not write) the duplicate when the same _id appears in both sources', async () => {
       const { database, collections } = buildDatabase()
       seed(collections)
       const shared = new ObjectId()
@@ -254,13 +254,18 @@ describe('021 otps merge migration', () => {
         expiredAt: t(9),
       })
 
-      await expect(migrateOtps(database, { dryRun: false })).rejects.toThrow(
-        'refusing to apply'
+      const report = await migrateOtps(database, { dryRun: false })
+
+      expect(report.errors).toHaveLength(1)
+      expect(report.errors[0]).toContain('trùng _id với nguồn')
+      const written = (collections.otps?.docs ?? []).filter(
+        d => String(d._id) === String(shared)
       )
-      expect(collections.otps?.docs ?? []).toEqual([])
+      expect(written).toHaveLength(1)
+      expect(written[0]?.kind).toBe('email')
     })
 
-    it('refuses when an existing target row with the same _id has another kind', async () => {
+    it('reports and keeps an existing target row with the same _id and another kind', async () => {
       const { database, collections } = buildDatabase()
       seed(collections)
       collections.otps = new FakeCollection()
@@ -271,10 +276,18 @@ describe('021 otps merge migration', () => {
         expiredAt: t(9),
       })
 
-      await expect(migrateOtps(database, { dryRun: false })).rejects.toThrow(
-        'refusing to apply'
+      const report = await migrateOtps(database, { dryRun: false })
+
+      expect(report.errors).toHaveLength(1)
+      expect(report.errors[0]).toContain('trùng _id với bản ghi đích')
+      const conflicting = col(collections, 'otps').docs.filter(
+        d => String(d._id) === String(emailId)
       )
-      expect(col(collections, 'otps').docs).toHaveLength(1)
+      expect(conflicting).toHaveLength(1)
+      expect(conflicting[0]).toMatchObject({
+        kind: 'transaction',
+        otpCode: '999999',
+      })
     })
 
     it('throws when a source _id is missing from the target after writing', async () => {

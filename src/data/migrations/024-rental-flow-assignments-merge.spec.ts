@@ -326,12 +326,12 @@ describe('024 rental flow assignments merge migration', () => {
     expect(
       collections.rental_flow_configs.docs.filter(d => d.kind === 'assignment')
     ).toHaveLength(0)
-    expect(JSON.stringify(collections.rental_flow_assignments.docs)).toBe(
-      before
-    )
+    expect(
+      JSON.parse(JSON.stringify(collections.rental_flow_assignments.docs))
+    ).toEqual(JSON.parse(before))
   })
 
-  it('refuses when an existing target row with the same _id has another kind', async () => {
+  it('reports and keeps an existing target row with the same _id and another kind', async () => {
     const { database, collections } = buildDatabase()
     const ids = seed(collections)
     collections.rental_flow_configs.docs.push({
@@ -343,9 +343,16 @@ describe('024 rental flow assignments merge migration', () => {
     const dry = await migrateRentalFlowAssignments(database)
     expect(dry.errors).toHaveLength(1)
 
-    await expect(
-      migrateRentalFlowAssignments(database, { dryRun: false })
-    ).rejects.toThrow('refusing to apply')
+    const report = await migrateRentalFlowAssignments(database, {
+      dryRun: false,
+    })
+
+    expect(report.errors).toHaveLength(1)
+    const kept = collections.rental_flow_configs.docs.filter(d =>
+      d._id.equals(ids.durId)
+    )
+    expect(kept).toHaveLength(1)
+    expect(kept[0]?.kind).toBe('policy')
   })
 
   it('applies when a target assignment already has the same assignmentId under another _id (no unique)', async () => {

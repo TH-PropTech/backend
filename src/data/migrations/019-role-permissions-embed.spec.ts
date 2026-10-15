@@ -225,7 +225,7 @@ describe('019 role permissions embed migration', () => {
 
   it('dry-runs by default without writing', async () => {
     const { db, roles, permissions } = makeDb(fixture())
-    const rolesBefore = structuredClone(roles)
+    const rolesBefore = JSON.stringify(roles)
     const permsBefore = permissions.map(cloneDoc)
 
     const report = await migrateRolePermissionsToEmbedded(db)
@@ -241,7 +241,7 @@ describe('019 role permissions embed migration', () => {
       errors: [],
     })
     expect(report.orphanRoleIds).toEqual([orphanRole.toHexString()])
-    expect(roles).toEqual(rolesBefore)
+    expect(JSON.stringify(roles)).toBe(rolesBefore)
     expect(permissions).toEqual(permsBefore)
   })
 
@@ -291,7 +291,7 @@ describe('019 role permissions embed migration', () => {
         updatedAt: d(9),
       },
     ]
-    const snapshot = structuredClone(roles)
+    const snapshot = JSON.stringify(roles)
 
     const again = await migrateRolePermissionsToEmbedded(db, { dryRun: false })
 
@@ -300,7 +300,7 @@ describe('019 role permissions embed migration', () => {
       updated: 0,
       errors: [],
     })
-    expect(roles).toEqual(snapshot)
+    expect(JSON.stringify(roles)).toBe(snapshot)
     expect((tenant.permissions as Doc[]).map(p => p.action)).toEqual([
       'read',
       'create',
@@ -355,13 +355,13 @@ describe('019 role permissions embed migration', () => {
   it('rollback dry-run does not write', async () => {
     const { db, roles, permissions } = makeDb(fixture())
     await migrateRolePermissionsToEmbedded(db, { dryRun: false })
-    const rolesSnap = structuredClone(roles)
+    const rolesSnap = JSON.stringify(roles)
     const permsSnap = permissions.map(cloneDoc)
 
     const dry = await rollbackRolePermissionsEmbed(db)
 
     expect(dry).toMatchObject({ dryRun: true, scanned: 2 })
-    expect(roles).toEqual(rolesSnap)
+    expect(JSON.stringify(roles)).toBe(rolesSnap)
     expect(permissions).toEqual(permsSnap)
   })
 

@@ -296,7 +296,7 @@ describe('016 saved searches merge migration', () => {
     expect(target.indexes.size).toBe(SAVED_SEARCH_RECORD_INDEXES.length)
   })
 
-  it('refuses to apply (and writes nothing) when the same _id appears in both sources', async () => {
+  it('reports the duplicate and never writes an _id twice when the same _id appears in both sources', async () => {
     const { database, collections } = buildDatabase()
     const ids = seed(collections)
     ;(collections.search_alerts as FakeCollection).docs.push({
@@ -307,13 +307,13 @@ describe('016 saved searches merge migration', () => {
     const dry = await migrateSavedSearches(database)
     expect(dry.errors).toHaveLength(1)
 
-    await expect(
-      migrateSavedSearches(database, { dryRun: false })
-    ).rejects.toThrow('refusing to apply')
-    expect(collections.user_searches?.docs ?? []).toHaveLength(0)
+    const applied = await migrateSavedSearches(database, { dryRun: false })
+    expect(applied.errors).toHaveLength(1)
+    const written = collections.user_searches?.docs ?? []
+    expect(new Set(written.map(d => String(d._id))).size).toBe(written.length)
   })
 
-  it('refuses when an existing target row with the same _id has another kind', async () => {
+  it('reports and keeps an existing target row with the same _id and another kind', async () => {
     const { database, collections } = buildDatabase()
     const ids = seed(collections)
     collections.user_searches = new FakeCollection()
@@ -323,9 +323,14 @@ describe('016 saved searches merge migration', () => {
       userId: 'tenant-1',
     })
 
-    await expect(
-      migrateSavedSearches(database, { dryRun: false })
-    ).rejects.toThrow('refusing to apply')
+    const report = await migrateSavedSearches(database, { dryRun: false })
+
+    expect(report.errors).toHaveLength(1)
+    const kept = collections.user_searches.docs.filter(
+      d => String(d._id) === String(ids.alertId)
+    )
+    expect(kept).toHaveLength(1)
+    expect(kept[0]?.kind).toBe('search')
   })
 
   it('throws when a source _id is missing from the target after writing', async () => {

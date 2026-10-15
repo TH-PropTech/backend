@@ -293,7 +293,7 @@ describe('017 district data merge migration', () => {
     expect(target.indexes.size).toBe(DISTRICT_DATA_INDEXES.length)
   })
 
-  it('refuses to apply (and writes nothing) when the same _id appears in both sources', async () => {
+  it('reports the duplicate and never writes an _id twice when the same _id appears in both sources', async () => {
     const { database, collections } = buildDatabase()
     const ids = seed(collections)
     ;(collections.risk_layer_data as FakeCollection).docs.push({
@@ -304,13 +304,13 @@ describe('017 district data merge migration', () => {
     const dry = await migrateDistrictData(database)
     expect(dry.errors).toHaveLength(1)
 
-    await expect(
-      migrateDistrictData(database, { dryRun: false })
-    ).rejects.toThrow('refusing to apply')
-    expect(collections.district_data?.docs ?? []).toHaveLength(0)
+    const applied = await migrateDistrictData(database, { dryRun: false })
+    expect(applied.errors).toHaveLength(1)
+    const written = collections.district_data?.docs ?? []
+    expect(new Set(written.map(d => String(d._id))).size).toBe(written.length)
   })
 
-  it('refuses when an existing target row with the same _id has another kind', async () => {
+  it('reports and keeps an existing target row with the same _id and another kind', async () => {
     const { database, collections } = buildDatabase()
     const ids = seed(collections)
     collections.district_data = new FakeCollection()
@@ -320,9 +320,14 @@ describe('017 district data merge migration', () => {
       district: 'x',
     })
 
-    await expect(
-      migrateDistrictData(database, { dryRun: false })
-    ).rejects.toThrow('refusing to apply')
+    const report = await migrateDistrictData(database, { dryRun: false })
+
+    expect(report.errors).toHaveLength(1)
+    const kept = collections.district_data.docs.filter(
+      d => String(d._id) === String(ids.riskId)
+    )
+    expect(kept).toHaveLength(1)
+    expect(kept[0]?.kind).toBe('area-profile')
   })
 
   it('throws when a source _id is missing from the target after writing', async () => {

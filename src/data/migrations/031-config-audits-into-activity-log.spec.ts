@@ -282,7 +282,7 @@ describe('031-config-audits-into-activity-log', () => {
     expect(target.docs.filter(d => d.kind === 'config-audit')).toHaveLength(3)
   })
 
-  it('refuses a _id that already exists under another kind, writes nothing and creates no index', async () => {
+  it('reports a _id that already exists under another kind and keeps it', async () => {
     const a = audit()
     const clash = {
       _id: a._id,
@@ -292,12 +292,12 @@ describe('031-config-audits-into-activity-log', () => {
     }
     const { db, target } = setup({ legacy: [a], target: [clash] })
 
-    await expect(
-      migrateConfigAuditsIntoActivityLog(db, { dryRun: false })
-    ).rejects.toThrow('refusing to apply')
+    const report = await migrateConfigAuditsIntoActivityLog(db, {
+      dryRun: false,
+    })
 
+    expect(report.errors).toHaveLength(1)
     expect(target.docs).toEqual([clash])
-    expect(target.indexes.size).toBe(0)
   })
 
   it('reports the clash in a dry-run without throwing', async () => {

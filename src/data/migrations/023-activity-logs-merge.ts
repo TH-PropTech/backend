@@ -198,10 +198,12 @@ export async function migrateActivityLogs(
       const existing = await target.find({ _id: { $in: ids } }).toArray()
       const existingById = new Map(existing.map(d => [String(d._id), d]))
       const pending: Doc[] = []
+      const expectedIds: unknown[] = []
       for (const doc of docs) {
         const current = existingById.get(String(doc._id))
         if (!current) {
           pending.push(doc)
+          expectedIds.push(doc._id)
           continue
         }
         if (current.kind !== source.kind) {
@@ -210,6 +212,7 @@ export async function migrateActivityLogs(
           )
           continue
         }
+        expectedIds.push(doc._id)
         report.skipped += 1
       }
       report.updated += pending.length
@@ -225,12 +228,12 @@ export async function migrateActivityLogs(
       }
       const found = await target.countDocuments({
         kind: source.kind,
-        _id: { $in: ids },
+        _id: { $in: expectedIds },
       })
-      if (found !== ids.length) {
+      if (found !== expectedIds.length) {
         throw new Error(
           `${ACTIVITY_LOGS_MERGE_MIGRATION_ID}: count mismatch for kind ${source.kind} ` +
-            `(expected ${ids.length}, found ${found})`
+            `(expected ${expectedIds.length}, found ${found})`
         )
       }
     })
