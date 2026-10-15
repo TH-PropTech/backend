@@ -17,6 +17,10 @@ import {
   SavedSearchListResult,
   AlertListResult,
 } from '../services/saved-searches.service'
+import type {
+  SavedSearchView,
+  SearchAlertView,
+} from '../mappers/saved-search-record.mapper'
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard'
 import { CurrentUser } from '../../../common/decorators/current-user.decorator'
 import {
@@ -26,8 +30,6 @@ import {
 } from '../dto/saved-search.dto'
 import { AlertQueryDto } from '../dto/alert-query.dto'
 import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto'
-import { SavedSearch } from '../schemas/saved-search.schema'
-import { SearchAlert } from '../schemas/search-alert.schema'
 
 @ApiTags('saved-searches')
 @Controller('saved-searches')
@@ -45,7 +47,7 @@ export class SavedSearchesController {
   async create(
     @Body() dto: CreateSavedSearchDto,
     @CurrentUser('id') userId: string
-  ): Promise<SavedSearch> {
+  ): Promise<SavedSearchView> {
     return this.savedSearchesService.createSavedSearch(userId, dto)
   }
 
@@ -70,7 +72,7 @@ export class SavedSearchesController {
     @Param('id') id: string,
     @Body() dto: UpdateSavedSearchDto,
     @CurrentUser('id') userId: string
-  ): Promise<SavedSearch> {
+  ): Promise<SavedSearchView> {
     return this.savedSearchesService.updateSavedSearch(id, userId, dto)
   }
 
@@ -96,7 +98,7 @@ export class SavedSearchesController {
     @Param('id') id: string,
     @Body() dto: ToggleAlertDto,
     @CurrentUser('id') userId: string
-  ): Promise<SavedSearch> {
+  ): Promise<SavedSearchView> {
     return this.savedSearchesService.toggleAlert(id, userId, dto.enabled)
   }
 
@@ -120,7 +122,7 @@ export class SavedSearchesController {
   async markAlertRead(
     @Param('id') id: string,
     @CurrentUser('id') userId: string
-  ): Promise<SearchAlert> {
+  ): Promise<SearchAlertView> {
     return this.savedSearchesService.markAlertRead(id, userId)
   }
 

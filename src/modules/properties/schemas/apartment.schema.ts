@@ -5,8 +5,44 @@ import {
   Column,
   CreateDateColumn,
   UpdateDateColumn,
+  AfterLoad,
 } from 'typeorm'
 import type { RentalPackageRecord } from '../utils/rental-package.util'
+import type { ReviewRatings } from './review.schema'
+
+/** Phiếu bảo trì nhúng trong căn hộ (thay cho collection `maintenance_tickets`). */
+export interface MaintenanceTicketEntry {
+  _id: ObjectId
+  tenantId: string
+  propertyTitle?: string
+  description: string
+  images: string[]
+  status: 'pending' | 'in-progress' | 'resolved' | 'cancelled'
+  resolvedAt: Date | null
+  createdAt: Date
+  updatedAt: Date
+}
+
+/** Số phiếu bảo trì tối đa trong một căn hộ (409 khi vượt). */
+export const MAX_MAINTENANCE_TICKETS = 100
+/** Đánh giá nhúng trong căn hộ (G-REV, thay cho collection `reviews`). */
+export interface ApartmentReviewEntry {
+  _id: ObjectId
+  authorId: string
+  authorName: string
+  targetUserId: string
+  contractId: string
+  comment: string
+  ratings: ReviewRatings
+  overall: number
+  createdAt: Date
+  updatedAt: Date
+}
+
+/** Số đánh giá tối đa trong một căn hộ (khớp `APARTMENT_REVIEWS_LIMIT` của migration 030). */
+export const MAX_APARTMENT_REVIEWS = 100
+/** Số ảnh tối đa trong một phiếu bảo trì. */
+export const MAX_MAINTENANCE_TICKET_IMAGES = 20
 
 @Entity('apartments')
 export class Apartment {
@@ -163,9 +199,36 @@ export class Apartment {
   @Column({ default: '', nullable: true })
   rejectedReason?: string | null
 
+  /**
+   * Phiếu bảo trì nhúng (G-MNT). CHỈ ghi bằng `updateOne` $push có trần
+   * (`MaintenanceTicketsService`). Vì `save(apartment)` ghi đè mọi cột đã nạp,
+   * `stripMaintenanceTickets` bỏ trường này khỏi entity vừa nạp để `save` không
+   * bao giờ mang theo bản sao cũ của mảng. Đọc phiếu qua `MaintenanceTicketsService.list`.
+   */
+  @Column('array')
+  maintenanceTickets?: MaintenanceTicketEntry[]
+
+  /**
+   * Đánh giá nhúng (G-REV). Chỉ ghi bằng `updateOne` (migration 030 dùng `$push` có trần).
+   * Giống `maintenanceTickets`, `stripReviews` bỏ trường này khỏi entity vừa nạp để `save` không ghi đè mảng.
+   */
+  @Column('array')
+  reviews?: ApartmentReviewEntry[]
+
   @CreateDateColumn()
   createdAt!: Date
 
   @UpdateDateColumn()
   updatedAt!: Date
+
+  @AfterLoad()
+  stripReviews?(): void {
+    delete this.reviews
+  }
+
+  @AfterLoad()
+  // Tùy chọn (`?`) để literal/spread kiểu `Apartment` không phải khai báo hook này.
+  stripMaintenanceTickets?(): void {
+    delete this.maintenanceTickets
+  }
 }

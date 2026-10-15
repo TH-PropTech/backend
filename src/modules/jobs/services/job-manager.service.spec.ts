@@ -1,5 +1,6 @@
 import { NotFoundException } from '@nestjs/common'
 import { SchedulerRegistry } from '@nestjs/schedule'
+import { ObjectId } from 'mongodb'
 import { BaseJob } from '../base-job'
 import { JobManagerService } from './job-manager.service'
 
@@ -13,7 +14,7 @@ class FakeJob extends BaseJob {
   }
 }
 
-type ConfigRow = { jobName: string; enabled: boolean }
+type ConfigRow = { scope: string; key: string; enabled: boolean }
 type Repos = {
   configs: Map<string, ConfigRow>
   histories: Array<Record<string, unknown>>
@@ -25,20 +26,27 @@ function makeRepos(): Repos {
   const configs = new Map<string, ConfigRow>()
   const histories: Array<Record<string, unknown>> = []
   const configRepo = {
-    findOne: jest.fn(({ where }: { where: { jobName: string } }) =>
-      Promise.resolve(configs.get(where.jobName) ?? null)
+    findOne: jest.fn(({ where }: { where: { scope: string; key: string } }) =>
+      // Mọi truy vấn cấu hình job phải lọc scope 'job'.
+      Promise.resolve(
+        where.scope === 'job' ? (configs.get(where.key) ?? null) : null
+      )
     ),
     create: jest.fn((v: ConfigRow) => v),
     save: jest.fn((v: ConfigRow) => {
-      configs.set(v.jobName, v)
+      configs.set(v.key, v)
       return Promise.resolve(v)
     }),
   }
   const historyRepo = {
     create: jest.fn((v: Record<string, unknown>) => ({ ...v })),
     save: jest.fn((v: Record<string, unknown>) => {
-      if (!histories.includes(v)) histories.push(v)
-      return Promise.resolve(v)
+      // Upsert theo _id như TypeORM: ghi lần hai cùng bản ghi cập nhật dòng đã có.
+      if (v._id === undefined) v._id = new ObjectId()
+      const index = histories.findIndex(h => String(h._id) === String(v._id))
+      if (index >= 0) histories[index] = { ...v }
+      else histories.push({ ...v })
+      return Promise.resolve({ ...v })
     }),
     find: jest.fn(() => Promise.resolve(histories)),
   }
@@ -85,7 +93,11 @@ describe('JobManagerService', () => {
       ['job-a', true, true],
       ['job-b', true, true],
     ])
-    expect(configs.get('job-a')?.enabled).toBe(true)
+    expect(configs.get('job-a')).toMatchObject({
+      scope: 'job',
+      key: 'job-a',
+      enabled: true,
+    })
     expect(manager.list()[0]?.timeZone).toBe('Asia/Ho_Chi_Minh')
   })
 
@@ -102,7 +114,11 @@ describe('JobManagerService', () => {
 
   it('does not start the schedule of a job disabled in config', async () => {
     const repos = makeRepos()
-    repos.configs.set('job-a', { jobName: 'job-a', enabled: false })
+    repos.configs.set('job-a', {
+      scope: 'job',
+      key: 'job-a',
+      enabled: false,
+    })
     const { manager, registry } = make([new FakeJob('job-a')], repos)
 
     await manager.onModuleInit()
@@ -186,7 +202,7 @@ describe('JobManagerService', () => {
 
     await manager.history('job-a', 5)
     expect(historyRepo.find).toHaveBeenCalledWith({
-      where: { jobName: 'job-a' },
+      where: { jobName: 'job-a', kind: 'job-run' },
       order: { startedAt: 'DESC' },
       take: 5,
     })

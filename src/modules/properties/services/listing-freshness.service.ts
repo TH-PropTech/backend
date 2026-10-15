@@ -9,11 +9,14 @@ import { ObjectId } from 'mongodb'
 import { Repository } from 'typeorm'
 import { Apartment } from '../schemas/apartment.schema'
 import type { ListingReviewQueryDto } from '../dto/listing-freshness-query.dto'
-import {
+import type {
   ListingReviewCase,
-  type ListingReviewStatus,
-  type ListingReviewType,
+  ListingReviewStatus,
+  ListingReviewType,
 } from '../schemas/listing-review-case.schema'
+import { ReviewCase } from '../schemas/review-case.schema'
+import { KindScopedReviewCaseRepository } from '../utils/review-case.repository'
+import { toListingReviewCase } from '../utils/review-case.mapper'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 const NEEDS_CONFIRMATION_DAYS = 30
@@ -46,12 +49,19 @@ interface DuplicateSignal {
 
 @Injectable()
 export class ListingFreshnessService {
+  private readonly reviewCaseRepository: KindScopedReviewCaseRepository
+
   constructor(
     @InjectRepository(Apartment)
     private readonly apartmentRepository: Repository<Apartment>,
-    @InjectRepository(ListingReviewCase)
-    private readonly reviewCaseRepository: Repository<ListingReviewCase>
-  ) {}
+    @InjectRepository(ReviewCase)
+    reviewCaseRepository: Repository<ReviewCase>
+  ) {
+    this.reviewCaseRepository = new KindScopedReviewCaseRepository(
+      reviewCaseRepository,
+      'listing'
+    )
+  }
 
   /** [uc_staff_apartment] Calculate freshness without mutating the listing. */
   async checkFreshness(apartmentId: string): Promise<FreshnessResult> {
@@ -86,7 +96,9 @@ export class ListingFreshnessService {
       const signals = this.collectDuplicateSignals(target, candidate)
       for (const signal of signals) {
         cases.push(
-          await this.findOrCreatePendingCase(target, candidate, signal)
+          toListingReviewCase(
+            await this.findOrCreatePendingCase(target, candidate, signal)
+          )
         )
       }
     }
@@ -98,9 +110,11 @@ export class ListingFreshnessService {
   async getReviewQueue(
     query: ListingReviewQueryDto
   ): Promise<ListingReviewListResult> {
-    const records = await this.reviewCaseRepository.find({
-      order: { createdAt: 'DESC' },
-    })
+    const records = (
+      await this.reviewCaseRepository.find({
+        order: { createdAt: 'DESC' },
+      })
+    ).map(toListingReviewCase)
     const filtered = records.filter(record => {
       if (query.type && record.type !== query.type) return false
       if (query.status && record.status !== query.status) return false
@@ -135,7 +149,7 @@ export class ListingFreshnessService {
     reviewCase.status = status
     reviewCase.reviewedBy = reviewerId
     reviewCase.reviewedAt = new Date()
-    return this.reviewCaseRepository.save(reviewCase)
+    return toListingReviewCase(await this.reviewCaseRepository.save(reviewCase))
   }
 
   private toFreshnessResult(apartment: Apartment): FreshnessResult {
@@ -207,7 +221,7 @@ export class ListingFreshnessService {
     target: Apartment,
     candidate: Apartment,
     signal: DuplicateSignal
-  ): Promise<ListingReviewCase> {
+  ): Promise<ReviewCase> {
     const apartmentId = target._id.toString()
     const relatedApartmentId = candidate._id.toString()
     const existing = await this.reviewCaseRepository.findOne({
@@ -272,7 +286,7 @@ export class ListingFreshnessService {
     return apartment
   }
 
-  private async findCaseOrThrow(caseId: string): Promise<ListingReviewCase> {
+  private async findCaseOrThrow(caseId: string): Promise<ReviewCase> {
     if (!ObjectId.isValid(caseId)) {
       throw new NotFoundException(`ID review case không hợp lệ: ${caseId}`)
     }

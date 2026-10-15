@@ -26,6 +26,11 @@ export interface SavedSearchFilters {
   category?: string
 }
 
+/**
+ * @deprecated G-SAV: đã hợp nhất vào `SavedSearchRecord` (kind 'search', collection
+ * `user_searches`); giữ lại để đọc collection cũ và migration 016. Không đăng ký
+ * forFeature, không ghi mới. `SavedSearchFilters` và `AlertFrequency` vẫn dùng chung.
+ */
 @Entity('saved_searches')
 export class SavedSearch {
   @ObjectIdColumn()

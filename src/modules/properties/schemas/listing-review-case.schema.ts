@@ -16,6 +16,12 @@ export type ListingReviewType =
 
 export type ListingReviewStatus = 'pending' | 'confirmed' | 'dismissed'
 
+/**
+ * @deprecated G-RVC: dữ liệu nay nằm ở `ReviewCase{kind:'listing'}` (collection
+ * `review_cases`). Giữ lại làm kiểu hình trả về và để migration 015 / rollback
+ * tham chiếu collection cũ `listing_review_cases`; entity này KHÔNG còn nằm trong
+ * `TypeOrmModule.forFeature`.
+ */
 @Entity('listing_review_cases')
 export class ListingReviewCase {
   @ObjectIdColumn()

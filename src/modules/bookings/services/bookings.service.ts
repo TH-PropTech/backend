@@ -416,24 +416,12 @@ export class BookingsService {
         skip,
         take,
       }),
-      this.bookingRepository.count({
-        where: where as FindOptionsWhere<Booking>,
-      }),
-      this.bookingRepository.count({
-        where: { status: 'pending' } as FindOptionsWhere<Booking>,
-      }),
-      this.bookingRepository.count({
-        where: { status: 'confirmed' } as FindOptionsWhere<Booking>,
-      }),
-      this.bookingRepository.count({
-        where: { status: 'rejected' } as FindOptionsWhere<Booking>,
-      }),
-      this.bookingRepository.count({
-        where: { status: 'cancelled' } as FindOptionsWhere<Booking>,
-      }),
-      this.bookingRepository.count({
-        where: { status: 'completed' } as FindOptionsWhere<Booking>,
-      }),
+      this.bookingRepository.countBy(where as FindOptionsWhere<Booking>),
+      this.bookingRepository.countBy({ status: 'pending' }),
+      this.bookingRepository.countBy({ status: 'confirmed' }),
+      this.bookingRepository.countBy({ status: 'rejected' }),
+      this.bookingRepository.countBy({ status: 'cancelled' }),
+      this.bookingRepository.countBy({ status: 'completed' }),
     ])
 
     // Lấy thông tin user (landlord + tenant) chỉ cho các items của trang hiện tại

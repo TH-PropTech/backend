@@ -1,9 +1,14 @@
 import { Logger } from '@nestjs/common'
-import type { Repository } from 'typeorm'
 import type {
   JobRunHistory,
   JobRunTrigger,
 } from './schemas/job-run-history.schema'
+
+/** Kho lịch sử chạy job (facade trên `activity_logs`, kind 'job-run'). */
+export interface JobRunHistoryStore {
+  create(data: Partial<JobRunHistory>): JobRunHistory
+  save(entity: JobRunHistory): Promise<JobRunHistory>
+}
 
 export interface JobRunOutcome {
   jobName: string
@@ -30,12 +35,12 @@ export abstract class BaseJob {
   readonly timeZone?: string
 
   protected readonly logger = new Logger(this.constructor.name)
-  private historyRepository: Repository<JobRunHistory> | null = null
+  private historyRepository: JobRunHistoryStore | null = null
 
   /** Logic của job; ném lỗi nếu thất bại. */
   abstract run(): Promise<unknown>
 
-  attachHistory(repository: Repository<JobRunHistory>): void {
+  attachHistory(repository: JobRunHistoryStore): void {
     this.historyRepository = repository
   }
 

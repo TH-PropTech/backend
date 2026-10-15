@@ -14,6 +14,11 @@ export interface ReviewRatings {
   commitment: number // Mức độ thực hiện cam kết
 }
 
+/**
+ * @deprecated G-REV: thay bằng `Apartment.reviews[]` (`schemas/apartment.schema.ts`, migration 030).
+ * Giữ file để rollback/migration 030; không đăng ký trong `forFeature`.
+ * Collection `reviews` không bị xóa.
+ */
 @Entity('reviews')
 export class Review {
   @ObjectIdColumn()
