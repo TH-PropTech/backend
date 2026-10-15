@@ -11,7 +11,14 @@ import type {
   LegalDocStatus,
 } from '../utils/legal-knowledge.types'
 
-/** A legal / regulation text in the admin knowledge base. `content` is the knowledge itself. */
+/**
+ * @deprecated G-LEG: dữ liệu nay nằm ở `LegalDocument{kind:'knowledge'}`
+ * (collection `legal_documents`). Giữ lại làm kiểu hình và để migration 020 /
+ * rollback tham chiếu collection cũ `legal_knowledge_docs`; entity này KHÔNG còn
+ * nằm trong `TypeOrmModule.forFeature`.
+ *
+ * A legal / regulation text in the admin knowledge base. `content` is the knowledge itself.
+ */
 @Entity('legal_knowledge_docs')
 export class LegalKnowledgeDoc {
   @ObjectIdColumn()

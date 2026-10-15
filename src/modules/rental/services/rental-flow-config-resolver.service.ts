@@ -1,14 +1,16 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
-import { Repository, IsNull } from 'typeorm'
+import { Repository } from 'typeorm'
+import type { FlowProfileSteps } from '../schemas/rental-flow-profile.schema'
 import {
-  RentalFlowAssignment,
+  RentalFlowConfig,
   type FlowAssignmentScope,
-} from '../schemas/rental-flow-assignment.schema'
+  type ProfileReference,
+} from '../schemas/rental-flow-config.schema'
 import {
-  RentalFlowProfile,
-  type FlowProfileSteps,
-} from '../schemas/rental-flow-profile.schema'
+  asAssignmentRow,
+  asProfileRow,
+} from '../utils/rental-flow-config.mapper'
 import {
   DEFAULT_FLOW_PROFILE_STEPS,
   SAFE_DEFAULT_FLOW_PROFILE_ID,
@@ -37,10 +39,8 @@ export class RentalFlowConfigResolver {
   private readonly logger = new Logger(RentalFlowConfigResolver.name)
 
   constructor(
-    @InjectRepository(RentalFlowAssignment)
-    private readonly assignmentRepo: Repository<RentalFlowAssignment>,
-    @InjectRepository(RentalFlowProfile)
-    private readonly profileRepo: Repository<RentalFlowProfile>
+    @InjectRepository(RentalFlowConfig)
+    private readonly configRepo: Repository<RentalFlowConfig>
   ) {}
 
   async resolve(
@@ -48,64 +48,77 @@ export class RentalFlowConfigResolver {
   ): Promise<ResolvedFlowConfigResult> {
     const now = new Date()
 
+    // Mongo: dùng `null` thay IsNull() (FindOperator bị BSON tuần tự hóa thành subdocument, không khớp null)
     // 1. Kiểm tra PACKAGE assignment
     if (options.packageId) {
-      const packageAssignment = await this.assignmentRepo.findOne({
+      const packageRow = await this.configRepo.findOne({
         where: {
+          kind: 'assignment',
           scope: 'PACKAGE',
           scopeValue: options.packageId,
-          supersededAt: IsNull(),
+          supersededAt: null as unknown as Date,
         },
       })
 
-      if (packageAssignment && packageAssignment.effectiveAt <= now) {
-        const resolved = await this.loadProfileByRef(
-          packageAssignment.profileRef,
-          'PACKAGE',
-          packageAssignment.scopeValue,
-          packageAssignment.assignmentId
-        )
-        if (resolved) return resolved
+      if (packageRow) {
+        const packageAssignment = asAssignmentRow(packageRow)
+        if (packageAssignment.effectiveAt <= now) {
+          const resolved = await this.loadProfileByRef(
+            packageAssignment.profileRef,
+            'PACKAGE',
+            packageAssignment.scopeValue,
+            packageAssignment.key
+          )
+          if (resolved) return resolved
+        }
       }
     }
 
     // 2. Kiểm tra DURATION assignment
     if (options.durationMonths) {
-      const durationAssignment = await this.assignmentRepo.findOne({
+      const durationRow = await this.configRepo.findOne({
         where: {
+          kind: 'assignment',
           scope: 'DURATION',
           scopeValue: String(options.durationMonths),
-          supersededAt: IsNull(),
+          supersededAt: null as unknown as Date,
         },
       })
 
-      if (durationAssignment && durationAssignment.effectiveAt <= now) {
-        const resolved = await this.loadProfileByRef(
-          durationAssignment.profileRef,
-          'DURATION',
-          durationAssignment.scopeValue,
-          durationAssignment.assignmentId
-        )
-        if (resolved) return resolved
+      if (durationRow) {
+        const durationAssignment = asAssignmentRow(durationRow)
+        if (durationAssignment.effectiveAt <= now) {
+          const resolved = await this.loadProfileByRef(
+            durationAssignment.profileRef,
+            'DURATION',
+            durationAssignment.scopeValue,
+            durationAssignment.key
+          )
+          if (resolved) return resolved
+        }
       }
     }
 
     // 3. Kiểm tra GLOBAL assignment
-    const globalAssignment = await this.assignmentRepo.findOne({
+    const globalRow = await this.configRepo.findOne({
       where: {
+        kind: 'assignment',
         scope: 'GLOBAL',
-        supersededAt: IsNull(),
+        supersededAt: null as unknown as Date,
       },
     })
 
-    if (globalAssignment && globalAssignment.effectiveAt <= now) {
-      const resolved = await this.loadProfileByRef(
-        globalAssignment.profileRef,
-        'GLOBAL',
-        null,
-        globalAssignment.assignmentId
-      )
-      if (resolved) return resolved
+    if (globalRow) {
+      const globalAssignment = asAssignmentRow(globalRow)
+      if (globalAssignment.effectiveAt <= now) {
+        const resolved = await this.loadProfileByRef(
+          globalAssignment.profileRef,
+          'GLOBAL',
+          null,
+          globalAssignment.key
+        )
+        if (resolved) return resolved
+      }
     }
 
     // 4. Safe System Fallback
@@ -124,32 +137,34 @@ export class RentalFlowConfigResolver {
   }
 
   private async loadProfileByRef(
-    ref: { profileId: string; version: number; contentHash?: string },
+    ref: ProfileReference,
     scope: FlowAssignmentScope,
     scopeValue: string | null,
     assignmentId: string
   ): Promise<ResolvedFlowConfigResult | null> {
-    const profile = await this.profileRepo.findOne({
+    const profileRow = await this.configRepo.findOne({
       where: {
-        profileId: ref.profileId,
+        kind: 'profile',
+        key: ref.profileId,
         status: 'published',
         version: ref.version,
       },
     })
 
-    if (!profile) {
+    if (!profileRow) {
       this.logger.warn(
         `Assignment [${assignmentId}] references non-existent profile [${ref.profileId} v${ref.version}]. Falling back to lower precedence.`
       )
       return null
     }
 
+    const profile = asProfileRow(profileRow)
     return {
       effectiveConfig: profile.steps,
       resolvedFrom: {
         scope,
         scopeValue,
-        profileId: profile.profileId,
+        profileId: profile.key,
         profileName: profile.name,
         version: profile.version || ref.version,
         contentHash: profile.contentHash || ref.contentHash || '',

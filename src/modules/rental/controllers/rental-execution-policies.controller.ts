@@ -16,7 +16,7 @@ import type { UserPayload } from '../../auth/interfaces/auth.interface'
 import { RentalExecutionPoliciesService } from '../services/rental-execution-policies.service'
 import { SaveRentalExecutionPolicyDraftDto } from '../dto/save-rental-execution-policy-draft.dto'
 import { PublishRentalExecutionPolicyDto } from '../dto/publish-rental-execution-policy.dto'
-import type { RentalExecutionPolicy } from '../schemas/rental-execution-policy.schema'
+import type { RentalExecutionPolicyView } from '../utils/rental-flow-config.mapper'
 
 @ApiTags('rental-execution-policies')
 @ApiBearerAuth()
@@ -26,14 +26,14 @@ export class RentalExecutionPoliciesController {
 
   @Get()
   @UseGuards(JwtAuthGuard)
-  async listActive(): Promise<RentalExecutionPolicy[]> {
+  async listActive(): Promise<RentalExecutionPolicyView[]> {
     return this.service.listActive()
   }
 
   @Get('admin')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin', 'staff')
-  async listAll(): Promise<RentalExecutionPolicy[]> {
+  async listAll(): Promise<RentalExecutionPolicyView[]> {
     return this.service.listAll()
   }
 
@@ -43,7 +43,7 @@ export class RentalExecutionPoliciesController {
   async saveDraft(
     @Body() dto: SaveRentalExecutionPolicyDraftDto,
     @CurrentUser() user: UserPayload
-  ): Promise<RentalExecutionPolicy> {
+  ): Promise<RentalExecutionPolicyView> {
     const policyId = dto.policyId?.trim() || `execution-policy-${Date.now()}`
     return this.service.saveDraft(
       policyId,
@@ -59,7 +59,7 @@ export class RentalExecutionPoliciesController {
     @Param('policyId') policyId: string,
     @Body() dto: SaveRentalExecutionPolicyDraftDto,
     @CurrentUser() user: UserPayload
-  ): Promise<RentalExecutionPolicy> {
+  ): Promise<RentalExecutionPolicyView> {
     return this.service.saveDraft(
       policyId,
       dto,
@@ -74,7 +74,7 @@ export class RentalExecutionPoliciesController {
     @Param('policyId') policyId: string,
     @Body() dto: PublishRentalExecutionPolicyDto,
     @CurrentUser() user: UserPayload
-  ): Promise<RentalExecutionPolicy> {
+  ): Promise<RentalExecutionPolicyView> {
     return this.service.publish(
       policyId,
       dto,
@@ -90,7 +90,7 @@ export class RentalExecutionPoliciesController {
     @Param('version') version: string,
     @Body('reason') reason: string,
     @CurrentUser() user: UserPayload
-  ): Promise<RentalExecutionPolicy> {
+  ): Promise<RentalExecutionPolicyView> {
     return this.service.archive(
       policyId,
       Number(version),

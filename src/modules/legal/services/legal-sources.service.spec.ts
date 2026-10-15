@@ -4,38 +4,19 @@ import {
   NotFoundException,
 } from '@nestjs/common'
 import type { Repository } from 'typeorm'
-import { ObjectId } from 'mongodb'
+import type { LegalDocument } from '../schemas/legal-document.schema'
+import { toSourceDocumentFields } from '../schemas/legal-document.mapper'
 import { LegalSourcesService } from './legal-sources.service'
-import type { LegalSource } from '../schemas/legal-source.schema'
-import type { PlatformRegulation } from '../schemas/platform-regulation.schema'
 import {
   buildSeedLegalSources,
   buildSeedPlatformRegulations,
   SEED_CONTRACT_PANEL_KEYS,
 } from '../utils/legal-sources.seed-data'
 import type { CreateLegalSourceDto } from '../dto/legal-source.dto'
-
-type MockRepo<T extends object> = jest.Mocked<
-  Pick<
-    Repository<T>,
-    'find' | 'findOne' | 'count' | 'save' | 'create' | 'update' | 'delete'
-  >
->
-
-function mockRepo<T extends object>(): MockRepo<T> {
-  return {
-    find: jest.fn(),
-    findOne: jest.fn(),
-    count: jest.fn(),
-    // Như Mongo: gán _id khi insert bản ghi mới
-    save: jest.fn((entity: { _id?: ObjectId }) =>
-      Promise.resolve({ _id: new ObjectId(), ...entity })
-    ),
-    create: jest.fn((entity: unknown) => entity),
-    update: jest.fn(),
-    delete: jest.fn(),
-  } as unknown as MockRepo<T>
-}
+import {
+  LegalDocumentMemoryRepository,
+  type LegalDocumentRow,
+} from '../utils/legal-document-memory-repository.fixtures'
 
 const CONTENT = {
   kind: 'procedure' as const,
@@ -54,17 +35,39 @@ const CONTENT = {
   notes: [],
 }
 
-function source(overrides: Partial<LegalSource> = {}): LegalSource {
+/** Dòng `legal_documents` kind='source' (kind cũ của nguồn nằm ở docKind). */
+function sourceRow(
+  overrides: Record<string, unknown> = {}
+): Record<string, unknown> {
   return {
-    ...CONTENT,
-    _id: new ObjectId(),
+    ...toSourceDocumentFields(CONTENT),
+    kind: 'source',
     key: '1.004194',
     showInContractPanel: true,
     order: 1,
     isActive: true,
     updatedBy: 'admin-1',
-    createdAt: new Date(),
-    updatedAt: new Date(),
+    ...overrides,
+  }
+}
+
+/** Dòng `legal_documents` kind='regulation'. */
+function regulationRow(
+  overrides: Record<string, unknown> = {}
+): Record<string, unknown> {
+  return {
+    kind: 'regulation',
+    code: 'REG-RES-01',
+    title: 'Quy định',
+    summary: 'Tóm tắt',
+    category: 'residence',
+    severity: 'mandatory',
+    scope: ['all'],
+    linkedSourceKey: '1.004194',
+    checklistItems: [],
+    order: 1,
+    isActive: true,
+    isDefault: true,
     ...overrides,
   }
 }
@@ -76,16 +79,16 @@ function createDto(
 }
 
 describe('LegalSourcesService', () => {
-  let sources: MockRepo<LegalSource>
-  let regulations: MockRepo<PlatformRegulation>
+  let store: LegalDocumentMemoryRepository
   let service: LegalSourcesService
 
+  const rowsOf = (kind: string): LegalDocumentRow[] =>
+    store.rows.filter(r => r['kind'] === kind)
+
   beforeEach(() => {
-    sources = mockRepo<LegalSource>()
-    regulations = mockRepo<PlatformRegulation>()
+    store = new LegalDocumentMemoryRepository()
     service = new LegalSourcesService(
-      sources as unknown as Repository<LegalSource>,
-      regulations as unknown as Repository<PlatformRegulation>
+      store as unknown as Repository<LegalDocument>
     )
   })
 
@@ -128,90 +131,128 @@ describe('LegalSourcesService', () => {
   })
 
   describe('seedIfEmpty', () => {
-    it('seeds both collections when empty', async () => {
-      sources.count.mockResolvedValue(0)
-      regulations.count.mockResolvedValue(0)
-
+    it('seeds both kinds when empty, tagging each row with its kind', async () => {
       await service.seedIfEmpty()
 
-      expect(sources.save).toHaveBeenCalledWith(
-        expect.arrayContaining([expect.objectContaining({ key: '1.004194' })])
+      expect(rowsOf('source')).toHaveLength(buildSeedLegalSources().length)
+      expect(rowsOf('regulation')).toHaveLength(
+        buildSeedPlatformRegulations().length
       )
-      expect(regulations.save).toHaveBeenCalled()
+      expect(rowsOf('source')).toContainEqual(
+        expect.objectContaining({ key: '1.004194' })
+      )
+      // loại nguồn seed (kind cũ) đi vào docKind, không đè discriminator
+      expect(rowsOf('source').every(r => r['docKind'] !== undefined)).toBe(true)
     })
 
     it('does not overwrite collections that already have data', async () => {
-      sources.count.mockResolvedValue(3)
-      regulations.count.mockResolvedValue(1)
+      store.seed([
+        sourceRow(),
+        sourceRow({ key: 'b' }),
+        sourceRow({ key: 'c' }),
+      ])
+      store.seed([regulationRow()])
 
       await service.seedIfEmpty()
 
-      expect(sources.save).not.toHaveBeenCalled()
-      expect(regulations.save).not.toHaveBeenCalled()
+      expect(rowsOf('source')).toHaveLength(3)
+      expect(rowsOf('regulation')).toHaveLength(1)
+    })
+
+    it('counts only its own kind: foreign rows do not block seeding (kind isolation)', async () => {
+      store.seed([
+        { kind: 'terms', key: 'rental-service-terms', version: 1 },
+        { kind: 'knowledge', title: 'Luật Nhà ở' },
+        regulationRow(),
+      ])
+
+      await service.seedIfEmpty()
+
+      expect(rowsOf('source')).toHaveLength(buildSeedLegalSources().length)
+      expect(rowsOf('regulation')).toHaveLength(1)
     })
   })
 
   describe('public reads', () => {
     it('filters active contract-panel sources sorted by order', async () => {
-      sources.find.mockResolvedValue([source()])
+      store.seed([
+        sourceRow({ key: '1.004194', order: 2 }),
+        sourceRow({ key: 'b', order: 1, showInContractPanel: false }),
+        sourceRow({ key: 'c', order: 3, isActive: false }),
+      ])
 
       const result = await service.findPublic('contract')
 
-      expect(sources.find).toHaveBeenCalledWith({
-        where: { isActive: true, showInContractPanel: true },
-        order: { order: 'ASC' },
-      })
-      expect(result[0]?.key).toBe('1.004194')
+      expect(result.map(r => r.key)).toEqual(['1.004194'])
+      expect(result[0]?.kind).toBe('procedure')
       expect(result[0]).not.toHaveProperty('updatedBy')
     })
 
-    it('returns every active source without panel filter', async () => {
-      sources.find.mockResolvedValue([])
+    it('returns every active source without panel filter, sorted by order', async () => {
+      store.seed([
+        sourceRow({ key: 'late', order: 2 }),
+        sourceRow({ key: 'early', order: 1, showInContractPanel: false }),
+        sourceRow({ key: 'off', order: 3, isActive: false }),
+      ])
 
-      await service.findPublic()
+      const result = await service.findPublic()
 
-      expect(sources.find).toHaveBeenCalledWith({
-        where: { isActive: true },
-        order: { order: 'ASC' },
-      })
+      expect(result.map(r => r.key)).toEqual(['early', 'late'])
     })
 
     it('throws 404 for missing or inactive source', async () => {
-      sources.findOne.mockResolvedValue(null)
+      store.seed([sourceRow({ key: 'off', isActive: false })])
 
       await expect(service.findPublicByKey('tax-law-2019')).rejects.toThrow(
         NotFoundException
       )
-      expect(sources.findOne).toHaveBeenCalledWith({
-        where: { key: 'tax-law-2019', isActive: true },
-      })
+      await expect(service.findPublicByKey('off')).rejects.toThrow(
+        NotFoundException
+      )
+    })
+
+    it('does not treat a terms or regulation row with the same key as a source', async () => {
+      store.seed([
+        { kind: 'terms', key: '1.004194', version: 1, status: 'published' },
+      ])
+
+      await expect(service.findPublicByKey('1.004194')).rejects.toThrow(
+        NotFoundException
+      )
     })
   })
 
   describe('create', () => {
     it('creates source at the end of the order with actor', async () => {
-      sources.count.mockResolvedValueOnce(0).mockResolvedValueOnce(16)
+      store.seed(
+        Array.from({ length: 16 }, (_, index) =>
+          sourceRow({ key: `seed-${index}`, order: index + 1 })
+        )
+      )
 
       const result = await service.create(createDto(), 'admin-1')
 
-      expect(sources.save).toHaveBeenCalledWith(
-        expect.objectContaining({
-          key: 'residence-law-2020',
-          order: 17,
-          updatedBy: 'admin-1',
-          isActive: true,
-        })
-      )
+      expect(rowsOf('source')).toHaveLength(17)
+      expect(
+        rowsOf('source').find(r => r['key'] === 'residence-law-2020')
+      ).toMatchObject({
+        kind: 'source',
+        docKind: 'procedure',
+        order: 17,
+        updatedBy: 'admin-1',
+        isActive: true,
+      })
       expect(result.key).toBe('residence-law-2020')
+      expect(result.kind).toBe('procedure')
     })
 
     it('rejects duplicate key with 409', async () => {
-      sources.count.mockResolvedValue(1)
+      store.seed([sourceRow()])
 
       await expect(
         service.create(createDto({ key: '1.004194' }), 'admin-1')
       ).rejects.toThrow(ConflictException)
-      expect(sources.save).not.toHaveBeenCalled()
+      expect(rowsOf('source')).toHaveLength(1)
     })
 
     it('rejects reserved key "admin"', async () => {
@@ -219,12 +260,19 @@ describe('LegalSourcesService', () => {
         service.create(createDto({ key: 'admin' }), 'admin-1')
       ).rejects.toThrow(BadRequestException)
     })
+
+    it('a terms row with the same key does not block a new source (kind isolation)', async () => {
+      store.seed([{ kind: 'terms', key: 'residence-law-2020', version: 1 }])
+
+      await expect(
+        service.create(createDto(), 'admin-1')
+      ).resolves.toMatchObject({ key: 'residence-law-2020' })
+    })
   })
 
   describe('update', () => {
     it('merges fields, keeps key and records actor', async () => {
-      const existing = source()
-      sources.findOne.mockResolvedValue(existing)
+      store.seed([sourceRow()])
 
       const result = await service.update(
         '1.004194',
@@ -237,12 +285,30 @@ describe('LegalSourcesService', () => {
         showInContractPanel: false,
         updatedBy: 'admin-2',
       })
-      expect(existing.showInContractPanel).toBe(true)
+      expect(rowsOf('source')[0]).toMatchObject({
+        key: '1.004194',
+        showInContractPanel: false,
+        updatedBy: 'admin-2',
+      })
+    })
+
+    it('maps a changed source kind to docKind and keeps the row discriminator', async () => {
+      store.seed([sourceRow()])
+
+      const result = await service.update(
+        '1.004194',
+        { kind: 'legal_text' },
+        'admin-2'
+      )
+
+      expect(result.kind).toBe('legal_text')
+      expect(rowsOf('source')[0]).toMatchObject({
+        kind: 'source',
+        docKind: 'legal_text',
+      })
     })
 
     it('throws 404 for unknown key', async () => {
-      sources.findOne.mockResolvedValue(null)
-
       await expect(service.update('nope', {}, 'admin-1')).rejects.toThrow(
         NotFoundException
       )
@@ -251,10 +317,7 @@ describe('LegalSourcesService', () => {
 
   describe('remove', () => {
     it('blocks deletion when regulations reference the source', async () => {
-      sources.findOne.mockResolvedValue(source())
-      regulations.find.mockResolvedValue([
-        { code: 'REG-RES-01' } as PlatformRegulation,
-      ])
+      store.seed([sourceRow(), regulationRow({ code: 'REG-RES-01' })])
 
       const error = await service.remove('1.004194').catch((e: unknown) => e)
 
@@ -263,37 +326,47 @@ describe('LegalSourcesService', () => {
         code: 'LEGAL_SOURCE_IN_USE',
         regulationCodes: ['REG-RES-01'],
       })
-      expect(sources.delete).not.toHaveBeenCalled()
+      expect(rowsOf('source')).toHaveLength(1)
     })
 
     it('deletes an unreferenced source', async () => {
-      const existing = source()
-      sources.findOne.mockResolvedValue(existing)
-      regulations.find.mockResolvedValue([])
+      store.seed([sourceRow()])
 
       await service.remove('1.004194')
 
-      expect(sources.delete).toHaveBeenCalledWith(existing._id)
+      expect(rowsOf('source')).toHaveLength(0)
     })
   })
 
   describe('reorder', () => {
-    const a = source({ key: 'a1', order: 1 })
-    const b = source({ key: 'b2', order: 2 })
+    const seedAB = (): void => {
+      store.seed([
+        sourceRow({ key: 'a1', order: 1 }),
+        sourceRow({ key: 'b2', order: 2 }),
+      ])
+    }
+    const orderOf = (key: string): unknown =>
+      rowsOf('source').find(r => r['key'] === key)?.['order']
 
     it('assigns order by list position', async () => {
-      sources.find.mockResolvedValue([a, b])
+      seedAB()
 
       await service.reorder(['b2', 'a1'], 'admin-1')
 
-      expect(sources.update).toHaveBeenCalledWith(b._id, {
-        order: 1,
-        updatedBy: 'admin-1',
-      })
-      expect(sources.update).toHaveBeenCalledWith(a._id, {
-        order: 2,
-        updatedBy: 'admin-1',
-      })
+      expect(orderOf('b2')).toBe(1)
+      expect(orderOf('a1')).toBe(2)
+      expect(rowsOf('source').every(r => r['updatedBy'] === 'admin-1')).toBe(
+        true
+      )
+    })
+
+    it('ignores regulation rows when checking the permutation (kind isolation)', async () => {
+      seedAB()
+      store.seed([regulationRow({ code: 'REG-X' })])
+
+      await expect(
+        service.reorder(['b2', 'a1'], 'admin-1')
+      ).resolves.toHaveLength(2)
     })
 
     it.each([
@@ -302,12 +375,13 @@ describe('LegalSourcesService', () => {
       ['duplicate key', ['a1', 'a1']],
       ['extra key', ['a1', 'b2', 'c3']],
     ])('rejects %s with 400', async (_label, keys) => {
-      sources.find.mockResolvedValue([a, b])
+      seedAB()
 
       await expect(service.reorder(keys, 'admin-1')).rejects.toThrow(
         BadRequestException
       )
-      expect(sources.update).not.toHaveBeenCalled()
+      expect(orderOf('a1')).toBe(1)
+      expect(orderOf('b2')).toBe(2)
     })
   })
 })

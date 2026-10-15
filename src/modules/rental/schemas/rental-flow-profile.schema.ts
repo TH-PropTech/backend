@@ -95,6 +95,9 @@ export interface FlowProfileSteps {
   step4: Step4Config
 }
 
+/**
+ * @deprecated Đã hợp nhất vào `RentalFlowConfig` (kind 'profile'); giữ lại để đọc collection cũ và migration 014. Không đăng ký forFeature, không ghi mới. Các kiểu StepNConfig và FlowProfileSteps vẫn dùng chung.
+ */
 @Entity('rental_flow_profiles')
 export class RentalFlowProfile {
   @ObjectIdColumn()

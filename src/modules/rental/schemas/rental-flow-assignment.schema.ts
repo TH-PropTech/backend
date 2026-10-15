@@ -7,14 +7,18 @@ import {
   UpdateDateColumn,
 } from 'typeorm'
 
-export type FlowAssignmentScope = 'GLOBAL' | 'DURATION' | 'PACKAGE'
+import type {
+  FlowAssignmentScope,
+  ProfileReference,
+} from './rental-flow-config.schema'
 
-export interface ProfileReference {
-  profileId: string
-  version: number
-  contentHash: string
-}
+export type { FlowAssignmentScope, ProfileReference }
 
+/**
+ * @deprecated Đã gom vào `RentalFlowConfig` với `kind = 'assignment'`
+ * (`rental_flow_configs`, migration 024). Không còn đăng ký trong `forFeature`;
+ * chỉ giữ để tương thích import kiểu và để tham chiếu dữ liệu collection cũ.
+ */
 @Entity('rental_flow_assignments')
 export class RentalFlowAssignment {
   @ObjectIdColumn()

@@ -7,8 +7,14 @@ import {
 } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
-import { RentalFlowProfile } from '../schemas/rental-flow-profile.schema'
-import { RentalFlowAudit } from '../schemas/rental-flow-audit.schema'
+import { RentalFlowConfig } from '../schemas/rental-flow-config.schema'
+import {
+  asProfileRow,
+  toProfileView,
+  type ProfileConfigRow,
+  type RentalFlowProfileView,
+} from '../utils/rental-flow-config.mapper'
+import { ConfigAuditService } from '../../activity-log/services/config-audit.service'
 import {
   DEFAULT_FLOW_PROFILE_STEPS,
   SAFE_DEFAULT_FLOW_PROFILE_ID,
@@ -23,27 +29,27 @@ export class RentalFlowProfilesService implements OnModuleInit {
   private readonly logger = new Logger(RentalFlowProfilesService.name)
 
   constructor(
-    @InjectRepository(RentalFlowProfile)
-    private readonly profileRepo: Repository<RentalFlowProfile>,
-    @InjectRepository(RentalFlowAudit)
-    private readonly auditRepo: Repository<RentalFlowAudit>
+    @InjectRepository(RentalFlowConfig)
+    private readonly profileRepo: Repository<RentalFlowConfig>,
+    private readonly configAudit: ConfigAuditService
   ) {}
 
   async onModuleInit(): Promise<void> {
     await this.ensureSeedProfile()
   }
 
-  async ensureSeedProfile(): Promise<RentalFlowProfile> {
+  async ensureSeedProfile(): Promise<RentalFlowProfileView> {
     const existing = await this.profileRepo.findOne({
       where: {
-        profileId: SAFE_DEFAULT_FLOW_PROFILE_ID,
+        kind: 'profile',
+        key: SAFE_DEFAULT_FLOW_PROFILE_ID,
         status: 'published',
         version: 1,
       },
     })
 
     if (existing) {
-      return existing
+      return toProfileView(existing)
     }
 
     this.logger.log(
@@ -58,7 +64,8 @@ export class RentalFlowProfilesService implements OnModuleInit {
     })
 
     const seedProfile = this.profileRepo.create({
-      profileId: SAFE_DEFAULT_FLOW_PROFILE_ID,
+      kind: 'profile',
+      key: SAFE_DEFAULT_FLOW_PROFILE_ID,
       name: 'Quy chuẩn Luồng thuê Mặc định (Nghị định 96/2024)',
       description:
         'Cấu hình tiêu chuẩn theo Luật Nhà ở 2023 và Phụ lục II Nghị định 96/2024/NĐ-CP.',
@@ -74,25 +81,27 @@ export class RentalFlowProfilesService implements OnModuleInit {
       publishedAt: new Date(),
     })
 
-    return this.profileRepo.save(seedProfile)
+    return toProfileView(await this.profileRepo.save(seedProfile))
   }
 
-  async listProfiles(): Promise<RentalFlowProfile[]> {
-    return this.profileRepo.find({
+  async listProfiles(): Promise<RentalFlowProfileView[]> {
+    const rows = await this.profileRepo.find({
+      where: { kind: 'profile' },
       order: { createdAt: 'DESC' },
     })
+    return rows.map(toProfileView)
   }
 
   async getProfile(profileId: string): Promise<{
-    draft: RentalFlowProfile | null
-    publishedVersions: RentalFlowProfile[]
+    draft: RentalFlowProfileView | null
+    publishedVersions: RentalFlowProfileView[]
   }> {
     const [draft, publishedVersions] = await Promise.all([
       this.profileRepo.findOne({
-        where: { profileId, status: 'draft' },
+        where: { kind: 'profile', key: profileId, status: 'draft' },
       }),
       this.profileRepo.find({
-        where: { profileId, status: 'published' },
+        where: { kind: 'profile', key: profileId, status: 'published' },
         order: { version: 'DESC' },
       }),
     ])
@@ -101,40 +110,52 @@ export class RentalFlowProfilesService implements OnModuleInit {
       throw new NotFoundException(`Không tìm thấy profile có mã [${profileId}]`)
     }
 
-    return { draft, publishedVersions }
+    return {
+      draft: draft ? toProfileView(draft) : null,
+      publishedVersions: publishedVersions.map(toProfileView),
+    }
   }
 
-  async getDraft(profileId: string): Promise<RentalFlowProfile> {
-    let draft = await this.profileRepo.findOne({
-      where: { profileId, status: 'draft' },
+  async getDraft(profileId: string): Promise<RentalFlowProfileView> {
+    return toProfileView(await this.getDraftRow(profileId))
+  }
+
+  private async getDraftRow(profileId: string): Promise<ProfileConfigRow> {
+    const found = await this.profileRepo.findOne({
+      where: { kind: 'profile', key: profileId, status: 'draft' },
     })
+    let draft = found ? asProfileRow(found) : null
 
     if (!draft) {
       // Nếu chưa có draft, lấy version published mới nhất để khởi tạo draft
-      const latestPublished = await this.profileRepo.findOne({
-        where: { profileId, status: 'published' },
+      const latestRow = await this.profileRepo.findOne({
+        where: { kind: 'profile', key: profileId, status: 'published' },
         order: { version: 'DESC' },
       })
 
-      if (!latestPublished) {
+      if (!latestRow) {
         throw new NotFoundException(
           `Không tìm thấy profile có mã [${profileId}]`
         )
       }
+      const latestPublished = asProfileRow(latestRow)
 
-      draft = this.profileRepo.create({
-        profileId,
-        name: latestPublished.name,
-        description: latestPublished.description,
-        status: 'draft',
-        version: null,
-        draftRevision: (latestPublished.draftRevision || 1) + 1,
-        contentHash: null,
-        schemaVersion: latestPublished.schemaVersion || 1,
-        changeClassification: latestPublished.changeClassification,
-        steps: latestPublished.steps,
-        createdBy: 'system',
-      })
+      draft = asProfileRow(
+        this.profileRepo.create({
+          kind: 'profile',
+          key: profileId,
+          name: latestPublished.name,
+          description: latestPublished.description,
+          status: 'draft',
+          version: null,
+          draftRevision: (latestPublished.draftRevision || 1) + 1,
+          contentHash: null,
+          schemaVersion: latestPublished.schemaVersion || 1,
+          changeClassification: latestPublished.changeClassification,
+          steps: latestPublished.steps,
+          createdBy: 'system',
+        })
+      )
 
       await this.profileRepo.save(draft)
     }
@@ -146,12 +167,13 @@ export class RentalFlowProfilesService implements OnModuleInit {
     profileId: string,
     dto: SaveFlowProfileDraftDto,
     actorId: string
-  ): Promise<RentalFlowProfile> {
+  ): Promise<RentalFlowProfileView> {
     validateFlowProfileSteps(dto.steps)
 
-    let draft = await this.profileRepo.findOne({
-      where: { profileId, status: 'draft' },
+    const existingDraft = await this.profileRepo.findOne({
+      where: { kind: 'profile', key: profileId, status: 'draft' },
     })
+    let draft = existingDraft ? asProfileRow(existingDraft) : null
 
     if (draft) {
       if (draft.draftRevision !== dto.expectedRevision) {
@@ -166,39 +188,41 @@ export class RentalFlowProfilesService implements OnModuleInit {
       draft.draftRevision += 1
       draft.updatedBy = actorId
     } else {
-      draft = this.profileRepo.create({
-        profileId,
-        name: dto.name,
-        description: dto.description ?? '',
-        status: 'draft',
-        version: null,
-        draftRevision: 1,
-        contentHash: null,
-        schemaVersion: 1,
-        changeClassification: dto.changeClassification,
-        steps: dto.steps,
-        createdBy: actorId,
-        updatedBy: actorId,
-      })
+      draft = asProfileRow(
+        this.profileRepo.create({
+          kind: 'profile',
+          key: profileId,
+          name: dto.name,
+          description: dto.description ?? '',
+          status: 'draft',
+          version: null,
+          draftRevision: 1,
+          contentHash: null,
+          schemaVersion: 1,
+          changeClassification: dto.changeClassification,
+          steps: dto.steps,
+          createdBy: actorId,
+          updatedBy: actorId,
+        })
+      )
     }
 
-    const saved = await this.profileRepo.save(draft)
+    const saved = asProfileRow(await this.profileRepo.save(draft))
 
-    await this.auditRepo.save(
-      this.auditRepo.create({
-        action: 'DRAFT_SAVED',
-        actorId,
-        targetType: 'profile',
-        targetId: profileId,
-        version: null,
-        details: {
-          draftRevision: saved.draftRevision,
-          classification: saved.changeClassification,
-        },
-      })
-    )
+    await this.configAudit.append({
+      scope: 'rental-flow',
+      action: 'DRAFT_SAVED',
+      actorId,
+      targetType: 'profile',
+      key: profileId,
+      version: null,
+      details: {
+        draftRevision: saved.draftRevision,
+        classification: saved.changeClassification,
+      },
+    })
 
-    return saved
+    return toProfileView(saved)
   }
 
   async validateDraft(profileId: string): Promise<{
@@ -227,8 +251,8 @@ export class RentalFlowProfilesService implements OnModuleInit {
     profileId: string,
     dto: PublishFlowProfileDto,
     actorId: string
-  ): Promise<RentalFlowProfile> {
-    const draft = await this.getDraft(profileId)
+  ): Promise<RentalFlowProfileView> {
+    const draft = await this.getDraftRow(profileId)
 
     if (draft.draftRevision !== dto.expectedRevision) {
       throw new ConflictException(
@@ -240,7 +264,7 @@ export class RentalFlowProfilesService implements OnModuleInit {
 
     // Lấy số phiên bản published cao nhất hiện tại
     const latestPublished = await this.profileRepo.findOne({
-      where: { profileId, status: 'published' },
+      where: { kind: 'profile', key: profileId, status: 'published' },
       order: { version: 'DESC' },
     })
 
@@ -254,7 +278,8 @@ export class RentalFlowProfilesService implements OnModuleInit {
     })
 
     const publishedRecord = this.profileRepo.create({
-      profileId,
+      kind: 'profile',
+      key: profileId,
       name: draft.name,
       description: draft.description,
       status: 'published',
@@ -269,50 +294,52 @@ export class RentalFlowProfilesService implements OnModuleInit {
       publishedAt: new Date(),
     })
 
-    const savedPublished = await this.profileRepo.save(publishedRecord)
+    const savedPublished = asProfileRow(
+      await this.profileRepo.save(publishedRecord)
+    )
 
     // Cập nhật draftRevision của draft để sẵn sàng cho lần sửa tiếp theo
     draft.draftRevision += 1
     draft.updatedBy = actorId
     await this.profileRepo.save(draft)
 
-    await this.auditRepo.save(
-      this.auditRepo.create({
-        action: 'PROFILE_PUBLISHED',
-        actorId,
-        targetType: 'profile',
-        targetId: profileId,
-        version: newVersion,
-        details: {
-          contentHash,
-          classification: savedPublished.changeClassification,
-        },
-      })
-    )
+    await this.configAudit.append({
+      scope: 'rental-flow',
+      action: 'PROFILE_PUBLISHED',
+      actorId,
+      targetType: 'profile',
+      key: profileId,
+      version: newVersion,
+      details: {
+        contentHash,
+        classification: savedPublished.changeClassification,
+      },
+    })
 
     this.logger.log(
       `Profile [${profileId}] v${newVersion} published successfully (hash: ${contentHash.slice(0, 12)}...)`
     )
 
-    return savedPublished
+    return toProfileView(savedPublished)
   }
 
   async restoreVersionAsDraft(
     profileId: string,
     version: number,
     actorId: string
-  ): Promise<RentalFlowProfile> {
-    const targetVersion = await this.profileRepo.findOne({
-      where: { profileId, status: 'published', version },
+  ): Promise<RentalFlowProfileView> {
+    const targetRow = await this.profileRepo.findOne({
+      where: { kind: 'profile', key: profileId, status: 'published', version },
     })
 
-    if (!targetVersion) {
+    if (!targetRow) {
       throw new NotFoundException(
         `Không tìm thấy phiên bản published [v${version}] của profile [${profileId}]`
       )
     }
 
-    const draft = await this.getDraft(profileId)
+    const targetVersion = asProfileRow(targetRow)
+    const draft = await this.getDraftRow(profileId)
     draft.name = targetVersion.name
     draft.description = targetVersion.description
     draft.changeClassification = targetVersion.changeClassification
@@ -320,39 +347,39 @@ export class RentalFlowProfilesService implements OnModuleInit {
     draft.draftRevision += 1
     draft.updatedBy = actorId
 
-    const saved = await this.profileRepo.save(draft)
+    const saved = asProfileRow(await this.profileRepo.save(draft))
 
-    await this.auditRepo.save(
-      this.auditRepo.create({
-        action: 'PROFILE_RESTORED',
-        actorId,
-        targetType: 'profile',
-        targetId: profileId,
-        version,
-        details: {
-          restoredFromVersion: version,
-          newDraftRevision: saved.draftRevision,
-        },
-      })
-    )
+    await this.configAudit.append({
+      scope: 'rental-flow',
+      action: 'PROFILE_RESTORED',
+      actorId,
+      targetType: 'profile',
+      key: profileId,
+      version,
+      details: {
+        restoredFromVersion: version,
+        newDraftRevision: saved.draftRevision,
+      },
+    })
 
-    return saved
+    return toProfileView(saved)
   }
 
   async restoreVersion(
     profileId: string,
     version: number,
     actorId: string
-  ): Promise<RentalFlowProfile> {
+  ): Promise<RentalFlowProfileView> {
     return this.restoreVersionAsDraft(profileId, version, actorId)
   }
 
   async getPublishedProfile(
     profileId: string,
     version: number
-  ): Promise<RentalFlowProfile | null> {
-    return this.profileRepo.findOne({
-      where: { profileId, status: 'published', version },
+  ): Promise<RentalFlowProfileView | null> {
+    const row = await this.profileRepo.findOne({
+      where: { kind: 'profile', key: profileId, status: 'published', version },
     })
+    return row ? toProfileView(row) : null
   }
 }

@@ -1,7 +1,10 @@
 import { NotFoundException, ConflictException } from '@nestjs/common'
 import type { Repository } from 'typeorm'
 import { LegalTermsService, RENTAL_TERMS_KEY } from './legal-terms.service'
-import { LegalTermsDocument } from '../schemas/legal-terms-document.schema'
+import {
+  LegalDocument,
+  type TermsLegalDocument,
+} from '../schemas/legal-document.schema'
 
 describe('LegalTermsService', () => {
   let service: LegalTermsService
@@ -9,6 +12,7 @@ describe('LegalTermsService', () => {
     findOne: jest.Mock
     save: jest.Mock
     remove: jest.Mock
+    create: jest.Mock
   }
 
   beforeEach(() => {
@@ -16,10 +20,11 @@ describe('LegalTermsService', () => {
       findOne: jest.fn(),
       save: jest.fn(),
       remove: jest.fn(),
+      create: jest.fn((data?: Record<string, unknown>) => ({ ...data })),
     }
 
     service = new LegalTermsService(
-      repository as unknown as Repository<LegalTermsDocument>
+      repository as unknown as Repository<LegalDocument>
     )
   })
 
@@ -33,7 +38,7 @@ describe('LegalTermsService', () => {
         sections: [{ id: 's1', heading: 'H1', body: 'B1', order: 1 }],
         contentHash: 'hash-v2',
         publishedAt: new Date(),
-      } as unknown as LegalTermsDocument
+      } as unknown as TermsLegalDocument
 
       repository.findOne.mockResolvedValue(mockDoc)
 
@@ -41,7 +46,7 @@ describe('LegalTermsService', () => {
       expect(result.version).toBe(2)
       expect(result.contentHash).toBe('hash-v2')
       expect(repository.findOne).toHaveBeenCalledWith({
-        where: { key: RENTAL_TERMS_KEY, status: 'published' },
+        where: { key: RENTAL_TERMS_KEY, status: 'published', kind: 'terms' },
         order: { version: 'DESC' },
       })
     })
@@ -63,14 +68,19 @@ describe('LegalTermsService', () => {
         summary: 'Tóm tắt v1',
         sections: [],
         contentHash: 'hash-v1',
-      } as unknown as LegalTermsDocument
+      } as unknown as TermsLegalDocument
 
       repository.findOne.mockResolvedValue(mockDoc)
 
       const result = await service.getPublishedVersion(1)
       expect(result.version).toBe(1)
       expect(repository.findOne).toHaveBeenCalledWith({
-        where: { key: RENTAL_TERMS_KEY, version: 1, status: 'published' },
+        where: {
+          key: RENTAL_TERMS_KEY,
+          version: 1,
+          status: 'published',
+          kind: 'terms',
+        },
       })
     })
 
@@ -86,7 +96,7 @@ describe('LegalTermsService', () => {
     it('creates a new draft when no draft exists', async () => {
       repository.findOne.mockResolvedValue(null)
       repository.save.mockImplementation((doc: unknown) =>
-        Promise.resolve(doc as LegalTermsDocument)
+        Promise.resolve(doc as TermsLegalDocument)
       )
 
       const result = await service.saveDraft(
@@ -102,6 +112,11 @@ describe('LegalTermsService', () => {
       expect(result.status).toBe('draft')
       expect(result.draftRevision).toBe(1)
       expect(result.createdBy).toBe('admin-user')
+      // bản nháp mới được gắn kind 'terms' (không rò sang loại khác)
+      expect(result.kind).toBe('terms')
+      expect(repository.findOne).toHaveBeenCalledWith({
+        where: { key: RENTAL_TERMS_KEY, status: 'draft', kind: 'terms' },
+      })
     })
 
     it('updates existing draft and increments revision if expectedRevision matches', async () => {
@@ -109,11 +124,11 @@ describe('LegalTermsService', () => {
         key: RENTAL_TERMS_KEY,
         status: 'draft',
         draftRevision: 2,
-      } as unknown as LegalTermsDocument
+      } as unknown as TermsLegalDocument
 
       repository.findOne.mockResolvedValue(existingDraft)
       repository.save.mockImplementation((doc: unknown) =>
-        Promise.resolve(doc as LegalTermsDocument)
+        Promise.resolve(doc as TermsLegalDocument)
       )
 
       const result = await service.saveDraft(
@@ -135,7 +150,7 @@ describe('LegalTermsService', () => {
         key: RENTAL_TERMS_KEY,
         status: 'draft',
         draftRevision: 3,
-      } as unknown as LegalTermsDocument
+      } as unknown as TermsLegalDocument
 
       repository.findOne.mockResolvedValue(existingDraft)
 
@@ -162,18 +177,18 @@ describe('LegalTermsService', () => {
         title: 'Terms Title',
         summary: 'Terms Summary',
         sections: [{ id: 's1', heading: 'Heading', body: 'Body', order: 1 }],
-      } as unknown as LegalTermsDocument
+      } as unknown as TermsLegalDocument
 
       const latestPublished = {
         version: 1,
-      } as unknown as LegalTermsDocument
+      } as unknown as TermsLegalDocument
 
       repository.findOne
         .mockResolvedValueOnce(existingDraft) // find draft
         .mockResolvedValueOnce(latestPublished) // find latest published
 
       repository.save.mockImplementation((doc: unknown) =>
-        Promise.resolve(doc as LegalTermsDocument)
+        Promise.resolve(doc as TermsLegalDocument)
       )
       repository.remove.mockResolvedValue(existingDraft)
 
@@ -185,6 +200,10 @@ describe('LegalTermsService', () => {
       expect(result.version).toBe(2)
       expect(result.contentHash).toHaveLength(64)
       expect(repository.remove).toHaveBeenCalledWith(existingDraft)
+      expect(repository.findOne).toHaveBeenNthCalledWith(2, {
+        where: { key: RENTAL_TERMS_KEY, status: 'published', kind: 'terms' },
+        order: { version: 'DESC' },
+      })
     })
 
     it('throws NotFoundException when draft does not exist', async () => {
@@ -198,7 +217,7 @@ describe('LegalTermsService', () => {
     it('throws ConflictException when draft revision does not match expected', async () => {
       const existingDraft = {
         draftRevision: 5,
-      } as unknown as LegalTermsDocument
+      } as unknown as TermsLegalDocument
 
       repository.findOne.mockResolvedValue(existingDraft)
 

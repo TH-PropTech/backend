@@ -7,7 +7,11 @@ import {
 } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
-import { LegalTermsDocument } from '../schemas/legal-terms-document.schema'
+import {
+  LegalDocument,
+  type TermsLegalDocument,
+} from '../schemas/legal-document.schema'
+import { LegalDocumentScope } from '../utils/legal-document.scope'
 import { computeCanonicalTermsHash } from '../utils/legal-terms.canonical'
 import { SaveDraftDto } from '../dto/save-draft.dto'
 import { PublishTermsDto } from '../dto/publish-terms.dto'
@@ -62,10 +66,18 @@ const DEFAULT_RENTAL_TERMS_FIXTURE = {
 export class LegalTermsService implements OnApplicationBootstrap {
   private readonly logger = new Logger(LegalTermsService.name)
 
+  /** Điều khoản (kind='terms'): facade lọc và gắn kind (G-LEG). */
+  private readonly repository: LegalDocumentScope<TermsLegalDocument>
+
   constructor(
-    @InjectRepository(LegalTermsDocument)
-    private readonly repository: Repository<LegalTermsDocument>
-  ) {}
+    @InjectRepository(LegalDocument)
+    documents: Repository<LegalDocument>
+  ) {
+    this.repository = new LegalDocumentScope<TermsLegalDocument>(
+      documents,
+      'terms'
+    )
+  }
 
   async onApplicationBootstrap(): Promise<void> {
     await this.seedInitialTermsIfEmpty()
@@ -89,7 +101,7 @@ export class LegalTermsService implements OnApplicationBootstrap {
         sections: DEFAULT_RENTAL_TERMS_FIXTURE.sections,
       })
 
-      const doc = new LegalTermsDocument()
+      const doc = this.repository.create()
       doc.key = DEFAULT_RENTAL_TERMS_FIXTURE.key
       doc.version = version
       doc.title = DEFAULT_RENTAL_TERMS_FIXTURE.title
@@ -179,7 +191,7 @@ export class LegalTermsService implements OnApplicationBootstrap {
   async saveDraft(
     dto: SaveDraftDto,
     actorId: string
-  ): Promise<LegalTermsDocument> {
+  ): Promise<TermsLegalDocument> {
     let draft = await this.repository.findOne({
       where: { key: RENTAL_TERMS_KEY, status: 'draft' },
     })
@@ -194,7 +206,7 @@ export class LegalTermsService implements OnApplicationBootstrap {
       draft.draftRevision += 1
       draft.updatedBy = actorId
     } else {
-      draft = new LegalTermsDocument()
+      draft = this.repository.create()
       draft.key = RENTAL_TERMS_KEY
       draft.version = 0
       draft.title = dto.title
@@ -245,7 +257,7 @@ export class LegalTermsService implements OnApplicationBootstrap {
       sections: draft.sections,
     })
 
-    const newPublished = new LegalTermsDocument()
+    const newPublished = this.repository.create()
     newPublished.key = RENTAL_TERMS_KEY
     newPublished.version = nextVersion
     newPublished.title = draft.title
@@ -266,7 +278,7 @@ export class LegalTermsService implements OnApplicationBootstrap {
     return this.toPublicResponse(saved)
   }
 
-  private toPublicResponse(doc: LegalTermsDocument): PublicLegalTermsResponse {
+  private toPublicResponse(doc: TermsLegalDocument): PublicLegalTermsResponse {
     return {
       key: doc.key,
       version: doc.version,

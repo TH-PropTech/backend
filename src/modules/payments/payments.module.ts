@@ -2,8 +2,8 @@ import { Module } from '@nestjs/common'
 import { TypeOrmModule } from '@nestjs/typeorm'
 import { Payment } from './schemas/payment.schema'
 import { PaymentAttempt } from './schemas/payment-attempt.schema'
-import { PlatformFeeAudit } from './schemas/platform-fee-audit.schema'
-import { PlatformFeeSchedule } from './schemas/platform-fee-schedule.schema'
+import { SystemConfig } from '../properties/schemas/system-config.schema'
+import { PlatformFeeScheduleRepository } from './utils/platform-fee-schedule.repository'
 import { Contract } from '../contracts/schemas/contract.schema'
 import { PaymentsController } from './controllers/payments.controller'
 import { PlatformFeesController } from './controllers/platform-fees.controller'
@@ -12,22 +12,22 @@ import { PlatformFeesService } from './services/platform-fees.service'
 import { NotificationsModule } from '../notifications/notifications.module'
 import { FabricModule } from '../fabric/fabric.module'
 import { WalletsModule } from '../wallets/wallets.module'
+import { ActivityLogModule } from '../activity-log/activity-log.module'
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([
-      Payment,
-      PaymentAttempt,
-      Contract,
-      PlatformFeeSchedule,
-      PlatformFeeAudit,
-    ]),
+    TypeOrmModule.forFeature([Payment, PaymentAttempt, Contract, SystemConfig]),
     NotificationsModule,
     FabricModule,
     WalletsModule,
+    ActivityLogModule,
   ],
   controllers: [PaymentsController, PlatformFeesController],
-  providers: [PaymentsService, PlatformFeesService],
+  providers: [
+    PaymentsService,
+    PlatformFeesService,
+    PlatformFeeScheduleRepository,
+  ],
   exports: [TypeOrmModule, PaymentsService, PlatformFeesService],
 })
 export class PaymentsModule {}

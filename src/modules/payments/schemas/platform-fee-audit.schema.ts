@@ -7,6 +7,9 @@ import {
   Index,
 } from 'typeorm'
 
+/**
+ * @deprecated Đã hợp nhất vào `ConfigAudit` (scope 'platform-fee') trong activity-log; giữ lại để đọc collection cũ và migration 010. Không đăng ký forFeature, không ghi mới.
+ */
 @Entity('platform_fee_audits')
 @Index(['scheduleId', 'createdAt'])
 export class PlatformFeeAudit {

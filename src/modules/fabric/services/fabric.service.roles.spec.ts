@@ -1,3 +1,4 @@
+import { vi } from 'vitest'
 import { Logger } from '@nestjs/common'
 import { X509Certificate } from 'node:crypto'
 import { connect } from '@hyperledger/fabric-gateway'
@@ -8,25 +9,25 @@ import {
   TEST_IDENTITY_CERT_PEM_3,
 } from '../utils/fabric-identity.fixtures'
 
-jest.mock('@hyperledger/fabric-gateway', () => ({
+vi.mock('@hyperledger/fabric-gateway', () => ({
   connect: jest.fn(),
   signers: { newPrivateKeySigner: jest.fn(() => ({})) },
 }))
 
-jest.mock('@grpc/grpc-js', () => ({
+vi.mock('@grpc/grpc-js', () => ({
   Client: jest.fn(() => ({ close: jest.fn() })),
   credentials: { createSsl: jest.fn() },
 }))
 
-jest.mock('crypto', () => {
-  const actual = jest.requireActual<typeof import('crypto')>('crypto')
+vi.mock('crypto', async () => {
+  const actual = await vi.importActual<typeof import('crypto')>('crypto')
   return { ...actual, createPrivateKey: jest.fn(() => ({})) }
 })
 
 // Nội dung file giả lập, khớp theo hậu tố đường dẫn; đọc lười (lúc gọi) nên đổi được giữa các lần dựng lại.
-const mockFiles = new Map<string, string>()
-jest.mock('fs', () => {
-  const actual = jest.requireActual<typeof import('fs')>('fs')
+const mockFiles = vi.hoisted(() => new Map<string, string>())
+vi.mock('fs', async () => {
+  const actual = await vi.importActual<typeof import('fs')>('fs')
   return {
     ...actual,
     readFileSync: jest.fn((p: string) => {
@@ -285,16 +286,7 @@ describe('FabricService role gateways and readiness (PROP-399 tasks 6.3, 6.4, 6.
     function at(offsetMs: number): void {
       jest.useFakeTimers({
         now: new Date(notAfter.getTime() + offsetMs),
-        doNotFake: [
-          'nextTick',
-          'setImmediate',
-          'clearImmediate',
-          'setInterval',
-          'clearInterval',
-          'setTimeout',
-          'clearTimeout',
-          'queueMicrotask',
-        ],
+        toFake: ['Date'],
       })
     }
 
@@ -633,7 +625,7 @@ describe('FabricService role gateways and readiness (PROP-399 tasks 6.3, 6.4, 6.
     function warnSpy(): jest.SpyInstance {
       warnSpyInstance = jest
         .spyOn(Logger.prototype, 'warn')
-        .mockImplementation()
+        .mockImplementation(() => undefined)
       return warnSpyInstance
     }
 

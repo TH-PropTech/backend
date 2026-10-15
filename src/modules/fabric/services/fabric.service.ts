@@ -19,6 +19,9 @@ import {
   signers,
 } from '@hyperledger/fabric-gateway'
 import { BlockchainLog } from '../schemas/blockchain-log.schema'
+import { ActivityLog } from '../../activity-log/schemas/activity-log.schema'
+import { KindScopedActivityLogRepository } from '../../activity-log/utils/kind-scoped-activity-log.repository'
+import { toBlockchainLog } from '../../activity-log/utils/legacy-log.mapper'
 import {
   FabricIdentityInspection,
   FabricIdentityState,
@@ -152,11 +155,19 @@ export class FabricService implements OnModuleInit, OnModuleDestroy {
   private refreshTimer: NodeJS.Timeout | null = null
   private refreshing: Promise<void> | null = null
 
+  private readonly logRepository: KindScopedActivityLogRepository<BlockchainLog>
+
   constructor(
-    @InjectRepository(BlockchainLog)
-    private readonly logRepository: Repository<BlockchainLog>,
+    @InjectRepository(ActivityLog)
+    activityLogRepository: Repository<ActivityLog>,
     private readonly configService: ConfigService
-  ) {}
+  ) {
+    this.logRepository = new KindScopedActivityLogRepository(
+      activityLogRepository,
+      'blockchain',
+      toBlockchainLog
+    )
+  }
 
   async onModuleInit(): Promise<void> {
     const enabled = this.configService.get<boolean>('fabric.enabled') ?? false

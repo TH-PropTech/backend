@@ -5,9 +5,12 @@ import { Repository } from 'typeorm'
 import { ObjectId } from 'mongodb'
 import { FabricService, FabricStatus } from './fabric.service'
 import { BlockchainLog } from '../schemas/blockchain-log.schema'
+import { ActivityLog } from '../../activity-log/schemas/activity-log.schema'
+import { KindScopedActivityLogRepository } from '../../activity-log/utils/kind-scoped-activity-log.repository'
+import { toBlockchainLog } from '../../activity-log/utils/legacy-log.mapper'
 import { LedgerOutbox } from '../schemas/ledger-outbox.schema'
 import { Contract } from '../../contracts/schemas/contract.schema'
-import { ContractAmendment } from '../../contracts/schemas/contract-amendment.schema'
+import { ContractAmendmentStore } from '../../contracts/services/contract-amendment.store'
 import { DepositAgreement } from '../../contracts/schemas/deposit-agreement.schema'
 import { Payment } from '../../payments/schemas/payment.schema'
 
@@ -49,20 +52,27 @@ type AggregateRef = {
 
 @Injectable()
 export class LedgerEvidenceQueryService {
+  private readonly logRepository: KindScopedActivityLogRepository<BlockchainLog>
+
   constructor(
-    @InjectRepository(BlockchainLog)
-    private readonly logRepository: Repository<BlockchainLog>,
+    @InjectRepository(ActivityLog)
+    activityLogRepository: Repository<ActivityLog>,
     @InjectRepository(LedgerOutbox)
     private readonly outboxRepository: Repository<LedgerOutbox>,
     @InjectRepository(DepositAgreement)
     private readonly depositAgreementRepository: Repository<DepositAgreement>,
     @InjectRepository(Payment)
     private readonly paymentRepository: Repository<Payment>,
-    @InjectRepository(ContractAmendment)
-    private readonly amendmentRepository: Repository<ContractAmendment>,
+    private readonly amendmentRepository: ContractAmendmentStore,
     private readonly fabricService: FabricService,
     private readonly configService: ConfigService
-  ) {}
+  ) {
+    this.logRepository = new KindScopedActivityLogRepository(
+      activityLogRepository,
+      'blockchain',
+      toBlockchainLog
+    )
+  }
 
   async getContractLedgerEvidence(
     contractId: string,

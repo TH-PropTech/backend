@@ -1,3 +1,4 @@
+import type { ActivityLog } from '../../activity-log/schemas/activity-log.schema'
 import type { Repository } from 'typeorm'
 import { ConflictException, NotFoundException } from '@nestjs/common'
 import { RentalFlowProfilesService } from './rental-flow-profiles.service'
@@ -5,8 +6,8 @@ import {
   DEFAULT_FLOW_PROFILE_STEPS,
   SAFE_DEFAULT_FLOW_PROFILE_ID,
 } from '../utils/default-flow-profile'
-import type { RentalFlowProfile } from '../schemas/rental-flow-profile.schema'
-import type { RentalFlowAudit } from '../schemas/rental-flow-audit.schema'
+import type { RentalFlowConfig } from '../schemas/rental-flow-config.schema'
+import { ConfigAuditService } from '../../activity-log/services/config-audit.service'
 
 interface MockProfileRepo {
   findOne: jest.Mock
@@ -43,8 +44,10 @@ describe('RentalFlowProfilesService', () => {
     }
 
     service = new RentalFlowProfilesService(
-      mockProfileRepo as unknown as Repository<RentalFlowProfile>,
-      mockAuditRepo as unknown as Repository<RentalFlowAudit>
+      mockProfileRepo as unknown as Repository<RentalFlowConfig>,
+      new ConfigAuditService(
+        mockAuditRepo as unknown as Repository<ActivityLog>
+      )
     )
   })
 
@@ -62,20 +65,26 @@ describe('RentalFlowProfilesService', () => {
 
   it('returns existing seed profile if already present', async () => {
     const existing = {
-      profileId: SAFE_DEFAULT_FLOW_PROFILE_ID,
+      kind: 'profile',
+      key: SAFE_DEFAULT_FLOW_PROFILE_ID,
       version: 1,
       status: 'published',
     }
     mockProfileRepo.findOne.mockResolvedValue(existing)
 
     const result = await service.ensureSeedProfile()
-    expect(result).toBe(existing)
+    expect(result).toEqual({
+      profileId: SAFE_DEFAULT_FLOW_PROFILE_ID,
+      version: 1,
+      status: 'published',
+    })
     expect(mockProfileRepo.save).not.toHaveBeenCalled()
   })
 
   it('saves draft successfully when expectedRevision matches (Optimistic concurrency)', async () => {
     const existingDraft = {
-      profileId: 'custom-prof',
+      kind: 'profile',
+      key: 'custom-prof',
       draftRevision: 2,
       status: 'draft',
       steps: DEFAULT_FLOW_PROFILE_STEPS,
@@ -99,7 +108,8 @@ describe('RentalFlowProfilesService', () => {
 
   it('rejects saveDraft with ConflictException when expectedRevision is stale', async () => {
     const existingDraft = {
-      profileId: 'custom-prof',
+      kind: 'profile',
+      key: 'custom-prof',
       draftRevision: 5,
       status: 'draft',
       steps: DEFAULT_FLOW_PROFILE_STEPS,
@@ -122,7 +132,8 @@ describe('RentalFlowProfilesService', () => {
 
   it('publishes profile successfully, generates canonical SHA-256 hash, and increments immutable version', async () => {
     const existingDraft = {
-      profileId: 'prof-99',
+      kind: 'profile',
+      key: 'prof-99',
       name: 'Profile 99',
       version: 2,
       draftRevision: 4,
@@ -144,9 +155,15 @@ describe('RentalFlowProfilesService', () => {
     )
 
     expect(mockProfileRepo.save).toHaveBeenCalled()
-    expect(mockAuditRepo.create).toHaveBeenCalledWith(
+    expect(mockAuditRepo.save).toHaveBeenCalledWith(
       expect.objectContaining({
+        kind: 'config-audit',
         action: 'PROFILE_PUBLISHED',
+        actorId: 'admin-1',
+        scope: 'rental-flow',
+        targetType: 'profile',
+        key: 'prof-99',
+        version: 4,
       })
     )
     expect(published.version).toBe(4)
@@ -154,7 +171,8 @@ describe('RentalFlowProfilesService', () => {
 
   it('restores previous immutable version into active draft with incremented revision', async () => {
     const historicalV1 = {
-      profileId: 'prof-archived',
+      kind: 'profile',
+      key: 'prof-archived',
       version: 1,
       status: 'published',
       name: 'V1 Name',
@@ -162,7 +180,8 @@ describe('RentalFlowProfilesService', () => {
     }
 
     const currentDraft = {
-      profileId: 'prof-archived',
+      kind: 'profile',
+      key: 'prof-archived',
       status: 'draft',
       draftRevision: 7,
     }

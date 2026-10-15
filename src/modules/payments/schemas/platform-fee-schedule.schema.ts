@@ -9,6 +9,12 @@ import {
 } from 'typeorm'
 import type { PlatformFeeScheduleRules } from '../utils/platform-fee.types'
 
+/**
+ * @deprecated G-CFG2: thay bằng `SystemConfig{scope:'platform-fee'}`
+ * (`properties/schemas/system-config.schema.ts`, facade `utils/platform-fee-schedule.repository.ts`).
+ * Giữ file để migration 022 đọc collection cũ; không đăng ký trong `forFeature`.
+ * Collection `platform_fee_schedules` không bị xóa.
+ */
 @Entity('platform_fee_schedules')
 @Index(['scheduleId', 'version'], { unique: true })
 @Index(['status', 'effectiveFrom'])

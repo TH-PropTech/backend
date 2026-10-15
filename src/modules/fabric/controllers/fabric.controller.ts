@@ -38,6 +38,9 @@ import {
   type FabricIdentityCheck,
 } from '../services/fabric.service'
 import { BlockchainLog } from '../schemas/blockchain-log.schema'
+import { ActivityLog } from '../../activity-log/schemas/activity-log.schema'
+import { KindScopedActivityLogRepository } from '../../activity-log/utils/kind-scoped-activity-log.repository'
+import { toBlockchainLog } from '../../activity-log/utils/legacy-log.mapper'
 import { LedgerOutboxService } from '../services/ledger-outbox.service'
 import { LedgerOutbox } from '../schemas/ledger-outbox.schema'
 import { FabricGovernanceService } from '../services/fabric-governance.service'
@@ -191,15 +194,23 @@ export class FabricStatusResponseDto {
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('fabric')
 export class FabricController {
+  private readonly logRepository: KindScopedActivityLogRepository<BlockchainLog>
+
   constructor(
     private readonly fabricService: FabricService,
     private readonly ledgerOutboxService: LedgerOutboxService,
-    @InjectRepository(BlockchainLog)
-    private readonly logRepository: Repository<BlockchainLog>,
+    @InjectRepository(ActivityLog)
+    activityLogRepository: Repository<ActivityLog>,
     private readonly governanceService: FabricGovernanceService,
     private readonly auditQueryService: LedgerAuditQueryService,
     private readonly reconciliationService: LedgerReconciliationService
-  ) {}
+  ) {
+    this.logRepository = new KindScopedActivityLogRepository(
+      activityLogRepository,
+      'blockchain',
+      toBlockchainLog
+    )
+  }
 
   /** Trạng thái kết nối Hyperledger Fabric — Admin, Nhân viên */
   @Get('status')

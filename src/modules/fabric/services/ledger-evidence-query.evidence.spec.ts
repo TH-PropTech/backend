@@ -70,8 +70,9 @@ describe('LedgerEvidenceQueryService PROP-399 evidence families (task 5.5)', () 
     } as never)
 
     const queried = outboxRepository.find.mock.calls.map(
-      ([query]: [{ where: { aggregateType: string; aggregateId: string } }]) =>
-        `${query.where.aggregateType}:${query.where.aggregateId}`
+      ([query]: Array<{
+        where: { aggregateType: string; aggregateId: string }
+      }>) => `${query?.where.aggregateType}:${query?.where.aggregateId}`
     )
     expect(queried).toEqual(
       expect.arrayContaining([

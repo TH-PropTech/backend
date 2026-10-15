@@ -9,6 +9,9 @@ import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 import { ObjectId } from 'mongodb'
 import { BlockchainLog } from '../schemas/blockchain-log.schema'
+import { ActivityLog } from '../../activity-log/schemas/activity-log.schema'
+import { KindScopedActivityLogRepository } from '../../activity-log/utils/kind-scoped-activity-log.repository'
+import { toBlockchainLog } from '../../activity-log/utils/legacy-log.mapper'
 import { LedgerOutbox } from '../schemas/ledger-outbox.schema'
 import { LedgerReconciliationRun } from '../schemas/ledger-reconciliation-run.schema'
 import { LedgerReconciliationFinding } from '../schemas/ledger-reconciliation-finding.schema'
@@ -37,9 +40,11 @@ const MISMATCH_LOOKUP_LIMIT = 200
 
 @Injectable()
 export class LedgerAuditQueryService {
+  private readonly logRepository: KindScopedActivityLogRepository<BlockchainLog>
+
   constructor(
-    @InjectRepository(BlockchainLog)
-    private readonly logRepository: Repository<BlockchainLog>,
+    @InjectRepository(ActivityLog)
+    activityLogRepository: Repository<ActivityLog>,
     @InjectRepository(LedgerOutbox)
     private readonly outboxRepository: Repository<LedgerOutbox>,
     @Optional() private readonly configService?: ConfigService,
@@ -50,7 +55,13 @@ export class LedgerAuditQueryService {
     @Optional()
     @InjectRepository(LedgerReconciliationFinding)
     private readonly findingRepository?: Repository<LedgerReconciliationFinding>
-  ) {}
+  ) {
+    this.logRepository = new KindScopedActivityLogRepository(
+      activityLogRepository,
+      'blockchain',
+      toBlockchainLog
+    )
+  }
 
   // ── PROP-399 Audit Center read model (D6/D9) ─────────────────────────────
 
@@ -67,7 +78,7 @@ export class LedgerAuditQueryService {
   async getOverview(): Promise<AuditOverview> {
     const status = this.fabricService?.getStatus()
     const count = (where: MongoWhere): Promise<number> =>
-      this.outboxRepository.count({ where: asWhere(where) })
+      this.outboxRepository.countBy(asWhere(where))
 
     const [
       pending,
@@ -265,7 +276,7 @@ export class LedgerAuditQueryService {
 
   private async getCoverage(): Promise<AuditOverview['coverage']> {
     const count = (where: MongoWhere): Promise<number> =>
-      this.outboxRepository.count({ where: asWhere(where) })
+      this.outboxRepository.countBy(asWhere(where))
     return Promise.all(
       AUDIT_EVENT_TYPES.map(async eventType => {
         const [total, pending, confirmed, failed] = await Promise.all([
@@ -287,7 +298,7 @@ export class LedgerAuditQueryService {
     }
     const [[latest], openFindings] = await Promise.all([
       this.runRepository.find({ order: { createdAt: 'DESC' }, take: 1 }),
-      this.findingRepository.count({ where: asWhere({ status: 'open' }) }),
+      this.findingRepository.countBy(asWhere({ status: 'open' })),
     ])
     return {
       latestRun: latest

@@ -4,12 +4,13 @@ import { getRepositoryToken } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 import { ObjectId } from 'mongodb'
 import { LedgerAuditQueryService } from './ledger-audit-query.service'
-import { BlockchainLog } from '../schemas/blockchain-log.schema'
+import { ActivityLog } from '../../activity-log/schemas/activity-log.schema'
 import { LedgerOutbox } from '../schemas/ledger-outbox.schema'
 
 describe('LedgerAuditQueryService', () => {
   let service: LedgerAuditQueryService
-  let logRepo: jest.Mocked<Repository<BlockchainLog>>
+  let logRepo: jest.Mocked<Repository<ActivityLog>>
+  let mockLogFind: jest.Mock
   let outboxRepo: jest.Mocked<Repository<LedgerOutbox>>
   let configService: { get: jest.Mock }
 
@@ -17,6 +18,7 @@ describe('LedgerAuditQueryService', () => {
     const mockLogRepo = {
       find: jest.fn(),
     }
+    mockLogFind = mockLogRepo.find
     const mockOutboxRepo = {
       find: jest.fn(),
     }
@@ -30,7 +32,7 @@ describe('LedgerAuditQueryService', () => {
       providers: [
         LedgerAuditQueryService,
         {
-          provide: getRepositoryToken(BlockchainLog),
+          provide: getRepositoryToken(ActivityLog),
           useValue: mockLogRepo,
         },
         {
@@ -45,7 +47,7 @@ describe('LedgerAuditQueryService', () => {
     }).compile()
 
     service = module.get<LedgerAuditQueryService>(LedgerAuditQueryService)
-    logRepo = module.get(getRepositoryToken(BlockchainLog))
+    logRepo = module.get(getRepositoryToken(ActivityLog))
     outboxRepo = module.get(getRepositoryToken(LedgerOutbox))
   })
 
@@ -76,11 +78,17 @@ describe('LedgerAuditQueryService', () => {
         txHash: '0xabc123',
         blockNumber: 0,
         createdAt: new Date('2026-09-14T07:55:00Z'),
-      } as BlockchainLog,
+      } as unknown as ActivityLog,
     ])
 
     const events = await service.getContractEvents('contract-123')
 
+    // Log chuỗi chỉ đọc loại 'blockchain' của activity_logs (không lẫn nhật ký HTTP/job/AI).
+    expect(mockLogFind).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { contractId: 'contract-123', kind: 'blockchain' },
+      })
+    )
     expect(events).toHaveLength(2)
     expect(events[0]!.id).toBe(`outbox-${outboxId.toString()}`)
     expect(events[0]!.status).toBe('pending')

@@ -578,9 +578,11 @@ describe('LedgerReconciliationService (PROP-399 tasks 8.1-8.4)', () => {
         unverifiable: 0,
       })
       const pageSizes = ctx.snapshots.find.mock.calls.map(
-        ([options]: [{ take: number }]) => options.take
+        ([options]: Array<{ take: number }>) => options?.take
       )
-      expect(pageSizes.every((size: number) => size === 2)).toBe(true)
+      expect(pageSizes.every((size: number | undefined) => size === 2)).toBe(
+        true
+      )
       expect(ctx.snapshots.find).toHaveBeenCalledTimes(3) // 2 + 2 + 1 (short page ends the phase)
       expect(checkpoints).toEqual(
         expect.arrayContaining([
@@ -835,7 +837,7 @@ describe('LedgerReconciliationService (PROP-399 tasks 8.1-8.4)', () => {
       })
 
       const listCalls = ctx.fabric.evaluateTransaction.mock.calls.filter(
-        ([a]: [string]) => a === 'listEvidenceKeys'
+        ([a]: string[]) => a === 'listEvidenceKeys'
       )
       expect(listCalls).toHaveLength(2)
       expect(run.lastErrorCode).toBe('ORPHAN_SCAN_BUDGET_EXHAUSTED')
@@ -916,7 +918,7 @@ describe('LedgerReconciliationService (PROP-399 tasks 8.1-8.4)', () => {
       })
       const actions = new Set(
         ctx.fabric.evaluateTransaction.mock.calls.map(
-          ([action]: [string]) => action
+          ([action]: string[]) => action
         )
       )
       for (const action of actions) {
