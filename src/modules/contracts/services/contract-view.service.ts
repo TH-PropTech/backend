@@ -39,8 +39,20 @@ import {
   ContractExecutionPolicyViewDto,
 } from '../dto/contract-view.dto'
 
+/**
+ * `/view` chỉ cần biết artifact có tải và khớp hash hay không, nhưng
+ * resolveCanonicalArtifact tải toàn bộ file từ GridFS rồi băm lại. Artifact đã khóa là bất biến
+ * (khóa cache gồm artifactId + hash + lockedAt + contentLockedHash) nên chỉ nhớ kết quả THÀNH CÔNG
+ * trong thời gian ngắn; mọi lỗi (thiếu, lệch hash, kho lỗi) không được nhớ và luôn kiểm tra lại.
+ * Các luồng tải/ký/bằng chứng vẫn gọi resolveCanonicalArtifact đầy đủ, không đi qua cache này.
+ */
+const ARTIFACT_VERIFIED_TTL_MS = 5 * 60 * 1000
+const ARTIFACT_VERIFIED_MAX_ENTRIES = 500
+
 @Injectable()
 export class ContractViewService {
+  private readonly verifiedArtifacts = new Map<string, number>()
+
   constructor(
     @InjectRepository(Contract)
     private readonly contractRepository: Repository<Contract>,
@@ -103,10 +115,26 @@ export class ContractViewService {
     let artifactFailure: 'mismatch' | 'unavailable' | null = null
     let artifactAvailable = false
     if (contract.artifactRef && this.artifactService) {
+      const cacheKey = [
+        contract.artifactRef.artifactId,
+        contract.artifactRef.artifactHash,
+        String(contract.artifactRef.lockedAt),
+        contract.contentLockedHash,
+      ].join(':')
+      const now = Date.now()
       try {
-        await this.artifactService.resolveCanonicalArtifact(contract)
-        artifactAvailable = true
+        if ((this.verifiedArtifacts.get(cacheKey) ?? 0) > now) {
+          artifactAvailable = true
+        } else {
+          await this.artifactService.resolveCanonicalArtifact(contract)
+          artifactAvailable = true
+          if (this.verifiedArtifacts.size >= ARTIFACT_VERIFIED_MAX_ENTRIES) {
+            this.verifiedArtifacts.clear()
+          }
+          this.verifiedArtifacts.set(cacheKey, now + ARTIFACT_VERIFIED_TTL_MS)
+        }
       } catch (error) {
+        this.verifiedArtifacts.delete(cacheKey)
         artifactFailure =
           error instanceof ConflictException ? 'mismatch' : 'unavailable'
       }

@@ -516,6 +516,71 @@ describe('ContractViewService', () => {
     )
   })
 
+  describe('artifact verification cache', () => {
+    const lockedContract = (): Contract => {
+      const artifactRef = {
+        artifactId: new ObjectId().toHexString(),
+        revision: 1,
+        templateKey: 'lease-vn',
+        templateVersion: 1,
+        hashSchemaVersion: 1,
+        artifactHash: mockContract.contentLockedHash,
+        contentType: 'application/pdf' as const,
+        lockedAt: mockContract.contentLockedAt as Date,
+      }
+      return { ...mockContract, artifactRef } as Contract
+    }
+
+    it('does not re-download the artifact for repeated views of the same locked artifact', async () => {
+      contractRepo.findOne.mockResolvedValue(lockedContract())
+      kycService.findByUserId.mockResolvedValue({
+        status: 'verified',
+        idCardNumber: '079123456789',
+      } as KycRecord)
+
+      const first = await service.getForActor(
+        validContractId,
+        'user-tenant-1',
+        false
+      )
+      const second = await service.getForActor(
+        validContractId,
+        'user-tenant-1',
+        false
+      )
+
+      expect(artifactService.resolveCanonicalArtifact).toHaveBeenCalledTimes(1)
+      expect(first.actions.canDownloadArtifact).toBe(true)
+      expect(second.actions.canDownloadArtifact).toBe(true)
+    })
+
+    it('never caches a failed verification and checks again on the next view', async () => {
+      contractRepo.findOne.mockResolvedValue(lockedContract())
+      kycService.findByUserId.mockResolvedValue({
+        status: 'verified',
+        idCardNumber: '079123456789',
+      } as KycRecord)
+      artifactService.resolveCanonicalArtifact
+        .mockRejectedValueOnce(new Error('storage down'))
+        .mockResolvedValueOnce({})
+
+      const failed = await service.getForActor(
+        validContractId,
+        'user-tenant-1',
+        false
+      )
+      const recovered = await service.getForActor(
+        validContractId,
+        'user-tenant-1',
+        false
+      )
+
+      expect(failed.actions.canDownloadArtifact).toBe(false)
+      expect(recovered.actions.canDownloadArtifact).toBe(true)
+      expect(artifactService.resolveCanonicalArtifact).toHaveBeenCalledTimes(2)
+    })
+  })
+
   it('should throw ForbiddenException if actor is neither tenant, landlord, nor staff', async () => {
     contractRepo.findOne.mockResolvedValue(mockContract as Contract)
 
