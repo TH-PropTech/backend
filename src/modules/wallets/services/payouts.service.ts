@@ -40,6 +40,10 @@ export type PayoutListResult = {
 
 const DUPLICATE_KEY_CODE = 11000
 
+/** Ví Mộc chỉ là mô phỏng: luôn nói rõ trong thông báo gửi chủ nhà. */
+const SANDBOX_WALLET_NOTE =
+  'Ví Mộc là ví điện tử giả lập, đơn vị đối tác con của Techcombank; không phải tiền thật.'
+
 @Injectable()
 export class PayoutsService {
   private readonly logger = new Logger(PayoutsService.name)
@@ -329,10 +333,10 @@ export class PayoutsService {
   private receivedMessage(payout: Payout): string {
     const amount = payout.receivedAmount.toLocaleString('vi-VN')
     if (payout.directReceipt) {
-      return `Khách đã thanh toán trực tiếp ${amount} VND vào tài khoản Ví Mộc đã liên kết của bạn.`
+      return `Khách đã thanh toán trực tiếp ${amount} VND vào tài khoản Ví Mộc đã liên kết của bạn. ${SANDBOX_WALLET_NOTE}`
     }
     if (payout.relayRef) {
-      return `Khách đã thanh toán qua cổng của nền tảng. Nền tảng đã chuyển hộ ${amount} VND vào Ví Mộc của bạn (mã ${payout.relayRef}). Đây là chuyển hộ giả lập trên môi trường thử nghiệm: nền tảng nhận tiền rồi chuyển lại vào Ví Mộc.`
+      return `Khách đã thanh toán qua cổng của nền tảng. Nền tảng đã chuyển hộ ${amount} VND vào Ví Mộc của bạn (mã ${payout.relayRef}). Đây là chuyển hộ giả lập trên môi trường thử nghiệm: nền tảng nhận tiền rồi chuyển lại vào Ví Mộc. ${SANDBOX_WALLET_NOTE}`
     }
     return `${amount} VND đã được chuyển về tài khoản ngân hàng đã liên kết của bạn (sàn chuyển ${payout.sentAmount.toLocaleString('vi-VN')} VND).`
   }

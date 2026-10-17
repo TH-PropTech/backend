@@ -501,7 +501,7 @@ describe('PayoutsService direct receipt (Ví Mộc trả thẳng chủ nhà)', (
       LANDLORD,
       expect.stringContaining(':received'),
       'Bạn đã nhận tiền',
-      expect.stringContaining('thanh toán trực tiếp'),
+      expect.stringMatching(/thanh toán trực tiếp[\s\S]*Techcombank/),
       'PAYOUT_RECEIVED',
       expect.any(Object)
     )
@@ -619,7 +619,7 @@ describe('PayoutsService simulated relay to the landlord Ví Mộc wallet', () =
       LANDLORD,
       expect.stringContaining(':received'),
       'Bạn đã nhận tiền',
-      expect.stringContaining('giả lập'),
+      expect.stringMatching(/giả lập[\s\S]*Techcombank/),
       'PAYOUT_RECEIVED',
       expect.objectContaining({
         simulatedRelay: true,
