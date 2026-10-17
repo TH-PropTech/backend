@@ -655,25 +655,48 @@ export class SmartCaSigningService {
     signerCccd: string,
     certificateSerial: string
   ): Promise<{ id: string; digest: string } | null> {
-    if (!this.signedArtifactService?.isEnabled()) return null
-    if (!('getCertificateMaterial' in this.provider)) return null
-    const material = await this.provider.getCertificateMaterial(
-      signerCccd,
-      certificateSerial
-    )
-    const prepared = await this.signedArtifactService.prepare({
-      contract: context.contract,
-      signerId,
-      signerRole: context.signerRole,
-      signerPem: material.signerPem,
-      chainPem: material.chainPem,
-      signerName:
-        (context.signerRole === 'landlord'
-          ? context.contract.landlordName
-          : context.contract.tenantName) || 'Người ký',
-      certificateSerial,
-    })
-    return { id: prepared.id, digest: prepared.signedAttrsDigest }
+    if (!this.signedArtifactService) return null
+    if (!this.signedArtifactService.isEnabled()) {
+      if (process.env['SMARTCA_PADES_ENABLED'] === 'true') {
+        this.logger.warn(
+          'PAdES bật trong cấu hình nhưng không áp dụng cho phiên ký này (SMARTCA_ENV=mock?): chữ ký sẽ KHÔNG được nhúng vào PDF'
+        )
+      }
+      return null
+    }
+    if (!('getCertificateMaterial' in this.provider)) {
+      this.logger.warn(
+        'Provider ký không hỗ trợ lấy chứng thư: chữ ký sẽ KHÔNG được nhúng vào PDF'
+      )
+      return null
+    }
+    // PAdES đã bật thì không được ký "lặng lẽ" mà thiếu bản nhúng: lỗi chuẩn bị làm hỏng phiên
+    // (phiên bị gỡ, người ký thử lại) thay vì để hợp đồng ký xong mà PDF không có chữ ký.
+    try {
+      const material = await this.provider.getCertificateMaterial(
+        signerCccd,
+        certificateSerial
+      )
+      const prepared = await this.signedArtifactService.prepare({
+        contract: context.contract,
+        signerId,
+        signerRole: context.signerRole,
+        signerPem: material.signerPem,
+        chainPem: material.chainPem,
+        signerName:
+          (context.signerRole === 'landlord'
+            ? context.contract.landlordName
+            : context.contract.tenantName) || 'Người ký',
+        certificateSerial,
+      })
+      return { id: prepared.id, digest: prepared.signedAttrsDigest }
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : 'unknown'
+      this.logger.error(
+        `Không chuẩn bị được bản PDF đã ký (contract=${context.contract._id.toHexString()}, role=${context.signerRole}): ${reason}`
+      )
+      throw new ConflictException('SIGNED_ARTIFACT_PREPARE_FAILED')
+    }
   }
 
   private async finalizeSignedCopy(
