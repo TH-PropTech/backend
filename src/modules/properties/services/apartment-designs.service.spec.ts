@@ -70,6 +70,7 @@ describe('ApartmentDesignsService', () => {
       palette: {},
       furnishing: null,
       defaultHour: 10,
+      layout: { items: {}, extras: [] },
     })
     expect(list[0]).not.toHaveProperty('visible')
   })
@@ -158,6 +159,72 @@ describe('ApartmentDesignsService', () => {
     expect(update.$set['floorplanDesigns.$.visible']).toBe(false)
     expect(update.$set['floorplanDesigns.$.updatedAt']).toBeInstanceOf(Date)
     expect(updated.visible).toBe(false)
+  })
+
+  it('persists and returns a normalized layout with a positional $set', async () => {
+    const layout = {
+      items: { 'sofa-1': { x: 1.23456, hidden: true } },
+      extras: [
+        {
+          id: 'extra-chair-1',
+          kind: 'chair',
+          x: 2.34567,
+          z: 3.45678,
+          rot: Math.PI * 3,
+        },
+      ],
+    }
+    const { service, repo } = build([
+      entry({ id: 'd1', layout: layout as never }),
+    ])
+
+    const updated = await service.update(APARTMENT_ID, 'd1', {
+      layout,
+    } as never)
+
+    const [, update] = repo.updateOne.mock.calls[0] as [
+      unknown,
+      { $set: Record<string, unknown> },
+    ]
+    expect(update.$set['floorplanDesigns.$.layout']).toEqual({
+      items: { 'sofa-1': { x: 1.235, hidden: true } },
+      extras: [
+        {
+          id: 'extra-chair-1',
+          kind: 'chair',
+          x: 2.346,
+          z: 3.457,
+          rot: 3.1416,
+        },
+      ],
+    })
+    expect(updated.layout).toEqual(update.$set['floorplanDesigns.$.layout'])
+  })
+
+  it('normalizes malformed historic layout entries in public responses', async () => {
+    const { service } = build([
+      entry({
+        id: 'd1',
+        layout: {
+          items: {
+            'sofa-1': { x: 2, z: Number.NaN },
+            'bad id': { x: 1 },
+          },
+          extras: [
+            { id: 'extra-1', kind: 'chair', x: 2, z: 3, rot: 0 },
+            { id: 'extra-1', kind: 'sofa', x: 4, z: 5, rot: 0 },
+            { id: 'extra-2', kind: 'unknown', x: 1, z: 1, rot: 0 },
+          ],
+        } as never,
+      }),
+    ])
+
+    const [design] = await service.listVisible(APARTMENT_ID)
+
+    expect(design?.layout).toEqual({
+      items: { 'sofa-1': { x: 2 } },
+      extras: [{ id: 'extra-1', kind: 'chair', x: 2, z: 3, rot: 0 }],
+    })
   })
 
   it('answers 404 when updating or removing a design that does not exist', async () => {
