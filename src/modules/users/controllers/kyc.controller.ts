@@ -43,6 +43,7 @@ import { CurrentUser } from '../../../common/decorators/current-user.decorator'
 import type { Response } from 'express'
 import { BiometricGrantService } from '../../ekyc/services/biometric-grant.service'
 import { KYC_IMAGE_MAX_BYTES, validateKycImage } from '../utils/kyc-image.util'
+import { isKycSelfieOptional } from '../utils/kyc-selfie-policy'
 
 @ApiTags('kyc')
 @ApiBearerAuth()
@@ -204,11 +205,16 @@ export class KycController {
     if (!userId) throw new BadRequestException('Không thể xác thực người dùng')
     const frontCard = requireImage(files.frontCard?.[0], 'frontCard')
     const backCard = requireImage(files.backCard?.[0], 'backCard')
-    const selfie = requireImage(files.selfie?.[0], 'selfie')
+    const selfieFile = files.selfie?.[0]
+    // Bỏ selfie chỉ khi cờ dev bật và client không gửi file; có gửi thì vẫn kiểm tra như thường.
+    const selfie =
+      !selfieFile && isKycSelfieOptional()
+        ? undefined
+        : requireImage(selfieFile, 'selfie')
     return this.kycService.submitKyc(userId, dto, {
       frontCard,
       backCard,
-      selfie,
+      ...(selfie ? { selfie } : {}),
     })
   }
 
