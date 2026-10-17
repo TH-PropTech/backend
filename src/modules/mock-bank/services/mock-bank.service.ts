@@ -966,6 +966,7 @@ export class MockBankService {
       expiresAt: new Date(Date.now() + ttlMinutes * 60 * 1000),
       clientIp: input.options.clientIp,
       momoMethod: momoMethod ?? undefined,
+      clientChannel: input.options.clientChannel,
     })
     const attempt = this.attemptRepository.create({
       provider: intent.provider,
@@ -1317,7 +1318,9 @@ export class MockBankService {
           ? payments?.momo.secretKey
           : provider === 'zalopay'
             ? payments?.zalopay.key2
-            : undefined
+            : provider === 'mocbank'
+              ? payments?.mocbank.merchantSecret
+              : undefined
     return secret || this.secret()
   }
 

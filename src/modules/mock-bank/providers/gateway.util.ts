@@ -105,22 +105,20 @@ export function stringField(
 }
 
 /**
- * POST to a gateway with a hard timeout. Error bodies are kept because
- * gateways (e.g. MoMo HTTP 400) explain rejections there; callers still
- * fail closed unless the body carries an explicit success code.
+ * Send a request to a gateway with a hard timeout. Error bodies are kept
+ * because gateways (e.g. MoMo HTTP 400) explain rejections there; callers
+ * still fail closed unless the body carries an explicit success code.
  */
-export async function postToGateway(
+async function sendToGateway(
   fetcher: GatewayFetcher,
   url: string,
-  init: { headers: Record<string, string>; body: string },
+  init: RequestInit,
   timeoutMs: number
 ): Promise<GatewayReply> {
   let response: GatewayFetchResponse
   try {
     response = await fetcher(url, {
-      method: 'POST',
-      headers: init.headers,
-      body: init.body,
+      ...init,
       signal: AbortSignal.timeout(timeoutMs),
     })
   } catch {
@@ -132,6 +130,29 @@ export async function postToGateway(
   } catch {
     return { status, body: null }
   }
+}
+
+export function postToGateway(
+  fetcher: GatewayFetcher,
+  url: string,
+  init: { headers: Record<string, string>; body: string },
+  timeoutMs: number
+): Promise<GatewayReply> {
+  return sendToGateway(
+    fetcher,
+    url,
+    { method: 'POST', headers: init.headers, body: init.body },
+    timeoutMs
+  )
+}
+
+export function getFromGateway(
+  fetcher: GatewayFetcher,
+  url: string,
+  headers: Record<string, string>,
+  timeoutMs: number
+): Promise<GatewayReply> {
+  return sendToGateway(fetcher, url, { method: 'GET', headers }, timeoutMs)
 }
 
 /** Short, secret-free description of a gateway field for logs. */

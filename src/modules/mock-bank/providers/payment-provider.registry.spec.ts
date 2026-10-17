@@ -22,9 +22,11 @@ describe('PaymentProviderRegistry', () => {
       adapter('vnpay') as never,
       adapter('momo') as never,
       adapter('zalopay') as never,
+      adapter('mocbank') as never,
       verifier('vnpay') as never,
       verifier('momo') as never,
-      verifier('zalopay') as never
+      verifier('zalopay') as never,
+      verifier('mocbank') as never
     )
   }
 
@@ -76,10 +78,27 @@ describe('PaymentProviderRegistry', () => {
     expect(JSON.stringify(listed)).not.toContain(TEST_PAYMENTS.vnpay.tmnCode)
   })
 
+  it('lists Mộc Bank as an external gateway without credentials or URLs', () => {
+    const registry = createRegistry(['mocbank', 'mock-bank'])
+    const listed = registry.listProviders()
+
+    expect(listed).toEqual([
+      { provider: 'mocbank', label: 'Mộc Bank (sandbox)', simulation: false },
+      { provider: 'mock-bank', label: 'Mock Bank (sandbox)', simulation: true },
+    ])
+    expect(registry.get('mocbank').name).toBe('mocbank')
+    const json = JSON.stringify(listed)
+    expect(json).not.toContain(TEST_PAYMENTS.mocbank.merchantSecret)
+    expect(json).not.toContain(TEST_PAYMENTS.mocbank.merchantId)
+    expect(json).not.toContain(TEST_PAYMENTS.mocbank.baseUrl)
+    expect(json).not.toContain(TEST_PAYMENTS.mocbank.webhookUrl)
+  })
+
   it('keeps verifiers available after a gateway is disabled (rollback)', () => {
     const registry = createRegistry(['mock-bank'])
 
     expect(registry.verifierFor('zalopay').name).toBe('zalopay')
+    expect(registry.verifierFor('mocbank').name).toBe('mocbank')
   })
 
   it('returns provider account links instead of balances', async () => {

@@ -10,6 +10,8 @@ import { MockBankAdapter } from './providers/mock-bank.adapter'
 import { PaymentProviderRegistry } from './providers/payment-provider.registry'
 import { VnpayAdapter } from './providers/vnpay.adapter'
 import { VnpayCallbackVerifier } from './providers/vnpay-callback.verifier'
+import { MocbankAdapter } from './providers/mocbank.adapter'
+import { MocbankCallbackVerifier } from './providers/mocbank-callback.verifier'
 import { MomoAdapter } from './providers/momo.adapter'
 import { MomoCallbackVerifier } from './providers/momo-callback.verifier'
 import { ZalopayAdapter } from './providers/zalopay.adapter'
@@ -44,6 +46,8 @@ import { Contract } from '../contracts/schemas/contract.schema'
     MomoCallbackVerifier,
     ZalopayAdapter,
     ZalopayCallbackVerifier,
+    MocbankAdapter,
+    MocbankCallbackVerifier,
     PaymentProviderRegistry,
     GatewayCallbackService,
   ],

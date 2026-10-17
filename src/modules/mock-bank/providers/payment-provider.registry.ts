@@ -2,6 +2,8 @@ import { BadRequestException, Injectable } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import type { SelectablePaymentProvider } from '../../../config/configuration'
 import { MockBankAdapter } from './mock-bank.adapter'
+import { MocbankAdapter } from './mocbank.adapter'
+import { MocbankCallbackVerifier } from './mocbank-callback.verifier'
 import {
   MOMO_METHOD_OPTIONS,
   MomoAdapter,
@@ -33,6 +35,7 @@ const PROVIDER_LABELS: Record<SelectablePaymentProvider, string> = {
   vnpay: 'VNPAY',
   momo: 'MoMo',
   zalopay: 'ZaloPay',
+  mocbank: 'Mộc Bank (sandbox)',
 }
 
 @Injectable()
@@ -49,20 +52,24 @@ export class PaymentProviderRegistry {
     vnpayAdapter: VnpayAdapter,
     momoAdapter: MomoAdapter,
     zalopayAdapter: ZalopayAdapter,
+    mocbankAdapter: MocbankAdapter,
     vnpayVerifier: VnpayCallbackVerifier,
     momoVerifier: MomoCallbackVerifier,
-    zalopayVerifier: ZalopayCallbackVerifier
+    zalopayVerifier: ZalopayCallbackVerifier,
+    mocbankVerifier: MocbankCallbackVerifier
   ) {
     this.adapters = {
       'mock-bank': mockBankAdapter,
       vnpay: vnpayAdapter,
       momo: momoAdapter,
       zalopay: zalopayAdapter,
+      mocbank: mocbankAdapter,
     }
     this.verifiers = {
       vnpay: vnpayVerifier,
       momo: momoVerifier,
       zalopay: zalopayVerifier,
+      mocbank: mocbankVerifier,
     }
   }
 

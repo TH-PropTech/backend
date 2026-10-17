@@ -64,6 +64,8 @@ describe('envValidationSchema eKYC configuration', () => {
     ZALOPAY_APP_ID: '2553',
     ZALOPAY_KEY1: 'zalo-key1',
     ZALOPAY_KEY2: 'zalo-key2',
+    MOCBANK_MERCHANT_ID: 'MB_TEST0001',
+    MOCBANK_MERCHANT_SECRET: 'moc-secret-value',
   }
 
   it('defaults to mock-bank only when no gateway is enabled', () => {
@@ -78,6 +80,8 @@ describe('envValidationSchema eKYC configuration', () => {
     ['vnpay', 'VNPAY_HASH_SECRET'],
     ['momo', 'MOMO_SECRET_KEY'],
     ['zalopay', 'ZALOPAY_KEY2'],
+    ['mocbank', 'MOCBANK_MERCHANT_ID'],
+    ['mocbank', 'MOCBANK_MERCHANT_SECRET'],
   ])(
     'rejects enabled %s without %s and never echoes secrets',
     (provider, missingKey) => {
@@ -109,9 +113,56 @@ describe('envValidationSchema eKYC configuration', () => {
       ...baseEnvironment,
       ...gatewayEnvironment,
       EKYC_SERVICE_URL: 'https://ekyc.example.com',
-      PAYMENT_PROVIDERS_ENABLED: 'mock-bank, vnpay,momo,zalopay',
+      PAYMENT_PROVIDERS_ENABLED: 'mock-bank, vnpay,momo,zalopay,mocbank',
     })
     expect(result.error).toBeUndefined()
+  })
+
+  it('accepts mocbank in the legacy single-provider setting', () => {
+    const result = envValidationSchema.validate({
+      ...baseEnvironment,
+      ...gatewayEnvironment,
+      EKYC_SERVICE_URL: 'https://ekyc.example.com',
+      PAYMENT_PROVIDER: 'mocbank',
+    })
+    expect(result.error).toBeUndefined()
+  })
+
+  it('requires an https Mộc Bank webhook URL in production', () => {
+    const production = {
+      ...baseEnvironment,
+      ...gatewayEnvironment,
+      NODE_ENV: 'production',
+      EKYC_SERVICE_URL: 'https://ekyc.example.com',
+      KYC_MEDIA_ENCRYPTION_KEY: 'a'.repeat(64),
+      PAYMENT_PROVIDERS_ENABLED: 'mocbank',
+    }
+
+    const missing = envValidationSchema.validate(production)
+    expect(missing.error?.message).toContain('MOCBANK_WEBHOOK_URL')
+    expect(missing.error?.message).not.toContain('moc-secret-value')
+
+    const insecure = envValidationSchema.validate({
+      ...production,
+      MOCBANK_WEBHOOK_URL: 'http://api.example.com/api/v1/bank/mocbank/webhook',
+    })
+    expect(insecure.error?.message).toContain('MOCBANK_WEBHOOK_URL')
+
+    const valid = envValidationSchema.validate({
+      ...production,
+      MOCBANK_WEBHOOK_URL:
+        'https://api.example.com/api/v1/bank/mocbank/webhook',
+    })
+    expect(valid.error).toBeUndefined()
+  })
+
+  it('rejects a non-HTTPS Mộc Bank base URL', () => {
+    const result = envValidationSchema.validate({
+      ...baseEnvironment,
+      EKYC_SERVICE_URL: 'https://ekyc.example.com',
+      MOCBANK_BASE_URL: 'http://bank.example.com',
+    })
+    expect(result.error?.message).toContain('MOCBANK_BASE_URL')
   })
 
   it('rejects unknown names in the allow-list', () => {

@@ -32,7 +32,7 @@ const SUCCESS_OUTCOMES: SettlementOutcome[] = [
 ]
 
 /**
- * Verifies VNPAY / MoMo / ZaloPay notify + browser-return payloads against
+ * Verifies VNPAY / MoMo / ZaloPay / Mộc Bank notify + browser-return payloads against
  * the stored attempt and hands verified results to the single settlement
  * dispatcher. Never logs payload contents, keys or signatures.
  */
@@ -95,6 +95,12 @@ export class GatewayCallbackService {
     return result.reason === 'internal-error' ? 500 : 400
   }
 
+  /** Mộc Bank webhook: 200 handled, 400 rejected, 503 so Mộc Bank retries. */
+  toMocbankStatus(result: GatewayCallbackResult): number {
+    if (result.ok) return 200
+    return result.reason === 'internal-error' ? 503 : 400
+  }
+
   toZalopayAck(result: GatewayCallbackResult): ZalopayCallbackAck {
     if (result.ok) {
       return result.outcome === 'replayed'
@@ -122,7 +128,7 @@ export class GatewayCallbackService {
       return this.reject(provider, kind, 'unknown-reference', null, txRef)
     }
     try {
-      const verdict = verifier.verify(payload, kind, {
+      const verdict = await verifier.verify(payload, kind, {
         txRef: attempt.txRef,
         amount: attempt.amount,
       })

@@ -1,8 +1,11 @@
+import type { PaymentClientChannel } from '../../payments/schemas/payment-attempt.schema'
+
 export type PaymentProviderName =
   | 'mock-bank'
   | 'vnpay'
   | 'momo'
   | 'zalopay'
+  | 'mocbank'
   | 'sepay'
   | 'techcombank'
 
@@ -11,7 +14,7 @@ export const MOMO_PAYMENT_METHODS = ['wallet', 'atm', 'card'] as const
 export type MomoPaymentMethod = (typeof MOMO_PAYMENT_METHODS)[number]
 
 /** External gateways that authenticate their own callbacks. */
-export type GatewayProviderName = 'vnpay' | 'momo' | 'zalopay'
+export type GatewayProviderName = 'vnpay' | 'momo' | 'zalopay' | 'mocbank'
 
 export type ProviderPaymentIntent = {
   provider: PaymentProviderName
@@ -36,6 +39,8 @@ export type PaymentIntentInput = {
   clientIp?: string | undefined
   /** MoMo only; other adapters ignore it. Defaults to `wallet`. */
   momoMethod?: MomoPaymentMethod | undefined
+  /** Mộc Bank only; other adapters ignore it. Defaults to `web`. */
+  clientChannel?: PaymentClientChannel | undefined
 }
 
 /**
@@ -83,5 +88,5 @@ export interface GatewayVerifier {
     payload: unknown,
     kind: GatewayCallbackKind,
     expected: { txRef: string; amount: number }
-  ): GatewayVerdict
+  ): GatewayVerdict | Promise<GatewayVerdict>
 }

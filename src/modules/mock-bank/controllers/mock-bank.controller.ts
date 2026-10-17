@@ -7,15 +7,18 @@ import {
   HttpException,
   HttpStatus,
   Ip,
+  Logger,
   Param,
   Post,
   UnauthorizedException,
   Body,
+  type RawBodyRequest,
   Query,
+  Req,
   Res,
   UseGuards,
 } from '@nestjs/common'
-import type { Response } from 'express'
+import type { Request, Response } from 'express'
 import {
   ApiBearerAuth,
   ApiOkResponse,
@@ -43,6 +46,11 @@ import {
 } from '../services/mock-bank.service'
 import type { PaymentRequestView } from '../utils/payment-request.builder'
 import {
+  MocbankCallbackVerifier,
+  type MocbankWebhookEnvelope,
+} from '../providers/mocbank-callback.verifier'
+import { GatewayVerificationError } from '../providers/payment-provider.port'
+import {
   PaymentProviderRegistry,
   type PaymentProviderOption,
 } from '../providers/payment-provider.registry'
@@ -63,11 +71,14 @@ type GatewayQuery = Record<string, string | string[] | undefined>
 @SkipThrottle()
 @Controller('bank')
 export class MockBankController {
+  private readonly logger = new Logger(MockBankController.name)
+
   constructor(
     private readonly mockBankService: MockBankService,
     private readonly providerRegistry: PaymentProviderRegistry,
     private readonly gatewayCallbackService: GatewayCallbackService,
-    private readonly payoutsService: PayoutsService
+    private readonly payoutsService: PayoutsService,
+    private readonly mocbankVerifier: MocbankCallbackVerifier
   ) {}
 
   @Get('providers')
@@ -300,6 +311,49 @@ export class MockBankController {
     response.status(200).json(ack)
   }
 
+  @Public()
+  @Get('mocbank/return')
+  @ApiOperation({ summary: 'Mộc Bank browser return (signed)' })
+  @ApiResponse({ status: 302, description: 'Redirect to client result URL' })
+  async mocbankReturn(
+    @Query() query: GatewayQuery,
+    @Res() response: Response
+  ): Promise<void> {
+    response.redirect(
+      302,
+      await this.gatewayCallbackService.handleReturn('mocbank', query)
+    )
+  }
+
+  @Public()
+  @Post('mocbank/webhook')
+  @ApiOperation({
+    summary: 'Mộc Bank webhook (server-to-server, HMAC on raw body)',
+  })
+  @ApiResponse({ status: 200, description: 'Handled, replayed or test event' })
+  @ApiResponse({ status: 400, description: 'Signed but rejected' })
+  @ApiResponse({ status: 401, description: 'Invalid or stale signature' })
+  @ApiResponse({ status: 503, description: 'Temporary failure, retry' })
+  async mocbankWebhook(
+    @Req() request: RawBodyRequest<Request>,
+    @Res() response: Response
+  ): Promise<void> {
+    const envelope = this.verifyMocbankEnvelope(request)
+    if (!envelope) {
+      response.status(HttpStatus.UNAUTHORIZED).end()
+      return
+    }
+    if (envelope.event === 'webhook.test') {
+      response.status(HttpStatus.OK).end()
+      return
+    }
+    const result = await this.gatewayCallbackService.handleNotify(
+      'mocbank',
+      envelope.body
+    )
+    response.status(this.gatewayCallbackService.toMocbankStatus(result)).end()
+  }
+
   @Get('simulate-success/:txRef')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
@@ -353,6 +407,26 @@ export class MockBankController {
   })
   payInvoiceFromWallet(): never {
     throw new HttpException('WALLET_BALANCE_PAYMENT_REMOVED', HttpStatus.GONE)
+  }
+
+  /** Raw-body HMAC check; null (logged by reason only) means respond 401. */
+  private verifyMocbankEnvelope(
+    request: RawBodyRequest<Request>
+  ): MocbankWebhookEnvelope | null {
+    if (!request.rawBody) {
+      this.logger.warn('mocbank webhook rejected reason=missing-raw-body')
+      return null
+    }
+    try {
+      return this.mocbankVerifier.verifyWebhookEnvelope(
+        request.rawBody.toString('utf8'),
+        request.headers
+      )
+    } catch (error) {
+      if (!(error instanceof GatewayVerificationError)) throw error
+      this.logger.warn(`mocbank webhook rejected reason=${error.reason}`)
+      return null
+    }
   }
 
   private callbackHeaders(headers: Record<string, string>): {
