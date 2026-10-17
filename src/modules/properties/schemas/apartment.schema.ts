@@ -8,6 +8,14 @@ import {
   AfterLoad,
 } from 'typeorm'
 import type { RentalPackageRecord } from '../utils/rental-package.util'
+import {
+  LAYOUT_FURNITURE_KINDS,
+  LAYOUT_LIMITS,
+  type ApartmentLayout,
+  type LayoutExtra,
+  type LayoutFurnitureKind,
+  type LayoutItemOverride,
+} from '../utils/apartment-layout'
 import type { ReviewRatings } from './review.schema'
 
 /** Phiếu bảo trì nhúng trong căn hộ (thay cho collection `maintenance_tickets`). */
@@ -55,55 +63,22 @@ export type ApartmentDesignFurnishing =
   (typeof APARTMENT_DESIGN_FURNISHING)[number]
 
 /** Catalog nội thất có thể thêm thủ công trong trình chỉnh sửa bố cục 3D. [uc_vr_tour] */
-export const APARTMENT_FURNITURE_KINDS = [
-  'sofa',
-  'armchair',
-  'ottoman',
-  'coffeeTable',
-  'sideTable',
-  'tvUnit',
-  'bookshelf',
-  'dresser',
-  'wardrobe',
-  'bed',
-  'nightstand',
-  'desk',
-  'chair',
-  'diningTable',
-  'barStool',
-  'console',
-  'plant',
-  'floorLamp',
-  'standingMirror',
-] as const
-export type ApartmentFurnitureKind = (typeof APARTMENT_FURNITURE_KINDS)[number]
+export const APARTMENT_FURNITURE_KINDS = LAYOUT_FURNITURE_KINDS
+export type ApartmentFurnitureKind = LayoutFurnitureKind
 
-export const MAX_APARTMENT_LAYOUT_ITEMS = 120
-export const MAX_APARTMENT_LAYOUT_EXTRAS = 60
-export const APARTMENT_LAYOUT_COORD_MIN = -2
-export const APARTMENT_LAYOUT_COORD_MAX = 40
+export const MAX_APARTMENT_LAYOUT_ITEMS = LAYOUT_LIMITS.overrides
+export const MAX_APARTMENT_LAYOUT_EXTRAS = LAYOUT_LIMITS.extras
+export const APARTMENT_LAYOUT_COORD_MIN = LAYOUT_LIMITS.coordMin
+export const APARTMENT_LAYOUT_COORD_MAX = LAYOUT_LIMITS.coordMax
 
-export interface ApartmentDesignLayoutItem {
-  x?: number
-  z?: number
-  rot?: number
-  hidden?: boolean
-}
+export type ApartmentDesignLayoutItem = LayoutItemOverride
+export type ApartmentDesignLayoutExtra = LayoutExtra
 
-export interface ApartmentDesignLayoutExtra {
-  id: string
-  kind: ApartmentFurnitureKind
-  x: number
-  z: number
-  rot: number
-  hidden?: boolean
-}
-
-/** Bố cục lưu theo toạ độ mẫu, trước khi renderer co giãn theo diện tích. [uc_vr_tour] */
-export interface ApartmentDesignLayout {
-  items: Record<string, ApartmentDesignLayoutItem>
-  extras: ApartmentDesignLayoutExtra[]
-}
+/**
+ * Bố cục lưu theo toạ độ mẫu (đồ, sàn/tên phòng, cửa) hoặc mặt bằng tuỳ chỉnh nhiều tầng (mét).
+ * Hình dạng và luật chuẩn hoá nằm ở `utils/apartment-layout.ts`. [uc_vr_tour]
+ */
+export type ApartmentDesignLayout = ApartmentLayout
 
 /** Ghi đè từng màu của phong cách (chuỗi #RRGGBB); thiếu khoá = dùng màu của phong cách. */
 export interface ApartmentDesignPalette {

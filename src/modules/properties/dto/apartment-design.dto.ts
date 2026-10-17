@@ -20,6 +20,7 @@ import {
   ValidatorConstraint,
   type ValidatorConstraintInterface,
 } from 'class-validator'
+import { LAYOUT_LIMITS } from '../utils/apartment-layout'
 import {
   APARTMENT_FURNITURE_KINDS,
   APARTMENT_DESIGN_FURNISHING,
@@ -132,6 +133,35 @@ export class ApartmentDesignLayoutExtraDto {
   @IsOptional()
   @IsBoolean()
   hidden?: boolean
+
+  @ApiPropertyOptional({ description: 'Tầng của mặt bằng tuỳ chỉnh' })
+  @IsOptional()
+  @Matches(LAYOUT_ID)
+  floor?: string
+
+  @ApiPropertyOptional({
+    type: [Number],
+    description: 'Kích thước tuỳ chỉnh của builder (tối đa 3 số)',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(3)
+  @IsNumber({ allowInfinity: false, allowNaN: false }, { each: true })
+  args?: number[]
+}
+
+@ValidatorConstraint({ name: 'apartmentLayoutCustomPlan', async: false })
+class ApartmentLayoutCustomPlanConstraint implements ValidatorConstraintInterface {
+  validate(value: unknown): boolean {
+    if (!value || typeof value !== 'object' || Array.isArray(value))
+      return false
+    const floors = (value as Record<string, unknown>).floors
+    return Array.isArray(floors) && floors.length <= LAYOUT_LIMITS.floors
+  }
+
+  defaultMessage(): string {
+    return 'Mặt bằng tuỳ chỉnh tối đa 5 tầng'
+  }
 }
 
 export class ApartmentDesignLayoutDto {
@@ -156,6 +186,35 @@ export class ApartmentDesignLayoutDto {
   @ValidateNested({ each: true })
   @Type(() => ApartmentDesignLayoutExtraDto)
   extras?: ApartmentDesignLayoutExtraDto[]
+
+  @ApiPropertyOptional({
+    type: 'object',
+    additionalProperties: { type: 'object' },
+    description: 'Đổi tên / loại sàn phòng của mẫu, khoá theo mã phòng',
+  })
+  @IsOptional()
+  @IsObject()
+  rooms?: Record<string, unknown>
+
+  @ApiPropertyOptional({
+    type: 'object',
+    additionalProperties: true,
+    description: 'Sửa cửa của mẫu: { removed, moved, added }',
+  })
+  @IsOptional()
+  @IsObject()
+  openings?: Record<string, unknown>
+
+  @ApiPropertyOptional({
+    type: 'object',
+    additionalProperties: true,
+    description:
+      'Mặt bằng tuỳ chỉnh nhiều tầng (mét), thay hẳn mẫu: { floors }',
+  })
+  @IsOptional()
+  @IsObject()
+  @Validate(ApartmentLayoutCustomPlanConstraint)
+  custom?: Record<string, unknown>
 }
 
 export class ApartmentDesignPaletteDto {

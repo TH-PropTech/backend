@@ -10,18 +10,12 @@ import { ObjectId } from 'mongodb'
 import { MongoRepository } from 'typeorm'
 import {
   Apartment,
-  APARTMENT_FURNITURE_KINDS,
-  APARTMENT_LAYOUT_COORD_MAX,
-  APARTMENT_LAYOUT_COORD_MIN,
   MAX_APARTMENT_DESIGNS,
-  MAX_APARTMENT_LAYOUT_EXTRAS,
-  MAX_APARTMENT_LAYOUT_ITEMS,
   type ApartmentDesignEntry,
   type ApartmentDesignLayout,
-  type ApartmentDesignLayoutExtra,
-  type ApartmentDesignLayoutItem,
   type ApartmentDesignPalette,
 } from '../schemas/apartment.schema'
+import { normalizeApartmentLayout } from '../utils/apartment-layout'
 import type {
   CreateApartmentDesignDto,
   UpdateApartmentDesignDto,
@@ -60,82 +54,8 @@ function cleanPalette(
   return out
 }
 
-const LAYOUT_ID = /^[A-Za-z0-9_-]{1,48}$/
-const FURNITURE_KINDS = new Set<string>(APARTMENT_FURNITURE_KINDS)
-
-function cleanCoordinate(value: unknown): number | undefined {
-  if (
-    typeof value !== 'number' ||
-    !Number.isFinite(value) ||
-    value < APARTMENT_LAYOUT_COORD_MIN ||
-    value > APARTMENT_LAYOUT_COORD_MAX
-  )
-    return undefined
-  return Math.round(value * 1000) / 1000
-}
-
-function cleanRotation(value: unknown): number | undefined {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined
-  return Math.round((value % (Math.PI * 2)) * 10000) / 10000
-}
-
-function cleanLayoutItem(value: unknown): ApartmentDesignLayoutItem | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
-  const raw = value as Record<string, unknown>
-  const item: ApartmentDesignLayoutItem = {}
-  const x = cleanCoordinate(raw.x)
-  const z = cleanCoordinate(raw.z)
-  const rot = cleanRotation(raw.rot)
-  if (x !== undefined) item.x = x
-  if (z !== undefined) item.z = z
-  if (rot !== undefined) item.rot = rot
-  if (raw.hidden === true) item.hidden = true
-  return Object.keys(item).length > 0 ? item : null
-}
-
-function cleanLayout(value: unknown): ApartmentDesignLayout {
-  const output: ApartmentDesignLayout = { items: {}, extras: [] }
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return output
-  const raw = value as Record<string, unknown>
-  if (raw.items && typeof raw.items === 'object' && !Array.isArray(raw.items)) {
-    for (const [id, value] of Object.entries(raw.items).slice(
-      0,
-      MAX_APARTMENT_LAYOUT_ITEMS
-    )) {
-      if (!LAYOUT_ID.test(id)) continue
-      const item = cleanLayoutItem(value)
-      if (item) output.items[id] = item
-    }
-  }
-  if (!Array.isArray(raw.extras)) return output
-  const seen = new Set<string>()
-  for (const value of raw.extras.slice(0, MAX_APARTMENT_LAYOUT_EXTRAS)) {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) continue
-    const extra = value as Record<string, unknown>
-    if (
-      typeof extra.id !== 'string' ||
-      !LAYOUT_ID.test(extra.id) ||
-      seen.has(extra.id) ||
-      typeof extra.kind !== 'string' ||
-      !FURNITURE_KINDS.has(extra.kind)
-    )
-      continue
-    const x = cleanCoordinate(extra.x)
-    const z = cleanCoordinate(extra.z)
-    if (x === undefined || z === undefined) continue
-    const normalized: ApartmentDesignLayoutExtra = {
-      id: extra.id,
-      kind: extra.kind as ApartmentDesignLayoutExtra['kind'],
-      x,
-      z,
-      rot: cleanRotation(extra.rot) ?? 0,
-    }
-    if (extra.hidden === true) normalized.hidden = true
-    seen.add(normalized.id)
-    output.extras.push(normalized)
-  }
-  return output
-}
+const cleanLayout = (value: unknown): ApartmentDesignLayout =>
+  normalizeApartmentLayout(value)
 
 function toPublic(entry: ApartmentDesignEntry): PublicApartmentDesign {
   return {
