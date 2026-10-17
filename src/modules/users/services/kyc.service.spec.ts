@@ -201,6 +201,69 @@ describe('KycService.submitKyc', () => {
     })
   })
 
+  describe('bỏ bước selfie (KYC_SKIP_SELFIE, chỉ ngoài production)', () => {
+    const cccdOnly = {
+      frontCard: files.frontCard,
+      backCard: files.backCard,
+    }
+    const original = {
+      node: process.env['NODE_ENV'],
+      skip: process.env['KYC_SKIP_SELFIE'],
+    }
+    const restore = (key: string, value: string | undefined): void => {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+    afterEach(() => {
+      restore('NODE_ENV', original.node)
+      restore('KYC_SKIP_SELFIE', original.skip)
+    })
+
+    it('nộp chỉ với ảnh CCCD: không đòi biometric grant, không lưu selfie, xóa kết quả sinh trắc cũ', async () => {
+      process.env['NODE_ENV'] = 'development'
+      process.env['KYC_SKIP_SELFIE'] = 'true'
+      const { service, userRepository, grants } = createService()
+      userRepository.aggregate = aggregateReturns([])
+
+      await service.submitKyc(USER_ID, dto, cccdOnly)
+
+      expect(grants.consume).not.toHaveBeenCalled()
+      const [, update] = userRepository.updateOne.mock.calls[0] as [
+        unknown,
+        { $set: Record<string, unknown>; $unset: Record<string, unknown> },
+      ]
+      expect(update.$set['kyc.selfieUrl']).toBe('')
+      expect(update.$set).not.toHaveProperty('kyc.faceMatchResult')
+      expect(update.$set['kyc.status']).toBe('pending')
+      expect(update.$unset).toMatchObject({
+        'kyc.faceMatchResult': '',
+        'kyc.livenessResult': '',
+        'kyc.spoofScore': '',
+      })
+    })
+
+    it('production luôn bắt buộc selfie dù cờ bật', async () => {
+      process.env['NODE_ENV'] = 'production'
+      process.env['KYC_SKIP_SELFIE'] = 'true'
+      const { service, userRepository } = createService()
+
+      await expect(
+        service.submitKyc(USER_ID, dto, cccdOnly)
+      ).rejects.toBeInstanceOf(BadRequestException)
+      expect(userRepository.updateOne).not.toHaveBeenCalled()
+    })
+
+    it('cờ tắt thì không selfie vẫn bị từ chối', async () => {
+      delete process.env['KYC_SKIP_SELFIE']
+      const { service, userRepository } = createService()
+
+      await expect(
+        service.submitKyc(USER_ID, dto, cccdOnly)
+      ).rejects.toBeInstanceOf(BadRequestException)
+      expect(userRepository.updateOne).not.toHaveBeenCalled()
+    })
+  })
+
   it('không ghi gì khi thiếu biometric grant', async () => {
     const { service, userRepository } = createService({
       grantError: new UnprocessableEntityException('expired'),

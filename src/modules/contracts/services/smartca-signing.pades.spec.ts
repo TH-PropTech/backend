@@ -147,6 +147,18 @@ describe('SmartCaSigningService PAdES integration', () => {
     expect(signedArtifacts.finalize).not.toHaveBeenCalled()
   })
 
+  it('refuses to sign silently without an embedded copy when preparing the PDF fails', async () => {
+    const { service, provider, signedArtifacts, contractsService } = build()
+    signedArtifacts['prepare']?.mockRejectedValue(new Error('PADES_BROKEN'))
+
+    await expect(
+      service.createSessionV2(contractId, 'tenant-1', credentials)
+    ).rejects.toThrow('SIGNED_ARTIFACT_PREPARE_FAILED')
+
+    expect(provider.signV2).not.toHaveBeenCalled()
+    expect(contractsService.recordSmartCaSignature).not.toHaveBeenCalled()
+  })
+
   it('keeps the session signed when embedding the signature fails', async () => {
     const { service, signedArtifacts } = build()
     signedArtifacts['finalize']?.mockResolvedValue(false)

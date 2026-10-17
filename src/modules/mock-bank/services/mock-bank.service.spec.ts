@@ -1127,6 +1127,55 @@ describe('MockBankService', () => {
     )
   })
 
+  it('forwards a paid deposit to the landlord payout and survives payout failure', async () => {
+    const context = createContext()
+    const agreement = {
+      _id: new ObjectId(),
+      applicationId: 'application-1',
+      landlordId: 'landlord-1',
+      linkedLeaseContractId: 'contract-1',
+      amount: context.attempt.amount,
+    }
+    const payoutsService = {
+      createForPayment: jest.fn().mockRejectedValue(new Error('db down')),
+      releaseAwaitingWallet: jest.fn(),
+    }
+    Reflect.set(context.service, 'payoutsService', payoutsService)
+    context.attempt.paymentType = 'deposit'
+    context.depositAgreementsService.getAgreement.mockResolvedValue({
+      status: 'payment-pending',
+      paymentAttemptId: null,
+    })
+    context.depositAgreementsService.recordDepositPaid.mockResolvedValue(
+      agreement
+    )
+    const body = {
+      txRef: context.attempt.txRef,
+      amount: context.attempt.amount,
+      status: 'success' as const,
+    }
+    const timestamp = Date.now().toString()
+    const headers = {
+      timestamp,
+      nonce: 'nonce-deposit-payout',
+      signature: context.service.signCallback(
+        body,
+        timestamp,
+        'nonce-deposit-payout'
+      ),
+    }
+
+    const result = await context.service.handleDepositCallback(body, headers)
+
+    expect(result.replayed).toBe(false)
+    expect(payoutsService.createForPayment).toHaveBeenCalledWith({
+      paymentId: agreement._id.toHexString(),
+      contractId: 'contract-1',
+      landlordId: 'landlord-1',
+      amount: agreement.amount,
+    })
+  })
+
   it('allows contract participants to read a receipt and rejects third parties', async () => {
     const context = createContext()
     context.payment.status = 'paid'

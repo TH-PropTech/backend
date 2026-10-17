@@ -1379,5 +1379,25 @@ export class MockBankService {
       ],
       metadata: { details: { paymentAttemptId: attempt._id.toString() } },
     })
+    await this.createDepositPayout(agreement)
+  }
+
+  /** Tiền cọc chuyển tiếp về ví chủ nhà như các khoản thanh toán khác; lỗi payout không làm hỏng cọc đã ghi nhận. */
+  private async createDepositPayout(
+    agreement: DepositAgreement
+  ): Promise<void> {
+    if (!this.payoutsService) return
+    try {
+      await this.payoutsService.createForPayment({
+        paymentId: agreement._id.toHexString(),
+        contractId: agreement.linkedLeaseContractId ?? null,
+        landlordId: agreement.landlordId,
+        amount: agreement.amount,
+      })
+    } catch (error) {
+      this.logger.warn(
+        `Payout creation failed for deposit ${agreement._id.toHexString()}: ${error instanceof Error ? error.message : 'unknown'}`
+      )
+    }
   }
 }

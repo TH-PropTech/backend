@@ -41,6 +41,48 @@ export interface ApartmentReviewEntry {
 
 /** Số đánh giá tối đa trong một căn hộ (khớp `APARTMENT_REVIEWS_LIMIT` của migration 030). */
 export const MAX_APARTMENT_REVIEWS = 100
+/** Phong cách thiết kế cho viewer 3D (khớp bảng THEMES của apartment-3d-renderer). */
+export const APARTMENT_DESIGN_THEMES = [
+  'modern',
+  'nordic',
+  'warm',
+  'luxury',
+  'industrial',
+] as const
+export type ApartmentDesignTheme = (typeof APARTMENT_DESIGN_THEMES)[number]
+export const APARTMENT_DESIGN_FURNISHING = ['bare', 'partial', 'full'] as const
+export type ApartmentDesignFurnishing =
+  (typeof APARTMENT_DESIGN_FURNISHING)[number]
+
+/** Ghi đè từng màu của phong cách (chuỗi #RRGGBB); thiếu khoá = dùng màu của phong cách. */
+export interface ApartmentDesignPalette {
+  floor?: string
+  wall?: string
+  wood?: string
+  sofa?: string
+  accent?: string
+}
+
+/** Một thiết kế 3D của căn hộ, nhúng trong `Apartment.floorplanDesigns[]` (admin tạo/ẩn/hiện). */
+export interface ApartmentDesignEntry {
+  id: string
+  name: string
+  description: string
+  theme: ApartmentDesignTheme
+  palette: ApartmentDesignPalette
+  /** null = theo mức nội thất của tin đăng. */
+  furnishing: ApartmentDesignFurnishing | null
+  /** Giờ mặc định (6..18) khi mở thiết kế này. */
+  defaultHour: number
+  visible: boolean
+  order: number
+  createdBy: string
+  createdAt: Date
+  updatedAt: Date
+}
+
+/** Số thiết kế tối đa của một căn hộ (409 khi vượt). */
+export const MAX_APARTMENT_DESIGNS = 12
 /** Số ảnh tối đa trong một phiếu bảo trì. */
 export const MAX_MAINTENANCE_TICKET_IMAGES = 20
 
@@ -215,11 +257,23 @@ export class Apartment {
   @Column('array')
   reviews?: ApartmentReviewEntry[]
 
+  /**
+   * Thiết kế 3D nhúng. Chỉ ghi bằng `updateOne` ($push/$set/$pull có điều kiện, `ApartmentDesignsService`);
+   * `stripFloorplanDesigns` bỏ trường này khỏi entity vừa nạp để `save` không ghi đè mảng.
+   */
+  @Column('array')
+  floorplanDesigns?: ApartmentDesignEntry[]
+
   @CreateDateColumn()
   createdAt!: Date
 
   @UpdateDateColumn()
   updatedAt!: Date
+
+  @AfterLoad()
+  stripFloorplanDesigns?(): void {
+    delete this.floorplanDesigns
+  }
 
   @AfterLoad()
   stripReviews?(): void {
