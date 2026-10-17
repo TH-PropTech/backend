@@ -222,6 +222,7 @@ describe('ContractViewService', () => {
 
     expect(view.contract.executionPolicy.depositConfirmed).toBe(true)
     expect(view.actions.signingEligibility.eligible).toBe(true)
+    expect(view.deposit?.status).toBe('transferred')
   })
 
   it('blocks SmartCA signing with ARTIFACT_NOT_LOCKED until the PDF artifact is locked', async () => {
