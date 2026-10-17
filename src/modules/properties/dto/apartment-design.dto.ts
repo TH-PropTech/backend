@@ -2,26 +2,161 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
 import { Type } from 'class-transformer'
 import {
   IsBoolean,
+  IsArray,
   IsIn,
   IsInt,
   IsNumber,
+  IsObject,
   IsOptional,
   IsString,
   Matches,
   Max,
+  ArrayMaxSize,
   MaxLength,
   Min,
   MinLength,
+  Validate,
   ValidateNested,
+  ValidatorConstraint,
+  type ValidatorConstraintInterface,
 } from 'class-validator'
 import {
+  APARTMENT_FURNITURE_KINDS,
   APARTMENT_DESIGN_FURNISHING,
   APARTMENT_DESIGN_THEMES,
+  APARTMENT_LAYOUT_COORD_MAX,
+  APARTMENT_LAYOUT_COORD_MIN,
+  MAX_APARTMENT_LAYOUT_EXTRAS,
+  MAX_APARTMENT_LAYOUT_ITEMS,
   type ApartmentDesignFurnishing,
+  type ApartmentDesignLayoutItem,
   type ApartmentDesignTheme,
 } from '../schemas/apartment.schema'
 
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/
+const LAYOUT_ID = /^[A-Za-z0-9_-]{1,48}$/
+
+function isFiniteInRange(value: unknown): value is number {
+  return (
+    typeof value === 'number' &&
+    Number.isFinite(value) &&
+    value >= APARTMENT_LAYOUT_COORD_MIN &&
+    value <= APARTMENT_LAYOUT_COORD_MAX
+  )
+}
+
+function isLayoutItem(value: unknown): value is ApartmentDesignLayoutItem {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const item = value as Record<string, unknown>
+  if (Object.keys(item).some(key => !['x', 'z', 'rot', 'hidden'].includes(key)))
+    return false
+  if ('x' in item && !isFiniteInRange(item.x)) return false
+  if ('z' in item && !isFiniteInRange(item.z)) return false
+  if (
+    'rot' in item &&
+    (typeof item.rot !== 'number' || !Number.isFinite(item.rot))
+  )
+    return false
+  return !('hidden' in item) || typeof item.hidden === 'boolean'
+}
+
+@ValidatorConstraint({ name: 'apartmentLayoutItems', async: false })
+class ApartmentLayoutItemsConstraint implements ValidatorConstraintInterface {
+  validate(value: unknown): boolean {
+    if (!value || typeof value !== 'object' || Array.isArray(value))
+      return false
+    const entries = Object.entries(value)
+    return (
+      entries.length <= MAX_APARTMENT_LAYOUT_ITEMS &&
+      entries.every(([id, item]) => LAYOUT_ID.test(id) && isLayoutItem(item))
+    )
+  }
+
+  defaultMessage(): string {
+    return 'Bố cục nội thất mẫu không hợp lệ'
+  }
+}
+
+@ValidatorConstraint({ name: 'uniqueApartmentLayoutExtraIds', async: false })
+class UniqueApartmentLayoutExtraIdsConstraint implements ValidatorConstraintInterface {
+  validate(value: unknown): boolean {
+    if (!Array.isArray(value)) return false
+    const ids = value.map(item =>
+      item && typeof item === 'object'
+        ? (item as Record<string, unknown>).id
+        : undefined
+    )
+    return (
+      ids.every(id => typeof id === 'string') &&
+      new Set(ids).size === ids.length
+    )
+  }
+
+  defaultMessage(): string {
+    return 'Mã đồ nội thất thêm vào không được trùng nhau'
+  }
+}
+
+export class ApartmentDesignLayoutExtraDto {
+  @ApiProperty({ pattern: LAYOUT_ID.source, maxLength: 48 })
+  @Matches(LAYOUT_ID)
+  id!: string
+
+  @ApiProperty({ enum: APARTMENT_FURNITURE_KINDS })
+  @IsIn(APARTMENT_FURNITURE_KINDS)
+  kind!: (typeof APARTMENT_FURNITURE_KINDS)[number]
+
+  @ApiProperty({
+    minimum: APARTMENT_LAYOUT_COORD_MIN,
+    maximum: APARTMENT_LAYOUT_COORD_MAX,
+  })
+  @IsNumber({ allowInfinity: false, allowNaN: false })
+  @Min(APARTMENT_LAYOUT_COORD_MIN)
+  @Max(APARTMENT_LAYOUT_COORD_MAX)
+  x!: number
+
+  @ApiProperty({
+    minimum: APARTMENT_LAYOUT_COORD_MIN,
+    maximum: APARTMENT_LAYOUT_COORD_MAX,
+  })
+  @IsNumber({ allowInfinity: false, allowNaN: false })
+  @Min(APARTMENT_LAYOUT_COORD_MIN)
+  @Max(APARTMENT_LAYOUT_COORD_MAX)
+  z!: number
+
+  @ApiProperty({ description: 'Góc xoay theo radian' })
+  @IsNumber({ allowInfinity: false, allowNaN: false })
+  rot!: number
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsBoolean()
+  hidden?: boolean
+}
+
+export class ApartmentDesignLayoutDto {
+  @ApiPropertyOptional({
+    type: 'object',
+    additionalProperties: { type: 'object' },
+    maxProperties: MAX_APARTMENT_LAYOUT_ITEMS,
+  })
+  @IsOptional()
+  @IsObject()
+  @Validate(ApartmentLayoutItemsConstraint)
+  items?: Record<string, ApartmentDesignLayoutItem>
+
+  @ApiPropertyOptional({
+    type: [ApartmentDesignLayoutExtraDto],
+    maxItems: MAX_APARTMENT_LAYOUT_EXTRAS,
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAX_APARTMENT_LAYOUT_EXTRAS)
+  @Validate(UniqueApartmentLayoutExtraIdsConstraint)
+  @ValidateNested({ each: true })
+  @Type(() => ApartmentDesignLayoutExtraDto)
+  extras?: ApartmentDesignLayoutExtraDto[]
+}
 
 export class ApartmentDesignPaletteDto {
   @ApiPropertyOptional({ example: '#cfa67a' })
@@ -89,6 +224,12 @@ export class CreateApartmentDesignDto {
   @Max(18)
   defaultHour?: number
 
+  @ApiPropertyOptional({ type: ApartmentDesignLayoutDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ApartmentDesignLayoutDto)
+  layout?: ApartmentDesignLayoutDto
+
   @ApiPropertyOptional({ default: true })
   @IsOptional()
   @IsBoolean()
@@ -138,6 +279,12 @@ export class UpdateApartmentDesignDto {
   @Min(6)
   @Max(18)
   defaultHour?: number
+
+  @ApiPropertyOptional({ type: ApartmentDesignLayoutDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ApartmentDesignLayoutDto)
+  layout?: ApartmentDesignLayoutDto
 
   @ApiPropertyOptional()
   @IsOptional()

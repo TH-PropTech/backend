@@ -54,6 +54,57 @@ export const APARTMENT_DESIGN_FURNISHING = ['bare', 'partial', 'full'] as const
 export type ApartmentDesignFurnishing =
   (typeof APARTMENT_DESIGN_FURNISHING)[number]
 
+/** Catalog nội thất có thể thêm thủ công trong trình chỉnh sửa bố cục 3D. [uc_vr_tour] */
+export const APARTMENT_FURNITURE_KINDS = [
+  'sofa',
+  'armchair',
+  'ottoman',
+  'coffeeTable',
+  'sideTable',
+  'tvUnit',
+  'bookshelf',
+  'dresser',
+  'wardrobe',
+  'bed',
+  'nightstand',
+  'desk',
+  'chair',
+  'diningTable',
+  'barStool',
+  'console',
+  'plant',
+  'floorLamp',
+  'standingMirror',
+] as const
+export type ApartmentFurnitureKind = (typeof APARTMENT_FURNITURE_KINDS)[number]
+
+export const MAX_APARTMENT_LAYOUT_ITEMS = 120
+export const MAX_APARTMENT_LAYOUT_EXTRAS = 60
+export const APARTMENT_LAYOUT_COORD_MIN = -2
+export const APARTMENT_LAYOUT_COORD_MAX = 40
+
+export interface ApartmentDesignLayoutItem {
+  x?: number
+  z?: number
+  rot?: number
+  hidden?: boolean
+}
+
+export interface ApartmentDesignLayoutExtra {
+  id: string
+  kind: ApartmentFurnitureKind
+  x: number
+  z: number
+  rot: number
+  hidden?: boolean
+}
+
+/** Bố cục lưu theo toạ độ mẫu, trước khi renderer co giãn theo diện tích. [uc_vr_tour] */
+export interface ApartmentDesignLayout {
+  items: Record<string, ApartmentDesignLayoutItem>
+  extras: ApartmentDesignLayoutExtra[]
+}
+
 /** Ghi đè từng màu của phong cách (chuỗi #RRGGBB); thiếu khoá = dùng màu của phong cách. */
 export interface ApartmentDesignPalette {
   floor?: string
@@ -74,6 +125,7 @@ export interface ApartmentDesignEntry {
   furnishing: ApartmentDesignFurnishing | null
   /** Giờ mặc định (6..18) khi mở thiết kế này. */
   defaultHour: number
+  layout?: ApartmentDesignLayout
   visible: boolean
   order: number
   createdBy: string
