@@ -284,12 +284,15 @@ export class ContractViewService {
             null,
           amount: depositAgreement.amount || contract.deposit,
           currency: 'VND',
+          // Cọc đã chuyển vào hợp đồng khi kích hoạt: client hiểu là `transferred` (đã trả).
           status:
-            (depositAgreement.status as
-              | 'draft'
-              | 'pending'
-              | 'paid'
-              | 'transferred') || 'pending',
+            depositAgreement.status === 'applied-to-lease-security'
+              ? 'transferred'
+              : (depositAgreement.status as
+                  | 'draft'
+                  | 'pending'
+                  | 'paid'
+                  | 'transferred') || 'pending',
           consentGiven: Boolean(depositAgreement.tenantConsent),
           contentRevision: depositAgreement.contentRevision,
           contentHash: depositAgreement.contentHash,
