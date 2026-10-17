@@ -225,5 +225,74 @@ describe('LegalTermsService', () => {
         service.publishDraft({ expectedRevision: 4 }, 'admin-user')
       ).rejects.toThrow(ConflictException)
     })
+
+    it('returns TERMS_VERSION_CONFLICT and keeps the draft when the version was taken concurrently', async () => {
+      const existingDraft = {
+        draftRevision: 2,
+        title: 'T',
+        summary: 'S',
+        sections: [],
+      } as unknown as TermsLegalDocument
+      repository.findOne
+        .mockResolvedValueOnce(existingDraft)
+        .mockResolvedValueOnce({ version: 1 })
+      repository.save.mockRejectedValue({ code: 11000 })
+
+      await expect(
+        service.publishDraft({ expectedRevision: 2 }, 'admin-user')
+      ).rejects.toThrow('TERMS_VERSION_CONFLICT')
+      expect(repository.remove).not.toHaveBeenCalled()
+    })
+
+    it('rethrows other save errors on publish', async () => {
+      repository.findOne
+        .mockResolvedValueOnce({
+          draftRevision: 1,
+          title: 'T',
+          summary: 'S',
+          sections: [],
+        })
+        .mockResolvedValueOnce(null)
+      repository.save.mockRejectedValue(new Error('db down'))
+
+      await expect(
+        service.publishDraft({ expectedRevision: 1 }, 'admin-user')
+      ).rejects.toThrow('db down')
+    })
+  })
+
+  describe('seedInitialTermsIfEmpty', () => {
+    it('seeds published version 1 when none exists', async () => {
+      repository.findOne.mockResolvedValue(null)
+      repository.save.mockImplementation((doc: unknown) => Promise.resolve(doc))
+
+      await service.seedInitialTermsIfEmpty()
+
+      expect(repository.save).toHaveBeenCalledWith(
+        expect.objectContaining({ version: 1, status: 'published' })
+      )
+    })
+
+    it('does nothing when published terms already exist', async () => {
+      repository.findOne.mockResolvedValue({ version: 1 })
+
+      await service.seedInitialTermsIfEmpty()
+
+      expect(repository.save).not.toHaveBeenCalled()
+    })
+
+    it('treats a duplicate key from a concurrent seed as already seeded', async () => {
+      repository.findOne.mockResolvedValue(null)
+      repository.save.mockRejectedValue({ code: 11000 })
+
+      await expect(service.seedInitialTermsIfEmpty()).resolves.toBeUndefined()
+    })
+
+    it('rethrows other errors while seeding', async () => {
+      repository.findOne.mockResolvedValue(null)
+      repository.save.mockRejectedValue(new Error('db down'))
+
+      await expect(service.seedInitialTermsIfEmpty()).rejects.toThrow('db down')
+    })
   })
 })

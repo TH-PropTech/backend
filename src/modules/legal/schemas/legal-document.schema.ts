@@ -43,7 +43,8 @@ import type { LegalTermsDocument } from './legal-terms-document.schema'
  *
  * Khóa duy nhất theo loại (không tạo được bằng decorator, do migration 020 tạo
  * bằng partial index): `key` UNIQUE khi `kind='source'`; `code` UNIQUE khi
- * `kind='regulation'`. Terms không có unique (nhiều bản cùng `key` theo `version`).
+ * `kind='regulation'`. Terms: `(key, version)` UNIQUE khi `kind='terms'` và
+ * `status='published'` (migration 032); bản nháp và bản đã lưu trữ không bị ràng buộc.
  */
 export const LEGAL_DOCUMENTS_COLLECTION = 'legal_documents'
 
@@ -93,6 +94,14 @@ export const LEGAL_DOCUMENT_INDEXES: ReadonlyArray<{
     name: 'legal_documents_regulation_code_unique',
     keys: { code: 1 },
     options: { unique: true, partialFilterExpression: { kind: 'regulation' } },
+  },
+  {
+    name: 'legal_documents_terms_key_version_published_unique',
+    keys: { key: 1, version: 1 },
+    options: {
+      unique: true,
+      partialFilterExpression: { kind: 'terms', status: 'published' },
+    },
   },
 ]
 

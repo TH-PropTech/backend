@@ -22,6 +22,17 @@ import {
 
 export const RENTAL_TERMS_KEY = 'rental-service-terms'
 
+const DUPLICATE_KEY_CODE = 11000
+
+/** Vi phạm `legal_documents_terms_key_version_published_unique` (migration 032). */
+function isDuplicateKeyError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    (error as { code?: unknown }).code === DUPLICATE_KEY_CODE
+  )
+}
+
 const DEFAULT_RENTAL_TERMS_FIXTURE = {
   key: RENTAL_TERMS_KEY,
   title: 'Điều khoản Dịch vụ Thuê Căn hộ Chung cư',
@@ -114,7 +125,14 @@ export class LegalTermsService implements OnApplicationBootstrap {
       doc.publishedBy = 'system'
       doc.publishedAt = new Date()
 
-      await this.repository.save(doc)
+      try {
+        await this.repository.save(doc)
+      } catch (error) {
+        // Backend khác dùng chung DB vừa seed cùng version: coi như đã có.
+        if (!isDuplicateKeyError(error)) throw error
+        this.logger.warn(`Legal terms v${version} already seeded concurrently`)
+        return
+      }
       this.logger.log(`Seeded canonical published legal terms v${version}`)
     }
   }
@@ -270,7 +288,16 @@ export class LegalTermsService implements OnApplicationBootstrap {
     newPublished.publishedBy = actorId
     newPublished.publishedAt = new Date()
 
-    const saved = await this.repository.save(newPublished)
+    let saved: TermsLegalDocument
+    try {
+      saved = await this.repository.save(newPublished)
+    } catch (error) {
+      // Lần publish đồng thời đã chiếm version này; giữ bản nháp để thử lại.
+      if (isDuplicateKeyError(error)) {
+        throw new ConflictException('TERMS_VERSION_CONFLICT')
+      }
+      throw error
+    }
 
     // Reset or delete draft so a new draft cycle begins
     await this.repository.remove(draft)
