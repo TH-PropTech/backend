@@ -1,0 +1,272 @@
+{
+  "_comment": "Ca kiểm thử chuẩn hoá layout dùng chung: renderer, frontend, mobile và backend phải cho cùng kết quả. input -> expected.",
+  "cases": [
+    {
+      "name": "legacy layout keeps its shape",
+      "input": {
+        "items": {
+          "sofa-1": { "x": 1.23456, "z": 2, "rot": 9.42477796, "hidden": true }
+        },
+        "extras": [
+          { "id": "extra-1", "kind": "chair", "x": 2, "z": 3, "rot": 0 }
+        ]
+      },
+      "expected": {
+        "items": {
+          "sofa-1": { "x": 1.235, "z": 2, "rot": 3.1416, "hidden": true }
+        },
+        "extras": [
+          { "id": "extra-1", "kind": "chair", "x": 2, "z": 3, "rot": 0 }
+        ]
+      }
+    },
+    {
+      "name": "empty and junk inputs",
+      "input": null,
+      "expected": { "items": {}, "extras": [] }
+    },
+    {
+      "name": "room overrides keep only known materials and trimmed names",
+      "input": {
+        "rooms": {
+          "living": { "name": "  Phòng khách lớn  ", "floor": "marble" },
+          "bed1": { "floor": "lava" },
+          "bad id": { "name": "x" },
+          "bath": {}
+        }
+      },
+      "expected": {
+        "items": {},
+        "extras": [],
+        "rooms": { "living": { "name": "Phòng khách lớn", "floor": "marble" } }
+      }
+    },
+    {
+      "name": "opening overrides are bounded and typed",
+      "input": {
+        "openings": {
+          "removed": ["w1o0", "w1o0", "bad id", 5],
+          "moved": {
+            "w2o1": { "c": 3.12345, "w": 1.2, "type": "window" },
+            "w3o0": { "w": 9 },
+            "w4o0": { "type": "hole" }
+          },
+          "added": [
+            {
+              "id": "add-1",
+              "dir": "x",
+              "at": 0,
+              "c": 2,
+              "w": 1,
+              "type": "window",
+              "sill": 0.9
+            },
+            {
+              "id": "add-1",
+              "dir": "x",
+              "at": 0,
+              "c": 3,
+              "w": 1,
+              "type": "door"
+            },
+            {
+              "id": "add-2",
+              "dir": "y",
+              "at": 0,
+              "c": 3,
+              "w": 1,
+              "type": "door"
+            },
+            {
+              "id": "add-3",
+              "dir": "z",
+              "at": 4,
+              "c": 1,
+              "w": 0.2,
+              "type": "door"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "items": {},
+        "extras": [],
+        "openings": {
+          "removed": ["w1o0"],
+          "moved": { "w2o1": { "c": 3.123, "w": 1.2, "type": "window" } },
+          "added": [
+            {
+              "id": "add-1",
+              "dir": "x",
+              "at": 0,
+              "c": 2,
+              "w": 1,
+              "type": "window",
+              "sill": 0.9
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "custom plan drops overlapping, tiny and unknown rooms and keeps valid ones",
+      "input": {
+        "custom": {
+          "floors": [
+            {
+              "id": "f1",
+              "name": "Tầng 1",
+              "rooms": [
+                {
+                  "id": "a",
+                  "name": "Khách",
+                  "x0": 0,
+                  "x1": 5,
+                  "z0": 0,
+                  "z1": 4,
+                  "floor": "tile"
+                },
+                {
+                  "id": "b",
+                  "name": "Chồng",
+                  "x0": 4,
+                  "x1": 8,
+                  "z0": 1,
+                  "z1": 5,
+                  "floor": "wood"
+                },
+                {
+                  "id": "c",
+                  "name": "Bếp",
+                  "x0": 5,
+                  "x1": 8,
+                  "z0": 0,
+                  "z1": 3,
+                  "floor": "lava"
+                },
+                { "id": "d", "name": "Bé", "x0": 0, "x1": 1, "z0": 4, "z1": 5 },
+                {
+                  "id": "a",
+                  "name": "Trùng id",
+                  "x0": 10,
+                  "x1": 14,
+                  "z0": 0,
+                  "z1": 4
+                }
+              ],
+              "openings": [
+                {
+                  "id": "o1",
+                  "dir": "z",
+                  "at": 5,
+                  "c": 1.5,
+                  "w": 0.9,
+                  "type": "door"
+                },
+                {
+                  "id": "o1",
+                  "dir": "z",
+                  "at": 5,
+                  "c": 2.5,
+                  "w": 0.9,
+                  "type": "door"
+                },
+                {
+                  "id": "o2",
+                  "dir": "q",
+                  "at": 5,
+                  "c": 1.5,
+                  "w": 0.9,
+                  "type": "door"
+                }
+              ]
+            },
+            { "id": "f2", "name": "Rỗng", "rooms": [], "openings": [] }
+          ]
+        }
+      },
+      "expected": {
+        "items": {},
+        "extras": [],
+        "custom": {
+          "floors": [
+            {
+              "id": "f1",
+              "name": "Tầng 1",
+              "rooms": [
+                {
+                  "id": "a",
+                  "name": "Khách",
+                  "x0": 0,
+                  "x1": 5,
+                  "z0": 0,
+                  "z1": 4,
+                  "floor": "tile"
+                },
+                {
+                  "id": "c",
+                  "name": "Bếp",
+                  "x0": 5,
+                  "x1": 8,
+                  "z0": 0,
+                  "z1": 3,
+                  "floor": "wood"
+                }
+              ],
+              "openings": [
+                {
+                  "id": "o1",
+                  "dir": "z",
+                  "at": 5,
+                  "c": 1.5,
+                  "w": 0.9,
+                  "type": "door"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "extras keep floor and bounded sizes",
+      "input": {
+        "extras": [
+          {
+            "id": "e1",
+            "kind": "sofa",
+            "x": 3,
+            "z": 2,
+            "rot": 0,
+            "floor": "f1",
+            "args": [2.6]
+          },
+          {
+            "id": "e2",
+            "kind": "kitchenRun",
+            "x": 1,
+            "z": 1,
+            "args": [2.4, "x"]
+          },
+          { "id": "e3", "kind": "toilet", "x": 1, "z": 1, "args": [9] }
+        ]
+      },
+      "expected": {
+        "items": {},
+        "extras": [
+          {
+            "id": "e1",
+            "kind": "sofa",
+            "x": 3,
+            "z": 2,
+            "rot": 0,
+            "floor": "f1",
+            "args": [2.6]
+          },
+          { "id": "e2", "kind": "kitchenRun", "x": 1, "z": 1, "rot": 0 },
+          { "id": "e3", "kind": "toilet", "x": 1, "z": 1, "rot": 0 }
+        ]
+      }
+    }
+  ]
+}
