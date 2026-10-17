@@ -11,6 +11,8 @@ import { ActivityLog } from '../activity-log/schemas/activity-log.schema'
 import { SystemConfig } from './schemas/system-config.schema'
 import { User } from '../users/schemas/user.schema'
 import { ApartmentsService } from './services/apartments.service'
+import { ApartmentDesignsService } from './services/apartment-designs.service'
+import { ApartmentDesignsController } from './controllers/apartment-designs.controller'
 import { MaintenanceTicketsService } from './services/maintenance-tickets.service'
 import { ListingQualityService } from './services/listing-quality.service'
 import { ApartmentMediaUploadService } from './services/apartment-media-upload.service'
@@ -62,6 +64,7 @@ import { NotificationsModule } from '../notifications/notifications.module'
     ApartmentsService,
     ListingQualityService,
     MaintenanceTicketsService,
+    ApartmentDesignsService,
     ApartmentMediaUploadService,
     ApartmentExpirationService,
     BuildingsService,
@@ -81,6 +84,7 @@ import { NotificationsModule } from '../notifications/notifications.module'
   ],
   controllers: [
     ApartmentsController,
+    ApartmentDesignsController,
     BuildingsController,
     ProjectsController,
     SavedSearchesController,
@@ -95,6 +99,7 @@ import { NotificationsModule } from '../notifications/notifications.module'
   exports: [
     TypeOrmModule,
     ApartmentsService,
+    ApartmentDesignsService,
     ApartmentExpirationService,
     BuildingsService,
     ProjectsService,
