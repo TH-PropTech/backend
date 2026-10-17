@@ -313,7 +313,7 @@ export class MockBankController {
 
   @Public()
   @Get('mocbank/return')
-  @ApiOperation({ summary: 'Mộc Bank browser return (signed)' })
+  @ApiOperation({ summary: 'Ví Mộc browser return (signed)' })
   @ApiResponse({ status: 302, description: 'Redirect to client result URL' })
   async mocbankReturn(
     @Query() query: GatewayQuery,
@@ -328,7 +328,7 @@ export class MockBankController {
   @Public()
   @Post('mocbank/webhook')
   @ApiOperation({
-    summary: 'Mộc Bank webhook (server-to-server, HMAC on raw body)',
+    summary: 'Ví Mộc webhook (server-to-server, HMAC on raw body)',
   })
   @ApiResponse({ status: 200, description: 'Handled, replayed or test event' })
   @ApiResponse({ status: 400, description: 'Signed but rejected' })

@@ -225,7 +225,7 @@ describe('GatewayCallbackService', () => {
     expect(context.mockBankService.settleVerifiedAttempt).not.toHaveBeenCalled()
   })
 
-  it('reports an unavailable reconciliation as internal-error so Mộc Bank retries', async () => {
+  it('reports an unavailable reconciliation as internal-error so Ví Mộc retries', async () => {
     const context = createContext({ provider: 'mocbank' })
     context.verifier.verify.mockRejectedValue(
       new Error('MOCBANK_RECONCILE_UNAVAILABLE')
@@ -238,7 +238,7 @@ describe('GatewayCallbackService', () => {
     expect(context.mockBankService.settleVerifiedAttempt).not.toHaveBeenCalled()
   })
 
-  it('maps Mộc Bank webhook results to HTTP statuses', () => {
+  it('maps Ví Mộc webhook results to HTTP statuses', () => {
     const { service } = createContext()
     const ok = (outcome: string): never =>
       ({ ok: true, outcome, attempt: null }) as never
@@ -278,7 +278,7 @@ describe('GatewayCallbackService', () => {
   })
 })
 
-describe('GatewayCallbackService with the Mộc Bank verifier', () => {
+describe('GatewayCallbackService with the Ví Mộc verifier', () => {
   const moc = TEST_PAYMENTS.mocbank
   const attempt = {
     _id: new ObjectId(),

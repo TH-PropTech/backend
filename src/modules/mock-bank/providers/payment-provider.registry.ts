@@ -35,7 +35,7 @@ const PROVIDER_LABELS: Record<SelectablePaymentProvider, string> = {
   vnpay: 'VNPAY',
   momo: 'MoMo',
   zalopay: 'ZaloPay',
-  mocbank: 'Mộc Bank (sandbox)',
+  mocbank: 'Ví Mộc (sandbox)',
 }
 
 @Injectable()

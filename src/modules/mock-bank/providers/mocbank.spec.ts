@@ -158,7 +158,7 @@ describe('MocbankAdapter', () => {
     ).resolves.toMatchObject({ redirectUrl: PAYMENT_URL })
   })
 
-  it('rejects an amount above the limit before calling Mộc Bank', async () => {
+  it('rejects an amount above the limit before calling Ví Mộc', async () => {
     const fetcher = jsonFetcher(createReply())
 
     await expect(
@@ -545,7 +545,7 @@ describe('MocbankCallbackVerifier', () => {
   describe('payee reconciliation', () => {
     const payee = '810000000002'
 
-    it('settles when Mộc Bank confirms the landlord account', async () => {
+    it('settles when Ví Mộc confirms the landlord account', async () => {
       const fetcher = jsonFetcher(reconcileReply({ payeeAccountNumber: payee }))
 
       const verdict = await verifierWith(fetcher).verify(

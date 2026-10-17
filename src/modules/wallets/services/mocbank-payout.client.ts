@@ -20,7 +20,7 @@ export type MocbankPayoutInput = {
   description: string
 }
 
-/** Raised when Mộc Bank did not confirm the transfer; `code` is safe to store and log. */
+/** Raised when Ví Mộc did not confirm the transfer; `code` is safe to store and log. */
 export class MocbankPayoutError extends Error {
   constructor(readonly code: string) {
     super(`MOCBANK_PAYOUT_${code}`)
@@ -30,7 +30,7 @@ export class MocbankPayoutError extends Error {
 
 /**
  * Simulated disbursement: after a MoMo/VNPay/ZaloPay payment the platform moves
- * the landlord's share from its own Mộc Bank wallet to the landlord's wallet
+ * the landlord's share from its own Ví Mộc wallet to the landlord's wallet
  * (`POST /api/payouts`). Sandbox only; real money needs a licensed disbursement
  * provider.
  */
@@ -46,7 +46,7 @@ export class MocbankPayoutClient {
     this.fetcher = fetcher ?? globalThis.fetch
   }
 
-  /** True when the Mộc Bank merchant credentials needed to pay out are set. */
+  /** True when the Ví Mộc merchant credentials needed to pay out are set. */
   isConfigured(): boolean {
     const config = this.config()
     return Boolean(
@@ -90,7 +90,7 @@ export class MocbankPayoutClient {
     ) {
       const code = asRecord(result?.error)?.code
       this.logger.warn(
-        `Mộc Bank payout rejected orderId=${input.orderId} http=${logField(reply.status)} code=${logField(code)}`
+        `Ví Mộc payout rejected orderId=${input.orderId} http=${logField(reply.status)} code=${logField(code)}`
       )
       // The code comes from a remote system: keep only a plain upper-case token.
       throw new MocbankPayoutError(

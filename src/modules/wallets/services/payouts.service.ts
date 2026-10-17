@@ -204,7 +204,7 @@ export class PayoutsService {
     return saved
   }
 
-  /** Ví Mộc Bank của chủ nhà: nền tảng chuyển hộ tự động (giả lập), không cần chủ nhà bấm. */
+  /** Ví Mộc của chủ nhà: nền tảng chuyển hộ tự động (giả lập), không cần chủ nhà bấm. */
   private canRelayToMocbank(wallet: Wallet): boolean {
     return (
       wallet.provider === 'mocbank' &&
@@ -221,7 +221,7 @@ export class PayoutsService {
     if (!client || !wallet.mocbankAccountNumber) return payout
     try {
       const { transactionCode } = await client.payout({
-        // Stable across retries, so Mộc Bank never pays the same payout twice.
+        // Stable across retries, so Ví Mộc never pays the same payout twice.
         orderId: `PAYOUT-${payout._id.toHexString()}`,
         amount: payout.receivedAmount,
         payeeAccountNumber: wallet.mocbankAccountNumber,
@@ -329,10 +329,10 @@ export class PayoutsService {
   private receivedMessage(payout: Payout): string {
     const amount = payout.receivedAmount.toLocaleString('vi-VN')
     if (payout.directReceipt) {
-      return `Khách đã thanh toán trực tiếp ${amount} VND vào tài khoản Mộc Bank đã liên kết của bạn.`
+      return `Khách đã thanh toán trực tiếp ${amount} VND vào tài khoản Ví Mộc đã liên kết của bạn.`
     }
     if (payout.relayRef) {
-      return `Khách đã thanh toán qua cổng của nền tảng. Nền tảng đã chuyển hộ ${amount} VND vào ví Mộc Bank của bạn (mã ${payout.relayRef}). Đây là chuyển hộ giả lập trên môi trường thử nghiệm: nền tảng nhận tiền rồi chuyển lại vào ví Mộc Bank.`
+      return `Khách đã thanh toán qua cổng của nền tảng. Nền tảng đã chuyển hộ ${amount} VND vào Ví Mộc của bạn (mã ${payout.relayRef}). Đây là chuyển hộ giả lập trên môi trường thử nghiệm: nền tảng nhận tiền rồi chuyển lại vào Ví Mộc.`
     }
     return `${amount} VND đã được chuyển về tài khoản ngân hàng đã liên kết của bạn (sàn chuyển ${payout.sentAmount.toLocaleString('vi-VN')} VND).`
   }

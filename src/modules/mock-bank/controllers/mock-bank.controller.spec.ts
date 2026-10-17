@@ -445,7 +445,7 @@ describe('MockBankController', () => {
     })
   })
 
-  it('redirects a Mộc Bank return to the mobile deep link', async () => {
+  it('redirects a Ví Mộc return to the mobile deep link', async () => {
     const gateway = {
       handleReturn: jest
         .fn()

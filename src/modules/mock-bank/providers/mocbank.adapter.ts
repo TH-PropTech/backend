@@ -23,7 +23,7 @@ import {
   type GatewayFetcher,
 } from './gateway.util'
 
-/** Mộc Bank per-transaction limit in VND (INTEGRATION.md section 1). */
+/** Ví Mộc per-transaction limit in VND (INTEGRATION.md section 1). */
 export const MOCBANK_MAX_AMOUNT = 50_000_000
 const MAX_DESCRIPTION_LENGTH = 200
 const MIN_EXPIRES_MINUTES = 1
@@ -50,7 +50,7 @@ function sameOrigin(url: string, baseUrl: string): boolean {
   }
 }
 
-/** Mộc Bank sandbox payment-session adapter (server-to-server create). */
+/** Ví Mộc sandbox payment-session adapter (server-to-server create). */
 @Injectable()
 export class MocbankAdapter implements PaymentProviderAdapter {
   readonly name = 'mocbank' as const
@@ -72,7 +72,7 @@ export class MocbankAdapter implements PaymentProviderAdapter {
     input: PaymentIntentInput
   ): Promise<ProviderPaymentIntent> {
     if (input.amount > MOCBANK_MAX_AMOUNT) {
-      // Fail before calling Mộc Bank so the tenant sees why, not a gateway error.
+      // Fail before calling Ví Mộc so the tenant sees why, not a gateway error.
       throw new BadRequestException('PAYMENT_AMOUNT_OUT_OF_RANGE')
     }
     const config = this.configService.getOrThrow<PaymentsConfig['mocbank']>(
@@ -91,7 +91,7 @@ export class MocbankAdapter implements PaymentProviderAdapter {
       description: input.description.slice(0, MAX_DESCRIPTION_LENGTH),
       returnUrl: config.returnUrl,
       cancelUrl: config.returnUrl,
-      // Mộc Bank falls back to the app's first registered webhook when omitted.
+      // Ví Mộc falls back to the app's first registered webhook when omitted.
       ...(config.webhookUrl ? { webhookUrl: config.webhookUrl } : {}),
       expiresInMinutes,
       channel: input.clientChannel ?? 'web',
@@ -118,7 +118,7 @@ export class MocbankAdapter implements PaymentProviderAdapter {
     const data = asRecord(result?.data)
     const paymentUrl = data?.paymentUrl
     if (asRecord(result?.error)?.code === 'PAYEE_NOT_FOUND') {
-      // Tài khoản nhận của chủ nhà không tồn tại trên Mộc Bank: khách chưa mất tiền.
+      // Tài khoản nhận của chủ nhà không tồn tại trên Ví Mộc: khách chưa mất tiền.
       throw new UnprocessableEntityException('LANDLORD_PAYEE_ACCOUNT_INVALID')
     }
     if (
@@ -132,7 +132,7 @@ export class MocbankAdapter implements PaymentProviderAdapter {
       data.amount !== input.amount
     ) {
       this.logger.warn(
-        `Mộc Bank create rejected txRef=${input.txRef} http=${logField(reply.status)} code=${logField(asRecord(result?.error)?.code)}`
+        `Ví Mộc create rejected txRef=${input.txRef} http=${logField(reply.status)} code=${logField(asRecord(result?.error)?.code)}`
       )
       throw new ServiceUnavailableException('PAYMENT_GATEWAY_UNAVAILABLE')
     }

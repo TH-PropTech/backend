@@ -1378,7 +1378,7 @@ describe('MockBankService', () => {
       )
     })
 
-    it('settles a late Mộc Bank success on an attempt expired by a provider switch', async () => {
+    it('settles a late Ví Mộc success on an attempt expired by a provider switch', async () => {
       const context = createContext()
       context.configService.get.mockImplementation((key: string) =>
         key === 'rentalFlow.payments' ? TEST_PAYMENTS : 'test'
@@ -1405,7 +1405,7 @@ describe('MockBankService', () => {
       })
     })
 
-    it('records duplicate-paid when a late Mộc Bank success meets a target paid elsewhere', async () => {
+    it('records duplicate-paid when a late Ví Mộc success meets a target paid elsewhere', async () => {
       const context = createContext()
       context.configService.get.mockImplementation((key: string) =>
         key === 'rentalFlow.payments' ? TEST_PAYMENTS : 'test'
@@ -1552,7 +1552,7 @@ describe('MockBankService', () => {
       )
     })
 
-    it('creates a Mộc Bank attempt carrying the client channel', async () => {
+    it('creates a Ví Mộc attempt carrying the client channel', async () => {
       const context = createContext()
       const mocbankAdapter = {
         name: 'mocbank' as const,
@@ -1630,7 +1630,7 @@ describe('MockBankService', () => {
       expect(context.attemptRepository.save).not.toHaveBeenCalled()
     })
   })
-  describe('landlord direct receipt (Mộc Bank)', () => {
+  describe('landlord direct receipt (Ví Mộc)', () => {
     const LANDLORD_ACCOUNT = '810000000002'
 
     function gatewayAdapter(name: 'mocbank' | 'momo'): {
@@ -1668,7 +1668,7 @@ describe('MockBankService', () => {
       return { context, adapter }
     }
 
-    it('sends the landlord account to Mộc Bank and stores it on the attempt', async () => {
+    it('sends the landlord account to Ví Mộc and stores it on the attempt', async () => {
       const { context, adapter } = prepare('mocbank')
 
       await context.service.initRentPayment(paymentId, tenantId, {
@@ -1686,7 +1686,7 @@ describe('MockBankService', () => {
       )
     })
 
-    it('refuses the payment when the landlord has no linked Mộc Bank account', async () => {
+    it('refuses the payment when the landlord has no linked Ví Mộc account', async () => {
       const { context, adapter } = prepare('mocbank', null)
 
       await expect(
@@ -1758,7 +1758,7 @@ describe('MockBankService', () => {
       expect(adapter.createPaymentIntent).toHaveBeenCalledTimes(1)
     })
 
-    it('does not reuse a live Mộc Bank attempt that targets another account', async () => {
+    it('does not reuse a live Ví Mộc attempt that targets another account', async () => {
       const { context, adapter } = prepare('mocbank')
       context.attemptRepository.findOne.mockReset()
       context.attemptRepository.findOne.mockResolvedValueOnce({
@@ -1964,7 +1964,7 @@ describe('MockBankService', () => {
         return { context, payoutsService }
       }
 
-      it('records a direct receipt when Mộc Bank paid the landlord account', async () => {
+      it('records a direct receipt when Ví Mộc paid the landlord account', async () => {
         const { context, payoutsService } = settleContext({
           provider: 'mocbank',
           txRef: 'MOCBANK-1',
@@ -1985,7 +1985,7 @@ describe('MockBankService', () => {
         )
       })
 
-      it('keeps the relay payout for a Mộc Bank attempt without a payee account', async () => {
+      it('keeps the relay payout for a Ví Mộc attempt without a payee account', async () => {
         const { context, payoutsService } = settleContext({
           provider: 'mocbank',
           txRef: 'MOCBANK-2',

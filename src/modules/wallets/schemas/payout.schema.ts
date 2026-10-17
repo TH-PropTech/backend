@@ -31,9 +31,9 @@ export class Payout {
   @Column({ default: 1 }) attempts!: number
   @Column({ nullable: true }) failureReason!: string | null
   @Column({ nullable: true }) paidOutAt!: Date | null
-  /** Khách đã trả thẳng vào tài khoản của chủ nhà (Mộc Bank): không có bước sàn chuyển tiền. */
+  /** Khách đã trả thẳng vào tài khoản của chủ nhà (Ví Mộc): không có bước sàn chuyển tiền. */
   @Column({ default: false }) directReceipt!: boolean
-  /** Mã giao dịch Mộc Bank khi nền tảng chuyển hộ vào ví Mộc Bank của chủ nhà (giả lập). */
+  /** Mã giao dịch Ví Mộc khi nền tảng chuyển hộ vào Ví Mộc của chủ nhà (giả lập). */
   @Column({ type: 'string', nullable: true }) relayRef?: string | null
   @CreateDateColumn() createdAt!: Date
   @UpdateDateColumn() updatedAt!: Date

@@ -39,9 +39,9 @@ export type PaymentIntentInput = {
   clientIp?: string | undefined
   /** MoMo only; other adapters ignore it. Defaults to `wallet`. */
   momoMethod?: MomoPaymentMethod | undefined
-  /** Mộc Bank only; other adapters ignore it. Defaults to `web`. */
+  /** Ví Mộc only; other adapters ignore it. Defaults to `web`. */
   clientChannel?: PaymentClientChannel | undefined
-  /** Mộc Bank only: tài khoản nhận tiền thay cho ví của sàn (chủ nhà). */
+  /** Ví Mộc only: tài khoản nhận tiền thay cho ví của sàn (chủ nhà). */
   payeeAccountNumber?: string | undefined
 }
 

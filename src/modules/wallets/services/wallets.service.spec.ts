@@ -341,10 +341,10 @@ describe('WalletsService.listTransactions (D5: dựng từ Payout + Payment)', (
   })
 })
 
-describe('WalletsService Mộc Bank account (tiền chủ nhà nhận trực tiếp)', () => {
+describe('WalletsService Ví Mộc account (tiền chủ nhà nhận trực tiếp)', () => {
   const MOC = { ...LINK, bankCode: 'MOCBANK', accountNumber: '810000000002' }
 
-  it('links a Mộc Bank account, keeping the full number server-side only', async () => {
+  it('links a Ví Mộc account, keeping the full number server-side only', async () => {
     const { service, wallets } = setup()
 
     const { wallet, newlyLinked } = await service.link(USER, MOC)
@@ -361,14 +361,14 @@ describe('WalletsService Mộc Bank account (tiền chủ nhà nhận trực ti�
     )
     expect(wallet).toMatchObject({
       simulation: false,
-      bank: { code: 'MOCBANK', name: 'Mộc Bank (sandbox)' },
+      bank: { code: 'MOCBANK', name: 'Ví Mộc (sandbox)' },
       accountNumberMasked: '****0002',
     })
     expect(JSON.stringify(wallet)).not.toContain('810000000002')
   })
 
   it.each(['81000000000', '8100000000021', '81000000000a'])(
-    'rejects the Mộc Bank number %s that is not 12 digits',
+    'rejects the Ví Mộc number %s that is not 12 digits',
     async accountNumber => {
       const { service, wallets } = setup()
 
@@ -379,7 +379,7 @@ describe('WalletsService Mộc Bank account (tiền chủ nhà nhận trực ti�
     }
   )
 
-  it('drops the Mộc Bank number and returns to simulation when re-linked to another bank', async () => {
+  it('drops the Ví Mộc number and returns to simulation when re-linked to another bank', async () => {
     const existing = {
       _id: new ObjectId(),
       userId: USER,
@@ -403,7 +403,7 @@ describe('WalletsService Mộc Bank account (tiền chủ nhà nhận trực ti�
     )
   })
 
-  it('returns the account only for a linked Mộc Bank wallet', async () => {
+  it('returns the account only for a linked Ví Mộc wallet', async () => {
     const linked = setup({
       wallet: { userId: USER, mocbankAccountNumber: '810000000002' },
     })

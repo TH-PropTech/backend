@@ -88,7 +88,7 @@ describe('MocbankPayoutClient', () => {
     )
   })
 
-  it('surfaces a plain error code from Mộc Bank', async () => {
+  it('surfaces a plain error code from Ví Mộc', async () => {
     const fetcher = httpFetcher(409, {
       success: false,
       error: { code: 'INSUFFICIENT_BALANCE', message: 'x' },

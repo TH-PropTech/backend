@@ -74,7 +74,7 @@ export class PaymentAttempt {
   @Column({ type: 'string', nullable: true })
   clientChannel?: PaymentClientChannel | null
 
-  /** Mộc Bank account that receives the money directly (landlord); null when it goes to the platform. */
+  /** Ví Mộc account that receives the money directly (landlord); null when it goes to the platform. */
   @Column({ type: 'string', nullable: true })
   payeeAccountNumber?: string | null
 

@@ -474,7 +474,7 @@ describe('PayoutsService queries', () => {
   })
 })
 
-describe('PayoutsService direct receipt (Mộc Bank trả thẳng chủ nhà)', () => {
+describe('PayoutsService direct receipt (Ví Mộc trả thẳng chủ nhà)', () => {
   const paidAt = new Date('2026-10-17T10:00:00.000Z')
 
   it('records a paid-out payout at once with no transfer and one notification', async () => {
@@ -546,7 +546,7 @@ describe('PayoutsService direct receipt (Mộc Bank trả thẳng chủ nhà)', 
   })
 })
 
-describe('PayoutsService simulated relay to the landlord Mộc Bank wallet', () => {
+describe('PayoutsService simulated relay to the landlord Ví Mộc wallet', () => {
   const ACCOUNT = '810000000002'
   const mocWallet = {
     _id: walletId,
@@ -673,7 +673,7 @@ describe('PayoutsService simulated relay to the landlord Mộc Bank wallet', () 
     expect(orderIds[0]).toBe(orderIds[1])
   })
 
-  it('falls back to the manual simulation when Mộc Bank payout is not configured', async () => {
+  it('falls back to the manual simulation when Ví Mộc payout is not configured', async () => {
     const { service, client, notifications } = relaySetup({ configured: false })
 
     const payout = await service.createForPayment(source)
@@ -690,7 +690,7 @@ describe('PayoutsService simulated relay to the landlord Mộc Bank wallet', () 
     )
   })
 
-  it('keeps the manual simulation for a simulated (non Mộc Bank) wallet', async () => {
+  it('keeps the manual simulation for a simulated (non Ví Mộc) wallet', async () => {
     const { service, client } = relaySetup({
       wallet: { _id: walletId, status: 'linked', provider: 'mock-bank' },
     })
@@ -710,7 +710,7 @@ describe('PayoutsService simulated relay to the landlord Mộc Bank wallet', () 
     expect(payout.status).toBe('awaiting-wallet')
   })
 
-  it('relays waiting payouts once the landlord links a Mộc Bank wallet', async () => {
+  it('relays waiting payouts once the landlord links a Ví Mộc wallet', async () => {
     const { service, payouts, client } = relaySetup({})
     const waiting = makePayout({
       status: 'awaiting-wallet',

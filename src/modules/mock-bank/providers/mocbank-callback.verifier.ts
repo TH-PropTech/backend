@@ -191,7 +191,7 @@ export class MocbankCallbackVerifier implements GatewayVerifier {
     const data = asRecord(result?.data)
     if (!isSuccessStatus(reply.status) || !data) {
       this.logger.warn(
-        `Mộc Bank reconcile failed txRef=${expected.txRef} http=${logField(reply.status)} code=${logField(asRecord(result?.error)?.code)}`
+        `Ví Mộc reconcile failed txRef=${expected.txRef} http=${logField(reply.status)} code=${logField(asRecord(result?.error)?.code)}`
       )
       throw new Error('MOCBANK_RECONCILE_UNAVAILABLE')
     }

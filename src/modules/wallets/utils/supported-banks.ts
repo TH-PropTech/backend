@@ -9,13 +9,13 @@ export const SUPPORTED_BANKS = [
   { code: 'TPB', name: 'TPBank' },
   { code: 'STB', name: 'Sacombank' },
   { code: 'AGR', name: 'Agribank' },
-  { code: 'MOCBANK', name: 'Mộc Bank (sandbox)' },
+  { code: 'MOCBANK', name: 'Ví Mộc (sandbox)' },
 ] as const
 
-/** Mã ngân hàng của Mộc Bank sandbox: tiền của chủ nhà được trả thẳng vào tài khoản này. */
+/** Mã ngân hàng của Ví Mộc sandbox: tiền của chủ nhà được trả thẳng vào tài khoản này. */
 export const MOCBANK_BANK_CODE = 'MOCBANK'
 
-/** Số tài khoản Mộc Bank gồm đúng 12 chữ số. */
+/** Số tài khoản Ví Mộc gồm đúng 12 chữ số. */
 export const MOCBANK_ACCOUNT_PATTERN = /^\d{12}$/
 
 export type SupportedBankCode = (typeof SUPPORTED_BANKS)[number]['code']

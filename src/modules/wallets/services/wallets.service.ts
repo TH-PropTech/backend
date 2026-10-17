@@ -105,7 +105,7 @@ export class WalletsService {
       bankName: bank.name,
       accountHolder: normalizeHolderName(dto.accountHolder),
       accountNumberMasked: maskAccountNumber(dto.accountNumber),
-      // Chỉ tài khoản Mộc Bank mới giữ số đầy đủ (làm tài khoản nhận trực tiếp).
+      // Chỉ tài khoản Ví Mộc mới giữ số đầy đủ (làm tài khoản nhận trực tiếp).
       mocbankAccountNumber: isMocbank ? dto.accountNumber : null,
       provider: isMocbank ? ('mocbank' as const) : ('mock-bank' as const),
       externalAccountRef: `${isMocbank ? 'mocbank' : 'mock-account'}:${userId}`,
@@ -191,7 +191,7 @@ export class WalletsService {
     }
   }
 
-  /** Tài khoản Mộc Bank nhận tiền trực tiếp của chủ nhà; null khi chưa liên kết. */
+  /** Tài khoản Ví Mộc nhận tiền trực tiếp của chủ nhà; null khi chưa liên kết. */
   async getMocbankAccountNumber(userId: string): Promise<string | null> {
     const wallet = await this.walletRepository.findOne({
       where: { userId, status: 'linked', provider: 'mocbank' },

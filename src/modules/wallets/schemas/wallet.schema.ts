@@ -48,7 +48,7 @@ export class Wallet {
   accountNumberMasked!: string | null
 
   /**
-   * Số tài khoản Mộc Bank đầy đủ (mã định danh sandbox, không phải số tài khoản
+   * Số tài khoản Ví Mộc đầy đủ (mã định danh sandbox, không phải số tài khoản
    * thật) dùng làm `payeeAccountNumber`; null với ngân hàng khác.
    */
   @Column({ type: 'string', nullable: true })

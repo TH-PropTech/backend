@@ -54,7 +54,7 @@ const CALLBACK_WINDOW_MS = 5 * 60 * 1000
 const isPlatformPayment = (payment: Payment): boolean =>
   payment.type === 'platform-fee' || payment.payeeRole === 'platform'
 
-/** Khách đã trả thẳng vào tài khoản Mộc Bank của chủ nhà (không qua ví sàn). */
+/** Khách đã trả thẳng vào tài khoản Ví Mộc của chủ nhà (không qua ví sàn). */
 const isDirectReceiptAttempt = (
   attempt: Pick<PaymentAttempt, 'provider' | 'payeeAccountNumber'>
 ): boolean =>
@@ -1048,7 +1048,7 @@ export class MockBankService {
   }
 
   /**
-   * Chỉ Mộc Bank trả thẳng vào tài khoản chủ nhà. Các cổng khác (MoMo, VNPay,
+   * Chỉ Ví Mộc trả thẳng vào tài khoản chủ nhà. Các cổng khác (MoMo, VNPay,
    * ZaloPay, mock-bank) thu vào sàn và payout chuyển hộ sau (giả lập).
    */
   private async resolvePayeeAccount(
@@ -1063,7 +1063,7 @@ export class MockBankService {
   }
 
   /**
-   * Quyết toán nhận nhà có thể gồm dòng của chủ nhà và dòng của sàn. Với Mộc Bank
+   * Quyết toán nhận nhà có thể gồm dòng của chủ nhà và dòng của sàn. Với Ví Mộc
    * trả lần lượt: dòng chủ nhà (kèm tài khoản nhận) rồi dòng của sàn; cổng khác
    * trả một lần như trước.
    */

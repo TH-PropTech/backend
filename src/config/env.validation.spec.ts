@@ -128,7 +128,7 @@ describe('envValidationSchema eKYC configuration', () => {
     expect(result.error).toBeUndefined()
   })
 
-  it('requires an https Mộc Bank webhook URL in production', () => {
+  it('requires an https Ví Mộc webhook URL in production', () => {
     const production = {
       ...baseEnvironment,
       ...gatewayEnvironment,
@@ -156,7 +156,7 @@ describe('envValidationSchema eKYC configuration', () => {
     expect(valid.error).toBeUndefined()
   })
 
-  it('rejects a non-HTTPS Mộc Bank base URL', () => {
+  it('rejects a non-HTTPS Ví Mộc base URL', () => {
     const result = envValidationSchema.validate({
       ...baseEnvironment,
       EKYC_SERVICE_URL: 'https://ekyc.example.com',

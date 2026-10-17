@@ -78,12 +78,12 @@ describe('PaymentProviderRegistry', () => {
     expect(JSON.stringify(listed)).not.toContain(TEST_PAYMENTS.vnpay.tmnCode)
   })
 
-  it('lists Mộc Bank as an external gateway without credentials or URLs', () => {
+  it('lists Ví Mộc as an external gateway without credentials or URLs', () => {
     const registry = createRegistry(['mocbank', 'mock-bank'])
     const listed = registry.listProviders()
 
     expect(listed).toEqual([
-      { provider: 'mocbank', label: 'Mộc Bank (sandbox)', simulation: false },
+      { provider: 'mocbank', label: 'Ví Mộc (sandbox)', simulation: false },
       { provider: 'mock-bank', label: 'Mock Bank (sandbox)', simulation: true },
     ])
     expect(registry.get('mocbank').name).toBe('mocbank')
