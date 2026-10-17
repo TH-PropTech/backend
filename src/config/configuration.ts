@@ -3,6 +3,7 @@ export const SELECTABLE_PAYMENT_PROVIDERS = [
   'vnpay',
   'momo',
   'zalopay',
+  'mocbank',
 ] as const
 export type SelectablePaymentProvider =
   (typeof SELECTABLE_PAYMENT_PROVIDERS)[number]
@@ -34,6 +35,13 @@ export type PaymentsConfig = {
     endpoint: string
     returnUrl: string
     callbackUrl: string
+  }
+  mocbank: {
+    baseUrl: string
+    merchantId: string
+    merchantSecret: string
+    returnUrl: string
+    webhookUrl: string
   }
 }
 
@@ -273,6 +281,20 @@ export const configuration = (): {
           'ZALOPAY_CALLBACK_URL',
           'http://localhost:3001/api/v1/bank/zalopay/callback'
         ),
+      },
+      mocbank: {
+        // Trailing slash stripped: adapters append `/api/...` paths.
+        baseUrl: envOr(
+          'MOCBANK_BASE_URL',
+          'https://bank-sanboxv1.vercel.app'
+        ).replace(/\/+$/, ''),
+        merchantId: envOr('MOCBANK_MERCHANT_ID', ''),
+        merchantSecret: envOr('MOCBANK_MERCHANT_SECRET', ''),
+        returnUrl: envOr(
+          'MOCBANK_RETURN_URL',
+          'http://localhost:3001/api/v1/bank/mocbank/return'
+        ),
+        webhookUrl: envOr('MOCBANK_WEBHOOK_URL', ''),
       },
     },
   },

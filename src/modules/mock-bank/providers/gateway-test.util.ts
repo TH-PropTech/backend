@@ -2,7 +2,7 @@ import type { PaymentsConfig } from '../../../config/configuration'
 
 /** Synthetic sandbox-shaped config shared by gateway specs (no real keys). */
 export const TEST_PAYMENTS: PaymentsConfig = {
-  enabledProviders: ['mock-bank', 'vnpay', 'momo', 'zalopay'],
+  enabledProviders: ['mock-bank', 'vnpay', 'momo', 'zalopay', 'mocbank'],
   gatewayTimeoutMs: 5000,
   attemptTtlMinutes: 15,
   clientReturnUrl: 'http://localhost:3000',
@@ -29,6 +29,13 @@ export const TEST_PAYMENTS: PaymentsConfig = {
     returnUrl: 'http://localhost:3001/api/v1/bank/zalopay/return',
     callbackUrl: 'https://tunnel.example/api/v1/bank/zalopay/callback',
   },
+  mocbank: {
+    baseUrl: 'https://moc.example.test',
+    merchantId: 'MB_TEST0001',
+    merchantSecret: 'mocbank-test-secret',
+    returnUrl: 'http://localhost:3001/api/v1/bank/mocbank/return',
+    webhookUrl: 'https://tunnel.example/api/v1/bank/mocbank/webhook',
+  },
 }
 
 /** Every secret in TEST_PAYMENTS, for log-hygiene assertions. */
@@ -38,6 +45,7 @@ export const TEST_SECRETS = [
   TEST_PAYMENTS.momo.secretKey,
   TEST_PAYMENTS.zalopay.key1,
   TEST_PAYMENTS.zalopay.key2,
+  TEST_PAYMENTS.mocbank.merchantSecret,
 ]
 
 export function testConfigService(
@@ -55,6 +63,7 @@ export function testConfigService(
     'rentalFlow.payments.vnpay': payments.vnpay,
     'rentalFlow.payments.momo': payments.momo,
     'rentalFlow.payments.zalopay': payments.zalopay,
+    'rentalFlow.payments.mocbank': payments.mocbank,
     ...extra,
   }
   return {

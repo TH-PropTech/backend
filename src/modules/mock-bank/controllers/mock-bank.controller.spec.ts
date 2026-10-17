@@ -4,7 +4,13 @@ import {
   HttpStatus,
   NotFoundException,
 } from '@nestjs/common'
+import { createHmac } from 'node:crypto'
 import { MockBankController } from './mock-bank.controller'
+import { MocbankCallbackVerifier } from '../providers/mocbank-callback.verifier'
+import {
+  TEST_PAYMENTS,
+  testConfigService,
+} from '../providers/gateway-test.util'
 
 const headers = {
   'x-bank-timestamp': '1000',
@@ -21,13 +27,15 @@ function createController(
   service: object = {},
   registry: object = {},
   gateway: object = {},
-  payouts: object = {}
+  payouts: object = {},
+  mocbankVerifier: object = {}
 ): MockBankController {
   return new MockBankController(
     service as never,
     registry as never,
     gateway as never,
-    payouts as never
+    payouts as never,
+    mocbankVerifier as never
   )
 }
 
@@ -187,6 +195,7 @@ describe('MockBankController', () => {
     ['vnpayReturn', 'vnpay'],
     ['momoReturn', 'momo'],
     ['zalopayReturn', 'zalopay'],
+    ['mocbankReturn', 'mocbank'],
   ] as const)(
     '%s redirects to the server-built client URL',
     async (method, provider) => {
@@ -278,6 +287,181 @@ describe('MockBankController', () => {
       return_code: -1,
       return_message: 'mac not equal',
     })
+  })
+
+  describe('mocbankWebhook', () => {
+    const secret = TEST_PAYMENTS.mocbank.merchantSecret
+    const verifier = new MocbankCallbackVerifier(testConfigService() as never)
+
+    function webhookRequest(
+      body: Record<string, unknown>,
+      options: { ts?: number; raw?: string; signAs?: string } = {}
+    ): never {
+      const raw = options.raw ?? JSON.stringify(body)
+      const ts = String(options.ts ?? Date.now())
+      return {
+        rawBody: Buffer.from(raw, 'utf8'),
+        headers: {
+          'x-sandbox-timestamp': ts,
+          'x-sandbox-signature': createHmac('sha256', secret)
+            .update(`${ts}.${options.signAs ?? raw}`)
+            .digest('hex'),
+        },
+      } as never
+    }
+
+    function setup(result: object = { ok: true }): {
+      controller: MockBankController
+      gateway: { handleNotify: jest.Mock; toMocbankStatus: jest.Mock }
+      response: ReturnType<typeof fakeResponse>
+    } {
+      const gateway = {
+        handleNotify: jest.fn().mockResolvedValue(result),
+        toMocbankStatus: jest.fn().mockReturnValue(200),
+      }
+      return {
+        controller: createController({}, {}, gateway, {}, verifier),
+        gateway,
+        response: fakeResponse(),
+      }
+    }
+
+    const successBody = {
+      event: 'payment.success',
+      paymentId: 'PAY_ABC123',
+      orderId: 'MOCBANK-abc',
+      amount: 5_000_000,
+    }
+
+    it('answers 401 and touches no attempt when the signature is wrong', async () => {
+      const { controller, gateway, response } = setup()
+
+      await controller.mocbankWebhook(
+        webhookRequest(successBody, { signAs: 'tampered' }),
+        response as never
+      )
+
+      expect(response.status).toHaveBeenCalledWith(401)
+      expect(response.end).toHaveBeenCalled()
+      expect(gateway.handleNotify).not.toHaveBeenCalled()
+    })
+
+    it('answers 401 when the timestamp is stale', async () => {
+      const { controller, gateway, response } = setup()
+
+      await controller.mocbankWebhook(
+        webhookRequest(successBody, { ts: Date.now() - 6 * 60_000 }),
+        response as never
+      )
+
+      expect(response.status).toHaveBeenCalledWith(401)
+      expect(gateway.handleNotify).not.toHaveBeenCalled()
+    })
+
+    it('answers 401 when the raw body is unavailable', async () => {
+      const { controller, gateway, response } = setup()
+
+      await controller.mocbankWebhook(
+        { headers: {} } as never,
+        response as never
+      )
+
+      expect(response.status).toHaveBeenCalledWith(401)
+      expect(gateway.handleNotify).not.toHaveBeenCalled()
+    })
+
+    it('answers 401 when a proxy re-serialized the body', async () => {
+      const { controller, gateway, response } = setup()
+
+      await controller.mocbankWebhook(
+        webhookRequest(successBody, {
+          raw: JSON.stringify(successBody, null, 2),
+          signAs: JSON.stringify(successBody),
+        }),
+        response as never
+      )
+
+      expect(response.status).toHaveBeenCalledWith(401)
+      expect(gateway.handleNotify).not.toHaveBeenCalled()
+    })
+
+    it('answers 200 to webhook.test without touching any attempt', async () => {
+      const { controller, gateway, response } = setup()
+
+      await controller.mocbankWebhook(
+        webhookRequest({ event: 'webhook.test' }),
+        response as never
+      )
+
+      expect(response.status).toHaveBeenCalledWith(200)
+      expect(response.end).toHaveBeenCalled()
+      expect(gateway.handleNotify).not.toHaveBeenCalled()
+    })
+
+    it('hands a verified body to the shared callback service and maps the status', async () => {
+      const result = { ok: true, outcome: 'settled' }
+      const { controller, gateway, response } = setup(result)
+
+      await controller.mocbankWebhook(
+        webhookRequest(successBody),
+        response as never
+      )
+
+      expect(gateway.handleNotify).toHaveBeenCalledWith('mocbank', successBody)
+      expect(gateway.toMocbankStatus).toHaveBeenCalledWith(result)
+      expect(response.status).toHaveBeenCalledWith(200)
+      expect(response.end).toHaveBeenCalled()
+    })
+
+    it.each([400, 503])(
+      'relays status %d from the callback service',
+      async status => {
+        const { controller, gateway, response } = setup({ ok: false })
+        gateway.toMocbankStatus.mockReturnValue(status)
+
+        await controller.mocbankWebhook(
+          webhookRequest(successBody),
+          response as never
+        )
+
+        expect(response.status).toHaveBeenCalledWith(status)
+      }
+    )
+
+    it('rethrows unexpected verifier errors instead of answering 401', async () => {
+      const broken = {
+        verifyWebhookEnvelope: jest.fn().mockImplementation(() => {
+          throw new Error('config missing')
+        }),
+      }
+      const controller = createController({}, {}, {}, {}, broken)
+
+      await expect(
+        controller.mocbankWebhook(
+          webhookRequest(successBody),
+          fakeResponse() as never
+        )
+      ).rejects.toThrow('config missing')
+    })
+  })
+
+  it('redirects a Mộc Bank return to the mobile deep link', async () => {
+    const gateway = {
+      handleReturn: jest
+        .fn()
+        .mockResolvedValue('thproptech://payment-result?status=succeeded'),
+    }
+    const response = fakeResponse()
+
+    await createController({}, {}, gateway).mocbankReturn(
+      { moc_order_id: 'MOCBANK-abc' },
+      response as never
+    )
+
+    expect(response.redirect).toHaveBeenCalledWith(
+      302,
+      'thproptech://payment-result?status=succeeded'
+    )
   })
 
   it('settles a payout as success for the authenticated landlord', async () => {

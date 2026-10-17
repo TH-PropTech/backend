@@ -110,7 +110,7 @@ function validateFabricConfiguration(
 }
 
 const PROVIDER_CSV_PATTERN =
-  /^\s*(mock-bank|vnpay|momo|zalopay)(\s*,\s*(mock-bank|vnpay|momo|zalopay))*\s*$/
+  /^\s*(mock-bank|vnpay|momo|zalopay|mocbank)(\s*,\s*(mock-bank|vnpay|momo|zalopay|mocbank))*\s*$/
 const HTTP_URL = Joi.string()
   .uri({ scheme: ['http', 'https'] })
   .allow('')
@@ -125,10 +125,12 @@ const GATEWAY_REQUIRED_KEYS = {
   vnpay: ['VNPAY_TMN_CODE', 'VNPAY_HASH_SECRET'],
   momo: ['MOMO_PARTNER_CODE', 'MOMO_ACCESS_KEY', 'MOMO_SECRET_KEY'],
   zalopay: ['ZALOPAY_APP_ID', 'ZALOPAY_KEY1', 'ZALOPAY_KEY2'],
+  mocbank: ['MOCBANK_MERCHANT_ID', 'MOCBANK_MERCHANT_SECRET'],
 } as const
 const GATEWAY_NOTIFY_URL_KEYS = {
   momo: 'MOMO_IPN_URL',
   zalopay: 'ZALOPAY_CALLBACK_URL',
+  mocbank: 'MOCBANK_WEBHOOK_URL',
 } as const
 
 function validateEnabledGateways(
@@ -202,7 +204,15 @@ export const envValidationSchema = Joi.object({
   CLOUDINARY_API_SECRET: Joi.string().allow('').optional(),
   RENTAL_FLOW_V4_ENABLED: Joi.boolean().default(false),
   PAYMENT_PROVIDER: Joi.string()
-    .valid('mock-bank', 'vnpay', 'momo', 'zalopay', 'sepay', 'techcombank')
+    .valid(
+      'mock-bank',
+      'vnpay',
+      'momo',
+      'zalopay',
+      'mocbank',
+      'sepay',
+      'techcombank'
+    )
     .default('mock-bank'),
   PAYMENT_PROVIDERS_ENABLED: Joi.string()
     .pattern(PROVIDER_CSV_PATTERN)
@@ -248,6 +258,11 @@ export const envValidationSchema = Joi.object({
   ZALOPAY_ENDPOINT: HTTPS_URL,
   ZALOPAY_RETURN_URL: HTTP_URL,
   ZALOPAY_CALLBACK_URL: HTTP_URL,
+  MOCBANK_MERCHANT_ID: Joi.string().allow('').optional(),
+  MOCBANK_MERCHANT_SECRET: Joi.string().allow('').optional(),
+  MOCBANK_BASE_URL: HTTPS_URL,
+  MOCBANK_RETURN_URL: HTTP_URL,
+  MOCBANK_WEBHOOK_URL: HTTP_URL,
   FABRIC_ENABLED: Joi.boolean().default(false),
   FABRIC_EXPLORER_TX_URL_TEMPLATE: Joi.string()
     .pattern(/^\S*\{txId\}\S*$/)

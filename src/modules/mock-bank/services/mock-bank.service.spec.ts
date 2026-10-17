@@ -3,6 +3,7 @@ import { ObjectId } from 'mongodb'
 import { ConflictException } from '@nestjs/common'
 import { createHash } from 'node:crypto'
 import { MockBankService } from './mock-bank.service'
+import { TEST_PAYMENTS } from '../providers/gateway-test.util'
 import { RentalTransactionEventService } from '../../rental/services/rental-transaction-event.service'
 import type { RentalTransactionEvent } from '../../rental/schemas/rental-transaction-event.schema'
 
@@ -1377,6 +1378,61 @@ describe('MockBankService', () => {
       )
     })
 
+    it('settles a late Mộc Bank success on an attempt expired by a provider switch', async () => {
+      const context = createContext()
+      context.configService.get.mockImplementation((key: string) =>
+        key === 'rentalFlow.payments' ? TEST_PAYMENTS : 'test'
+      )
+      Object.assign(context.attempt, {
+        provider: 'mocbank',
+        txRef: 'MOCBANK-old',
+        status: 'expired',
+      })
+
+      await expect(
+        context.service.settleVerifiedAttempt(
+          context.attempt as never,
+          { succeeded: true, providerTransactionId: 'TX_LATE' },
+          'digest'
+        )
+      ).resolves.toBe('settled')
+      expect(context.paymentRepository.save).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'paid' })
+      )
+      expect(context.attempt).toMatchObject({
+        status: 'succeeded',
+        providerTransactionId: 'TX_LATE',
+      })
+    })
+
+    it('records duplicate-paid when a late Mộc Bank success meets a target paid elsewhere', async () => {
+      const context = createContext()
+      context.configService.get.mockImplementation((key: string) =>
+        key === 'rentalFlow.payments' ? TEST_PAYMENTS : 'test'
+      )
+      Object.assign(context.service, {
+        transactionEventService: {
+          record: jest.fn().mockResolvedValue(undefined),
+        },
+      })
+      Object.assign(context.attempt, {
+        provider: 'mocbank',
+        txRef: 'MOCBANK-old',
+        status: 'expired',
+      })
+      context.payment.status = 'paid'
+      Object.assign(context.payment, { txRef: 'VNPAY-OTHER' })
+
+      await expect(
+        context.service.settleVerifiedAttempt(
+          context.attempt as never,
+          { succeeded: true, providerTransactionId: 'TX_LATE' },
+          'digest'
+        )
+      ).resolves.toBe('duplicate-paid')
+      expect(context.paymentRepository.save).not.toHaveBeenCalled()
+    })
+
     it('releases the lock when settlement throws', async () => {
       const context = createContext()
       context.paymentRepository.findOne.mockResolvedValue(null)
@@ -1447,7 +1503,11 @@ describe('MockBankService', () => {
         })
       )
       expect(vnpayAdapter.createPaymentIntent).toHaveBeenCalledWith(
-        expect.objectContaining({ txRef: 'VNPAY-new', clientIp: '10.0.0.1' })
+        expect.objectContaining({
+          txRef: 'VNPAY-new',
+          clientIp: '10.0.0.1',
+          clientChannel: 'mobile',
+        })
       )
     })
 
@@ -1489,6 +1549,46 @@ describe('MockBankService', () => {
       expect(context.attemptRepository.save).toHaveBeenNthCalledWith(
         2,
         expect.objectContaining({ txRef: 'MOMO-card', momoMethod: 'card' })
+      )
+    })
+
+    it('creates a Mộc Bank attempt carrying the client channel', async () => {
+      const context = createContext()
+      const mocbankAdapter = {
+        name: 'mocbank' as const,
+        newTxRef: jest.fn().mockReturnValue('MOCBANK-new'),
+        createPaymentIntent: jest.fn().mockResolvedValue({
+          provider: 'mocbank',
+          txRef: 'MOCBANK-new',
+          redirectUrl: 'https://moc.example.test/pay/PAY_1',
+          expiresAt: new Date(Date.now() + 60_000),
+        }),
+      }
+      context.providerRegistry.get.mockReturnValue(mocbankAdapter)
+
+      const result = await context.service.initRentPayment(
+        paymentId,
+        tenantId,
+        { provider: 'mocbank', clientChannel: 'mobile' }
+      )
+
+      expect(mocbankAdapter.createPaymentIntent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          txRef: 'MOCBANK-new',
+          amount: 2_000_000,
+          clientChannel: 'mobile',
+        })
+      )
+      expect(result).toMatchObject({
+        provider: 'mocbank',
+        deepLink: 'https://moc.example.test/pay/PAY_1',
+      })
+      expect(context.attemptRepository.save).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          provider: 'mocbank',
+          clientChannel: 'mobile',
+          status: 'pending',
+        })
       )
     })
 
