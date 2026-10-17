@@ -57,13 +57,43 @@ describe('GatewayCallbackService', () => {
     expect(context.verifier.verify).toHaveBeenCalledWith(
       { orderId: 'MOMO-1' },
       'notify',
-      { txRef: 'MOMO-1', amount: 2_000_000 }
+      { txRef: 'MOMO-1', amount: 2_000_000, payeeAccountNumber: null }
     )
     expect(context.mockBankService.settleVerifiedAttempt).toHaveBeenCalledWith(
       context.attempt,
       expect.objectContaining({ succeeded: true }),
       expect.stringMatching(/^[a-f0-9]{64}$/)
     )
+  })
+
+  it('verifies against the payee account stored on the attempt', async () => {
+    const context = createContext({ payeeAccountNumber: '810000000002' })
+
+    await context.service.handleNotify('momo', { orderId: 'MOMO-1' })
+
+    expect(context.verifier.verify).toHaveBeenCalledWith(
+      { orderId: 'MOMO-1' },
+      'notify',
+      {
+        txRef: 'MOMO-1',
+        amount: 2_000_000,
+        payeeAccountNumber: '810000000002',
+      }
+    )
+  })
+
+  it('rejects a payee mismatch without settling', async () => {
+    const context = createContext()
+    context.verifier.verify.mockRejectedValue(
+      new GatewayVerificationError('payee-mismatch')
+    )
+
+    const result = await context.service.handleNotify('momo', {
+      orderId: 'MOMO-1',
+    })
+
+    expect(result).toMatchObject({ ok: false, reason: 'payee-mismatch' })
+    expect(context.mockBankService.settleVerifiedAttempt).not.toHaveBeenCalled()
   })
 
   it('treats a reference owned by another provider as unknown', async () => {

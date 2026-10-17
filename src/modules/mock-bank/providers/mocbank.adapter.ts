@@ -4,6 +4,7 @@ import {
   Logger,
   Optional,
   ServiceUnavailableException,
+  UnprocessableEntityException,
 } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { randomBytes } from 'node:crypto'
@@ -94,6 +95,10 @@ export class MocbankAdapter implements PaymentProviderAdapter {
       ...(config.webhookUrl ? { webhookUrl: config.webhookUrl } : {}),
       expiresInMinutes,
       channel: input.clientChannel ?? 'web',
+      // Có thì tiền đi thẳng vào tài khoản này (chủ nhà), không qua ví của sàn.
+      ...(input.payeeAccountNumber
+        ? { payeeAccountNumber: input.payeeAccountNumber }
+        : {}),
     }
     const reply = await postToGateway(
       this.fetcher,
@@ -112,6 +117,10 @@ export class MocbankAdapter implements PaymentProviderAdapter {
     const result = asRecord(reply.body)
     const data = asRecord(result?.data)
     const paymentUrl = data?.paymentUrl
+    if (asRecord(result?.error)?.code === 'PAYEE_NOT_FOUND') {
+      // Tài khoản nhận của chủ nhà không tồn tại trên Mộc Bank: khách chưa mất tiền.
+      throw new UnprocessableEntityException('LANDLORD_PAYEE_ACCOUNT_INVALID')
+    }
     if (
       !isSuccessStatus(reply.status) ||
       !result ||

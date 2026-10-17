@@ -19,6 +19,8 @@ import {
   type GatewayFetcher,
 } from './gateway.util'
 
+type Expected = Parameters<GatewayVerifier['verify']>[2]
+
 const WEBHOOK_TOLERANCE_MS = 5 * 60_000
 const RETURN_TOLERANCE_SECONDS = 15 * 60
 const PAYMENT_ID_PATTERN = /^PAY_[A-Za-z0-9]+$/
@@ -98,7 +100,7 @@ export class MocbankCallbackVerifier implements GatewayVerifier {
   async verify(
     payload: unknown,
     kind: GatewayCallbackKind,
-    expected: { txRef: string; amount: number }
+    expected: Expected
   ): Promise<GatewayVerdict> {
     const record = asRecord(payload)
     if (!record) throw new GatewayVerificationError('invalid-payload')
@@ -109,7 +111,7 @@ export class MocbankCallbackVerifier implements GatewayVerifier {
 
   private async verifyNotify(
     record: Record<string, unknown>,
-    expected: { txRef: string; amount: number }
+    expected: Expected
   ): Promise<GatewayVerdict> {
     const orderId = stringField(record, 'orderId')
     const event = stringField(record, 'event')
@@ -131,7 +133,7 @@ export class MocbankCallbackVerifier implements GatewayVerifier {
 
   private async verifyReturn(
     record: Record<string, unknown>,
-    expected: { txRef: string; amount: number }
+    expected: Expected
   ): Promise<GatewayVerdict> {
     const paymentId = stringField(record, 'moc_payment_id')
     const orderId = stringField(record, 'moc_order_id')
@@ -171,7 +173,7 @@ export class MocbankCallbackVerifier implements GatewayVerifier {
    */
   private async reconcile(
     paymentId: string | null,
-    expected: { txRef: string; amount: number }
+    expected: Expected
   ): Promise<GatewayVerdict> {
     if (!paymentId || !PAYMENT_ID_PATTERN.test(paymentId)) {
       throw new GatewayVerificationError('invalid-payload')
@@ -201,6 +203,13 @@ export class MocbankCallbackVerifier implements GatewayVerifier {
     }
     if (data.status !== 'SUCCESS') {
       throw new GatewayVerificationError('amount-mismatch')
+    }
+    // Tiền phải vào đúng tài khoản đã gắn vào lần thử (chủ nhà), hoặc ví của sàn khi không gắn.
+    if (
+      (stringField(data, 'payeeAccountNumber') ?? null) !==
+      (expected.payeeAccountNumber ?? null)
+    ) {
+      throw new GatewayVerificationError('payee-mismatch')
     }
     return {
       txRef: expected.txRef,

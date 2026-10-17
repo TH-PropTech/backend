@@ -74,6 +74,10 @@ export class PaymentAttempt {
   @Column({ type: 'string', nullable: true })
   clientChannel?: PaymentClientChannel | null
 
+  /** Mộc Bank account that receives the money directly (landlord); null when it goes to the platform. */
+  @Column({ type: 'string', nullable: true })
+  payeeAccountNumber?: string | null
+
   /** MoMo request type the tenant chose; null for other providers. */
   @Column({ type: 'string', nullable: true })
   momoMethod?: MomoPaymentMethod | null

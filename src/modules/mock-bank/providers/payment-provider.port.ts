@@ -41,6 +41,8 @@ export type PaymentIntentInput = {
   momoMethod?: MomoPaymentMethod | undefined
   /** Mộc Bank only; other adapters ignore it. Defaults to `web`. */
   clientChannel?: PaymentClientChannel | undefined
+  /** Mộc Bank only: tài khoản nhận tiền thay cho ví của sàn (chủ nhà). */
+  payeeAccountNumber?: string | undefined
 }
 
 /**
@@ -71,6 +73,7 @@ export type GatewayFailureReason =
   | 'merchant-mismatch'
   | 'unknown-reference'
   | 'amount-mismatch'
+  | 'payee-mismatch'
 
 /** Raised by verifiers; carries no payload data so it is safe to log. */
 export class GatewayVerificationError extends Error {
@@ -87,6 +90,11 @@ export interface GatewayVerifier {
   verify(
     payload: unknown,
     kind: GatewayCallbackKind,
-    expected: { txRef: string; amount: number }
+    expected: {
+      txRef: string
+      amount: number
+      /** Tài khoản nhận đã gắn vào lần thử; null/undefined khi tiền vào ví của sàn. */
+      payeeAccountNumber?: string | null | undefined
+    }
   ): GatewayVerdict | Promise<GatewayVerdict>
 }

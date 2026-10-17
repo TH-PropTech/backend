@@ -12,6 +12,8 @@ import { Payment } from '../../payments/schemas/payment.schema'
 import { User } from '../../users/schemas/user.schema'
 import type { LinkWalletDto } from '../dto/wallet.dto'
 import {
+  MOCBANK_ACCOUNT_PATTERN,
+  MOCBANK_BANK_CODE,
   SUPPORTED_BANKS,
   findBank,
   maskAccountNumber,
@@ -94,11 +96,20 @@ export class WalletsService {
     const bank = findBank(dto.bankCode)
     if (!bank) throw new BadRequestException('WALLET_BANK_NOT_SUPPORTED')
     await this.assertHolderMatchesProfile(userId, dto.accountHolder)
+    const isMocbank = bank.code === MOCBANK_BANK_CODE
+    if (isMocbank && !MOCBANK_ACCOUNT_PATTERN.test(dto.accountNumber)) {
+      throw new BadRequestException('ACCOUNT_NUMBER_INVALID')
+    }
     const bankFields = {
       bankCode: bank.code,
       bankName: bank.name,
       accountHolder: normalizeHolderName(dto.accountHolder),
       accountNumberMasked: maskAccountNumber(dto.accountNumber),
+      // Chỉ tài khoản Mộc Bank mới giữ số đầy đủ (làm tài khoản nhận trực tiếp).
+      mocbankAccountNumber: isMocbank ? dto.accountNumber : null,
+      provider: isMocbank ? ('mocbank' as const) : ('mock-bank' as const),
+      externalAccountRef: `${isMocbank ? 'mocbank' : 'mock-account'}:${userId}`,
+      simulation: !isMocbank,
     }
     const existing = await this.walletRepository.findOne({ where: { userId } })
     if (existing) {
@@ -180,6 +191,14 @@ export class WalletsService {
     }
   }
 
+  /** Tài khoản Mộc Bank nhận tiền trực tiếp của chủ nhà; null khi chưa liên kết. */
+  async getMocbankAccountNumber(userId: string): Promise<string | null> {
+    const wallet = await this.walletRepository.findOne({
+      where: { userId, status: 'linked', provider: 'mocbank' },
+    })
+    return wallet?.mocbankAccountNumber ?? null
+  }
+
   /** Hóa đơn phí sàn chủ nhà còn phải trả qua cổng thanh toán (`POST /bank/invoice/init`). */
   async listPayableInvoices(userId: string): Promise<PayableInvoice[]> {
     const invoices = await this.paymentRepository.find({
@@ -222,17 +241,21 @@ export class WalletsService {
     userId: string,
     bankFields: Pick<
       Wallet,
-      'bankCode' | 'bankName' | 'accountHolder' | 'accountNumberMasked'
+      | 'bankCode'
+      | 'bankName'
+      | 'accountHolder'
+      | 'accountNumberMasked'
+      | 'mocbankAccountNumber'
+      | 'provider'
+      | 'externalAccountRef'
+      | 'simulation'
     >
   ): Promise<Wallet> {
     try {
       return await this.walletRepository.save(
         this.walletRepository.create({
           userId,
-          provider: 'mock-bank',
-          externalAccountRef: `mock-account:${userId}`,
           status: 'linked',
-          simulation: true,
           ...bankFields,
           linkedAt: new Date(),
         })

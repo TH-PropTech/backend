@@ -44,10 +44,21 @@ import { Contract } from '../../contracts/schemas/contract.schema'
 import { MoveInSettlement } from '../../rental/schemas/move-in-settlement.schema'
 import { MoveInSettlementsService } from '../../rental/services/move-in-settlements.service'
 import { PayoutsService } from '../../wallets/services/payouts.service'
+import { WalletsService } from '../../wallets/services/wallets.service'
 import { RentalTransactionEventService } from '../../rental/services/rental-transaction-event.service'
 import type { RentalTransactionActorRole } from '../../rental/schemas/rental-transaction-event.schema'
 
 const CALLBACK_WINDOW_MS = 5 * 60 * 1000
+
+/** Khoản thuộc về sàn (phí sàn, phí dịch vụ khách thuê), không trả cho chủ nhà. */
+const isPlatformPayment = (payment: Payment): boolean =>
+  payment.type === 'platform-fee' || payment.payeeRole === 'platform'
+
+/** Khách đã trả thẳng vào tài khoản Mộc Bank của chủ nhà (không qua ví sàn). */
+const isDirectReceiptAttempt = (
+  attempt: Pick<PaymentAttempt, 'provider' | 'payeeAccountNumber'>
+): boolean =>
+  attempt.provider === 'mocbank' && Boolean(attempt.payeeAccountNumber)
 
 export type MockPaymentInit = {
   provider: PaymentProviderName
@@ -143,7 +154,9 @@ export class MockBankService {
     @Optional()
     private readonly moveInSettlementsService?: MoveInSettlementsService,
     @Optional()
-    private readonly payoutsService?: PayoutsService
+    private readonly payoutsService?: PayoutsService,
+    @Optional()
+    private readonly walletsService?: WalletsService
   ) {}
 
   private async recordTransactionEvent(input: {
@@ -210,6 +223,7 @@ export class MockBankService {
       paymentType: 'deposit',
       contractId:
         agreement.linkedLeaseContractId ?? contract?._id.toHexString() ?? null,
+      payeeLandlordId: agreement.landlordId,
       options,
     })
     if (!reused) {
@@ -425,6 +439,7 @@ export class MockBankService {
       paymentId: payment._id.toString(),
       paymentType: 'rent',
       contractId: payment.contractId ?? null,
+      payeeLandlordId: isPlatformPayment(payment) ? null : payment.landlordId,
       options,
     })
     return init
@@ -476,7 +491,12 @@ export class MockBankService {
       payment => payment.status !== 'paid' && payment.status !== 'waived'
     )
     if (!payable.length) throw new ConflictException('SETTLEMENT_NOT_PAYABLE')
-    const amount = payable.reduce((sum, payment) => sum + payment.amount, 0)
+    const { group, payeeLandlordId } = this.groupSettlementPayments(
+      this.providerRegistry.get(options.provider).name,
+      payable,
+      settlement.landlordId
+    )
+    const amount = group.reduce((sum, payment) => sum + payment.amount, 0)
     const description = `Settlement ${settlement._id.toHexString()}`
     const { payment } = await this.createAttempt({
       userId: settlement.tenantId,
@@ -485,14 +505,15 @@ export class MockBankService {
       paymentId: settlement._id.toHexString(),
       paymentType: 'settlement',
       contractId: settlement.contractId,
-      paymentIds: payable.map(item => item._id.toHexString()),
+      paymentIds: group.map(item => item._id.toHexString()),
+      payeeLandlordId,
       options,
     })
     return buildPaymentRequest({
       payment,
       invoiceCode: `STL-${settlement._id.toHexString().slice(-8)}`,
       purpose: 'SETTLEMENT',
-      lines: payable.map(item => {
+      lines: group.map(item => {
         const line = unpaidLines.find(
           candidate => candidate.paymentId === item._id.toHexString()
         )
@@ -506,7 +527,14 @@ export class MockBankService {
         }
       }),
       payer: { role: 'tenant' },
-      payee: { role: 'landlord', displayName: 'Landlord' },
+      payee: {
+        role: group.some(item => !isPlatformPayment(item))
+          ? 'landlord'
+          : 'platform',
+        displayName: group.some(item => !isPlatformPayment(item))
+          ? 'Landlord'
+          : 'Platform',
+      },
       dueAt: settlement.dueAt,
       simulation: payment.provider === 'mock-bank',
     })
@@ -797,7 +825,7 @@ export class MockBankService {
   /** Shared paid transition for rent/invoice/settlement payments. */
   private async markPaymentPaid(
     payment: Payment,
-    attempt: Pick<PaymentAttempt, 'txRef'>,
+    attempt: Pick<PaymentAttempt, 'txRef' | 'provider' | 'payeeAccountNumber'>,
     paidAt: Date,
     receiptSecret: string,
     types: { receiptType: string; hashType: string }
@@ -830,21 +858,25 @@ export class MockBankService {
     payment.ledgerStatus = 'pending'
     await this.paymentRepository.save(payment)
     await this.enqueuePaymentLedgerEvent(payment)
-    await this.createPayoutFor(payment)
+    await this.createPayoutFor(payment, attempt)
   }
 
   /** Payout failures must never fail the tenant's already-recorded payment. */
-  private async createPayoutFor(payment: Payment): Promise<void> {
+  private async createPayoutFor(
+    payment: Payment,
+    attempt: Pick<PaymentAttempt, 'provider' | 'payeeAccountNumber'>
+  ): Promise<void> {
     if (!this.payoutsService) return
-    if (payment.type === 'platform-fee' || payment.payeeRole === 'platform') {
-      return
-    }
+    if (isPlatformPayment(payment)) return
     try {
       await this.payoutsService.createForPayment({
         paymentId: payment._id.toHexString(),
         contractId: payment.contractId ?? null,
         landlordId: payment.landlordId,
         amount: payment.amount,
+        directReceipt: isDirectReceiptAttempt(attempt)
+          ? { paidAt: payment.paidAt ?? new Date() }
+          : undefined,
       })
     } catch (error) {
       this.logger.warn(
@@ -924,9 +956,15 @@ export class MockBankService {
     paymentType: PaymentType
     contractId?: string | null
     paymentIds?: string[] | null
+    /** Chủ nhà nhận khoản này; không có khi khoản thuộc về sàn. */
+    payeeLandlordId?: string | null
     options: PaymentInitOptions
   }): Promise<{ payment: MockPaymentInit; reused: boolean }> {
     const adapter = this.providerRegistry.get(input.options.provider)
+    const payeeAccountNumber = await this.resolvePayeeAccount(
+      adapter.name,
+      input.payeeLandlordId
+    )
     const momoMethod =
       adapter.name === 'momo' ? (input.options.momoMethod ?? 'wallet') : null
     const live = await this.attemptRepository.findOne({
@@ -941,6 +979,7 @@ export class MockBankService {
       if (
         live.provider === adapter.name &&
         (live.momoMethod ?? null) === momoMethod &&
+        (live.payeeAccountNumber ?? null) === payeeAccountNumber &&
         live.expiresAt.getTime() > Date.now()
       ) {
         return {
@@ -967,6 +1006,7 @@ export class MockBankService {
       clientIp: input.options.clientIp,
       momoMethod: momoMethod ?? undefined,
       clientChannel: input.options.clientChannel,
+      payeeAccountNumber: payeeAccountNumber ?? undefined,
     })
     const attempt = this.attemptRepository.create({
       provider: intent.provider,
@@ -985,6 +1025,7 @@ export class MockBankService {
       providerTransactionId: null,
       clientChannel: input.options.clientChannel ?? 'web',
       momoMethod,
+      payeeAccountNumber,
     })
     await this.attemptRepository.save(attempt)
     await this.recordTransactionEvent({
@@ -1004,6 +1045,41 @@ export class MockBankService {
       ),
       reused: false,
     }
+  }
+
+  /**
+   * Chỉ Mộc Bank trả thẳng vào tài khoản chủ nhà. Các cổng khác (MoMo, VNPay,
+   * ZaloPay, mock-bank) thu vào sàn và payout chuyển hộ sau (giả lập).
+   */
+  private async resolvePayeeAccount(
+    provider: PaymentProviderName,
+    landlordId: string | null | undefined
+  ): Promise<string | null> {
+    if (!landlordId || provider !== 'mocbank') return null
+    const account =
+      (await this.walletsService?.getMocbankAccountNumber(landlordId)) ?? null
+    if (!account) throw new ConflictException('LANDLORD_WALLET_NOT_LINKED')
+    return account
+  }
+
+  /**
+   * Quyết toán nhận nhà có thể gồm dòng của chủ nhà và dòng của sàn. Với Mộc Bank
+   * trả lần lượt: dòng chủ nhà (kèm tài khoản nhận) rồi dòng của sàn; cổng khác
+   * trả một lần như trước.
+   */
+  private groupSettlementPayments(
+    provider: PaymentProviderName,
+    payable: Payment[],
+    landlordId: string
+  ): { group: Payment[]; payeeLandlordId: string | null } {
+    if (provider !== 'mocbank') {
+      return { group: payable, payeeLandlordId: null }
+    }
+    const landlordLines = payable.filter(item => !isPlatformPayment(item))
+    if (landlordLines.length === 0) {
+      return { group: payable, payeeLandlordId: null }
+    }
+    return { group: landlordLines, payeeLandlordId: landlordId }
   }
 
   private async expireAttempt(attempt: PaymentAttempt): Promise<void> {
@@ -1382,12 +1458,14 @@ export class MockBankService {
       ],
       metadata: { details: { paymentAttemptId: attempt._id.toString() } },
     })
-    await this.createDepositPayout(agreement)
+    await this.createDepositPayout(agreement, attempt, paidAt)
   }
 
   /** Tiền cọc chuyển tiếp về ví chủ nhà như các khoản thanh toán khác; lỗi payout không làm hỏng cọc đã ghi nhận. */
   private async createDepositPayout(
-    agreement: DepositAgreement
+    agreement: DepositAgreement,
+    attempt: Pick<PaymentAttempt, 'provider' | 'payeeAccountNumber'>,
+    paidAt: Date
   ): Promise<void> {
     if (!this.payoutsService) return
     try {
@@ -1396,6 +1474,7 @@ export class MockBankService {
         contractId: agreement.linkedLeaseContractId ?? null,
         landlordId: agreement.landlordId,
         amount: agreement.amount,
+        directReceipt: isDirectReceiptAttempt(attempt) ? { paidAt } : undefined,
       })
     } catch (error) {
       this.logger.warn(

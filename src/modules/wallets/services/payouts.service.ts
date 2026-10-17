@@ -4,6 +4,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { randomBytes } from 'node:crypto'
@@ -12,12 +13,18 @@ import type { MongoRepository } from 'typeorm'
 import { NotificationsService } from '../../notifications/services/notifications.service'
 import { Payout } from '../schemas/payout.schema'
 import { Wallet } from '../schemas/wallet.schema'
+import {
+  MocbankPayoutClient,
+  MocbankPayoutError,
+} from './mocbank-payout.client'
 
 export type PayoutSource = {
   paymentId: string
   contractId: string | null
   landlordId: string
   amount: number
+  /** Có khi khách đã trả thẳng vào tài khoản chủ nhà; payout ghi `paid-out` ngay. */
+  directReceipt?: { paidAt: Date } | undefined
 }
 
 export type PayoutOutcome = 'success' | 'failed'
@@ -42,7 +49,9 @@ export class PayoutsService {
     private readonly payoutRepository: MongoRepository<Payout>,
     @InjectRepository(Wallet)
     private readonly walletRepository: MongoRepository<Wallet>,
-    private readonly notificationsService: NotificationsService
+    private readonly notificationsService: NotificationsService,
+    @Optional()
+    private readonly mocbankPayoutClient?: MocbankPayoutClient
   ) {}
 
   /** Tạo đúng một payout cho mỗi payment; gọi lại sẽ trả payout cũ. */
@@ -64,8 +73,15 @@ export class PayoutsService {
       attempts: 1,
       failureReason: null,
       paidOutAt: null,
+      directReceipt: false,
     })
     try {
+      if (source.directReceipt) {
+        return await this.recordDirectReceipt(
+          payout,
+          source.directReceipt.paidAt
+        )
+      }
       const saved = await this.payoutRepository.save(payout)
       return this.initiate(saved)
     } catch (error) {
@@ -96,6 +112,9 @@ export class PayoutsService {
     const payout = await this.payoutRepository.findOne({ where: { txRef } })
     if (!payout || payout.landlordId !== landlordId) {
       throw new NotFoundException('PAYOUT_NOT_FOUND')
+    }
+    if (payout.directReceipt) {
+      throw new ConflictException('PAYOUT_ALREADY_RECEIVED')
     }
     const wallet = payout.walletId ? await this.findWallet(payout) : null
     if (!wallet?.simulation) {
@@ -149,6 +168,23 @@ export class PayoutsService {
     return payout
   }
 
+  /** Tiền đã vào tài khoản chủ nhà khi thanh toán được xác thực: ghi nhận, không chuyển gì thêm. */
+  private async recordDirectReceipt(
+    payout: Payout,
+    paidAt: Date
+  ): Promise<Payout> {
+    const wallet = await this.walletRepository.findOne({
+      where: { userId: payout.landlordId, status: 'linked' },
+    })
+    payout.walletId = wallet ? wallet._id.toHexString() : null
+    payout.status = 'paid-out'
+    payout.paidOutAt = paidAt
+    payout.directReceipt = true
+    const saved = await this.payoutRepository.save(payout)
+    await this.notifyReceived(saved)
+    return saved
+  }
+
   /** Gắn ví + txRef mới rồi báo chủ nhà; không có ví thì giữ awaiting-wallet. */
   private async initiate(payout: Payout): Promise<Payout> {
     const wallet = await this.walletRepository.findOne({
@@ -162,8 +198,48 @@ export class PayoutsService {
     payout.txRef = `PAYOUT-${randomBytes(12).toString('hex')}`
     payout.status = 'pending'
     const saved = await this.payoutRepository.save(payout)
+    if (this.canRelayToMocbank(wallet))
+      return this.relayToMocbank(saved, wallet)
     await this.notifyPending(saved)
     return saved
+  }
+
+  /** Ví Mộc Bank của chủ nhà: nền tảng chuyển hộ tự động (giả lập), không cần chủ nhà bấm. */
+  private canRelayToMocbank(wallet: Wallet): boolean {
+    return (
+      wallet.provider === 'mocbank' &&
+      Boolean(wallet.mocbankAccountNumber) &&
+      Boolean(this.mocbankPayoutClient?.isConfigured())
+    )
+  }
+
+  private async relayToMocbank(
+    payout: Payout,
+    wallet: Wallet
+  ): Promise<Payout> {
+    const client = this.mocbankPayoutClient
+    if (!client || !wallet.mocbankAccountNumber) return payout
+    try {
+      const { transactionCode } = await client.payout({
+        // Stable across retries, so Mộc Bank never pays the same payout twice.
+        orderId: `PAYOUT-${payout._id.toHexString()}`,
+        amount: payout.receivedAmount,
+        payeeAccountNumber: wallet.mocbankAccountNumber,
+        description: `Chuyển hộ tiền thuê ${payout.contractId ?? payout.paymentId}`,
+      })
+      payout.relayRef = transactionCode
+      await this.payoutRepository.save(payout)
+      return (await this.settle(payout, 'success')).payout
+    } catch (error) {
+      const reason =
+        error instanceof MocbankPayoutError ? error.code : 'TRANSFER_FAILED'
+      this.logger.warn(
+        `Payout ${payout._id.toHexString()} relay failed: ${reason}`
+      )
+      payout.status = 'failed'
+      payout.failureReason = reason
+      return this.payoutRepository.save(payout)
+    }
   }
 
   private async settle(
@@ -236,16 +312,29 @@ export class PayoutsService {
         payout.landlordId,
         `payout:${id}:received`,
         'Bạn đã nhận tiền',
-        `${payout.receivedAmount.toLocaleString('vi-VN')} VND đã được chuyển về tài khoản ngân hàng đã liên kết của bạn (sàn chuyển ${payout.sentAmount.toLocaleString('vi-VN')} VND).`,
+        this.receivedMessage(payout),
         'PAYOUT_RECEIVED',
         {
           payoutId: id,
           contractId: payout.contractId,
           sentAmount: payout.sentAmount,
           receivedAmount: payout.receivedAmount,
+          simulatedRelay: Boolean(payout.relayRef),
+          transactionCode: payout.relayRef ?? null,
         }
       )
     )
+  }
+
+  private receivedMessage(payout: Payout): string {
+    const amount = payout.receivedAmount.toLocaleString('vi-VN')
+    if (payout.directReceipt) {
+      return `Khách đã thanh toán trực tiếp ${amount} VND vào tài khoản Mộc Bank đã liên kết của bạn.`
+    }
+    if (payout.relayRef) {
+      return `Khách đã thanh toán qua cổng của nền tảng. Nền tảng đã chuyển hộ ${amount} VND vào ví Mộc Bank của bạn (mã ${payout.relayRef}). Đây là chuyển hộ giả lập trên môi trường thử nghiệm: nền tảng nhận tiền rồi chuyển lại vào ví Mộc Bank.`
+    }
+    return `${amount} VND đã được chuyển về tài khoản ngân hàng đã liên kết của bạn (sàn chuyển ${payout.sentAmount.toLocaleString('vi-VN')} VND).`
   }
 
   /** Lỗi thông báo không được làm hỏng payout đã ghi. */

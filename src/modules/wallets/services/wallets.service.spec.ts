@@ -340,3 +340,88 @@ describe('WalletsService.listTransactions (D5: dựng từ Payout + Payment)', (
     expect(paymentArg.where.payerId).toBe(OTHER_USER)
   })
 })
+
+describe('WalletsService Mộc Bank account (tiền chủ nhà nhận trực tiếp)', () => {
+  const MOC = { ...LINK, bankCode: 'MOCBANK', accountNumber: '810000000002' }
+
+  it('links a Mộc Bank account, keeping the full number server-side only', async () => {
+    const { service, wallets } = setup()
+
+    const { wallet, newlyLinked } = await service.link(USER, MOC)
+
+    expect(newlyLinked).toBe(true)
+    expect(wallets.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'mocbank',
+        simulation: false,
+        mocbankAccountNumber: '810000000002',
+        externalAccountRef: `mocbank:${USER}`,
+        accountNumberMasked: '****0002',
+      })
+    )
+    expect(wallet).toMatchObject({
+      simulation: false,
+      bank: { code: 'MOCBANK', name: 'Mộc Bank (sandbox)' },
+      accountNumberMasked: '****0002',
+    })
+    expect(JSON.stringify(wallet)).not.toContain('810000000002')
+  })
+
+  it.each(['81000000000', '8100000000021', '81000000000a'])(
+    'rejects the Mộc Bank number %s that is not 12 digits',
+    async accountNumber => {
+      const { service, wallets } = setup()
+
+      await expect(
+        service.link(USER, { ...MOC, accountNumber })
+      ).rejects.toThrow('ACCOUNT_NUMBER_INVALID')
+      expect(wallets.save).not.toHaveBeenCalled()
+    }
+  )
+
+  it('drops the Mộc Bank number and returns to simulation when re-linked to another bank', async () => {
+    const existing = {
+      _id: new ObjectId(),
+      userId: USER,
+      status: 'linked',
+      provider: 'mocbank',
+      simulation: false,
+      mocbankAccountNumber: '810000000002',
+      linkedAt: new Date('2026-01-01'),
+    }
+    const { service, wallets } = setup({ wallet: existing })
+
+    await service.link(USER, LINK)
+
+    expect(wallets.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'mock-bank',
+        simulation: true,
+        mocbankAccountNumber: null,
+        bankCode: 'VCB',
+      })
+    )
+  })
+
+  it('returns the account only for a linked Mộc Bank wallet', async () => {
+    const linked = setup({
+      wallet: { userId: USER, mocbankAccountNumber: '810000000002' },
+    })
+    await expect(linked.service.getMocbankAccountNumber(USER)).resolves.toBe(
+      '810000000002'
+    )
+    expect(linked.wallets.findOne).toHaveBeenCalledWith({
+      where: { userId: USER, status: 'linked', provider: 'mocbank' },
+    })
+
+    const none = setup({ wallet: null })
+    await expect(none.service.getMocbankAccountNumber(USER)).resolves.toBeNull()
+
+    const otherBank = setup({
+      wallet: { userId: USER, mocbankAccountNumber: null },
+    })
+    await expect(
+      otherBank.service.getMocbankAccountNumber(USER)
+    ).resolves.toBeNull()
+  })
+})

@@ -7,6 +7,7 @@ import { PayoutsController } from './controllers/payouts.controller'
 import { WalletController } from './controllers/wallet.controller'
 import { Payout } from './schemas/payout.schema'
 import { Wallet } from './schemas/wallet.schema'
+import { MocbankPayoutClient } from './services/mocbank-payout.client'
 import { PayoutsService } from './services/payouts.service'
 import { WalletsService } from './services/wallets.service'
 
@@ -16,7 +17,7 @@ import { WalletsService } from './services/wallets.service'
     NotificationsModule,
   ],
   controllers: [PayoutsController, WalletController],
-  providers: [WalletsService, PayoutsService],
+  providers: [WalletsService, PayoutsService, MocbankPayoutClient],
   exports: [WalletsService, PayoutsService],
 })
 export class WalletsModule {}

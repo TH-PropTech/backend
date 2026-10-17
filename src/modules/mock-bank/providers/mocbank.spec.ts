@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Logger,
   ServiceUnavailableException,
+  UnprocessableEntityException,
 } from '@nestjs/common'
 import { createHmac } from 'node:crypto'
 import { MocbankAdapter } from './mocbank.adapter'
@@ -221,6 +222,43 @@ describe('MocbankAdapter', () => {
     expect(logged).toContain('MERCHANT_UNAUTHORIZED')
     expect(logged).not.toContain(moc.merchantSecret)
     warn.mockRestore()
+  })
+
+  it('sends the landlord payeeAccountNumber so money skips the platform wallet', async () => {
+    const fetcher = jsonFetcher(createReply())
+
+    await adapter(fetcher).createPaymentIntent({
+      ...input,
+      payeeAccountNumber: '810000000002',
+    })
+
+    expect(sentBody(fetcher)).toMatchObject({
+      payeeAccountNumber: '810000000002',
+    })
+  })
+
+  it('omits payeeAccountNumber for platform-owned payments', async () => {
+    const fetcher = jsonFetcher(createReply())
+
+    await adapter(fetcher).createPaymentIntent(input)
+
+    expect(sentBody(fetcher)).not.toHaveProperty('payeeAccountNumber')
+  })
+
+  it('maps PAYEE_NOT_FOUND to 422 LANDLORD_PAYEE_ACCOUNT_INVALID', async () => {
+    const fetcher = httpFetcher(400, {
+      success: false,
+      error: { code: 'PAYEE_NOT_FOUND', message: 'x' },
+    })
+
+    await expect(
+      adapter(fetcher).createPaymentIntent({
+        ...input,
+        payeeAccountNumber: '810000000009',
+      })
+    ).rejects.toThrow(
+      new UnprocessableEntityException('LANDLORD_PAYEE_ACCOUNT_INVALID')
+    )
   })
 
   it('returns an unlinked external account link', async () => {
@@ -501,6 +539,70 @@ describe('MocbankCallbackVerifier', () => {
       await expect(
         failureOf(verifierWith(jest.fn()).verify(null, 'notify', expected))
       ).resolves.toBe('invalid-payload')
+    })
+  })
+
+  describe('payee reconciliation', () => {
+    const payee = '810000000002'
+
+    it('settles when Mộc Bank confirms the landlord account', async () => {
+      const fetcher = jsonFetcher(reconcileReply({ payeeAccountNumber: payee }))
+
+      const verdict = await verifierWith(fetcher).verify(
+        successBody,
+        'notify',
+        { ...expected, payeeAccountNumber: payee }
+      )
+
+      expect(verdict.succeeded).toBe(true)
+    })
+
+    it.each([
+      ['another account', { payeeAccountNumber: '810000000099' }, payee],
+      ['no account (money went to the platform)', {}, payee],
+      [
+        'an account for a platform payment',
+        { payeeAccountNumber: payee },
+        null,
+      ],
+    ])(
+      'rejects reconciliation that reports %s',
+      async (_l, reply, expectedPayee) => {
+        const fetcher = jsonFetcher(reconcileReply(reply))
+
+        const failure = await failureOf(
+          verifierWith(fetcher).verify(successBody, 'notify', {
+            ...expected,
+            payeeAccountNumber: expectedPayee,
+          })
+        )
+
+        expect(failure).toBe('payee-mismatch')
+      }
+    )
+
+    it('also checks the payee on a signed browser return', async () => {
+      const ts = String(Math.floor(Date.now() / 1000))
+      const sig = sign(['PAY_ABC123', 'MOCBANK-abc', 'SUCCESS', ts].join('.'))
+      const fetcher = jsonFetcher(
+        reconcileReply({ payeeAccountNumber: '810000000099' })
+      )
+
+      const failure = await failureOf(
+        verifierWith(fetcher).verify(
+          {
+            moc_payment_id: 'PAY_ABC123',
+            moc_order_id: 'MOCBANK-abc',
+            moc_status: 'SUCCESS',
+            moc_ts: ts,
+            moc_sig: sig,
+          },
+          'return',
+          { ...expected, payeeAccountNumber: payee }
+        )
+      )
+
+      expect(failure).toBe('payee-mismatch')
     })
   })
 

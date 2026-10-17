@@ -1630,4 +1630,414 @@ describe('MockBankService', () => {
       expect(context.attemptRepository.save).not.toHaveBeenCalled()
     })
   })
+  describe('landlord direct receipt (Mộc Bank)', () => {
+    const LANDLORD_ACCOUNT = '810000000002'
+
+    function gatewayAdapter(name: 'mocbank' | 'momo'): {
+      name: typeof name
+      newTxRef: jest.Mock
+      createPaymentIntent: jest.Mock
+    } {
+      return {
+        name,
+        newTxRef: jest.fn().mockReturnValue('GW-new'),
+        createPaymentIntent: jest.fn().mockResolvedValue({
+          provider: name,
+          txRef: 'GW-new',
+          redirectUrl: 'https://gateway.example.test/pay/PAY_1',
+          expiresAt: new Date(Date.now() + 60_000),
+        }),
+      }
+    }
+
+    function prepare(
+      name: 'mocbank' | 'momo',
+      account: string | null = LANDLORD_ACCOUNT
+    ): {
+      context: ReturnType<typeof createContext>
+      adapter: ReturnType<typeof gatewayAdapter>
+    } {
+      const context = createContext()
+      const adapter = gatewayAdapter(name)
+      context.providerRegistry.get.mockReturnValue(adapter)
+      Reflect.set(context.service, 'walletsService', {
+        getMocbankAccountNumber: jest.fn().mockResolvedValue(account),
+      })
+      Reflect.set(context.payment, 'landlordId', 'landlord-1')
+      context.attemptRepository.findOne.mockResolvedValueOnce(null)
+      return { context, adapter }
+    }
+
+    it('sends the landlord account to Mộc Bank and stores it on the attempt', async () => {
+      const { context, adapter } = prepare('mocbank')
+
+      await context.service.initRentPayment(paymentId, tenantId, {
+        provider: 'mocbank',
+      })
+
+      expect(adapter.createPaymentIntent).toHaveBeenCalledWith(
+        expect.objectContaining({ payeeAccountNumber: LANDLORD_ACCOUNT })
+      )
+      expect(context.attemptRepository.save).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          provider: 'mocbank',
+          payeeAccountNumber: LANDLORD_ACCOUNT,
+        })
+      )
+    })
+
+    it('refuses the payment when the landlord has no linked Mộc Bank account', async () => {
+      const { context, adapter } = prepare('mocbank', null)
+
+      await expect(
+        context.service.initRentPayment(paymentId, tenantId, {
+          provider: 'mocbank',
+        })
+      ).rejects.toThrow('LANDLORD_WALLET_NOT_LINKED')
+      expect(adapter.createPaymentIntent).not.toHaveBeenCalled()
+      expect(context.attemptRepository.save).not.toHaveBeenCalled()
+    })
+
+    it('refuses the payment when the wallets service is unavailable', async () => {
+      const { context } = prepare('mocbank')
+      Reflect.set(context.service, 'walletsService', undefined)
+
+      await expect(
+        context.service.initRentPayment(paymentId, tenantId, {
+          provider: 'mocbank',
+        })
+      ).rejects.toThrow('LANDLORD_WALLET_NOT_LINKED')
+    })
+
+    it('lets MoMo collect landlord rent on the platform with no payee account (simulated relay)', async () => {
+      const { context, adapter } = prepare('momo')
+      const wallets = Reflect.get(context.service, 'walletsService') as {
+        getMocbankAccountNumber: jest.Mock
+      }
+
+      await context.service.initRentPayment(paymentId, tenantId, {
+        provider: 'momo',
+      })
+
+      expect(adapter.createPaymentIntent).toHaveBeenCalledWith(
+        expect.objectContaining({ payeeAccountNumber: undefined })
+      )
+      expect(wallets.getMocbankAccountNumber).not.toHaveBeenCalled()
+      expect(context.attemptRepository.save).toHaveBeenLastCalledWith(
+        expect.objectContaining({ provider: 'momo', payeeAccountNumber: null })
+      )
+    })
+
+    it('lets a landlord pay a platform invoice through MoMo with no payee account', async () => {
+      const { context, adapter } = prepare('momo')
+      Object.assign(context.payment, {
+        type: 'platform-fee',
+        payerId: 'landlord-1',
+        payerRole: 'landlord',
+        payeeRole: 'platform',
+      })
+
+      await context.service.initInvoicePayment(paymentId, 'landlord-1', {
+        provider: 'momo',
+      })
+
+      expect(adapter.createPaymentIntent).toHaveBeenCalledTimes(1)
+      expect(adapter.createPaymentIntent).toHaveBeenCalledWith(
+        expect.objectContaining({ payeeAccountNumber: undefined })
+      )
+    })
+
+    it('does not treat a platform-owned rent line as landlord money', async () => {
+      const { context, adapter } = prepare('momo')
+      Object.assign(context.payment, { payeeRole: 'platform' })
+
+      await context.service.initRentPayment(paymentId, tenantId, {
+        provider: 'momo',
+      })
+
+      expect(adapter.createPaymentIntent).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not reuse a live Mộc Bank attempt that targets another account', async () => {
+      const { context, adapter } = prepare('mocbank')
+      context.attemptRepository.findOne.mockReset()
+      context.attemptRepository.findOne.mockResolvedValueOnce({
+        _id: new ObjectId(),
+        provider: 'mocbank',
+        txRef: 'MOCBANK-old',
+        status: 'pending',
+        momoMethod: null,
+        payeeAccountNumber: '810000000099',
+        expiresAt: new Date(Date.now() + 60_000),
+      })
+
+      await context.service.initRentPayment(paymentId, tenantId, {
+        provider: 'mocbank',
+      })
+
+      expect(context.attemptRepository.save).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({ txRef: 'MOCBANK-old', status: 'expired' })
+      )
+      expect(adapter.createPaymentIntent).toHaveBeenCalledWith(
+        expect.objectContaining({ payeeAccountNumber: LANDLORD_ACCOUNT })
+      )
+    })
+
+    it('pays a deposit to the landlord of the agreement', async () => {
+      const { context, adapter } = prepare('mocbank')
+      context.depositAgreementsService.getAgreement.mockResolvedValue({
+        _id: new ObjectId('507f1f77bcf86cd799439011'),
+        agreementCode: 'DPA-1',
+        tenantId,
+        landlordId: 'landlord-9',
+        amount: 5_000_000,
+        status: 'accepted',
+        tenantConsent: { consentedAt: new Date(), contentHash: 'hash' },
+      })
+      const wallets = Reflect.get(context.service, 'walletsService') as {
+        getMocbankAccountNumber: jest.Mock
+      }
+
+      await context.service.initDepositPayment(
+        '507f1f77bcf86cd799439011',
+        tenantId,
+        { provider: 'mocbank' }
+      )
+
+      expect(wallets.getMocbankAccountNumber).toHaveBeenCalledWith('landlord-9')
+      expect(adapter.createPaymentIntent).toHaveBeenCalledWith(
+        expect.objectContaining({ payeeAccountNumber: LANDLORD_ACCOUNT })
+      )
+    })
+
+    describe('settlement split', () => {
+      const settlementId = new ObjectId().toHexString()
+      const landlordLineId = new ObjectId().toHexString()
+      const feeLineId = new ObjectId().toHexString()
+
+      function settlementContext(
+        name: 'mocbank' | 'momo',
+        paidLandlordLine = false
+      ): ReturnType<typeof prepare> {
+        const ready = prepare(name)
+        ready.context.settlementRepository.findOne.mockResolvedValue({
+          _id: new ObjectId(settlementId),
+          contractId: 'contract-1',
+          tenantId,
+          landlordId: 'landlord-1',
+          lines: [
+            {
+              kind: 'FIRST_RENT',
+              amount: 3_000_000,
+              paymentId: landlordLineId,
+              paidAt: paidLandlordLine ? new Date() : null,
+            },
+            {
+              kind: 'TENANT_SERVICE_FEE',
+              amount: 200_000,
+              paymentId: feeLineId,
+              paidAt: null,
+            },
+          ],
+          status: paidLandlordLine ? 'partially-paid' : 'pending',
+        })
+        ready.context.paymentRepository.findOne.mockImplementation(
+          ({ where }: { where: { _id: ObjectId } }) => {
+            const isFee = where._id.toHexString() === feeLineId
+            return Promise.resolve({
+              ...ready.context.payment,
+              _id: where._id,
+              amount: isFee ? 200_000 : 3_000_000,
+              type: isFee ? 'tenant-service-fee' : 'rent',
+              payeeRole: isFee ? 'platform' : 'landlord',
+              status: !isFee && paidLandlordLine ? 'paid' : 'unpaid',
+            })
+          }
+        )
+        return ready
+      }
+
+      it('charges the landlord lines first, straight to the landlord account', async () => {
+        const { context, adapter } = settlementContext('mocbank')
+
+        const result = await context.service.initSettlementPayment(
+          settlementId,
+          tenantId,
+          { provider: 'mocbank' }
+        )
+
+        expect(result.total).toBe(3_000_000)
+        expect(result.payee.role).toBe('landlord')
+        expect(adapter.createPaymentIntent).toHaveBeenCalledWith(
+          expect.objectContaining({
+            amount: 3_000_000,
+            payeeAccountNumber: LANDLORD_ACCOUNT,
+          })
+        )
+        expect(context.attemptRepository.save).toHaveBeenLastCalledWith(
+          expect.objectContaining({
+            paymentIds: [landlordLineId],
+            payeeAccountNumber: LANDLORD_ACCOUNT,
+          })
+        )
+      })
+
+      it('charges the platform fee line next, without a payee account', async () => {
+        const { context, adapter } = settlementContext('mocbank', true)
+
+        const result = await context.service.initSettlementPayment(
+          settlementId,
+          tenantId,
+          { provider: 'mocbank' }
+        )
+
+        expect(result.total).toBe(200_000)
+        expect(result.payee.role).toBe('platform')
+        expect(adapter.createPaymentIntent).toHaveBeenCalledWith(
+          expect.objectContaining({
+            amount: 200_000,
+            payeeAccountNumber: undefined,
+          })
+        )
+        expect(context.attemptRepository.save).toHaveBeenLastCalledWith(
+          expect.objectContaining({ paymentIds: [feeLineId] })
+        )
+      })
+
+      it('charges every line in one attempt for a non-direct gateway (simulated relay)', async () => {
+        const { context, adapter } = settlementContext('momo')
+
+        const result = await context.service.initSettlementPayment(
+          settlementId,
+          tenantId,
+          { provider: 'momo' }
+        )
+
+        expect(result.total).toBe(3_200_000)
+        expect(result.payee.role).toBe('landlord')
+        expect(adapter.createPaymentIntent).toHaveBeenCalledWith(
+          expect.objectContaining({
+            amount: 3_200_000,
+            payeeAccountNumber: undefined,
+          })
+        )
+        expect(context.attemptRepository.save).toHaveBeenLastCalledWith(
+          expect.objectContaining({
+            paymentIds: [landlordLineId, feeLineId],
+            payeeAccountNumber: null,
+          })
+        )
+      })
+
+      it('lets a non-direct gateway pay the platform fee once landlord lines are paid', async () => {
+        const { context, adapter } = settlementContext('momo', true)
+
+        const result = await context.service.initSettlementPayment(
+          settlementId,
+          tenantId,
+          { provider: 'momo' }
+        )
+
+        expect(result.total).toBe(200_000)
+        expect(adapter.createPaymentIntent).toHaveBeenCalledTimes(1)
+      })
+    })
+
+    describe('payout on settlement', () => {
+      const success = { succeeded: true, providerTransactionId: 'TX_1' }
+
+      function settleContext(attemptPatch: Record<string, unknown>): {
+        context: ReturnType<typeof createContext>
+        payoutsService: { createForPayment: jest.Mock }
+      } {
+        const context = createContext()
+        context.configService.get.mockImplementation((key: string) =>
+          key === 'rentalFlow.payments' ? TEST_PAYMENTS : 'test'
+        )
+        const payoutsService = {
+          createForPayment: jest.fn().mockResolvedValue({}),
+        }
+        Reflect.set(context.service, 'payoutsService', payoutsService)
+        Reflect.set(context.payment, 'landlordId', 'landlord-1')
+        Object.assign(context.attempt, attemptPatch)
+        return { context, payoutsService }
+      }
+
+      it('records a direct receipt when Mộc Bank paid the landlord account', async () => {
+        const { context, payoutsService } = settleContext({
+          provider: 'mocbank',
+          txRef: 'MOCBANK-1',
+          payeeAccountNumber: LANDLORD_ACCOUNT,
+        })
+
+        await context.service.settleVerifiedAttempt(
+          context.attempt as never,
+          success,
+          'digest'
+        )
+
+        expect(payoutsService.createForPayment).toHaveBeenCalledWith(
+          expect.objectContaining({
+            landlordId: 'landlord-1',
+            directReceipt: { paidAt: expect.any(Date) as Date },
+          })
+        )
+      })
+
+      it('keeps the relay payout for a Mộc Bank attempt without a payee account', async () => {
+        const { context, payoutsService } = settleContext({
+          provider: 'mocbank',
+          txRef: 'MOCBANK-2',
+          payeeAccountNumber: null,
+        })
+
+        await context.service.settleVerifiedAttempt(
+          context.attempt as never,
+          success,
+          'digest'
+        )
+
+        expect(payoutsService.createForPayment).toHaveBeenCalledWith(
+          expect.objectContaining({ directReceipt: undefined })
+        )
+      })
+
+      it('records a direct receipt for a deposit paid into the landlord account', async () => {
+        const { context, payoutsService } = settleContext({
+          provider: 'mocbank',
+          txRef: 'MOCBANK-3',
+          paymentType: 'deposit',
+          payeeAccountNumber: LANDLORD_ACCOUNT,
+        })
+        const agreement = {
+          _id: new ObjectId(),
+          applicationId: 'application-1',
+          landlordId: 'landlord-1',
+          linkedLeaseContractId: 'contract-1',
+          amount: context.attempt.amount,
+        }
+        context.depositAgreementsService.getAgreement.mockResolvedValue({
+          status: 'payment-pending',
+          paymentAttemptId: null,
+        })
+        context.depositAgreementsService.recordDepositPaid.mockResolvedValue(
+          agreement
+        )
+
+        await context.service.settleVerifiedAttempt(
+          context.attempt as never,
+          success,
+          'digest'
+        )
+
+        expect(payoutsService.createForPayment).toHaveBeenCalledWith(
+          expect.objectContaining({
+            paymentId: agreement._id.toHexString(),
+            directReceipt: { paidAt: expect.any(Date) as Date },
+          })
+        )
+      })
+    })
+  })
 })

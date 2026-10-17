@@ -131,6 +131,7 @@ export class GatewayCallbackService {
       const verdict = await verifier.verify(payload, kind, {
         txRef: attempt.txRef,
         amount: attempt.amount,
+        payeeAccountNumber: attempt.payeeAccountNumber ?? null,
       })
       const outcome = await this.mockBankService.settleVerifiedAttempt(
         attempt,

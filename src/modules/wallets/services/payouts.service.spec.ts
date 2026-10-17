@@ -6,6 +6,7 @@ import {
 import { ObjectId } from 'mongodb'
 import { PayoutsService } from './payouts.service'
 import type { Payout } from '../schemas/payout.schema'
+import { MocbankPayoutError } from './mocbank-payout.client'
 
 const LANDLORD = 'landlord-1'
 const walletId = new ObjectId()
@@ -25,6 +26,7 @@ function makePayout(overrides: Partial<Payout> = {}): Payout {
     attempts: 1,
     failureReason: null,
     paidOutAt: null,
+    directReceipt: false,
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,
@@ -469,5 +471,256 @@ describe('PayoutsService queries', () => {
     await expect(
       service.getByTxRefForLandlord('PAYOUT-X', LANDLORD)
     ).rejects.toBeInstanceOf(NotFoundException)
+  })
+})
+
+describe('PayoutsService direct receipt (Mộc Bank trả thẳng chủ nhà)', () => {
+  const paidAt = new Date('2026-10-17T10:00:00.000Z')
+
+  it('records a paid-out payout at once with no transfer and one notification', async () => {
+    const { service, payouts, wallets, notifications } = setup()
+    payouts.findOne.mockResolvedValue(null)
+    wallets.findOne.mockResolvedValue({ _id: walletId, status: 'linked' })
+
+    const payout = await service.createForPayment({
+      ...source,
+      directReceipt: { paidAt },
+    })
+
+    expect(payout).toMatchObject({
+      status: 'paid-out',
+      paidOutAt: paidAt,
+      directReceipt: true,
+      txRef: null,
+      sentAmount: 5_000_000,
+      receivedAmount: 5_000_000,
+      walletId: walletId.toHexString(),
+    })
+    expect(notifications.createNotificationOnce).toHaveBeenCalledTimes(1)
+    expect(notifications.createNotificationOnce).toHaveBeenCalledWith(
+      LANDLORD,
+      expect.stringContaining(':received'),
+      'Bạn đã nhận tiền',
+      expect.stringContaining('thanh toán trực tiếp'),
+      'PAYOUT_RECEIVED',
+      expect.any(Object)
+    )
+  })
+
+  it('still records the receipt when the landlord has no linked wallet record', async () => {
+    const { service, payouts, wallets } = setup()
+    payouts.findOne.mockResolvedValue(null)
+    wallets.findOne.mockResolvedValue(null)
+
+    const payout = await service.createForPayment({
+      ...source,
+      directReceipt: { paidAt },
+    })
+
+    expect(payout.status).toBe('paid-out')
+    expect(payout.walletId).toBeNull()
+  })
+
+  it('is idempotent for a replayed callback', async () => {
+    const { service, payouts, notifications } = setup()
+    const existing = makePayout({ status: 'paid-out', directReceipt: true })
+    payouts.findOne.mockResolvedValue(existing)
+
+    await expect(
+      service.createForPayment({ ...source, directReceipt: { paidAt } })
+    ).resolves.toBe(existing)
+    expect(payouts.save).not.toHaveBeenCalled()
+    expect(notifications.createNotificationOnce).not.toHaveBeenCalled()
+  })
+
+  it('refuses the landlord simulation endpoint for a direct receipt', async () => {
+    const { service, payouts } = setup()
+    payouts.findOne.mockResolvedValue(
+      makePayout({ status: 'paid-out', directReceipt: true, txRef: 'PAYOUT-D' })
+    )
+
+    await expect(
+      service.settleForLandlord('PAYOUT-D', 'failed', LANDLORD)
+    ).rejects.toThrow('PAYOUT_ALREADY_RECEIVED')
+    expect(payouts.updateOne).not.toHaveBeenCalled()
+  })
+})
+
+describe('PayoutsService simulated relay to the landlord Mộc Bank wallet', () => {
+  const ACCOUNT = '810000000002'
+  const mocWallet = {
+    _id: walletId,
+    status: 'linked',
+    provider: 'mocbank',
+    simulation: false,
+    mocbankAccountNumber: ACCOUNT,
+  }
+
+  function relaySetup(options: {
+    wallet?: Record<string, unknown> | null
+    configured?: boolean
+    payout?: jest.Mock
+  }): ReturnType<typeof setup> & {
+    stored: { current: Payout | null }
+    client: { isConfigured: jest.Mock; payout: jest.Mock }
+  } {
+    const base = setup()
+    const stored: { current: Payout | null } = { current: null }
+    base.payouts.findOne.mockImplementation(
+      ({ where }: { where: Record<string, unknown> }) =>
+        Promise.resolve(where._id ? stored.current : null)
+    )
+    base.payouts.save.mockImplementation((value: Payout) => {
+      stored.current = value
+      return Promise.resolve(value)
+    })
+    base.payouts.updateOne.mockImplementation(
+      (_filter: unknown, update: { $set: Partial<Payout> }) => {
+        Object.assign(stored.current as Payout, update.$set)
+        return Promise.resolve({ modifiedCount: 1 })
+      }
+    )
+    base.wallets.findOne.mockResolvedValue(
+      options.wallet === undefined ? mocWallet : options.wallet
+    )
+    const client = {
+      isConfigured: jest.fn().mockReturnValue(options.configured ?? true),
+      payout:
+        options.payout ??
+        jest.fn().mockResolvedValue({ transactionCode: 'TX_RELAY_1' }),
+    }
+    const service = new PayoutsService(
+      base.payouts as never,
+      base.wallets as never,
+      base.notifications as never,
+      client as never
+    )
+    return { ...base, service, stored, client }
+  }
+
+  it('transfers on its own, marks paid-out and tells the landlord it is a simulation', async () => {
+    const { service, client, notifications } = relaySetup({})
+
+    const payout = await service.createForPayment(source)
+
+    expect(client.payout).toHaveBeenCalledWith({
+      orderId: `PAYOUT-${payout._id.toHexString()}`,
+      amount: 5_000_000,
+      payeeAccountNumber: ACCOUNT,
+      description: expect.stringContaining('Chuyển hộ') as string,
+    })
+    expect(payout).toMatchObject({
+      status: 'paid-out',
+      relayRef: 'TX_RELAY_1',
+      directReceipt: false,
+    })
+    expect(notifications.createNotificationOnce).toHaveBeenCalledTimes(1)
+    expect(notifications.createNotificationOnce).toHaveBeenCalledWith(
+      LANDLORD,
+      expect.stringContaining(':received'),
+      'Bạn đã nhận tiền',
+      expect.stringContaining('giả lập'),
+      'PAYOUT_RECEIVED',
+      expect.objectContaining({
+        simulatedRelay: true,
+        transactionCode: 'TX_RELAY_1',
+      })
+    )
+  })
+
+  it('marks the payout failed with the bank reason and sends no success notification', async () => {
+    const { service, notifications } = relaySetup({
+      payout: jest
+        .fn()
+        .mockRejectedValue(new MocbankPayoutError('INSUFFICIENT_BALANCE')),
+    })
+
+    const payout = await service.createForPayment(source)
+
+    expect(payout).toMatchObject({
+      status: 'failed',
+      failureReason: 'INSUFFICIENT_BALANCE',
+    })
+    expect(notifications.createNotificationOnce).not.toHaveBeenCalled()
+  })
+
+  it('maps an unexpected error to TRANSFER_FAILED', async () => {
+    const { service } = relaySetup({
+      payout: jest.fn().mockRejectedValue(new Error('boom')),
+    })
+
+    await expect(service.createForPayment(source)).resolves.toMatchObject({
+      status: 'failed',
+      failureReason: 'TRANSFER_FAILED',
+    })
+  })
+
+  it('retries with the same bank order id so a lost reply never pays twice', async () => {
+    const payoutMock = jest
+      .fn()
+      .mockRejectedValueOnce(new MocbankPayoutError('GATEWAY_UNAVAILABLE'))
+      .mockResolvedValueOnce({ transactionCode: 'TX_RELAY_2' })
+    const { service, client } = relaySetup({ payout: payoutMock })
+
+    const failed = await service.createForPayment(source)
+    expect(failed.status).toBe('failed')
+    const retried = await service.retry(failed._id.toHexString())
+
+    expect(retried).toMatchObject({ status: 'paid-out', attempts: 2 })
+    const calls = client.payout.mock.calls as Array<[{ orderId: string }]>
+    const orderIds = calls.map(call => call[0].orderId)
+    expect(orderIds).toHaveLength(2)
+    expect(orderIds[0]).toBe(orderIds[1])
+  })
+
+  it('falls back to the manual simulation when Mộc Bank payout is not configured', async () => {
+    const { service, client, notifications } = relaySetup({ configured: false })
+
+    const payout = await service.createForPayment(source)
+
+    expect(client.payout).not.toHaveBeenCalled()
+    expect(payout.status).toBe('pending')
+    expect(notifications.createNotificationOnce).toHaveBeenCalledWith(
+      LANDLORD,
+      expect.stringContaining(':pending:'),
+      expect.any(String),
+      expect.any(String),
+      'PAYOUT_PENDING',
+      expect.any(Object)
+    )
+  })
+
+  it('keeps the manual simulation for a simulated (non Mộc Bank) wallet', async () => {
+    const { service, client } = relaySetup({
+      wallet: { _id: walletId, status: 'linked', provider: 'mock-bank' },
+    })
+
+    const payout = await service.createForPayment(source)
+
+    expect(client.payout).not.toHaveBeenCalled()
+    expect(payout.status).toBe('pending')
+  })
+
+  it('does not call the bank while the landlord has no linked wallet', async () => {
+    const { service, client } = relaySetup({ wallet: null })
+
+    const payout = await service.createForPayment(source)
+
+    expect(client.payout).not.toHaveBeenCalled()
+    expect(payout.status).toBe('awaiting-wallet')
+  })
+
+  it('relays waiting payouts once the landlord links a Mộc Bank wallet', async () => {
+    const { service, payouts, client } = relaySetup({})
+    const waiting = makePayout({
+      status: 'awaiting-wallet',
+      walletId: null,
+      txRef: null,
+    })
+    payouts.find.mockResolvedValue([waiting])
+
+    await expect(service.releaseAwaitingWallet(LANDLORD)).resolves.toBe(1)
+
+    expect(client.payout).toHaveBeenCalledTimes(1)
   })
 })
