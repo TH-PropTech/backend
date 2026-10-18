@@ -7,6 +7,8 @@ export type DepositAgreementConsentState = {
     | 'payment-pending'
     | 'paid'
     | 'applied-to-lease-security'
+    | 'released'
+    | 'refunded'
     | 'cancelled'
     | 'expired'
   contentRevision: number

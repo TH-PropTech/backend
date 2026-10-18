@@ -43,13 +43,13 @@ export interface DepositConfirmation {
 
 /**
  * Trạng thái thỏa thuận cọc coi là đã xác nhận đối với luồng kích hoạt/ký:
- * `paid` (đã trả) và `applied-to-lease-security` (đã chuyển vào hợp đồng
- * thuê chính thức). Đây là nguồn sự thật duy nhất dùng chung cho
+ * `paid` (đã trả), `applied-to-lease-security` (đã chuyển vào hợp đồng
+ * thuê chính thức) và `released` (ký quỹ đã giải ngân cho chủ nhà). Đây là nguồn sự thật duy nhất dùng chung cho
  * `ContractsService`, `SmartCaSigningService` và `ContractViewService`
  * theo yêu cầu specs/rental-flow-state-projection.
  */
 const CONFIRMED_AGREEMENT_STATUSES: ReadonlySet<DepositAgreementStatus> =
-  new Set(['paid', 'applied-to-lease-security'])
+  new Set(['paid', 'applied-to-lease-security', 'released'])
 
 /**
  * Hàm thuần tính "cọc đã xác nhận chưa" từ dữ kiện đã có sẵn (không truy vấn

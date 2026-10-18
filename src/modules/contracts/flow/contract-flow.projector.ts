@@ -89,6 +89,7 @@ const CONFIRMED_LEDGER_STATUSES: ReadonlySet<string> = new Set([
 const CLOSED_AGREEMENT_STATUSES: ReadonlySet<DepositAgreementStatus> = new Set([
   'cancelled',
   'expired',
+  'refunded',
 ])
 const PARTY_ROLES: readonly PartyRole[] = ['tenant', 'landlord']
 const ALWAYS_ENABLED: GuardResult = { enabled: true, reasonCode: null }

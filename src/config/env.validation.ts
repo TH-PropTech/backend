@@ -263,6 +263,7 @@ export const envValidationSchema = Joi.object({
   MOCBANK_BASE_URL: HTTPS_URL,
   MOCBANK_RETURN_URL: HTTP_URL,
   MOCBANK_WEBHOOK_URL: HTTP_URL,
+  DEPOSIT_ESCROW_ENABLED: Joi.boolean().default(false),
   FABRIC_ENABLED: Joi.boolean().default(false),
   FABRIC_EXPLORER_TX_URL_TEMPLATE: Joi.string()
     .pattern(/^\S*\{txId\}\S*$/)

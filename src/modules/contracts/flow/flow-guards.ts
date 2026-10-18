@@ -21,10 +21,12 @@ const deny = (reasonCode: string): GuardResult => ({
 const CLOSED_AGREEMENT_STATUSES: ReadonlySet<DepositAgreementStatus> = new Set([
   'cancelled',
   'expired',
+  'refunded',
 ])
 const PAID_AGREEMENT_STATUSES: ReadonlySet<DepositAgreementStatus> = new Set([
   'paid',
   'applied-to-lease-security',
+  'released',
 ])
 const PAYABLE_AGREEMENT_STATUSES: ReadonlySet<DepositAgreementStatus> = new Set(
   ['accepted', 'payment-pending']

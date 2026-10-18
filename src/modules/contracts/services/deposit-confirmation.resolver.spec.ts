@@ -53,6 +53,36 @@ describe('resolveDepositConfirmation (pure)', () => {
     expect(result.source).toBe('agreement')
   })
 
+  it('agreement ở trạng thái released: đã xác nhận (cổng DEPOSIT_FIRST)', () => {
+    const result = resolveDepositConfirmation(
+      { deposit: 20_000_000, depositPaidAt: null },
+      {
+        id: 'agreement-1',
+        status: 'released',
+        amount: 20_000_000,
+        paidAt: new Date('2026-09-01T00:00:00.000Z'),
+      }
+    )
+    expect(result).toMatchObject({
+      confirmed: true,
+      source: 'agreement',
+      agreementStatus: 'released',
+    })
+  })
+
+  it('agreement ở trạng thái refunded và chưa có depositPaidAt: chưa xác nhận', () => {
+    const result = resolveDepositConfirmation(
+      { deposit: 20_000_000, depositPaidAt: null },
+      {
+        id: 'agreement-1',
+        status: 'refunded',
+        amount: 20_000_000,
+        paidAt: new Date('2026-09-01T00:00:00.000Z'),
+      }
+    )
+    expect(result.confirmed).toBe(false)
+  })
+
   it('chỉ có contract.depositPaidAt (không có agreement đã xác nhận): đã xác nhận qua contract-field', () => {
     const result = resolveDepositConfirmation(
       {

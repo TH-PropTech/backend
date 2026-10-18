@@ -290,6 +290,19 @@ describe('projectContractFlow — stages', () => {
     ])
   })
 
+  it('thỏa thuận cọc đã hoàn ký quỹ (refunded): deposit blocked DEPOSIT_AGREEMENT_CLOSED', () => {
+    const flow = projectContractFlow(
+      facts({
+        agreement: { ...consented, status: 'refunded' },
+      })
+    )
+
+    const deposit = flow.stages.find(stage => stage.key === 'deposit')
+    expect(deposit?.blockers).toEqual([
+      { code: 'DEPOSIT_AGREEMENT_CLOSED', partyRole: null },
+    ])
+  })
+
   it('cọc bắt buộc nhưng thiếu thỏa thuận: deposit báo DEPOSIT_AGREEMENT_MISSING', () => {
     const flow = projectContractFlow(
       facts({
