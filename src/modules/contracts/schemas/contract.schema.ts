@@ -154,6 +154,13 @@ export class Contract {
   @Column({ nullable: true })
   paymentCycleMonths?: 1 | 3 | 6 | null
 
+  /**
+   * Số tháng tiền thuê tenant trả trước khi nhận nhà, chụp từ gói thuê: 0 = chỉ đặt cọc, N = trả trước N tháng,
+   * bằng `durationMonths` = trả toàn bộ. Vắng mặt/null = hợp đồng cũ (kỳ thanh toán đầu thu khi nhận nhà).
+   */
+  @Column({ nullable: true })
+  prepaidRentMonths?: number | null
+
   // ── Tài chính ──
 
   @Column()

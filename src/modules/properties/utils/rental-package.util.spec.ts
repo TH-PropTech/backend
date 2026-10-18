@@ -3,6 +3,7 @@ import {
   validateSettlementPolicy,
   validateRentalPackages,
   type RentalPackageInput,
+  type RentalPackageRecord,
   type SettlementPolicyInput,
 } from './rental-package.util'
 
@@ -185,5 +186,64 @@ describe('rental package rules', () => {
       resolvedDepositAmount: 24_000_000,
       status: 'active',
     })
+  })
+})
+
+describe('prepaid rent policy', () => {
+  const pkg = (
+    prepaidRent?: RentalPackageInput['prepaidRent']
+  ): RentalPackageInput => ({
+    packageId: 'pkg-6',
+    version: 1,
+    durationMonths: 6,
+    monthlyRent: 10_000_000,
+    depositPolicy: { type: 'MONTHS_OF_RENT', months: 1 },
+    status: 'active',
+    ...(prepaidRent ? { prepaidRent } : {}),
+  })
+  const first = (input: RentalPackageInput): RentalPackageRecord =>
+    validateRentalPackages([input]).packages[0]!
+
+  it('snapshots nothing extra for a legacy package without a prepayment policy', () => {
+    const snapshot = first(pkg())
+    expect(snapshot.prepaidRent).toBeUndefined()
+    expect(snapshot.resolvedPrepaidRentMonths).toBeUndefined()
+    expect(snapshot.resolvedPrepaidRentAmount).toBeUndefined()
+  })
+
+  it('resolves "deposit only" to zero prepaid months', () => {
+    expect(first(pkg({ type: 'NONE' }))).toMatchObject({
+      prepaidRent: { type: 'NONE' },
+      resolvedPrepaidRentMonths: 0,
+      resolvedPrepaidRentAmount: 0,
+    })
+  })
+
+  it('resolves N prepaid months to months and money', () => {
+    expect(first(pkg({ type: 'MONTHS', months: 2 }))).toMatchObject({
+      resolvedPrepaidRentMonths: 2,
+      resolvedPrepaidRentAmount: 20_000_000,
+    })
+  })
+
+  it('resolves full prepayment to the whole package duration', () => {
+    expect(first(pkg({ type: 'FULL' }))).toMatchObject({
+      resolvedPrepaidRentMonths: 6,
+      resolvedPrepaidRentAmount: 60_000_000,
+    })
+  })
+
+  it('rejects prepaid months that are not whole months within the package duration', () => {
+    for (const months of [0, -1, 1.5, 7]) {
+      expect(() =>
+        validateRentalPackages([pkg({ type: 'MONTHS', months })])
+      ).toThrow('INVALID_RENTAL_PACKAGE: invalid prepaid rent months')
+    }
+  })
+
+  it('keeps the prepayment policy independent from the deposit amount', () => {
+    const snapshot = first(pkg({ type: 'MONTHS', months: 3 }))
+    expect(snapshot.resolvedDepositAmount).toBe(10_000_000)
+    expect(snapshot.resolvedPrepaidRentAmount).toBe(30_000_000)
   })
 })

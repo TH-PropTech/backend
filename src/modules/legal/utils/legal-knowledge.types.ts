@@ -26,6 +26,8 @@ export interface LegalSearchHit {
   heading?: string | undefined
   text: string
   score: number
+  /** Share (0..1) of the question's weighted words found in this passage (see Bm25Hit.coverage). */
+  coverage: number
   sourceUrl?: string | undefined
   /** ISO time the text was last taken from the source link (or last updated). */
   fetchedAt?: string | undefined

@@ -66,6 +66,42 @@ describe('CreateApartmentDto validation (design §8)', () => {
     ).toEqual([])
   })
 
+  describe('prepaid rent in a rental package', () => {
+    const withPrepaid = (prepaidRent: unknown): Record<string, unknown> => ({
+      ...validPayload,
+      rentalPackages: [
+        {
+          packageId: 'pkg-12m',
+          version: 1,
+          durationMonths: 12,
+          monthlyRent: 12_000_000,
+          depositPolicy: { type: 'MONTHS_OF_RENT', months: 2 },
+          status: 'active',
+          prepaidRent,
+        },
+      ],
+    })
+
+    it.each([
+      [{ type: 'NONE' }],
+      [{ type: 'FULL' }],
+      [{ type: 'MONTHS', months: 3 }],
+    ])('accepts %j', async prepaidRent => {
+      expect(await invalidFields(withPrepaid(prepaidRent))).toEqual([])
+    })
+
+    it.each([
+      [{ type: 'WHENEVER' }],
+      [{ type: 'MONTHS', months: 0 }],
+      [{ type: 'MONTHS', months: 25 }],
+      [{ type: 'MONTHS', months: 1.5 }],
+    ])('rejects %j', async prepaidRent => {
+      expect(await invalidFields(withPrepaid(prepaidRent))).toContain(
+        'rentalPackages'
+      )
+    })
+  })
+
   it('rejects invalid settlement policy fields in a rental package', async () => {
     expect(
       await invalidFields({

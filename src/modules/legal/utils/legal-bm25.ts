@@ -15,6 +15,12 @@ export interface Bm25Doc<T> {
 export interface Bm25Hit<T> {
   id: string
   score: number
+  /**
+   * Share (0..1) of the query's IDF weight carried by words this document actually contains.
+   * "thủ tục ly hôn đơn phương giấy tờ" matches thousands of chunks on "thủ tục"/"giấy tờ" but none
+   * on the rare "ly hôn", so it scores low here while a real match scores high.
+   */
+  coverage: number
   meta: T
 }
 
@@ -76,7 +82,8 @@ export class Bm25Index<T> {
   search(
     query: string,
     limit = DEFAULT_LIMIT,
-    minScore = 0
+    minScore = 0,
+    minCoverage = 0
   ): Array<Bm25Hit<T>> {
     if (this.docs.length === 0 || limit <= 0) return []
 
@@ -87,15 +94,24 @@ export class Bm25Index<T> {
     const querySet = new Set(queryTokens)
     const normalizedQuery = ` ${normalizePhrase(query)} `
 
+    const idfOf = (term: string): number => {
+      const df = this.docFreq.get(term) ?? 0
+      return Math.log(1 + (this.docs.length - df + 0.5) / (df + 0.5))
+    }
+    // coverage is measured on single words (bigrams would double-count the same words)
+    const words = uniqueTerms.filter(term => !term.includes('_'))
+    const totalWordIdf = words.reduce((sum, term) => sum + idfOf(term), 0)
+
     const scored: Array<Bm25Hit<T>> = []
     for (const doc of this.docs) {
       let score = 0
+      let matchedWordIdf = 0
 
       for (const term of uniqueTerms) {
         const tf = doc.termFreq.get(term)
         if (!tf) continue
-        const df = this.docFreq.get(term) ?? 0
-        const idf = Math.log(1 + (this.docs.length - df + 0.5) / (df + 0.5))
+        const idf = idfOf(term)
+        if (!term.includes('_')) matchedWordIdf += idf
         const norm = tf + K1 * (1 - B + (B * doc.length) / this.avgLength)
         score += idf * ((tf * (K1 + 1)) / norm)
       }
@@ -110,8 +126,9 @@ export class Bm25Index<T> {
         }
       }
 
-      if (score > 0 && score >= minScore) {
-        scored.push({ id: doc.id, score, meta: doc.meta })
+      const coverage = totalWordIdf > 0 ? matchedWordIdf / totalWordIdf : 1
+      if (score > 0 && score >= minScore && coverage >= minCoverage) {
+        scored.push({ id: doc.id, score, coverage, meta: doc.meta })
       }
     }
 

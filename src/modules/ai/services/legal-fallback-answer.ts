@@ -2,6 +2,12 @@ import type { LegalSearchHit } from '../../legal/utils/legal-knowledge.types'
 
 /** Hits scoring below this are too weak to present as "related". */
 export const FALLBACK_MIN_TOP_SCORE = 20
+/**
+ * The best hit must carry this share of the question's weighted words. A question about a topic the
+ * knowledge base lacks ("thủ tục ly hôn") still matches common words ("thủ tục", "giấy tờ") with a
+ * high BM25 score, but misses its rare words, so its coverage stays low.
+ */
+export const FALLBACK_MIN_TOP_COVERAGE = 0.75
 /** A hit joins the list only if it scores at least this share of the best hit. */
 const FALLBACK_SCORE_SHARE = 0.6
 const FALLBACK_MAX_ITEMS = 3
@@ -26,6 +32,11 @@ export function buildRelatedSourcesAnswer(
 ): string | undefined {
   const top = hits.reduce((best, hit) => Math.max(best, hit.score), 0)
   if (top < FALLBACK_MIN_TOP_SCORE) return undefined
+  const topCoverage = hits.reduce(
+    (best, hit) => Math.max(best, hit.coverage),
+    0
+  )
+  if (topCoverage < FALLBACK_MIN_TOP_COVERAGE) return undefined
 
   const seen = new Set<string>()
   const chosen = hits
@@ -47,7 +58,7 @@ export function buildRelatedSourcesAnswer(
   })
 
   return [
-    'Kho tri thức chưa có nội dung trả lời trực tiếp đúng câu hỏi của bạn (ví dụ chưa có bản so sánh giữa các năm), nhưng có các văn bản liên quan sau. Bạn có thể mở nguồn ở phần "Căn cứ trích dẫn" để đọc và đối chiếu:',
+    'Kho tri thức chưa có nội dung trả lời trực tiếp câu hỏi của bạn, nhưng có các văn bản liên quan sau. Bạn có thể mở nguồn ở phần "Căn cứ trích dẫn" để đọc và đối chiếu:',
     items.join('\n'),
     '*Nội dung chỉ mang tính tham khảo, không thay thế tư vấn pháp lý chuyên nghiệp.*',
   ].join('\n\n')

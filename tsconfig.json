@@ -18,7 +18,7 @@
     "noFallthroughCasesInSwitch": true,
     "exactOptionalPropertyTypes": true,
     "esModuleInterop": true,
-    "types": ["node", "vitest/globals"],
+    "types": ["node", "multer", "vitest/globals"],
     "paths": {
       "@/*": ["src/*"]
     }

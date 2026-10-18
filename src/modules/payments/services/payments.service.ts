@@ -96,6 +96,9 @@ export class PaymentsService {
       monthlyRent: commercial.monthlyRent,
       paymentDay: commercial.paymentDay,
       cycleMonths: contract.paymentCycleMonths ?? 1,
+      ...(typeof contract.prepaidRentMonths === 'number'
+        ? { prepaidMonths: contract.prepaidRentMonths }
+        : {}),
     })
 
     const newPayments: Payment[] = []

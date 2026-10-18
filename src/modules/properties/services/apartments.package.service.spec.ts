@@ -76,6 +76,91 @@ describe('ApartmentsService.updateRentalPackages', () => {
     expect(context.repository.save).toHaveBeenCalledWith(context.apartment)
   })
 
+  describe('prepaid rent', () => {
+    const prepaidDto = (
+      prepaidRent: unknown,
+      durationMonths: 3 | 6 | 12 | 24 = 3
+    ): UpdateRentalPackagesDto =>
+      ({
+        expectedRevision: 1,
+        rentalPackages: [
+          {
+            packageId: 'pkg-p',
+            version: 1,
+            durationMonths,
+            monthlyRent: 10_000_000,
+            depositPolicy: { type: 'MONTHS_OF_RENT', months: 1 },
+            status: 'active',
+            prepaidRent,
+          },
+        ],
+      }) as UpdateRentalPackagesDto
+
+    it('stores the prepayment policy with its resolved months and amount', async () => {
+      const context = createContext()
+      const result = await context.service.updateRentalPackages(
+        context.apartment._id.toHexString(),
+        prepaidDto({ type: 'MONTHS', months: 2 }),
+        'landlord-1',
+        false
+      )
+
+      expect(result.rentalPackages?.[0]).toMatchObject({
+        prepaidRent: { type: 'MONTHS', months: 2 },
+        resolvedPrepaidRentMonths: 2,
+        resolvedPrepaidRentAmount: 20_000_000,
+      })
+    })
+
+    it('resolves deposit-only and full prepayment', async () => {
+      const a = createContext()
+      const noneResult = await a.service.updateRentalPackages(
+        a.apartment._id.toHexString(),
+        prepaidDto({ type: 'NONE' }),
+        'landlord-1',
+        false
+      )
+      expect(noneResult.rentalPackages?.[0]).toMatchObject({
+        resolvedPrepaidRentMonths: 0,
+        resolvedPrepaidRentAmount: 0,
+      })
+      const b = createContext()
+      const fullResult = await b.service.updateRentalPackages(
+        b.apartment._id.toHexString(),
+        prepaidDto({ type: 'FULL' }, 12),
+        'landlord-1',
+        false
+      )
+      expect(fullResult.rentalPackages?.[0]).toMatchObject({
+        resolvedPrepaidRentMonths: 12,
+        resolvedPrepaidRentAmount: 120_000_000,
+      })
+    })
+
+    it('rejects more prepaid months than the package lasts, and a missing month count', async () => {
+      const a = createContext()
+      await expect(
+        a.service.updateRentalPackages(
+          a.apartment._id.toHexString(),
+          prepaidDto({ type: 'MONTHS', months: 4 }),
+          'landlord-1',
+          false
+        )
+      ).rejects.toThrow('invalid prepaid rent months')
+      expect(a.repository.save).not.toHaveBeenCalled()
+
+      const b = createContext()
+      await expect(
+        b.service.updateRentalPackages(
+          b.apartment._id.toHexString(),
+          prepaidDto({ type: 'MONTHS' }),
+          'landlord-1',
+          false
+        )
+      ).rejects.toThrow('prepaid rent months is required')
+    })
+  })
+
   it('rejects non-owners and stale revisions before mutating packages', async () => {
     const context = createContext()
     await expect(

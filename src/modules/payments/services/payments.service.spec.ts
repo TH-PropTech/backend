@@ -113,6 +113,60 @@ describe('PaymentsService', () => {
     )
   })
 
+  it('merges prepaid months into the first invoice when the contract records a prepayment', async () => {
+    paymentRepository.find.mockResolvedValue([])
+    paymentRepository.create.mockImplementation(
+      (value: Payment): Payment => value
+    )
+    paymentRepository.save.mockImplementation(
+      (value: Payment): Promise<Payment> => Promise.resolve(value)
+    )
+    const contract = {
+      _id: new ObjectId(),
+      startDate: new Date('2030-01-01T00:00:00.000Z'),
+      durationMonths: 6,
+      monthlyRent: 10_000_000,
+      paymentDay: 5,
+      tenantId: 'tenant-1',
+      landlordId: 'landlord-1',
+      prepaidRentMonths: 6,
+    } as Contract
+
+    const result = await service.generateSchedule(contract)
+
+    expect(result).toHaveLength(1)
+    expect(paymentRepository.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        amount: 60_000_000,
+        periodKey: '2030-01',
+        periodEnd: new Date('2030-06-30T00:00:00.000Z'),
+      })
+    )
+  })
+
+  it('keeps one invoice per period for legacy contracts without a prepayment record', async () => {
+    paymentRepository.find.mockResolvedValue([])
+    paymentRepository.create.mockImplementation(
+      (value: Payment): Payment => value
+    )
+    paymentRepository.save.mockImplementation(
+      (value: Payment): Promise<Payment> => Promise.resolve(value)
+    )
+
+    const result = await service.generateSchedule({
+      _id: new ObjectId(),
+      startDate: new Date('2030-01-01T00:00:00.000Z'),
+      durationMonths: 3,
+      monthlyRent: 10_000_000,
+      paymentDay: 5,
+      tenantId: 'tenant-1',
+      landlordId: 'landlord-1',
+      prepaidRentMonths: null,
+    } as Contract)
+
+    expect(result).toHaveLength(3)
+  })
+
   it('uses locked effective commercial terms when generating rent invoices', async () => {
     paymentRepository.find.mockResolvedValue([])
     paymentRepository.create.mockImplementation(

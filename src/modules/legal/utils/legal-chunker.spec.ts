@@ -122,4 +122,68 @@ describe('chunkLegalText', () => {
       expect(chunk.text.trim()).not.toBe('')
     }
   })
+
+  describe('pages extracted with hard line breaks every ~80 characters', () => {
+    const page = [
+      'Chương X',
+      'Điều 172. Đơn phương',
+      'chấm dứt thực hiện hợp đồng thuê nhà ở',
+      '',
+      '1. Trong thời hạn thuê nhà ở theo thỏa thuận trong hợp đồng, bên cho thuê không được đơn',
+      'phương chấm dứt thực hiện hợp đồng thuê nhà ở, trừ trường hợp quy định tại khoản 2 Điều',
+      'này và các quy định khác có liên quan của pháp luật hiện hành về nhà ở.',
+      '',
+      '2. Bên cho thuê nhà ở có quyền đơn phương chấm dứt thực hiện hợp đồng khi bên thuê không',
+      'trả đủ tiền thuê nhà ở từ 03 tháng trở lên mà không có lý do chính đáng đã được bên cho',
+      'Điều 19 của Luật này;',
+      'thuê nhắc nhở nhưng vẫn không thực hiện nghĩa vụ thanh toán theo thỏa thuận hợp đồng.',
+      '',
+      'Điều 173. Quyền tiếp',
+      'tục thuê nhà ở',
+      '',
+      '1. Trường hợp chủ sở hữu nhà ở chết mà thời hạn thuê nhà ở vẫn còn thì bên thuê nhà ở được tiếp',
+      'tục thuê đến hết thời hạn của hợp đồng thuê nhà ở đã ký kết với chủ sở hữu trước đó.',
+    ].join('\n')
+
+    it('keeps a heading that was wrapped over two lines as one complete heading', () => {
+      const chunks = chunkLegalText(page)
+      expect(chunks.map(c => c.heading)).toContain(
+        'Điều 172. Đơn phương chấm dứt thực hiện hợp đồng thuê nhà ở'
+      )
+      expect(chunks.map(c => c.heading)).toContain(
+        'Điều 173. Quyền tiếp tục thuê nhà ở'
+      )
+    })
+
+    it('does not start a new section at a cross-reference like "Điều 19 của Luật này;"', () => {
+      const chunks = chunkLegalText(page)
+      expect(chunks.map(c => c.heading)).not.toContain('Điều 19 của Luật này;')
+      const article172 = chunks.find(c => c.heading?.startsWith('Điều 172.'))
+      expect(article172?.text).toContain(
+        'từ 03 tháng trở lên mà không có lý do chính đáng'
+      )
+      expect(article172?.text).toContain('Điều 19 của Luật này; thuê nhắc nhở')
+    })
+
+    it('stores flowing paragraphs, not 80-character fragments', () => {
+      const chunk = chunkLegalText(page).find(c =>
+        c.heading?.startsWith('Điều 172.')
+      )
+      const longest = Math.max(
+        ...(chunk?.text.split('\n').map(line => line.length) ?? [0])
+      )
+      expect(longest).toBeGreaterThan(150)
+    })
+  })
+
+  it('leaves already well-formed text exactly as before', () => {
+    const text = 'Điều 1. Tên\n1. Nội dung một.\n2. Nội dung hai.'
+    expect(chunkLegalText(text)).toEqual([
+      {
+        order: 0,
+        text: 'Điều 1. Tên\n1. Nội dung một.\n2. Nội dung hai.',
+        heading: 'Điều 1. Tên',
+      },
+    ])
+  })
 })

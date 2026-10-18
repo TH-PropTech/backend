@@ -87,6 +87,64 @@ describe('ContractsService application draft factory', () => {
     expect(created.rentalApplicationId).toBe('app-1')
     expect(reused.contractCode).toBe('HD-APP-app-1')
     expect(repository.save).toHaveBeenCalledTimes(1)
+    // gói cũ không có chính sách trả trước: hợp đồng không ghi nhận gì thêm
+    expect(created.prepaidRentMonths).toBeNull()
+  })
+
+  it('records the prepaid rent months of the package snapshot on the draft contract', async () => {
+    const repository = {
+      findOne: jest.fn().mockResolvedValue(null),
+      save: jest.fn((value: unknown) => Promise.resolve(value)),
+    }
+    const service = Object.create(
+      ContractsService.prototype
+    ) as ContractsService
+    Reflect.set(service, 'contractRepository', repository)
+    const baseInput = {
+      rentalApplicationId: 'app-2',
+      depositAgreementId: 'dpa-2',
+      propertyId: 'apt-1',
+      propertyTitle: 'Sunrise',
+      propertyAddress: '1 Example',
+      propertyArea: 68,
+      propertyFurniture: null,
+      landlordId: 'landlord-1',
+      tenantId: 'tenant-1',
+      moveInDate: new Date('2030-01-01'),
+      packageSnapshot: {
+        packageId: 'pkg-6',
+        version: 1,
+        durationMonths: 6 as const,
+        monthlyRent: 10_000_000,
+        depositPolicy: { type: 'MONTHS_OF_RENT' as const, months: 1 },
+        resolvedDepositAmount: 10_000_000,
+        currency: 'VND' as const,
+      },
+    }
+
+    const prepaid = await service.createDraftFromApplication({
+      ...baseInput,
+      packageSnapshot: {
+        ...baseInput.packageSnapshot,
+        prepaidRent: { type: 'MONTHS' as const, months: 2 },
+        resolvedPrepaidRentMonths: 2,
+        resolvedPrepaidRentAmount: 20_000_000,
+      },
+    })
+    expect(prepaid.prepaidRentMonths).toBe(2)
+    expect(prepaid.packageSnapshot?.resolvedPrepaidRentAmount).toBe(20_000_000)
+
+    const depositOnly = await service.createDraftFromApplication({
+      ...baseInput,
+      rentalApplicationId: 'app-3',
+      packageSnapshot: {
+        ...baseInput.packageSnapshot,
+        prepaidRent: { type: 'NONE' as const },
+        resolvedPrepaidRentMonths: 0,
+        resolvedPrepaidRentAmount: 0,
+      },
+    })
+    expect(depositOnly.prepaidRentMonths).toBe(0)
   })
 })
 

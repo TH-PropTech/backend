@@ -380,7 +380,9 @@ export class MoveInSettlementsService {
         paymentId: topUpPayment._id.toHexString(),
       })
     }
-    if (firstRent)
+    // gói "chỉ đặt cọc": tiền thuê kỳ đầu không thu khi nhận nhà mà theo lịch thanh toán thường
+    const collectFirstRentAtMoveIn = contract.prepaidRentMonths !== 0
+    if (firstRent && collectFirstRentAtMoveIn)
       lines.push({
         kind: 'FIRST_RENT',
         amount: firstRent.amount,

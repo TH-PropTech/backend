@@ -1,71 +1,79 @@
 import { ObjectId } from 'mongodb'
 import { ApartmentResponseMapper } from './apartment-response.mapper'
 
+const defaultPackages = [
+  {
+    packageId: 'pkg-12m',
+    version: 2,
+    durationMonths: 12 as const,
+    monthlyRent: 10000000,
+    depositPolicy: { type: 'MONTHS_OF_RENT' as const, months: 2 },
+    resolvedDepositAmount: 20000000,
+    settlementPolicy: {
+      holdingDeposit: {
+        type: 'FIXED_AMOUNT' as const,
+        amount: 6_000_000,
+      },
+      allowedPaymentCycles: [1, 3, 6] as Array<1 | 3 | 6>,
+      defaultPaymentCycle: 3 as const,
+      firstPaymentDueOffsetDays: 3,
+    },
+    resolvedHoldingDepositAmount: 6_000_000,
+    resolvedSecurityTopUpAmount: 14_000_000,
+    status: 'active' as const,
+  },
+]
+
+function buildApartment(
+  rentalPackages: Array<Record<string, unknown>>
+): Record<string, unknown> {
+  return {
+    _id: new ObjectId('507f1f77bcf86cd799439011'),
+    title: 'Apartment',
+    category: 'apartment',
+    buildingId: null,
+    buildingName: null,
+    projectId: null,
+    projectName: null,
+    description: 'Description',
+    location: 'District 1',
+    city: 'HCMC',
+    district: 'District 1',
+    ward: 'Ben Nghe',
+    street: 'Street',
+    address: 'Address',
+    priceMonthly: 12000000,
+    pricingMode: 'packages' as const,
+    pricingRevision: 3,
+    rentalPackages,
+    area: 50,
+    bedrooms: 2,
+    bathrooms: 1,
+    direction: 'East',
+    balconyDirection: 'East',
+    furniture: 'Full',
+    moveInTime: 'Immediate',
+    electricity: 'metered',
+    water: 'metered',
+    internet: 'included',
+    gallery: [],
+    images360: [],
+    vrUrl: '',
+    amenities: [],
+    status: 'available' as const,
+    isVerified: true,
+    landlordId: 'landlord-1',
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  }
+}
+
 describe('ApartmentResponseMapper rental pricing', () => {
   it('maps package pricing fields consistently for web and mobile responses', () => {
-    const apartment = {
-      _id: new ObjectId('507f1f77bcf86cd799439011'),
-      title: 'Apartment',
-      category: 'apartment',
-      buildingId: null,
-      buildingName: null,
-      projectId: null,
-      projectName: null,
-      description: 'Description',
-      location: 'District 1',
-      city: 'HCMC',
-      district: 'District 1',
-      ward: 'Ben Nghe',
-      street: 'Street',
-      address: 'Address',
-      priceMonthly: 12000000,
-      pricingMode: 'packages' as const,
-      pricingRevision: 3,
-      rentalPackages: [
-        {
-          packageId: 'pkg-12m',
-          version: 2,
-          durationMonths: 12 as const,
-          monthlyRent: 10000000,
-          depositPolicy: { type: 'MONTHS_OF_RENT' as const, months: 2 },
-          resolvedDepositAmount: 20000000,
-          settlementPolicy: {
-            holdingDeposit: {
-              type: 'FIXED_AMOUNT' as const,
-              amount: 6_000_000,
-            },
-            allowedPaymentCycles: [1, 3, 6] as Array<1 | 3 | 6>,
-            defaultPaymentCycle: 3 as const,
-            firstPaymentDueOffsetDays: 3,
-          },
-          resolvedHoldingDepositAmount: 6_000_000,
-          resolvedSecurityTopUpAmount: 14_000_000,
-          status: 'active' as const,
-        },
-      ],
-      area: 50,
-      bedrooms: 2,
-      bathrooms: 1,
-      direction: 'East',
-      balconyDirection: 'East',
-      furniture: 'Full',
-      moveInTime: 'Immediate',
-      electricity: 'metered',
-      water: 'metered',
-      internet: 'included',
-      gallery: [],
-      images360: [],
-      vrUrl: '',
-      amenities: [],
-      status: 'available' as const,
-      isVerified: true,
-      landlordId: 'landlord-1',
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    }
+    const apartment = buildApartment(defaultPackages)
 
-    const web = ApartmentResponseMapper.toWebJson(apartment)
-    const mobile = ApartmentResponseMapper.toMobileJson(apartment)
+    const web = ApartmentResponseMapper.toWebJson(apartment as never)
+    const mobile = ApartmentResponseMapper.toMobileJson(apartment as never)
 
     expect(web.pricingMode).toBe('packages')
     expect(web.pricingRevision).toBe(3)
@@ -73,6 +81,11 @@ describe('ApartmentResponseMapper rental pricing', () => {
     expect(web.rentalPackages[0]?.resolvedDepositAmount).toBe(20000000)
     expect(web.rentalPackages[0]?.resolvedHoldingDepositAmount).toBe(6_000_000)
     expect(web.rentalPackages[0]?.resolvedSecurityTopUpAmount).toBe(14_000_000)
+    // gói cũ không có chính sách trả trước: không lộ trường nào
+    expect(web.rentalPackages[0]).not.toHaveProperty('prepaidRent')
+    expect(web.rentalPackages[0]).not.toHaveProperty(
+      'resolvedPrepaidRentMonths'
+    )
     const rented = ApartmentResponseMapper.toWebJson({
       ...apartment,
       status: 'rented',
@@ -175,5 +188,32 @@ describe('ApartmentResponseMapper rental pricing', () => {
     expect(response.status).toBe('available')
     expect(response.rentalAvailabilityStatus).toBe('deposit-paid')
     expect(response.rentalAvailabilityLabel).toBe('Đã đặt cọc')
+  })
+
+  it('exposes the prepaid rent policy of a package to web and mobile clients', () => {
+    const apartment = buildApartment([
+      {
+        packageId: 'pkg-6m',
+        version: 1,
+        durationMonths: 6,
+        monthlyRent: 10_000_000,
+        depositPolicy: { type: 'MONTHS_OF_RENT', months: 1 },
+        resolvedDepositAmount: 10_000_000,
+        prepaidRent: { type: 'MONTHS', months: 2 },
+        resolvedPrepaidRentMonths: 2,
+        resolvedPrepaidRentAmount: 20_000_000,
+        status: 'active',
+      },
+    ])
+    const web = ApartmentResponseMapper.toWebJson(apartment as never)
+    const mobile = ApartmentResponseMapper.toMobileJson(apartment as never)
+
+    for (const response of [web, mobile]) {
+      expect(response.rentalPackages[0]).toMatchObject({
+        prepaidRent: { type: 'MONTHS', months: 2 },
+        resolvedPrepaidRentMonths: 2,
+        resolvedPrepaidRentAmount: 20_000_000,
+      })
+    }
   })
 })

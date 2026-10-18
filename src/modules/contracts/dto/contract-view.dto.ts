@@ -599,5 +599,11 @@ export class ContractViewDto {
     securityTopUpAmount: number
     tenantServiceFee: number
     landlordCommission: number
+    /** Tiền thuê trả trước đã ghi trong hợp đồng; null với hợp đồng cũ chưa có chính sách này. */
+    prepaidRent: {
+      policy: 'NONE' | 'MONTHS' | 'FULL'
+      months: number
+      amount: number
+    } | null
   }
 }

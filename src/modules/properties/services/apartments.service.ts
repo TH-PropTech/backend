@@ -22,6 +22,7 @@ import {
   validateRentalPackages as validateRentalPackageInputs,
   type HoldingDepositInput,
   type RentalPackageInput,
+  type PrepaidRentInput,
   type SettlementPolicyInput,
 } from '../utils/rental-package.util'
 import { UpdateApartmentMediaDto } from '../dto/update-apartment-media.dto'
@@ -113,6 +114,21 @@ function toRentalPackageInputs(
       }
     }
 
+    let prepaidRent: PrepaidRentInput | undefined
+    if (packageItem.prepaidRent) {
+      const raw = packageItem.prepaidRent
+      if (raw.type === 'MONTHS') {
+        if (raw.months === undefined) {
+          throw new BadRequestException(
+            'INVALID_RENTAL_PACKAGE: prepaid rent months is required'
+          )
+        }
+        prepaidRent = { type: 'MONTHS', months: raw.months }
+      } else {
+        prepaidRent = { type: raw.type }
+      }
+    }
+
     return {
       packageId: packageItem.packageId,
       version: packageItem.version,
@@ -123,6 +139,7 @@ function toRentalPackageInputs(
       ...(normalizedSettlementPolicy
         ? { settlementPolicy: normalizedSettlementPolicy }
         : {}),
+      ...(prepaidRent ? { prepaidRent } : {}),
       ...(packageItem.allowedExecutionPolicies
         ? { allowedExecutionPolicies: packageItem.allowedExecutionPolicies }
         : {}),
