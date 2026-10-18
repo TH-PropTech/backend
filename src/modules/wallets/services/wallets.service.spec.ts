@@ -19,15 +19,18 @@ function setup(
 ): {
   service: WalletsService
   wallets: Record<
-    'findOne' | 'create' | 'save' | 'findOneAndUpdate' | 'updateOne',
+    'findOne' | 'find' | 'create' | 'save' | 'findOneAndUpdate' | 'updateOne',
     jest.Mock
   >
+  users: Record<'findOne' | 'find', jest.Mock>
   payments: Record<'find', jest.Mock>
   payouts: Record<'find', jest.Mock>
+  apartments: Record<'aggregate', jest.Mock>
   mocbank: Record<'resolveAccountHolder', jest.Mock>
 } {
   const wallets = {
     findOne: jest.fn().mockResolvedValue(options.wallet ?? null),
+    find: jest.fn().mockResolvedValue([]),
     create: jest.fn((value: Doc) => ({ _id: new ObjectId(), ...value })),
     save: jest.fn((value: Doc) => Promise.resolve(value)),
     findOneAndUpdate: jest.fn(),
@@ -37,6 +40,7 @@ function setup(
     findOne: jest
       .fn()
       .mockResolvedValue({ fullName: options.fullName ?? 'Nguyen Van A' }),
+    find: jest.fn().mockResolvedValue([]),
   }
   const payments = { find: jest.fn().mockResolvedValue([]) }
   const payouts = { find: jest.fn().mockResolvedValue([]) }
@@ -58,7 +62,7 @@ function setup(
     apartments as never,
     mocbank as never
   )
-  return { service, wallets, payments, payouts, mocbank }
+  return { service, wallets, users, payments, payouts, apartments, mocbank }
 }
 
 describe('WalletsService.link', () => {
@@ -75,12 +79,13 @@ describe('WalletsService.link', () => {
         bank: { code: 'MOCBANK', name: 'Ví Mộc' },
         accountHolder: 'NGUYEN VAN A',
         accountNumberMasked: '****0002',
+        // Full number is included for the owner's own QR/receive display.
+        accountNumber: ACCOUNT_NUMBER,
       })
     )
     expect(wallet).not.toHaveProperty('balance')
     expect(wallet).not.toHaveProperty('totalReceived')
     expect(wallet).not.toHaveProperty('totalFeesPaid')
-    expect(JSON.stringify(wallet)).not.toContain(ACCOUNT_NUMBER)
   })
 
   it('re-links to a new Ví Mộc account and updates the fields', async () => {
@@ -147,6 +152,38 @@ describe('WalletsService.link', () => {
   })
 })
 
+describe('WalletsService.listLandlordWallets', () => {
+  it('lists users who own an apartment and never includes the full account number', async () => {
+    const { service, wallets, users, apartments } = setup()
+    apartments.aggregate
+      .mockReturnValueOnce({ toArray: () => Promise.resolve([{ n: 1 }]) })
+      .mockReturnValueOnce({
+        toArray: () => Promise.resolve([{ _id: USER }]),
+      })
+    users.find.mockResolvedValue([
+      { _id: new ObjectId(USER), fullName: 'Thạch chủ nhà', email: 'a@b.c' },
+    ])
+    wallets.find.mockResolvedValue([
+      {
+        userId: USER,
+        status: 'linked',
+        provider: 'mocbank',
+        simulation: false,
+        bankCode: 'MOCBANK',
+        mocbankAccountNumber: ACCOUNT_NUMBER,
+        accountNumberMasked: '****0002',
+      },
+    ])
+
+    const page = await service.listLandlordWallets(1, 20)
+
+    expect(page.total).toBe(1)
+    expect(page.items).toHaveLength(1)
+    expect(page.items[0]?.wallet.accountNumberMasked).toBe('****0002')
+    expect(page.items[0]?.wallet.accountNumber).toBeNull()
+  })
+})
+
 describe('WalletsService.getMine', () => {
   it('returns an unlinked view instead of auto-linking, with no balance fields', async () => {
     const { service, wallets } = setup()
@@ -185,6 +222,7 @@ describe('WalletsService.getMine', () => {
     expect(Object.keys(view).sort()).toEqual(
       [
         'accountHolder',
+        'accountNumber',
         'accountNumberMasked',
         'bank',
         'linkedAt',
@@ -378,7 +416,7 @@ describe('WalletsService.listTransactions (D5: dựng từ Payout + Payment)', (
 })
 
 describe('WalletsService Ví Mộc account (tiền chủ nhà nhận trực tiếp)', () => {
-  it('links a Ví Mộc account, keeping the full number server-side only', async () => {
+  it('links a Ví Mộc account and returns the full number only to its own owner', async () => {
     const { service, wallets } = setup()
 
     const { wallet, newlyLinked } = await service.link(USER, LINK)
@@ -397,8 +435,8 @@ describe('WalletsService Ví Mộc account (tiền chủ nhà nhận trực ti�
       simulation: false,
       bank: { code: 'MOCBANK', name: 'Ví Mộc' },
       accountNumberMasked: '****0002',
+      accountNumber: ACCOUNT_NUMBER,
     })
-    expect(JSON.stringify(wallet)).not.toContain(ACCOUNT_NUMBER)
   })
 
   it('returns the account only for a linked Ví Mộc wallet', async () => {

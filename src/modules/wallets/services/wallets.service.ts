@@ -36,6 +36,8 @@ export type WalletView = {
   bank: { code: string; name: string } | null
   accountHolder: string | null
   accountNumberMasked: string | null
+  /** Full Ví Mộc account number, for the owner's own QR/receive-money display only. */
+  accountNumber: string | null
   linkedAt: Date | null
 }
 
@@ -154,7 +156,7 @@ export class WalletsService {
 
   async getMine(userId: string): Promise<WalletView> {
     const wallet = await this.walletRepository.findOne({ where: { userId } })
-    return wallet ? this.toView(wallet) : this.unlinkedView(userId)
+    return wallet ? this.toView(wallet, true) : this.unlinkedView(userId)
   }
 
   /**
@@ -191,10 +193,10 @@ export class WalletsService {
       Object.assign(existing, bankFields, { status: 'linked' as const })
       existing.linkedAt = existing.linkedAt ?? new Date()
       const saved = await this.walletRepository.save(existing)
-      return { wallet: this.toView(saved), newlyLinked: false }
+      return { wallet: this.toView(saved, true), newlyLinked: false }
     }
     const created = await this.createWallet(userId, bankFields)
-    return { wallet: this.toView(created), newlyLinked: true }
+    return { wallet: this.toView(created, true), newlyLinked: true }
   }
 
   /**
@@ -341,7 +343,8 @@ export class WalletsService {
     }
   }
 
-  private toView(wallet: Wallet): WalletView {
+  /** `includeFullAccountNumber`: only for the wallet's own owner (QR/receive display), never for admin listings. */
+  private toView(wallet: Wallet, includeFullAccountNumber = false): WalletView {
     return {
       userId: wallet.userId,
       status: wallet.status,
@@ -351,6 +354,10 @@ export class WalletsService {
         : null,
       accountHolder: wallet.accountHolder ?? null,
       accountNumberMasked: wallet.accountNumberMasked ?? null,
+      accountNumber:
+        includeFullAccountNumber && wallet.provider === 'mocbank'
+          ? (wallet.mocbankAccountNumber ?? null)
+          : null,
       linkedAt: wallet.linkedAt ?? null,
     }
   }
@@ -363,6 +370,7 @@ export class WalletsService {
       bank: null,
       accountHolder: null,
       accountNumberMasked: null,
+      accountNumber: null,
       linkedAt: null,
     }
   }
