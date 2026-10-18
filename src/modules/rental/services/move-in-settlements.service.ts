@@ -1,10 +1,12 @@
 import {
   ConflictException,
   ForbiddenException,
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
   Optional,
+  forwardRef,
 } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { createHash } from 'node:crypto'
@@ -37,7 +39,7 @@ import {
   buildHandoverArgs,
   buildMoveInSettlementArgs,
 } from '../../fabric/utils/ledger-action-args'
-import { DepositAgreementsService } from '../../contracts/services/deposit-agreements.service'
+import type { DepositAgreementsService } from '../../contracts/services/deposit-agreements.service'
 import { DepositEscrowService } from '../../contracts/services/deposit-escrow.service'
 
 /** Điều 9.1: khách thuê có 3 ngày để xác nhận hoặc báo sai lệch kể từ khi bản sửa đổi được ghi. */
@@ -69,7 +71,21 @@ export class MoveInSettlementsService {
     private readonly transactionEventService?: RentalTransactionEventService,
     @Optional()
     private readonly ledgerOutboxService?: LedgerOutboxService,
+    // DepositAgreementsService is type-only imported above to break a
+    // require() cycle (move-in-settlements -> deposit-agreements ->
+    // contracts.service -> move-in-settlements) that otherwise throws
+    // "class used before initialization" at boot. forwardRef() defers this
+    // require() until Nest resolves the provider, after all three modules
+    // have finished loading, so the lazy require is required here.
     @Optional()
+    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-member-access
+    @Inject(
+      forwardRef(
+        () =>
+          require('../../contracts/services/deposit-agreements.service')
+            .DepositAgreementsService
+      )
+    )
     private readonly depositAgreementsService?: DepositAgreementsService,
     @Optional()
     private readonly depositEscrowService?: DepositEscrowService
