@@ -24,6 +24,7 @@ import { ContractsService } from './contracts.service'
 import { OwnershipTransferResolver } from './ownership-transfer.resolver'
 import { RentalTransactionEventService } from '../../rental/services/rental-transaction-event.service'
 import type { RentalTransactionActorRole } from '../../rental/schemas/rental-transaction-event.schema'
+import { DepositEscrowService } from './deposit-escrow.service'
 
 @Injectable()
 export class DepositAgreementsService {
@@ -46,8 +47,30 @@ export class DepositAgreementsService {
     @Optional()
     private readonly flowNotificationService?: FlowNotificationService,
     @Optional()
-    private readonly transactionEventService?: RentalTransactionEventService
+    private readonly transactionEventService?: RentalTransactionEventService,
+    @Optional()
+    private readonly depositEscrowService?: DepositEscrowService
   ) {}
+
+  /** Gắn phiên ký quỹ Ví Mộc vừa mở vào thỏa thuận cọc (D4, D11). */
+  async attachEscrow(
+    id: string,
+    escrow: NonNullable<DepositAgreement['escrow']>
+  ): Promise<DepositAgreement> {
+    const agreement = await this.findById(id)
+    agreement.escrow = escrow
+    return this.repository.save(agreement)
+  }
+
+  /** Thỏa thuận cọc gắn với một hợp đồng thuê, nếu có. */
+  async findByContractId(
+    contractId: string | null | undefined
+  ): Promise<DepositAgreement | null> {
+    if (!contractId) return null
+    return this.repository.findOne({
+      where: { linkedLeaseContractId: contractId },
+    })
+  }
 
   async reviseSecurityDepositBeforeConsent(
     agreementId: string,
@@ -311,6 +334,13 @@ export class DepositAgreementsService {
     }
     if (agreement.status === 'cancelled') return agreement
     if (
+      agreement.status === 'paid' &&
+      (await this.canRefundEscrow(agreement))
+    ) {
+      await this.refundAndFinish(agreement, 'cancelled')
+      return (await this.findById(id)) ?? agreement
+    }
+    if (
       agreement.status === 'paid' ||
       agreement.status === 'applied-to-lease-security'
     ) {
@@ -327,6 +357,13 @@ export class DepositAgreementsService {
     const agreement = await this.findById(id)
     if (agreement.status === 'expired' || agreement.status === 'cancelled') {
       return agreement
+    }
+    if (
+      agreement.status === 'paid' &&
+      (await this.canRefundEscrow(agreement))
+    ) {
+      await this.refundAndFinish(agreement, 'expired')
+      return (await this.findById(id)) ?? agreement
     }
     if (
       agreement.status === 'paid' ||
@@ -347,20 +384,59 @@ export class DepositAgreementsService {
   }
 
   /**
+   * D7: `paid` kèm ký quỹ `HELD` và hợp đồng chưa `active` thì hoàn cọc
+   * được, thay vì bị chặn như trước khi có ký quỹ.
+   */
+  private async canRefundEscrow(agreement: DepositAgreement): Promise<boolean> {
+    if (!agreement.escrow || !this.depositEscrowService) return false
+    if (agreement.escrow.status !== 'HELD') return false
+    if (!agreement.linkedLeaseContractId || !this.contractRepository) {
+      return true
+    }
+    const contract = await this.contractRepository.findOne({
+      where: { _id: new ObjectId(agreement.linkedLeaseContractId) },
+    })
+    return contract?.status !== 'active'
+  }
+
+  private async refundAndFinish(
+    agreement: DepositAgreement,
+    reasonEventType: 'cancelled' | 'expired'
+  ): Promise<void> {
+    await this.depositEscrowService?.requestSettlement(
+      agreement._id.toHexString(),
+      'refund'
+    )
+    await this.recordTransactionEvent({
+      agreement,
+      eventType: `deposit.${reasonEventType}`,
+      actorRole: reasonEventType === 'expired' ? 'system' : 'tenant',
+      transitionKey: `deposit:${agreement._id.toHexString()}:${reasonEventType}`,
+    })
+    await this.releaseReservation(agreement)
+  }
+
+  /**
    * Sweep vận hành (D10): hết hạn các thỏa thuận cọc còn `draft`/`accepted`
    * quá `ttlHours`. Tái sử dụng `expire()` hiện có cho từng bản ghi nên vẫn
    * đi qua cùng kiểm tra nghiệp vụ và cùng sự kiện audit.
    */
   async expireStale(ttlHours: number, now = new Date()): Promise<number> {
     const cutoff = new Date(now.getTime() - ttlHours * 60 * 60 * 1000)
+    // D7: quét có điều kiện `createdAt < cutoff` thay vì load toàn bộ rồi lọc
+    // trong bộ nhớ; thêm `paid` có ký quỹ (hợp đồng chưa active) để hoàn cọc
+    // khi khách không hoàn tất chữ ký trong TTL.
     const candidates = await this.repository.find({
-      where: [{ status: 'draft' }, { status: 'accepted' }],
+      where: {
+        status: { $in: ['draft', 'accepted', 'paid'] },
+        createdAt: { $lt: cutoff },
+      } as never,
     })
     let count = 0
     for (const agreement of candidates) {
       if (
-        !agreement.createdAt ||
-        agreement.createdAt.getTime() > cutoff.getTime()
+        agreement.status === 'paid' &&
+        !(await this.canRefundEscrow(agreement))
       ) {
         continue
       }

@@ -106,13 +106,29 @@ export class PaymentProviderRegistry {
     return this.verifiers[name]
   }
 
-  listProviders(): PaymentProviderOption[] {
-    return this.enabledProviders().map(provider => ({
+  /**
+   * `purpose: 'deposit'` + `DEPOSIT_ESCROW_ENABLED=true`: cọc chỉ trả qua Ví
+   * Mộc (D2), vì chỉ cổng này có ký quỹ.
+   */
+  listProviders(purpose?: 'deposit'): PaymentProviderOption[] {
+    const providers =
+      purpose === 'deposit' && this.depositEscrowEnabled()
+        ? (['mocbank'] as const)
+        : this.enabledProviders()
+    return providers.map(provider => ({
       provider,
       label: PROVIDER_LABELS[provider],
       simulation: provider === 'mock-bank',
       ...(provider === 'momo' ? { methods: MOMO_METHOD_OPTIONS } : {}),
     }))
+  }
+
+  private depositEscrowEnabled(): boolean {
+    return Boolean(
+      this.configService.get<boolean>(
+        'rentalFlow.payments.depositEscrowEnabled'
+      )
+    )
   }
 
   getAccountLink(userId: string): Promise<ProviderAccountLink> {

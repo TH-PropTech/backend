@@ -161,7 +161,9 @@ describe('MockBankService', () => {
           ? 'secret-for-tests-012345678901234567'
           : key === 'rentalFlow.paymentProvider'
             ? 'mock-bank'
-            : 'test'
+            : key === 'rentalFlow.payments.depositEscrowEnabled'
+              ? false
+              : 'test'
       ),
     }
     const mockAdapter = {
@@ -1381,7 +1383,11 @@ describe('MockBankService', () => {
     it('settles a late Ví Mộc success on an attempt expired by a provider switch', async () => {
       const context = createContext()
       context.configService.get.mockImplementation((key: string) =>
-        key === 'rentalFlow.payments' ? TEST_PAYMENTS : 'test'
+        key === 'rentalFlow.payments'
+          ? TEST_PAYMENTS
+          : key === 'rentalFlow.payments.depositEscrowEnabled'
+            ? false
+            : 'test'
       )
       Object.assign(context.attempt, {
         provider: 'mocbank',
@@ -1408,7 +1414,11 @@ describe('MockBankService', () => {
     it('records duplicate-paid when a late Ví Mộc success meets a target paid elsewhere', async () => {
       const context = createContext()
       context.configService.get.mockImplementation((key: string) =>
-        key === 'rentalFlow.payments' ? TEST_PAYMENTS : 'test'
+        key === 'rentalFlow.payments'
+          ? TEST_PAYMENTS
+          : key === 'rentalFlow.payments.depositEscrowEnabled'
+            ? false
+            : 'test'
       )
       Object.assign(context.service, {
         transactionEventService: {
@@ -1953,7 +1963,11 @@ describe('MockBankService', () => {
       } {
         const context = createContext()
         context.configService.get.mockImplementation((key: string) =>
-          key === 'rentalFlow.payments' ? TEST_PAYMENTS : 'test'
+          key === 'rentalFlow.payments'
+            ? TEST_PAYMENTS
+            : key === 'rentalFlow.payments.depositEscrowEnabled'
+              ? false
+              : 'test'
         )
         const payoutsService = {
           createForPayment: jest.fn().mockResolvedValue({}),

@@ -37,6 +37,8 @@ import {
   buildHandoverArgs,
   buildMoveInSettlementArgs,
 } from '../../fabric/utils/ledger-action-args'
+import { DepositAgreementsService } from '../../contracts/services/deposit-agreements.service'
+import { DepositEscrowService } from '../../contracts/services/deposit-escrow.service'
 
 /** Điều 9.1: khách thuê có 3 ngày để xác nhận hoặc báo sai lệch kể từ khi bản sửa đổi được ghi. */
 export const HANDOVER_RESPONSE_WINDOW_MS = 3 * 24 * 60 * 60 * 1000
@@ -66,7 +68,11 @@ export class MoveInSettlementsService {
     @Optional()
     private readonly transactionEventService?: RentalTransactionEventService,
     @Optional()
-    private readonly ledgerOutboxService?: LedgerOutboxService
+    private readonly ledgerOutboxService?: LedgerOutboxService,
+    @Optional()
+    private readonly depositAgreementsService?: DepositAgreementsService,
+    @Optional()
+    private readonly depositEscrowService?: DepositEscrowService
   ) {}
 
   /**
@@ -677,6 +683,7 @@ export class MoveInSettlementsService {
       transitionKey: `settlement:${settlementId}:handover-completed`,
     })
     await this.recordHandoverCompletedEvidence(saved)
+    await this.releaseDepositEscrow(saved)
     await this.notifyHandover(
       [saved.tenantId, saved.landlordId],
       'Biên bản bàn giao đã hoàn tất',
@@ -685,6 +692,36 @@ export class MoveInSettlementsService {
         : 'Biên bản bàn giao đã hoàn tất: hai bên đã xác nhận.',
       saved
     )
+  }
+
+  /**
+   * D1: bàn giao hoàn tất lần đầu (kể cả staff override) giải ngân ký quỹ
+   * cọc cho chủ nhà. Lỗi Ví Mộc không làm hỏng bàn giao (D6); job retry và
+   * webhook xác nhận xử lý phần còn lại.
+   */
+  private async releaseDepositEscrow(
+    settlement: MoveInSettlement
+  ): Promise<void> {
+    if (!this.depositAgreementsService || !this.depositEscrowService) return
+    try {
+      const agreement = await this.depositAgreementsService.findByContractId(
+        settlement.contractId
+      )
+      if (
+        !agreement?.escrow ||
+        agreement.status !== 'applied-to-lease-security'
+      ) {
+        return
+      }
+      await this.depositEscrowService.requestSettlement(
+        agreement._id.toHexString(),
+        'release'
+      )
+    } catch (error) {
+      this.logger.warn(
+        `Deposit escrow release failed for settlement ${settlement._id.toHexString()}: ${error instanceof Error ? error.message : 'unknown'}`
+      )
+    }
   }
 
   /** Lỗi gửi thông báo không làm thất bại thao tác bàn giao. */
@@ -784,5 +821,11 @@ export class MoveInSettlementsService {
     })
     if (!row) throw new NotFoundException('MOVE_IN_SETTLEMENT_NOT_FOUND')
     return row
+  }
+
+  /** True nếu hợp đồng đã có biên bản bàn giao hoàn tất (D7, dùng khi chấm dứt hợp đồng). */
+  async hasCompletedHandover(contractId: string): Promise<boolean> {
+    const row = await this.settlementRepo.findOne({ where: { contractId } })
+    return Boolean(row?.handover?.completedAt)
   }
 }

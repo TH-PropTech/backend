@@ -5,7 +5,10 @@ describe('DepositAgreementsController', () => {
     const service = {
       consent: jest.fn().mockResolvedValue({ status: 'accepted' }),
     }
-    const controller = new DepositAgreementsController(service as never)
+    const controller = new DepositAgreementsController(
+      service as never,
+      {} as never
+    )
 
     await controller.consent(
       '507f1f77bcf86cd799439011',

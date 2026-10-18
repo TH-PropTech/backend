@@ -22,6 +22,7 @@ import { PaymentRequestsController } from './controllers/payment-requests.contro
 import { MoveInSettlement } from '../rental/schemas/move-in-settlement.schema'
 import { WalletsModule } from '../wallets/wallets.module'
 import { Contract } from '../contracts/schemas/contract.schema'
+import { RentalApplication } from '../rental/schemas/rental-application.schema'
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { Contract } from '../contracts/schemas/contract.schema'
       PaymentAttempt,
       MoveInSettlement,
       Contract,
+      RentalApplication,
     ]),
   ],
   controllers: [MockBankController, PaymentRequestsController],
