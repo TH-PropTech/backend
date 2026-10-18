@@ -866,4 +866,57 @@ describe('ContractViewService', () => {
     expect(view.actions.canEditContent).toBe(true)
     expect(view.actions.canLockContent).toBe(true)
   })
+
+  it('returns the full handover record (inventory, discrepancies, deadline, completion reason) to the parties', async () => {
+    contractRepo.findOne.mockResolvedValue({
+      ...mockContract,
+      status: 'active',
+    } as unknown as Contract)
+    const handover = {
+      revision: 2,
+      handedOverAt: new Date('2030-02-01T09:00:00.000Z'),
+      meterReadings: { electricity: 120, water: 125 },
+      keyCount: 1,
+      inventoryReference: null,
+      inventoryItems: [
+        { name: 'Sofa', quantity: 1, condition: 'good', note: null },
+      ],
+      discrepancies: [
+        { revision: 1, note: 'Nước 125', at: new Date('2030-02-02') },
+      ],
+      responseDueAt: new Date('2030-02-05T10:00:00.000Z'),
+      completionReason: 'tenant-no-response',
+      notes: null,
+      handoverHash: 'a'.repeat(64),
+      recordedBy: 'user-landlord-1',
+      tenantConfirmation: null,
+      landlordConfirmation: { at: new Date(), hash: 'a'.repeat(64) },
+      discrepancyNote: null,
+      completedAt: new Date('2030-02-05T11:00:00.000Z'),
+    }
+    Reflect.set(service, 'settlementRepository', {
+      findOne: jest.fn().mockResolvedValue({
+        _id: new ObjectId(),
+        status: 'paid',
+        total: 8_000_000,
+        dueAt: new Date('2030-01-29T00:00:00.000Z'),
+        statementHash: 'b'.repeat(64),
+        lines: [{ kind: 'FIRST_RENT', amount: 8_000_000, paymentId: 'p1' }],
+        handover,
+      }),
+    })
+
+    const view = await service.getForActor(
+      validContractId,
+      'user-tenant-1',
+      false
+    )
+
+    expect(view.settlement?.handover).toMatchObject({
+      inventoryItems: handover.inventoryItems,
+      discrepancies: handover.discrepancies,
+      responseDueAt: handover.responseDueAt,
+      completionReason: 'tenant-no-response',
+    })
+  })
 })

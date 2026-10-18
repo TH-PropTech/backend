@@ -4,7 +4,10 @@ import {
   ApartmentExpireOverdueListingsJob,
   ApartmentRemindExpiringListingsJob,
 } from './apartment-expiration.job'
-import { MoveInSettlementOverdueJob } from './move-in-settlement.job'
+import {
+  MoveInHandoverDeadlineJob,
+  MoveInSettlementOverdueJob,
+} from './move-in-settlement.job'
 import {
   RentalOpsApplyDueAmendmentsJob,
   RentalOpsExpireAttemptsJob,
@@ -18,6 +21,7 @@ describe('job schedules (unchanged from the former @Cron decorators)', () => {
     expireOverdueListings: jest.fn().mockResolvedValue(undefined),
     remindExpiringListings: jest.fn().mockResolvedValue(undefined),
     processOverdue: jest.fn().mockResolvedValue(2),
+    processHandoverResponseDeadlines: jest.fn().mockResolvedValue(1),
     expireAttempts: jest.fn().mockResolvedValue(1),
     expireDepositAgreements: jest.fn().mockResolvedValue(1),
     processPaymentReminders: jest.fn().mockResolvedValue(1),
@@ -43,6 +47,12 @@ describe('job schedules (unchanged from the former @Cron decorators)', () => {
         CronExpression.EVERY_DAY_AT_9AM,
         undefined,
         'processOverdue',
+      ],
+      [
+        new MoveInHandoverDeadlineJob(svc as never),
+        CronExpression.EVERY_HOUR,
+        undefined,
+        'processHandoverResponseDeadlines',
       ],
       [
         new RentalOpsExpireAttemptsJob(svc as never),

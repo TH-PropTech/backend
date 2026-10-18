@@ -1,5 +1,6 @@
 import {
   ConflictException,
+  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
@@ -16,6 +17,7 @@ import { RentalTransactionEventService } from '../services/rental-transaction-ev
 import type { RentalTransactionActorRole } from '../schemas/rental-transaction-event.schema'
 import {
   MoveInSettlement,
+  type HandoverInventoryItem,
   type LedgerEvidenceRef,
   type SettlementLine,
 } from '../schemas/move-in-settlement.schema'
@@ -27,7 +29,7 @@ import {
   hashMoveInSettlementEvidenceEnvelope,
 } from '../../fabric/utils/move-in-evidence-envelope'
 import {
-  MOVE_IN_HANDOVER_EVIDENCE_SCHEMA_VERSION,
+  type MoveInHandoverEvidenceSchemaVersion,
   buildMoveInHandoverEvidenceEnvelope,
   hashMoveInHandoverEvidenceEnvelope,
 } from '../../fabric/utils/move-in-handover-evidence-envelope'
@@ -35,6 +37,19 @@ import {
   buildHandoverArgs,
   buildMoveInSettlementArgs,
 } from '../../fabric/utils/ledger-action-args'
+
+/** Điều 9.1: khách thuê có 3 ngày để xác nhận hoặc báo sai lệch kể từ khi bản sửa đổi được ghi. */
+export const HANDOVER_RESPONSE_WINDOW_MS = 3 * 24 * 60 * 60 * 1000
+
+const formatViDateTime = (date: Date): string =>
+  date.toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })
+
+type HandoverEvidence = {
+  schemaVersion: MoveInHandoverEvidenceSchemaVersion
+  manifestHash: string
+  completedAt: string
+  overrideUsed: boolean
+}
 
 @Injectable()
 export class MoveInSettlementsService {
@@ -176,19 +191,13 @@ export class MoveInSettlementsService {
     }
     const settlementId = settlement._id.toHexString()
     try {
-      const { manifestHash, completedAt, overrideUsed } =
-        this.buildHandoverEvidence(settlement)
+      const evidence = this.buildHandoverEvidence(settlement)
       settlement.handoverEvidence = this.pendingEvidence(
-        MOVE_IN_HANDOVER_EVIDENCE_SCHEMA_VERSION,
-        manifestHash
+        evidence.schemaVersion,
+        evidence.manifestHash
       )
       await this.settlementRepo.save(settlement)
-      await this.enqueueHandoverEvidence(
-        settlement,
-        manifestHash,
-        completedAt,
-        overrideUsed
-      )
+      await this.enqueueHandoverEvidence(settlement, evidence)
     } catch (error) {
       this.logLedgerEvidenceFailure('handover', settlementId, error)
     }
@@ -201,30 +210,24 @@ export class MoveInSettlementsService {
     if (!this.ledgerOutboxService) return null
     const settlement = await this.findOrNull(settlementId)
     if (!settlement?.handover?.completedAt) return null
-    const { manifestHash, completedAt, overrideUsed } =
-      this.buildHandoverEvidence(settlement)
+    const evidence = this.buildHandoverEvidence(settlement)
     if (!settlement.handoverEvidence) {
       settlement.handoverEvidence = this.pendingEvidence(
-        MOVE_IN_HANDOVER_EVIDENCE_SCHEMA_VERSION,
-        manifestHash
+        evidence.schemaVersion,
+        evidence.manifestHash
       )
       await this.settlementRepo.save(settlement)
-    } else if (settlement.handoverEvidence.manifestHash !== manifestHash) {
+    } else if (
+      settlement.handoverEvidence.manifestHash !== evidence.manifestHash
+    ) {
       throw new ConflictException('HANDOVER_EVIDENCE_HASH_CONFLICT')
     }
-    return this.enqueueHandoverEvidence(
-      settlement,
-      manifestHash,
-      completedAt,
-      overrideUsed
-    )
+    return this.enqueueHandoverEvidence(settlement, evidence)
   }
 
-  private buildHandoverEvidence(settlement: MoveInSettlement): {
-    manifestHash: string
-    completedAt: string
-    overrideUsed: boolean
-  } {
+  private buildHandoverEvidence(
+    settlement: MoveInSettlement
+  ): HandoverEvidence {
     const handover = settlement.handover!
     const completedAt = new Date(handover.completedAt!).toISOString()
     const overrideUsed = Boolean(handover.overrideReason?.trim())
@@ -237,8 +240,10 @@ export class MoveInSettlementsService {
       landlordConfirmationHash: handover.landlordConfirmation?.hash ?? '',
       completedAt,
       overrideUsed,
+      completionReason: handover.completionReason ?? null,
     })
     return {
+      schemaVersion: envelope.schemaVersion,
       manifestHash: hashMoveInHandoverEvidenceEnvelope(envelope),
       completedAt,
       overrideUsed,
@@ -247,9 +252,7 @@ export class MoveInSettlementsService {
 
   private enqueueHandoverEvidence(
     settlement: MoveInSettlement,
-    manifestHash: string,
-    completedAt: string,
-    overrideUsed: boolean
+    { schemaVersion, manifestHash, completedAt, overrideUsed }: HandoverEvidence
   ): Promise<LedgerOutbox> {
     const settlementId = settlement._id.toHexString()
     const handover = settlement.handover!
@@ -262,7 +265,7 @@ export class MoveInSettlementsService {
         settlementId,
         contractId: settlement.contractId,
         handoverHash: handover.handoverHash,
-        manifestSchemaVersion: MOVE_IN_HANDOVER_EVIDENCE_SCHEMA_VERSION,
+        manifestSchemaVersion: schemaVersion,
         revision: handover.revision,
         overrideUsed,
         occurredAt: completedAt,
@@ -272,7 +275,7 @@ export class MoveInSettlementsService {
         contractId: settlement.contractId,
         settlementId,
         handoverRevision: handover.revision,
-        schemaVersion: MOVE_IN_HANDOVER_EVIDENCE_SCHEMA_VERSION,
+        schemaVersion,
         payloadHash: manifestHash,
       },
     })
@@ -348,7 +351,6 @@ export class MoveInSettlementsService {
     const tenantFee = contract.feeSnapshot?.quote?.find(
       line => line.payerRole === 'tenant'
     )
-    if (!policy && !tenantFee) return null
     const payments = await this.paymentRepo.find({
       where: { contractId, type: 'rent' },
     })
@@ -449,15 +451,23 @@ export class MoveInSettlementsService {
       electricity: number
       water: number
       keyCount: number
+      inventoryItems?: Array<{
+        name: string
+        quantity: number
+        condition: 'good' | 'damaged'
+        note?: string
+      }>
       inventoryReference?: string
       notes?: string
       overrideReason?: string
       isStaff?: boolean
-    }
+    },
+    now = new Date()
   ): Promise<MoveInSettlement> {
     const settlement = await this.find(id)
-    if (actorId !== settlement.landlordId && !input.isStaff)
-      throw new ConflictException('HANDOVER_ACCESS_DENIED')
+    const isLandlord = actorId === settlement.landlordId
+    if (!isLandlord && !input.isStaff)
+      throw new ForbiddenException('HANDOVER_ACCESS_DENIED')
     if (settlement.handover?.completedAt)
       throw new ConflictException('HANDOVER_COMPLETED_IMMUTABLE')
     if (
@@ -466,6 +476,14 @@ export class MoveInSettlementsService {
     )
       throw new ConflictException('HANDOVER_REQUIRES_SETTLEMENT')
     const revision = (settlement.handover?.revision ?? 0) + 1
+    const inventoryItems: HandoverInventoryItem[] = (
+      input.inventoryItems ?? []
+    ).map(item => ({
+      name: item.name,
+      quantity: item.quantity,
+      condition: item.condition,
+      note: item.note?.trim() || null,
+    }))
     const body = {
       revision,
       handedOverAt: new Date(input.handedOverAt).toISOString(),
@@ -473,22 +491,30 @@ export class MoveInSettlementsService {
       water: input.water,
       keyCount: input.keyCount,
       inventoryReference: input.inventoryReference ?? null,
+      inventoryItems,
       notes: input.notes ?? null,
     }
     const handoverHash = createHash('sha256')
       .update(JSON.stringify(body))
       .digest('hex')
+    const responseDueAt = new Date(now.getTime() + HANDOVER_RESPONSE_WINDOW_MS)
     settlement.handover = {
       revision,
       handedOverAt: new Date(input.handedOverAt),
       meterReadings: { electricity: input.electricity, water: input.water },
       keyCount: input.keyCount,
       inventoryReference: input.inventoryReference ?? null,
+      inventoryItems,
+      // Phản hồi của các bản trước được giữ lại, không ghi đè.
+      discrepancies: settlement.handover?.discrepancies ?? [],
+      responseDueAt,
+      completionReason: null,
       notes: input.notes ?? null,
       handoverHash,
       recordedBy: actorId,
       tenantConfirmation: null,
-      landlordConfirmation: null,
+      // Chủ nhà lập biên bản = đã xác nhận bản này; nhân viên lập thì chủ nhà vẫn phải xác nhận.
+      landlordConfirmation: isLandlord ? { at: now, hash: handoverHash } : null,
       discrepancyNote: null,
       overrideReason: input.overrideReason ?? null,
       completedAt: null,
@@ -497,11 +523,17 @@ export class MoveInSettlementsService {
     await this.recordTransactionEvent({
       contractId: saved.contractId,
       eventType: 'settlement.handover-recorded',
-      actorRole: input.isStaff ? 'staff' : 'landlord',
+      actorRole: isLandlord ? 'landlord' : 'staff',
       actorId,
       refs: { settlementId: saved._id.toHexString() },
       transitionKey: `settlement:${saved._id.toHexString()}:handover-recorded:${revision}`,
     })
+    await this.notifyHandover(
+      [saved.tenantId],
+      'Biên bản bàn giao cần bạn xác nhận',
+      `Chủ nhà đã ghi biên bản bàn giao căn hộ. Vui lòng xem và xác nhận hoặc báo sai lệch trước ${formatViDateTime(responseDueAt)}; quá hạn biên bản sẽ tự hoàn tất theo Điều 9.1.`,
+      saved
+    )
     return saved
   }
 
@@ -509,44 +541,177 @@ export class MoveInSettlementsService {
     id: string,
     actorId: string,
     role: 'tenant' | 'landlord',
-    handoverHash: string,
-    discrepancyNote?: string
+    handoverHash: string
   ): Promise<MoveInSettlement> {
     const settlement = await this.find(id)
     const handover = settlement.handover
     if (!handover) throw new ConflictException('HANDOVER_NOT_RECORDED')
     if (handover.completedAt) return settlement
-    if (handover.handoverHash !== handoverHash)
-      throw new ConflictException('HANDOVER_REVISION_STALE')
     if (
       (role === 'tenant' && settlement.tenantId !== actorId) ||
       (role === 'landlord' && settlement.landlordId !== actorId)
     )
-      throw new ConflictException('HANDOVER_ACCESS_DENIED')
+      throw new ForbiddenException('HANDOVER_ACCESS_DENIED')
+    if (handover.handoverHash !== handoverHash)
+      throw new ConflictException('HANDOVER_REVISION_STALE')
+    if (role === 'tenant' && this.hasOpenDiscrepancy(handover))
+      throw new ConflictException('HANDOVER_DISCREPANCY_OPEN')
     if (role === 'tenant')
       handover.tenantConfirmation = { at: new Date(), hash: handoverHash }
     else handover.landlordConfirmation = { at: new Date(), hash: handoverHash }
-    if (discrepancyNote) handover.discrepancyNote = discrepancyNote
     const justCompleted =
-      !handover.completedAt &&
       handover.tenantConfirmation?.hash === handoverHash &&
       handover.landlordConfirmation?.hash === handoverHash
     if (justCompleted) {
       handover.completedAt = new Date()
+      handover.completionReason = 'both-confirmed'
     }
     const saved = await this.settlementRepo.save(settlement)
-    if (justCompleted) {
-      await this.recordTransactionEvent({
-        contractId: saved.contractId,
-        eventType: 'settlement.handover-completed',
-        actorRole: role,
-        actorId,
-        refs: { settlementId: saved._id.toHexString() },
-        transitionKey: `settlement:${saved._id.toHexString()}:handover-completed`,
-      })
-      await this.recordHandoverCompletedEvidence(saved)
-    }
+    if (justCompleted) await this.afterHandoverCompleted(saved, role, actorId)
     return saved
+  }
+
+  /**
+   * Khách thuê báo sai lệch cho bản hiện tại. Không phải xác nhận và không làm hoàn tất;
+   * chủ nhà sửa biên bản (bản mới) để khách thuê xác nhận lại.
+   */
+  async reportHandoverDiscrepancy(
+    id: string,
+    actorId: string,
+    handoverHash: string,
+    note: string
+  ): Promise<MoveInSettlement> {
+    const settlement = await this.find(id)
+    const handover = settlement.handover
+    if (!handover) throw new ConflictException('HANDOVER_NOT_RECORDED')
+    if (settlement.tenantId !== actorId)
+      throw new ForbiddenException('HANDOVER_ACCESS_DENIED')
+    if (handover.completedAt)
+      throw new ConflictException('HANDOVER_COMPLETED_IMMUTABLE')
+    if (handover.handoverHash !== handoverHash)
+      throw new ConflictException('HANDOVER_REVISION_STALE')
+    if (handover.tenantConfirmation?.hash === handoverHash)
+      throw new ConflictException('HANDOVER_ALREADY_CONFIRMED')
+    const discrepancies = [
+      ...(handover.discrepancies ?? []),
+      { revision: handover.revision, note: note.trim(), at: new Date() },
+    ]
+    handover.discrepancies = discrepancies
+    const saved = await this.settlementRepo.save(settlement)
+    await this.recordTransactionEvent({
+      contractId: saved.contractId,
+      eventType: 'settlement.handover-discrepancy-reported',
+      actorRole: 'tenant',
+      actorId,
+      refs: { settlementId: saved._id.toHexString() },
+      transitionKey: `settlement:${saved._id.toHexString()}:handover-discrepancy:${handover.revision}:${discrepancies.length}`,
+    })
+    await this.notifyHandover(
+      [saved.landlordId],
+      'Khách thuê báo sai lệch biên bản bàn giao',
+      'Khách thuê đã gửi phản hồi sai lệch cho biên bản bàn giao. Vui lòng xem phản hồi và sửa biên bản để khách thuê xác nhận lại.',
+      saved
+    )
+    return saved
+  }
+
+  /**
+   * Điều 9.1: biên bản đã có xác nhận của chủ nhà, khách thuê không xác nhận và không báo
+   * sai lệch cho bản hiện tại đến hết `responseDueAt` → hoàn tất `tenant-no-response`.
+   * Idempotent: bản đã hoàn tất bị bỏ qua.
+   */
+  async processHandoverResponseDeadlines(now = new Date()): Promise<number> {
+    // ponytail: quét toàn bộ rồi lọc trong bộ nhớ như processOverdue (mỗi hợp đồng một bản ghi);
+    // chuyển sang truy vấn `handover.responseDueAt` có index nếu số hợp đồng lớn.
+    const rows = await this.settlementRepo.find()
+    let count = 0
+    for (const row of rows) {
+      const handover = row.handover
+      if (!handover || !this.isHandoverResponseExpired(handover, now)) continue
+      handover.completedAt = now
+      handover.completionReason = 'tenant-no-response'
+      const saved = await this.settlementRepo.save(row)
+      await this.afterHandoverCompleted(saved, 'system', null)
+      count += 1
+    }
+    return count
+  }
+
+  private isHandoverResponseExpired(
+    handover: NonNullable<MoveInSettlement['handover']>,
+    now: Date
+  ): boolean {
+    if (handover.completedAt || !handover.responseDueAt) return false
+    return (
+      new Date(handover.responseDueAt) <= now &&
+      handover.landlordConfirmation?.hash === handover.handoverHash &&
+      handover.tenantConfirmation?.hash !== handover.handoverHash &&
+      !this.hasOpenDiscrepancy(handover)
+    )
+  }
+
+  private hasOpenDiscrepancy(
+    handover: NonNullable<MoveInSettlement['handover']>
+  ): boolean {
+    return (handover.discrepancies ?? []).some(
+      item => item.revision === handover.revision
+    )
+  }
+
+  private async afterHandoverCompleted(
+    saved: MoveInSettlement,
+    actorRole: RentalTransactionActorRole,
+    actorId: string | null
+  ): Promise<void> {
+    const settlementId = saved._id.toHexString()
+    const completionReason =
+      saved.handover?.completionReason ?? 'both-confirmed'
+    await this.recordTransactionEvent({
+      contractId: saved.contractId,
+      eventType: 'settlement.handover-completed',
+      actorRole,
+      actorId,
+      refs: { settlementId, completionReason },
+      transitionKey: `settlement:${settlementId}:handover-completed`,
+    })
+    await this.recordHandoverCompletedEvidence(saved)
+    await this.notifyHandover(
+      [saved.tenantId, saved.landlordId],
+      'Biên bản bàn giao đã hoàn tất',
+      completionReason === 'tenant-no-response'
+        ? 'Biên bản bàn giao đã hoàn tất: khách thuê không phản hồi sai lệch trong hạn 3 ngày theo Điều 9.1.'
+        : 'Biên bản bàn giao đã hoàn tất: hai bên đã xác nhận.',
+      saved
+    )
+  }
+
+  /** Lỗi gửi thông báo không làm thất bại thao tác bàn giao. */
+  private async notifyHandover(
+    userIds: string[],
+    title: string,
+    body: string,
+    settlement: MoveInSettlement
+  ): Promise<void> {
+    for (const userId of userIds) {
+      try {
+        await this.notifications.createNotification(
+          userId,
+          title,
+          body,
+          'MOVE_IN_HANDOVER',
+          {
+            contractId: settlement.contractId,
+            settlementId: settlement._id.toHexString(),
+            revision: settlement.handover?.revision ?? null,
+          }
+        )
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        this.logger.warn(
+          `Handover notification for user [${userId}] on contract [${settlement.contractId}] failed: ${message}`
+        )
+      }
+    }
   }
 
   async processOverdue(now = new Date()): Promise<number> {

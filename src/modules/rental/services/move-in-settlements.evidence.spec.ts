@@ -268,7 +268,7 @@ describe('MoveInSettlementsService ledger evidence producers (PROP-399 D3, tasks
       )
 
       expect(done.handoverEvidence).toEqual({
-        manifestVersion: 1,
+        manifestVersion: 2,
         manifestHash: expect.stringMatching(/^[a-f0-9]{64}$/) as string,
         ledgerStatus: 'pending',
         txHash: null,
@@ -289,7 +289,7 @@ describe('MoveInSettlementsService ledger evidence producers (PROP-399 D3, tasks
         settlementId,
         contractId,
         HASH,
-        '1',
+        '2',
         '2',
         'false',
         completedAt,
@@ -305,6 +305,7 @@ describe('MoveInSettlementsService ledger evidence producers (PROP-399 D3, tasks
             landlordConfirmationHash: HASH,
             completedAt,
             overrideUsed: false,
+            completionReason: 'both-confirmed',
           })
         )
       )
@@ -313,16 +314,18 @@ describe('MoveInSettlementsService ledger evidence producers (PROP-399 D3, tasks
     it('flags overrideUsed without ever sending the override reason, meter readings, key count, inventory, notes or discrepancy note', async () => {
       const { service, settlementRepo, outbox } = build()
       settlementRepo.findOne.mockResolvedValue(
-        recordedSettlement({ overrideReason: 'STAFF OVERRIDE TEXT' })
+        recordedSettlement({
+          overrideReason: 'STAFF OVERRIDE TEXT',
+          inventoryItems: [
+            { name: 'SECRET SOFA', quantity: 1, condition: 'good', note: null },
+          ],
+          discrepancies: [
+            { revision: 1, note: 'DISCREPANCY TEXT', at: new Date() },
+          ],
+        })
       )
       await service.confirmHandover(settlementId, 'tenant', 'tenant', HASH)
-      await service.confirmHandover(
-        settlementId,
-        'landlord',
-        'landlord',
-        HASH,
-        'DISCREPANCY TEXT'
-      )
+      await service.confirmHandover(settlementId, 'landlord', 'landlord', HASH)
       const input = firstEnqueue(outbox)
       expect(input.args[5]).toBe('true')
       const serialized = JSON.stringify(input)
@@ -331,6 +334,7 @@ describe('MoveInSettlementsService ledger evidence producers (PROP-399 D3, tasks
         'DISCREPANCY TEXT',
         'PRIVATE NOTE',
         'INV-SECRET-REF',
+        'SECRET SOFA',
       ]) {
         expect(serialized).not.toContain(leaked)
       }

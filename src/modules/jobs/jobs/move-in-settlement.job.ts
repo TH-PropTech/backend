@@ -18,3 +18,20 @@ export class MoveInSettlementOverdueJob extends BaseJob {
     return this.service.processOverdue()
   }
 }
+
+/** Điều 9.1: hoàn tất biên bản bàn giao khi khách thuê không phản hồi trong 3 ngày. */
+@Injectable()
+export class MoveInHandoverDeadlineJob extends BaseJob {
+  readonly name = 'move-in-handover-deadline'
+  readonly description =
+    'Hoàn tất biên bản bàn giao quá hạn phản hồi 3 ngày (mỗi giờ)'
+  readonly cron = CronExpression.EVERY_HOUR
+
+  constructor(private readonly service: MoveInSettlementsService) {
+    super()
+  }
+
+  run(): Promise<number> {
+    return this.service.processHandoverResponseDeadlines()
+  }
+}

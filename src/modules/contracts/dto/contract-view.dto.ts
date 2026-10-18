@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger'
 import type { LegalProfile } from '../legal/legal-profile.resolver'
+import type { MoveInSettlement } from '../../rental/schemas/move-in-settlement.schema'
 
 export class ContractPropertySnapshotDto {
   @ApiProperty()
@@ -589,7 +590,8 @@ export class ContractViewDto {
     dueAt: string
     statementHash: string
     lines: Array<{ kind: string; amount: number; paymentId: string | null }>
-    handover: unknown
+    /** Gồm cả `inventoryItems`, `discrepancies`, `responseDueAt`, `completionReason` (phương án A). */
+    handover: MoveInSettlement['handover']
   } | null
 
   @ApiProperty()

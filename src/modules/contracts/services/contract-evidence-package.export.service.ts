@@ -350,6 +350,11 @@ export class ContractEvidencePackageExportService {
             handoverHash: settlement.handover.handoverHash,
             completedAt: settlement.handover.completedAt,
             overrideUsed: Boolean(settlement.handover.overrideReason?.trim()),
+            // Danh mục tài sản và nội dung phản hồi sai lệch là dữ liệu riêng (bị scrub);
+            // gói chỉ mang lý do hoàn tất, hạn phản hồi và số phản hồi.
+            completionReason: settlement.handover.completionReason ?? null,
+            responseDueAt: settlement.handover.responseDueAt ?? null,
+            disputeCount: settlement.handover.discrepancies?.length ?? 0,
             manifestHash: settlement.handoverEvidence?.manifestHash ?? null,
             ledgerStatus: settlement.handoverEvidence?.ledgerStatus ?? null,
             ledgerTxHash: settlement.handoverEvidence?.txHash ?? null,
