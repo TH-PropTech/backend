@@ -4,13 +4,9 @@ import { CONTRACT_DOCUMENT_INDEXES } from './011-contract-documents-merge'
 import { RENTAL_FLOW_CONFIG_INDEXES } from './014-rental-flow-configs-merge'
 import { REVIEW_CASE_INDEXES } from './015-review-cases-merge'
 import { SAVED_SEARCH_RECORD_INDEXES } from './016-saved-searches-merge'
-import { DISTRICT_DATA_INDEXES } from './017-district-data-merge'
-import { APARTMENT_ANALYSIS_INDEXES } from './018-apartment-analyses-merge'
 import { SYSTEM_CONFIG_INDEX } from './013-merge-system-configs'
 import { CommunityEntry } from '../../modules/community/schemas/community-entry.schema'
 import { ContractDocument } from '../../modules/contracts/schemas/contract-document.schema'
-import { DistrictData } from '../../modules/properties/insights/schemas/district-data.schema'
-import { ApartmentAnalysis } from '../../modules/properties/insights/schemas/apartment-analysis.schema'
 import { ReviewCase } from '../../modules/properties/schemas/review-case.schema'
 import { SavedSearchRecord } from '../../modules/properties/schemas/saved-search-record.schema'
 import { SystemConfig } from '../../modules/properties/schemas/system-config.schema'
@@ -88,16 +84,6 @@ const CASES: ReadonlyArray<{
     label: 'ContractDocument (011)',
     entity: ContractDocument,
     migrationIndexes: CONTRACT_DOCUMENT_INDEXES,
-  },
-  {
-    label: 'DistrictData (017)',
-    entity: DistrictData,
-    migrationIndexes: DISTRICT_DATA_INDEXES,
-  },
-  {
-    label: 'ApartmentAnalysis (018)',
-    entity: ApartmentAnalysis,
-    migrationIndexes: APARTMENT_ANALYSIS_INDEXES,
   },
   {
     label: 'ReviewCase (015)',
