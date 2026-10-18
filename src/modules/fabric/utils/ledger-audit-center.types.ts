@@ -6,6 +6,8 @@
 export const AUDIT_EVENT_TYPES = [
   'contract.activated',
   'deposit.paid',
+  'deposit.released',
+  'deposit.refunded',
   'payment.paid',
   'contract.amendment-effective',
   'contract.terminated',

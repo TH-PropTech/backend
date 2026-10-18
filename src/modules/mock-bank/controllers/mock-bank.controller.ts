@@ -88,8 +88,10 @@ export class MockBankController {
   @ApiOkResponse({
     description: 'Enabled providers; never includes credentials',
   })
-  providers(): PaymentProviderOption[] {
-    return this.providerRegistry.listProviders()
+  providers(@Query('purpose') purpose?: string): PaymentProviderOption[] {
+    return this.providerRegistry.listProviders(
+      purpose === 'deposit' ? 'deposit' : undefined
+    )
   }
 
   @Get('attempts/:txRef/result')
@@ -347,10 +349,27 @@ export class MockBankController {
       response.status(HttpStatus.OK).end()
       return
     }
+    if (envelope.event.startsWith('escrow.')) {
+      const handled = await this.mockBankService.handleEscrowWebhook(
+        envelope.event,
+        envelope.body
+      )
+      response.status(handled ? HttpStatus.OK : HttpStatus.BAD_REQUEST).end()
+      return
+    }
     const result = await this.gatewayCallbackService.handleNotify(
       'mocbank',
       envelope.body
     )
+    if (
+      result.ok &&
+      (envelope.event === 'payment.cancelled' ||
+        envelope.event === 'payment.expired')
+    ) {
+      await this.mockBankService.syncEscrowStatusFromPaymentWebhook(
+        envelope.body
+      )
+    }
     response.status(this.gatewayCallbackService.toMocbankStatus(result)).end()
   }
 

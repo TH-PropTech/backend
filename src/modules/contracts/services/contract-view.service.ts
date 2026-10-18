@@ -9,7 +9,11 @@ import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 import { ObjectId } from 'mongodb'
 import { Contract } from '../schemas/contract.schema'
-import { DepositAgreement } from '../schemas/deposit-agreement.schema'
+import {
+  DepositAgreement,
+  type DepositEscrow,
+} from '../schemas/deposit-agreement.schema'
+import type { ContractDepositEscrowViewDto } from '../dto/contract-view.dto'
 import { KycService } from '../../users/services/kyc.service'
 import { LedgerAuditQueryService } from '../../fabric/services/ledger-audit-query.service'
 import { FabricService } from '../../fabric/services/fabric.service'
@@ -48,6 +52,30 @@ import {
  */
 const ARTIFACT_VERIFIED_TTL_MS = 5 * 60 * 1000
 const ARTIFACT_VERIFIED_MAX_ENTRIES = 500
+
+/**
+ * D5: chiếu `escrow` cho view tenant/landlord; không lộ `escrowId` hay
+ * `transactionCodes` (chỉ staff xem trong Chi tiết kỹ thuật, nơi khác).
+ */
+export function toEscrowViewDto(
+  escrow: DepositEscrow | null | undefined
+): ContractDepositEscrowViewDto | null {
+  if (!escrow) return null
+  return {
+    status: escrow.status,
+    autoRefundAt: escrow.autoRefundAt.toISOString(),
+    heldAt: escrow.heldAt ? new Date(escrow.heldAt).toISOString() : null,
+    settlement: escrow.settlement
+      ? {
+          kind: escrow.settlement.kind,
+          state: escrow.settlement.state,
+          settledAt: escrow.settlement.settledAt
+            ? new Date(escrow.settlement.settledAt).toISOString()
+            : null,
+        }
+      : null,
+  }
+}
 
 @Injectable()
 export class ContractViewService {
@@ -292,7 +320,9 @@ export class ContractViewService {
                   | 'draft'
                   | 'pending'
                   | 'paid'
-                  | 'transferred') || 'pending',
+                  | 'transferred'
+                  | 'released'
+                  | 'refunded') || 'pending',
           consentGiven: Boolean(depositAgreement.tenantConsent),
           contentRevision: depositAgreement.contentRevision,
           contentHash: depositAgreement.contentHash,
@@ -300,6 +330,7 @@ export class ContractViewService {
             ? depositAgreement.paidAt.toISOString()
             : null,
           txHash: contract.depositTxHash ?? null,
+          escrow: toEscrowViewDto(depositAgreement.escrow),
         }
       }
     }
@@ -334,6 +365,7 @@ export class ContractViewService {
           ? contract.depositPaidAt.toISOString()
           : null,
         txHash: contract.depositTxHash ?? null,
+        escrow: null,
       }
     }
 

@@ -58,6 +58,8 @@ import { OwnershipTransferResolver } from './services/ownership-transfer.resolve
 import { OWNERSHIP_TRANSFER_STORE } from './services/ownership-transfer.store'
 import { PropertyOwnershipTransfer } from './schemas/property-ownership-transfer.schema'
 import { PropertyOwnershipTransferRecord } from './schemas/property-ownership-transfer-record.schema'
+import { DepositEscrowService } from './services/deposit-escrow.service'
+import { WalletsModule } from '../wallets/wallets.module'
 
 @Module({
   imports: [
@@ -85,6 +87,7 @@ import { PropertyOwnershipTransferRecord } from './schemas/property-ownership-tr
     PaymentsModule,
     AuthModule,
     NotificationsModule,
+    WalletsModule,
   ],
   controllers: [
     ContractsController,
@@ -141,6 +144,7 @@ import { PropertyOwnershipTransferRecord } from './schemas/property-ownership-tr
       provide: OWNERSHIP_TRANSFER_STORE,
       useExisting: MongoOwnershipTransferStore,
     },
+    DepositEscrowService,
   ],
   exports: [
     ContractsService,
@@ -156,6 +160,7 @@ import { PropertyOwnershipTransferRecord } from './schemas/property-ownership-tr
     ContractEvidencePackageService,
     OwnershipTransferService,
     OwnershipTransferResolver,
+    DepositEscrowService,
   ],
 })
 export class ContractsModule {}

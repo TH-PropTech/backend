@@ -69,6 +69,7 @@ import { MoveInSettlementsService } from '../../rental/services/move-in-settleme
 import { ContractLayoutService } from '../layout/contract-layout.service'
 import { RentalTransactionEventService } from '../../rental/services/rental-transaction-event.service'
 import type { RentalTransactionActorRole } from '../../rental/schemas/rental-transaction-event.schema'
+import { DepositEscrowService } from './deposit-escrow.service'
 
 // ── Interfaces ──
 
@@ -218,7 +219,9 @@ export class ContractsService {
     private readonly governanceService?: FabricGovernanceService,
     @Optional()
     @InjectRepository(User)
-    private readonly userRepository?: Repository<User>
+    private readonly userRepository?: Repository<User>,
+    @Optional()
+    private readonly depositEscrowService?: DepositEscrowService
   ) {
     this.signingGrantRepository =
       new KindScopedSmartCaSigningRepository<SigningGrantDoc>(
@@ -1224,7 +1227,40 @@ export class ContractsService {
       reasonHash,
       terminatedAt,
     })
+    await this.refundDepositEscrowOnTermination(contract)
     return contract
+  }
+
+  /**
+   * D7: chấm dứt hợp đồng trước khi bàn giao hoàn cọc còn ở ký quỹ. Lỗi Ví
+   * Mộc không làm hỏng việc chấm dứt (D6); job retry xử lý phần còn lại.
+   */
+  private async refundDepositEscrowOnTermination(
+    contract: Contract
+  ): Promise<void> {
+    if (!this.depositEscrowService) return
+    try {
+      const agreement = await this.findDepositAgreementForContract(contract)
+      if (
+        !agreement?.escrow ||
+        agreement.status !== 'applied-to-lease-security'
+      ) {
+        return
+      }
+      const handoverCompleted =
+        await this.moveInSettlementsService?.hasCompletedHandover(
+          contract._id.toHexString()
+        )
+      if (handoverCompleted) return
+      await this.depositEscrowService.requestSettlement(
+        agreement._id.toHexString(),
+        'refund'
+      )
+    } catch (error) {
+      this.logger.warn(
+        `Deposit escrow refund on termination failed for contract ${contract._id.toHexString()}: ${error instanceof Error ? error.message : 'unknown'}`
+      )
+    }
   }
 
   private async enqueueTerminationLedgerEvent(

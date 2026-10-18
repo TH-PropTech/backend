@@ -21,6 +21,8 @@ export type ProviderPaymentIntent = {
   txRef: string
   redirectUrl: string
   expiresAt: Date
+  /** Ví Mộc only, when the intent opened an escrow session instead of a direct transfer. */
+  escrowId?: string | null
 }
 
 export type ProviderAccountLink = {
@@ -43,6 +45,8 @@ export type PaymentIntentInput = {
   clientChannel?: PaymentClientChannel | undefined
   /** Ví Mộc only: tài khoản nhận tiền thay cho ví của sàn (chủ nhà). */
   payeeAccountNumber?: string | undefined
+  /** Ví Mộc only: mở phiên ký quỹ thay vì chuyển thẳng; loại trừ `payeeAccountNumber`. */
+  escrow?: { autoRefundAt: Date } | undefined
 }
 
 /**
