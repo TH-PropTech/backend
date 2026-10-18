@@ -428,6 +428,11 @@ describe('MoveInSettlementsService handover (phương án A)', () => {
     id: string
     notifications: { createNotification: jest.Mock }
     outbox: { enqueue: jest.Mock }
+    settlementRepo: {
+      findOne: jest.Mock
+      find: jest.Mock
+      save: jest.Mock
+    }
   } {
     const row: Row = {
       _id: new ObjectId(),
@@ -460,6 +465,7 @@ describe('MoveInSettlementsService handover (phương án A)', () => {
       id: row._id.toHexString(),
       notifications,
       outbox,
+      settlementRepo,
     }
   }
 
@@ -555,6 +561,41 @@ describe('MoveInSettlementsService handover (phương án A)', () => {
       await expect(
         service.updateHandover(id, 'landlord', RECORD)
       ).rejects.toThrow('HANDOVER_COMPLETED_IMMUTABLE')
+    })
+
+    it('lets the landlord record the handover once the deposit is confirmed, even while the settlement is still pending', async () => {
+      const { row, id, settlementRepo } = setup('pending')
+      row.contractId = new ObjectId().toHexString()
+      const contractRepo = {
+        findOne: jest.fn().mockResolvedValue({
+          deposit: 10_000_000,
+          depositPaidAt: null,
+        }),
+      }
+      const depositAgreementsService = {
+        findByContractId: jest.fn().mockResolvedValue({
+          _id: new ObjectId(),
+          status: 'applied-to-lease-security',
+          amount: 10_000_000,
+          paidAt: new Date('2030-01-01'),
+        }),
+      }
+      const service = new MoveInSettlementsService(
+        settlementRepo as never,
+        contractRepo as never,
+        {} as never,
+        { createNotification: jest.fn().mockResolvedValue(undefined) } as never,
+        undefined,
+        { enqueue: jest.fn().mockResolvedValue({}) } as never,
+        depositAgreementsService as never
+      )
+      const saved = await service.updateHandover(id, 'landlord', RECORD)
+      expect(saved.handover?.landlordConfirmation?.hash).toBe(
+        saved.handover?.handoverHash
+      )
+      expect(depositAgreementsService.findByContractId).toHaveBeenCalledWith(
+        row.contractId
+      )
     })
   })
 

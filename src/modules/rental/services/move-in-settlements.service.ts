@@ -41,6 +41,7 @@ import {
 } from '../../fabric/utils/ledger-action-args'
 import type { DepositAgreementsService } from '../../contracts/services/deposit-agreements.service'
 import { DepositEscrowService } from '../../contracts/services/deposit-escrow.service'
+import { resolveDepositConfirmation } from '../../contracts/services/deposit-confirmation.resolver'
 
 /** Điều 9.1: khách thuê có 3 ngày để xác nhận hoặc báo sai lệch kể từ khi bản sửa đổi được ghi. */
 export const HANDOVER_RESPONSE_WINDOW_MS = 3 * 24 * 60 * 60 * 1000
@@ -78,7 +79,7 @@ export class MoveInSettlementsService {
     // require() until Nest resolves the provider, after all three modules
     // have finished loading, so the lazy require is required here.
     @Optional()
-    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-member-access
+    /* eslint-disable @typescript-eslint/no-require-imports, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-member-access */
     @Inject(
       forwardRef(
         () =>
@@ -86,6 +87,7 @@ export class MoveInSettlementsService {
             .DepositAgreementsService
       )
     )
+    /* eslint-enable @typescript-eslint/no-require-imports, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-member-access */
     private readonly depositAgreementsService?: DepositAgreementsService,
     @Optional()
     private readonly depositEscrowService?: DepositEscrowService
@@ -496,6 +498,7 @@ export class MoveInSettlementsService {
       throw new ConflictException('HANDOVER_COMPLETED_IMMUTABLE')
     if (
       settlement.status !== 'paid' &&
+      !(await this.isDepositConfirmedForContract(settlement.contractId)) &&
       !(input.isStaff && input.overrideReason?.trim())
     )
       throw new ConflictException('HANDOVER_REQUIRES_SETTLEMENT')
@@ -708,6 +711,38 @@ export class MoveInSettlementsService {
         : 'Biên bản bàn giao đã hoàn tất: hai bên đã xác nhận.',
       saved
     )
+  }
+
+  /**
+   * Chủ nhà được lập biên bản bàn giao ngay khi cọc đã xác nhận (ký hợp
+   * đồng + chuyển cọc), không cần đợi quyết toán nhận nhà (tiền thuê kỳ
+   * đầu) trả xong — dùng chung nguồn sự thật `resolveDepositConfirmation`
+   * với luồng kích hoạt/ký hợp đồng.
+   */
+  private async isDepositConfirmedForContract(
+    contractId: string
+  ): Promise<boolean> {
+    if (!this.depositAgreementsService || !ObjectId.isValid(contractId))
+      return false
+    const [contract, agreement] = await Promise.all([
+      this.contractRepo.findOne({ where: { _id: new ObjectId(contractId) } }),
+      this.depositAgreementsService.findByContractId(contractId),
+    ])
+    if (!contract) return false
+    return resolveDepositConfirmation(
+      {
+        deposit: contract.deposit,
+        depositPaidAt: contract.depositPaidAt ?? null,
+      },
+      agreement
+        ? {
+            id: agreement._id.toHexString(),
+            status: agreement.status,
+            amount: agreement.amount,
+            paidAt: agreement.paidAt,
+          }
+        : null
+    ).confirmed
   }
 
   /**
