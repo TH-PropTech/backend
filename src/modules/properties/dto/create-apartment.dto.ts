@@ -68,6 +68,21 @@ class HoldingDepositDto {
   percent?: number
 }
 
+class PrepaidRentDto {
+  @ApiProperty({ enum: ['NONE', 'MONTHS', 'FULL'] })
+  @IsIn(['NONE', 'MONTHS', 'FULL'])
+  type!: 'NONE' | 'MONTHS' | 'FULL'
+
+  @ApiPropertyOptional({
+    description: 'Số tháng tiền thuê trả trước (bắt buộc khi type = MONTHS)',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(24)
+  months?: number
+}
+
 class SettlementPolicyDto {
   @ApiPropertyOptional({ type: HoldingDepositDto })
   @IsOptional()
@@ -122,6 +137,27 @@ export class RentalPackageDto {
   @ValidateNested()
   @Type(() => SettlementPolicyDto)
   settlementPolicy?: SettlementPolicyDto
+
+  @ApiPropertyOptional({
+    type: PrepaidRentDto,
+    description:
+      'Tiền thuê trả trước ngoài tiền cọc: không trả trước / N tháng / toàn bộ',
+  })
+  @IsOptional()
+  @IsObject()
+  @ValidateNested()
+  @Type(() => PrepaidRentDto)
+  prepaidRent?: PrepaidRentDto
+
+  @ApiPropertyOptional({ description: 'Số tháng trả trước đã quy đổi' })
+  @IsOptional()
+  @IsNumber()
+  resolvedPrepaidRentMonths?: number
+
+  @ApiPropertyOptional({ description: 'Tiền thuê trả trước đã quy đổi' })
+  @IsOptional()
+  @IsNumber()
+  resolvedPrepaidRentAmount?: number
 
   @ApiPropertyOptional({ description: 'Tiền cọc tính toán (tùy chọn khi gửi)' })
   @IsOptional()

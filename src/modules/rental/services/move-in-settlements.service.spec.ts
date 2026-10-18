@@ -136,6 +136,72 @@ describe('MoveInSettlementsService', () => {
     )
   })
 
+  describe('prepaid rent', () => {
+    const contractWith = (
+      prepaidRentMonths: number | null | undefined
+    ): Contract =>
+      ({
+        _id: new ObjectId(),
+        tenantId: 'tenant',
+        landlordId: 'landlord',
+        deposit: 20_000_000,
+        startDate: new Date('2030-02-01T00:00:00.000Z'),
+        ...(prepaidRentMonths !== undefined ? { prepaidRentMonths } : {}),
+        packageSnapshot: {
+          resolvedHoldingDepositAmount: 6_000_000,
+          settlementPolicy: { firstPaymentDueOffsetDays: 3 },
+        },
+      }) as Contract
+    const firstPayment = (amount: number): Payment =>
+      ({ _id: new ObjectId(), amount, periodKey: '2030-02' }) as Payment
+
+    it('collects the prepaid months at move-in as the first-rent line', async () => {
+      const { service, paymentRepo } = setup()
+      paymentRepo.find.mockResolvedValue([firstPayment(60_000_000)])
+
+      const result = await service.createForContract(
+        contractWith(6),
+        new Date('2030-01-01T00:00:00.000Z')
+      )
+
+      expect(result?.lines.map(line => line.kind)).toEqual([
+        'DEPOSIT_TOPUP',
+        'FIRST_RENT',
+      ])
+      expect(result?.total).toBe(14_000_000 + 60_000_000)
+    })
+
+    it('leaves the first rent out of the move-in statement when the package is deposit-only', async () => {
+      const { service, paymentRepo } = setup()
+      paymentRepo.find.mockResolvedValue([firstPayment(10_000_000)])
+
+      const result = await service.createForContract(
+        contractWith(0),
+        new Date('2030-01-01T00:00:00.000Z')
+      )
+
+      expect(result?.lines.map(line => line.kind)).toEqual(['DEPOSIT_TOPUP'])
+      expect(result?.total).toBe(14_000_000)
+    })
+
+    it('keeps the legacy behaviour for contracts that predate the prepayment policy', async () => {
+      for (const legacy of [undefined, null]) {
+        const { service, paymentRepo } = setup()
+        paymentRepo.find.mockResolvedValue([firstPayment(10_000_000)])
+
+        const result = await service.createForContract(
+          contractWith(legacy),
+          new Date('2030-01-01T00:00:00.000Z')
+        )
+
+        expect(result?.lines.map(line => line.kind)).toEqual([
+          'DEPOSIT_TOPUP',
+          'FIRST_RENT',
+        ])
+      }
+    })
+  })
+
   it('records exactly one settlement.created transaction event when creation is retried for the same contract', async () => {
     const { service, settlementRepo, paymentRepo } = setup()
     const { service: transactionEventService, events } =

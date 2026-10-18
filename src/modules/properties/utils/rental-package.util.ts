@@ -19,6 +19,18 @@ export type HoldingDepositInput =
   | { type: 'FIXED_AMOUNT'; amount: number }
   | { type: 'PERCENT_OF_SECURITY'; percent: number }
 
+/**
+ * Tiền thuê tenant phải trả TRƯỚC (cùng lúc đặt cọc / nhận nhà), tách khỏi tiền cọc:
+ * - NONE: chỉ đặt cọc, không thu trước tiền thuê; kỳ thuê đầu tiên thu theo lịch thanh toán thường.
+ * - MONTHS: trả trước `months` tháng tiền thuê (1..thời hạn gói).
+ * - FULL: trả trước toàn bộ tiền thuê của thời hạn gói.
+ * Vắng mặt = gói cũ, giữ hành vi cũ (kỳ thanh toán đầu thu khi nhận nhà).
+ */
+export type PrepaidRentInput =
+  | { type: 'NONE' }
+  | { type: 'MONTHS'; months: number }
+  | { type: 'FULL' }
+
 export type SettlementPolicyInput = {
   holdingDeposit?: HoldingDepositInput
   allowedPaymentCycles: Array<1 | 3 | 6>
@@ -36,6 +48,7 @@ export type RentalPackageInput = {
   depositPolicy: DepositPolicyInput
   status: 'active' | 'inactive'
   settlementPolicy?: SettlementPolicyInput
+  prepaidRent?: PrepaidRentInput
   allowedExecutionPolicies?: RentalExecutionPolicyRef[]
   defaultExecutionPolicy?: RentalExecutionPolicyRef
 }
@@ -50,6 +63,10 @@ export type RentalPackageSnapshot = {
   settlementPolicy?: SettlementPolicyInput
   resolvedHoldingDepositAmount?: number
   resolvedSecurityTopUpAmount?: number
+  prepaidRent?: PrepaidRentInput
+  /** Số tháng tiền thuê trả trước đã quy đổi (0 = chỉ cọc). Vắng mặt = gói cũ. */
+  resolvedPrepaidRentMonths?: number
+  resolvedPrepaidRentAmount?: number
   currency?: 'VND'
   capturedAt?: Date
   allowedExecutionPolicies?: RentalExecutionPolicyRef[]
@@ -91,6 +108,39 @@ function resolveDepositAmount(
     throw new Error('INVALID_RENTAL_PACKAGE: invalid fixed deposit amount')
   }
   return policy.amount
+}
+
+/** Quy đổi chính sách trả trước thành số tháng và số tiền; ném lỗi nếu số tháng không hợp lệ. */
+export function resolvePrepaidRent(
+  policy: PrepaidRentInput,
+  monthlyRent: number,
+  durationMonths: number
+): Pick<
+  RentalPackageSnapshot,
+  'prepaidRent' | 'resolvedPrepaidRentMonths' | 'resolvedPrepaidRentAmount'
+> {
+  let months: number
+  if (policy.type === 'NONE') {
+    months = 0
+  } else if (policy.type === 'FULL') {
+    months = durationMonths
+  } else if (policy.type === 'MONTHS') {
+    if (
+      !Number.isInteger(policy.months) ||
+      policy.months < 1 ||
+      policy.months > durationMonths
+    ) {
+      throw new Error('INVALID_RENTAL_PACKAGE: invalid prepaid rent months')
+    }
+    months = policy.months
+  } else {
+    throw new Error('INVALID_RENTAL_PACKAGE: invalid prepaid rent type')
+  }
+  return {
+    prepaidRent: policy,
+    resolvedPrepaidRentMonths: months,
+    resolvedPrepaidRentAmount: monthlyRent * months,
+  }
 }
 
 export function validateSettlementPolicy(
@@ -210,6 +260,13 @@ export function validateRentalPackages(
           resolvedDepositAmount
         )
       : {}
+    const prepaidSnapshot = packageItem.prepaidRent
+      ? resolvePrepaidRent(
+          packageItem.prepaidRent,
+          packageItem.monthlyRent,
+          packageItem.durationMonths
+        )
+      : {}
 
     return {
       packageId: packageItem.packageId,
@@ -220,6 +277,7 @@ export function validateRentalPackages(
       resolvedDepositAmount,
       status: packageItem.status,
       ...settlementSnapshot,
+      ...prepaidSnapshot,
       ...(packageItem.allowedExecutionPolicies
         ? { allowedExecutionPolicies: packageItem.allowedExecutionPolicies }
         : {}),

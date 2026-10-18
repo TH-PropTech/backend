@@ -479,6 +479,16 @@ export class ContractViewService {
     const holdingDeposit =
       contract.packageSnapshot?.resolvedHoldingDepositAmount ?? contract.deposit
     const securityTopUpAmount = Math.max(0, contract.deposit - holdingDeposit)
+    const prepaidMonths = contract.prepaidRentMonths
+    const prepaidPolicy = contract.packageSnapshot?.prepaidRent?.type
+    const prepaidRent =
+      typeof prepaidMonths === 'number' && prepaidPolicy
+        ? {
+            policy: prepaidPolicy,
+            months: prepaidMonths,
+            amount: commercial.monthlyRent * prepaidMonths,
+          }
+        : null
     const initialPaymentTotal = (settlement?.lines ?? []).reduce(
       (sum, line) => sum + line.amount,
       0
@@ -625,6 +635,7 @@ export class ContractViewService {
         securityTopUpAmount,
         tenantServiceFee,
         landlordCommission,
+        prepaidRent,
       },
     }
   }

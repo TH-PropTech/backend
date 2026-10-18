@@ -419,6 +419,8 @@ export class ContractsService {
     contract.endDate = endDate
     contract.durationMonths = input.packageSnapshot.durationMonths
     contract.paymentCycleMonths = input.paymentCycleMonths ?? 1
+    contract.prepaidRentMonths =
+      input.packageSnapshot.resolvedPrepaidRentMonths ?? null
     contract.monthlyRent = input.packageSnapshot.monthlyRent
     contract.deposit = input.packageSnapshot.resolvedDepositAmount
     contract.paymentDay = 1

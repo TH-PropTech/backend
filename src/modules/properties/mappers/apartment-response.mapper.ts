@@ -27,6 +27,9 @@ export interface RentalPackageResponse {
   settlementPolicy?: RentalPackageSnapshot['settlementPolicy']
   resolvedHoldingDepositAmount?: number
   resolvedSecurityTopUpAmount?: number
+  prepaidRent?: RentalPackageSnapshot['prepaidRent']
+  resolvedPrepaidRentMonths?: number
+  resolvedPrepaidRentAmount?: number
   status: 'active' | 'inactive'
   allowedExecutionPolicies?: RentalExecutionPolicyRef[]
   defaultExecutionPolicy?: RentalExecutionPolicyRef
@@ -275,6 +278,23 @@ export class ApartmentResponseMapper {
         ? {
             resolvedSecurityTopUpAmount:
               rentalPackage.resolvedSecurityTopUpAmount,
+          }
+        : {}),
+      ...(rentalPackage.prepaidRent
+        ? {
+            prepaidRent: rentalPackage.prepaidRent,
+            ...(rentalPackage.resolvedPrepaidRentMonths !== undefined
+              ? {
+                  resolvedPrepaidRentMonths:
+                    rentalPackage.resolvedPrepaidRentMonths,
+                }
+              : {}),
+            ...(rentalPackage.resolvedPrepaidRentAmount !== undefined
+              ? {
+                  resolvedPrepaidRentAmount:
+                    rentalPackage.resolvedPrepaidRentAmount,
+                }
+              : {}),
           }
         : {}),
       status: rentalPackage.status,
