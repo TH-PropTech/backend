@@ -161,7 +161,8 @@ export class WalletsService {
 
   /**
    * Liên kết (hoặc đổi) ví Ví Mộc; tra cứu tên chủ ví thật qua Mộc Bank thay
-   * vì cho gõ tay, giữ nguyên số dư khi liên kết lại.
+   * vì cho gõ tay (xác nhận ví có thật), giữ nguyên số dư khi liên kết lại.
+   * Không yêu cầu tên chủ ví trùng hồ sơ — chủ nhà có thể nhận hộ.
    */
   async link(userId: string, dto: LinkWalletDto): Promise<WalletLinkResult> {
     let accountHolder: string
@@ -177,7 +178,6 @@ export class WalletsService {
       }
       throw error
     }
-    await this.assertHolderMatchesProfile(userId, accountHolder)
     const bankFields = {
       bankCode: MOCBANK_BANK_CODE,
       bankName: 'Ví Mộc',
@@ -296,22 +296,6 @@ export class WalletsService {
       dueDate: invoice.dueDate,
       status: invoice.status,
     }))
-  }
-
-  /** Chủ tài khoản phải trùng họ tên trên hồ sơ để tránh nhận tiền hộ người khác. */
-  private async assertHolderMatchesProfile(
-    userId: string,
-    accountHolder: string
-  ): Promise<void> {
-    if (!ObjectId.isValid(userId)) throw new NotFoundException('USER_NOT_FOUND')
-    const user = await this.userRepository.findOne({
-      where: { _id: new ObjectId(userId) },
-    })
-    if (!user) throw new NotFoundException('USER_NOT_FOUND')
-    const expected = normalizeHolderName(user.fullName ?? '')
-    if (!expected || expected !== normalizeHolderName(accountHolder)) {
-      throw new BadRequestException('WALLET_HOLDER_NAME_MISMATCH')
-    }
   }
 
   private async createWallet(

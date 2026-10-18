@@ -134,18 +134,8 @@ describe('WalletsService.link', () => {
     )
   })
 
-  it('rejects a resolved holder name that differs from the profile', async () => {
+  it('links regardless of whether the resolved holder matches the profile name (receiving on behalf of someone is allowed)', async () => {
     const { service } = setup({ resolvedHolder: 'Tran Thi B' })
-    await expect(service.link(USER, LINK)).rejects.toThrow(
-      'WALLET_HOLDER_NAME_MISMATCH'
-    )
-  })
-
-  it('matches the holder ignoring accents, case and extra spaces', async () => {
-    const { service } = setup({
-      fullName: 'Nguyễn  Văn   Đạt',
-      resolvedHolder: 'nguyen van dat',
-    })
     await expect(service.link(USER, LINK)).resolves.toEqual(
       expect.objectContaining({ newlyLinked: true })
     )
