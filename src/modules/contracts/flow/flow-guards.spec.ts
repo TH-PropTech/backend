@@ -53,6 +53,7 @@ describe('evaluateConsentDeposit', () => {
     'payment-pending',
     'paid',
     'applied-to-lease-security',
+    'released',
   ] as const)('tắt với DEPOSIT_CONSENT_ALREADY_GIVEN khi đã %s', status => {
     expect(evaluateConsentDeposit({ status, ...metadata })).toEqual({
       enabled: false,
@@ -92,7 +93,7 @@ describe('evaluatePayDeposit', () => {
     ).toEqual({ enabled: false, reasonCode: 'DEPOSIT_NOT_READY' })
   })
 
-  it.each(['paid', 'applied-to-lease-security'] as const)(
+  it.each(['paid', 'applied-to-lease-security', 'released'] as const)(
     'tắt với DEPOSIT_ALREADY_PAID khi %s',
     status => {
       expect(evaluatePayDeposit({ status, hasConsent: true })).toEqual({
@@ -102,7 +103,7 @@ describe('evaluatePayDeposit', () => {
     }
   )
 
-  it.each(['cancelled', 'expired'] as const)(
+  it.each(['cancelled', 'expired', 'refunded'] as const)(
     'tắt với DEPOSIT_AGREEMENT_CLOSED khi %s',
     status => {
       expect(evaluatePayDeposit({ status, hasConsent: true })).toEqual({

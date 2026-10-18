@@ -222,4 +222,25 @@ describe('envValidationSchema eKYC configuration', () => {
       /FABRIC_EXPLORER_TX_URL_TEMPLATE|FABRIC_OUTBOX_POLL_INTERVAL_MS|DEPOSIT_AGREEMENT_TTL_HOURS/
     )
   })
+
+  it('defaults DEPOSIT_ESCROW_ENABLED to false and rejects non-boolean values', () => {
+    const base = {
+      ...baseEnvironment,
+      EKYC_SERVICE_URL: 'https://ekyc.example.com',
+    }
+
+    const escrowFlag = (input: Record<string, unknown>): unknown =>
+      (
+        envValidationSchema.validate(input).value as {
+          DEPOSIT_ESCROW_ENABLED?: unknown
+        }
+      ).DEPOSIT_ESCROW_ENABLED
+
+    expect(escrowFlag(base)).toBe(false)
+    expect(escrowFlag({ ...base, DEPOSIT_ESCROW_ENABLED: 'true' })).toBe(true)
+    expect(
+      envValidationSchema.validate({ ...base, DEPOSIT_ESCROW_ENABLED: 'maybe' })
+        .error?.message
+    ).toContain('DEPOSIT_ESCROW_ENABLED')
+  })
 })
