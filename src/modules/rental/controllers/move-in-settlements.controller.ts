@@ -5,7 +5,15 @@ import { Roles } from '../../../common/decorators/roles.decorator'
 import { RolesGuard } from '../../../common/guards/roles.guard'
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard'
 import type { UserPayload } from '../../auth/interfaces/auth.interface'
+import {
+  ConfirmHandoverDto,
+  HandoverDiscrepancyDto,
+  RecordHandoverDto,
+} from '../dto/move-in-handover.dto'
 import { MoveInSettlementsService } from '../services/move-in-settlements.service'
+
+const actorIdOf = (user: UserPayload): string =>
+  user._id || user.email || 'system'
 
 @ApiTags('move-in-settlements')
 @ApiBearerAuth()
@@ -17,21 +25,12 @@ export class MoveInSettlementsController {
   @UseGuards(JwtAuthGuard)
   handover(
     @Param('id') id: string,
-    @Body()
-    body: {
-      handedOverAt: string
-      electricity: number
-      water: number
-      keyCount: number
-      inventoryReference?: string
-      notes?: string
-      overrideReason?: string
-    },
+    @Body() body: RecordHandoverDto,
     @CurrentUser() user: UserPayload
   ): ReturnType<MoveInSettlementsService['updateHandover']> {
     const isStaff =
       user.roles?.some(role => ['admin', 'staff'].includes(role)) ?? false
-    return this.service.updateHandover(id, user._id || user.email || 'system', {
+    return this.service.updateHandover(id, actorIdOf(user), {
       ...body,
       isStaff,
     })
@@ -41,20 +40,29 @@ export class MoveInSettlementsController {
   @UseGuards(JwtAuthGuard)
   confirm(
     @Param('id') id: string,
-    @Body()
-    body: {
-      handoverHash: string
-      discrepancyNote?: string
-      role: 'tenant' | 'landlord'
-    },
+    @Body() body: ConfirmHandoverDto,
     @CurrentUser() user: UserPayload
   ): ReturnType<MoveInSettlementsService['confirmHandover']> {
     return this.service.confirmHandover(
       id,
-      user._id || user.email || 'system',
+      actorIdOf(user),
       body.role,
+      body.handoverHash
+    )
+  }
+
+  @Post(':id/handover/discrepancy')
+  @UseGuards(JwtAuthGuard)
+  reportDiscrepancy(
+    @Param('id') id: string,
+    @Body() body: HandoverDiscrepancyDto,
+    @CurrentUser() user: UserPayload
+  ): ReturnType<MoveInSettlementsService['reportHandoverDiscrepancy']> {
+    return this.service.reportHandoverDiscrepancy(
+      id,
+      actorIdOf(user),
       body.handoverHash,
-      body.discrepancyNote
+      body.note
     )
   }
 
@@ -63,5 +71,12 @@ export class MoveInSettlementsController {
   @Roles('admin', 'staff')
   processOverdue(): Promise<number> {
     return this.service.processOverdue()
+  }
+
+  @Post('admin/process-handover-deadlines')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin', 'staff')
+  processHandoverDeadlines(): Promise<number> {
+    return this.service.processHandoverResponseDeadlines()
   }
 }

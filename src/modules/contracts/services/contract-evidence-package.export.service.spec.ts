@@ -519,6 +519,14 @@ describe('ContractEvidencePackageExportService (PROP-399 tasks 9.5/9.6)', () => 
             meterReadings: { electricity: 1 },
             keyCount: 2,
             notes: 'PRIVATE NOTE',
+            inventoryItems: [
+              { name: 'PRIVATE SOFA', quantity: 1, condition: 'good' },
+            ],
+            discrepancies: [
+              { revision: 1, note: 'PRIVATE DISPUTE', at: new Date() },
+            ],
+            responseDueAt: new Date('2026-10-13T00:00:00.000Z'),
+            completionReason: 'tenant-no-response',
           },
           handoverEvidence: {
             manifestHash: '3'.repeat(64),
@@ -549,12 +557,19 @@ describe('ContractEvidencePackageExportService (PROP-399 tasks 9.5/9.6)', () => 
         ])
       )
       expect(json(entries, 'evidence/amendments.json')).toHaveLength(1)
+      expect(json(entries, 'evidence/handover.json')).toMatchObject({
+        completionReason: 'tenant-no-response',
+        responseDueAt: '2026-10-13T00:00:00.000Z',
+        disputeCount: 1,
+      })
       const all = entries.map(e => e.data.toString('utf8')).join('\n')
       for (const forbidden of [
         'Nguyen Van A',
         '079123456789',
         'PRIVATE TEXT',
         'PRIVATE NOTE',
+        'PRIVATE SOFA',
+        'PRIVATE DISPUTE',
         'meterReadings',
         'keyCount',
       ]) {

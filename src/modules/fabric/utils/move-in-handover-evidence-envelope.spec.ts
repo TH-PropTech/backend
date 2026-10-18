@@ -65,6 +65,8 @@ describe('move-in handover evidence envelope (PROP-399 D3: HANDOVER_RECORDED)', 
       'meterReadings',
       'keyCount',
       'inventoryReference',
+      'inventoryItems',
+      'discrepancies',
       'notes',
       'discrepancyNote',
       'overrideReason',
@@ -88,5 +90,58 @@ describe('move-in handover evidence envelope (PROP-399 D3: HANDOVER_RECORDED)', 
     expect(envelope.schemaVersion).toBe(1)
     expect((envelope as Record<string, unknown>).components).toBeUndefined()
     expect((envelope as Record<string, unknown>).statementHash).toBeUndefined()
+  })
+
+  it('keeps legacy completions (no completionReason) on v1 so already anchored hashes are unchanged', () => {
+    const legacy = buildMoveInHandoverEvidenceEnvelope(base)
+    expect(legacy.schemaVersion).toBe(1)
+    expect('completionReason' in legacy).toBe(false)
+    expect(
+      hashMoveInHandoverEvidenceEnvelope(
+        buildMoveInHandoverEvidenceEnvelope({ ...base, completionReason: null })
+      )
+    ).toBe(hashMoveInHandoverEvidenceEnvelope(legacy))
+  })
+
+  it('anchors completionReason in a v2 envelope and changes the hash per reason', () => {
+    const both = buildMoveInHandoverEvidenceEnvelope({
+      ...base,
+      completionReason: 'both-confirmed',
+    })
+    const silent = buildMoveInHandoverEvidenceEnvelope({
+      ...base,
+      completionReason: 'tenant-no-response',
+    })
+    expect(both.schemaVersion).toBe(2)
+    expect(both.completionReason).toBe('both-confirmed')
+    expect(hashMoveInHandoverEvidenceEnvelope(both)).not.toBe(
+      hashMoveInHandoverEvidenceEnvelope(silent)
+    )
+  })
+
+  it('allows a missing tenant confirmation hash only for tenant-no-response', () => {
+    expect(
+      buildMoveInHandoverEvidenceEnvelope({
+        ...base,
+        tenantConfirmationHash: '',
+        completionReason: 'tenant-no-response',
+      }).tenantConfirmationHash
+    ).toBe('')
+    expect(() =>
+      buildMoveInHandoverEvidenceEnvelope({
+        ...base,
+        tenantConfirmationHash: '',
+        completionReason: 'both-confirmed',
+      })
+    ).toThrow('MOVE_IN_HANDOVER_EVIDENCE_HASH_INVALID')
+  })
+
+  it('rejects an unknown completionReason', () => {
+    expect(() =>
+      buildMoveInHandoverEvidenceEnvelope({
+        ...base,
+        completionReason: 'landlord-said-so' as never,
+      })
+    ).toThrow('MOVE_IN_HANDOVER_EVIDENCE_COMPLETION_REASON_INVALID')
   })
 })

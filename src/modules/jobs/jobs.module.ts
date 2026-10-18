@@ -8,7 +8,10 @@ import {
   ApartmentExpireOverdueListingsJob,
   ApartmentRemindExpiringListingsJob,
 } from './jobs/apartment-expiration.job'
-import { MoveInSettlementOverdueJob } from './jobs/move-in-settlement.job'
+import {
+  MoveInHandoverDeadlineJob,
+  MoveInSettlementOverdueJob,
+} from './jobs/move-in-settlement.job'
 import {
   RentalOpsApplyDueAmendmentsJob,
   RentalOpsExpireAttemptsJob,
@@ -24,6 +27,7 @@ const JOB_CLASSES = [
   ApartmentExpireOverdueListingsJob,
   ApartmentRemindExpiringListingsJob,
   MoveInSettlementOverdueJob,
+  MoveInHandoverDeadlineJob,
   RentalOpsExpireAttemptsJob,
   RentalOpsExpireDepositAgreementsJob,
   RentalOpsProcessPaymentRemindersJob,

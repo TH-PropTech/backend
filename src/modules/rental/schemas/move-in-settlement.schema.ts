@@ -21,6 +21,16 @@ export type SettlementLine = {
   paidAt?: Date | null
 }
 
+export type HandoverInventoryItem = {
+  name: string
+  quantity: number
+  condition: 'good' | 'damaged'
+  note: string | null
+}
+/** Phản hồi sai lệch của khách thuê, gắn với bản sửa đổi mà nó phản hồi; chỉ thêm, không ghi đè. */
+export type HandoverDiscrepancy = { revision: number; note: string; at: Date }
+export type HandoverCompletionReason = 'both-confirmed' | 'tenant-no-response'
+
 /** PROP-399 D3: tham chiếu bằng chứng ledger cho một manifest (quyết toán hoặc bàn giao). */
 export type LedgerEvidenceRef = {
   manifestVersion: number
@@ -54,6 +64,11 @@ export class MoveInSettlement {
     meterReadings: { electricity: number; water: number }
     keyCount: number
     inventoryReference: string | null
+    /** Các trường dưới đây tùy chọn để bản ghi cũ (trước phương án A) vẫn đọc được. */
+    inventoryItems?: HandoverInventoryItem[]
+    discrepancies?: HandoverDiscrepancy[]
+    responseDueAt?: Date | null
+    completionReason?: HandoverCompletionReason | null
     notes: string | null
     handoverHash: string
     recordedBy: string
