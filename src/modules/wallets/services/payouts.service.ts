@@ -470,9 +470,11 @@ export class PayoutsService {
       agreement.status === 'paid' ||
       agreement.status === 'applied-to-lease-security'
     ) {
-      // Ký quỹ chưa bật / chưa áp dụng cho thỏa thuận này: cọc đã trả nhưng chưa có payout cho chủ nhà
-      // (phần payout cọc đã bị bỏ khỏi change này, xem design.md D1/D2).
-      return 'unpaid'
+      // Ký quỹ chưa bật / chưa áp dụng cho thỏa thuận này: cọc đã trả nhưng
+      // chưa có payout cho chủ nhà (phần payout cọc đã bị bỏ khỏi change
+      // này, xem design.md D1/D2) — khác với "chưa trả", nên không dùng
+      // `unpaid` kẻo hiểu nhầm là khách thuê chưa đóng cọc.
+      return 'paid-pending-disbursement'
     }
     return 'unpaid'
   }

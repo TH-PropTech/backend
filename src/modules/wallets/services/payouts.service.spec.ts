@@ -837,6 +837,32 @@ describe('PayoutsService.getContractSummary', () => {
     expect(result.totals).toEqual({ received: 5_000_000, pending: 10_000_000 })
   })
 
+  it('reports a paid deposit without escrow as pending disbursement, not unpaid', async () => {
+    const { service, contracts, payments, deposits, payouts, wallets } =
+      setupSummary()
+    contracts.findOne.mockResolvedValue({ landlordId: LANDLORD })
+    wallets.findOne.mockResolvedValue({ userId: LANDLORD, status: 'linked' })
+    deposits.findOne.mockResolvedValue({
+      _id: new ObjectId(),
+      amount: 10_000_000,
+      status: 'applied-to-lease-security',
+    })
+    payments.find.mockResolvedValue([])
+    payouts.find.mockResolvedValue([])
+
+    const result = await service.getContractSummary(contractId, {
+      userId: LANDLORD,
+      isLandlordScoped: true,
+    })
+
+    expect(result.items).toEqual([
+      expect.objectContaining({
+        kind: 'DEPOSIT',
+        status: 'paid-pending-disbursement',
+      }),
+    ])
+  })
+
   it('reports the wallet as not linked so the UI can prompt linking it', async () => {
     const { service, contracts, wallets } = setupSummary()
     contracts.findOne.mockResolvedValue({ landlordId: LANDLORD })
