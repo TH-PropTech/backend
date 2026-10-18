@@ -42,6 +42,7 @@ import {
 import type { DepositAgreementsService } from '../../contracts/services/deposit-agreements.service'
 import { DepositEscrowService } from '../../contracts/services/deposit-escrow.service'
 import { resolveDepositConfirmation } from '../../contracts/services/deposit-confirmation.resolver'
+import { renderMoveInHandoverPdf } from '../utils/move-in-handover-pdf.renderer'
 
 /** Điều 9.1: khách thuê có 3 ngày để xác nhận hoặc báo sai lệch kể từ khi bản sửa đổi được ghi. */
 export const HANDOVER_RESPONSE_WINDOW_MS = 3 * 24 * 60 * 60 * 1000
@@ -862,6 +863,32 @@ export class MoveInSettlementsService {
       ledgerStatus: 'not-required',
     })
     return this.paymentRepo.save(payment)
+  }
+
+  /**
+   * PDF một trang của biên bản bàn giao đã hoàn tất, cho khách thuê/chủ nhà
+   * của hợp đồng đó hoặc nhân viên/admin.
+   */
+  async getHandoverPdf(
+    id: string,
+    actorId: string,
+    isStaff: boolean
+  ): Promise<{ buffer: Buffer; contractCode: string }> {
+    const settlement = await this.find(id)
+    const isParty =
+      actorId === settlement.tenantId || actorId === settlement.landlordId
+    if (!isParty && !isStaff)
+      throw new ForbiddenException('HANDOVER_ACCESS_DENIED')
+    if (!settlement.handover?.completedAt)
+      throw new ConflictException('HANDOVER_NOT_COMPLETED')
+    if (!ObjectId.isValid(settlement.contractId))
+      throw new NotFoundException('CONTRACT_NOT_FOUND')
+    const contract = await this.contractRepo.findOne({
+      where: { _id: new ObjectId(settlement.contractId) },
+    })
+    if (!contract) throw new NotFoundException('CONTRACT_NOT_FOUND')
+    const buffer = await renderMoveInHandoverPdf(contract, settlement)
+    return { buffer, contractCode: contract.contractCode }
   }
 
   private async find(id: string): Promise<MoveInSettlement> {

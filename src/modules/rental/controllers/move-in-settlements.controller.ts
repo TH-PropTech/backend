@@ -1,5 +1,15 @@
-import { Body, Controller, Param, Post, Put, UseGuards } from '@nestjs/common'
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Put,
+  Res,
+  UseGuards,
+} from '@nestjs/common'
+import { ApiBearerAuth, ApiProduces, ApiTags } from '@nestjs/swagger'
+import type { Response } from 'express'
 import { CurrentUser } from '../../../common/decorators/current-user.decorator'
 import { Roles } from '../../../common/decorators/roles.decorator'
 import { RolesGuard } from '../../../common/guards/roles.guard'
@@ -49,6 +59,33 @@ export class MoveInSettlementsController {
       body.role,
       body.handoverHash
     )
+  }
+
+  @Get(':id/handover/pdf')
+  @UseGuards(JwtAuthGuard)
+  @ApiProduces('application/pdf')
+  async handoverPdf(
+    @Param('id') id: string,
+    @CurrentUser() user: UserPayload,
+    // Ghi byte trực tiếp (như contracts.controller#downloadArtifact): tránh
+    // ResponseEnvelopeInterceptor bọc Buffer thành JSON.
+    @Res() response: Response
+  ): Promise<void> {
+    const isStaff =
+      user.roles?.some(role => ['admin', 'staff'].includes(role)) ?? false
+    const { buffer, contractCode } = await this.service.getHandoverPdf(
+      id,
+      actorIdOf(user),
+      isStaff
+    )
+    response.setHeader('Content-Type', 'application/pdf')
+    response.setHeader('Cache-Control', 'private, no-store')
+    response.setHeader('X-Content-Type-Options', 'nosniff')
+    response.setHeader(
+      'Content-Disposition',
+      `attachment; filename="bien-ban-ban-giao-${contractCode}.pdf"`
+    )
+    response.end(buffer)
   }
 
   @Post(':id/handover/discrepancy')
