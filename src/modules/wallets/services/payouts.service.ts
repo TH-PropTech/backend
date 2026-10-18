@@ -11,12 +11,16 @@ import { randomBytes } from 'node:crypto'
 import { ObjectId } from 'mongodb'
 import type { MongoRepository } from 'typeorm'
 import { NotificationsService } from '../../notifications/services/notifications.service'
+import { Payment } from '../../payments/schemas/payment.schema'
+import { Contract } from '../../contracts/schemas/contract.schema'
+import { DepositAgreement } from '../../contracts/schemas/deposit-agreement.schema'
 import { Payout } from '../schemas/payout.schema'
 import { Wallet } from '../schemas/wallet.schema'
 import {
   MocbankPayoutClient,
   MocbankPayoutError,
 } from './mocbank-payout.client'
+import type { ContractPayoutSummaryDto } from '../dto/contract-payout-summary.dto'
 
 export type PayoutSource = {
   paymentId: string
@@ -55,7 +59,16 @@ export class PayoutsService {
     private readonly walletRepository: MongoRepository<Wallet>,
     private readonly notificationsService: NotificationsService,
     @Optional()
-    private readonly mocbankPayoutClient?: MocbankPayoutClient
+    private readonly mocbankPayoutClient?: MocbankPayoutClient,
+    @Optional()
+    @InjectRepository(Contract)
+    private readonly contractRepository?: MongoRepository<Contract>,
+    @Optional()
+    @InjectRepository(Payment)
+    private readonly paymentRepository?: MongoRepository<Payment>,
+    @Optional()
+    @InjectRepository(DepositAgreement)
+    private readonly depositAgreementRepository?: MongoRepository<DepositAgreement>
   ) {}
 
   /** Tạo đúng một payout cho mỗi payment; gọi lại sẽ trả payout cũ. */
@@ -339,6 +352,129 @@ export class PayoutsService {
       return `Khách đã thanh toán qua cổng của nền tảng. Nền tảng đã chuyển hộ ${amount} VND vào Ví Mộc của bạn (mã ${payout.relayRef}). Đây là chuyển hộ giả lập trên môi trường thử nghiệm: nền tảng nhận tiền rồi chuyển lại vào Ví Mộc. ${SANDBOX_WALLET_NOTE}`
     }
     return `${amount} VND đã được chuyển về tài khoản ngân hàng đã liên kết của bạn (sàn chuyển ${payout.sentAmount.toLocaleString('vi-VN')} VND).`
+  }
+
+  /**
+   * Tổng hợp "khoản chủ nhà nhận" cho một hợp đồng: cọc (trạng thái ký quỹ khi có,
+   * xem `deposit-escrow-mocbank`), kỳ thuê đã có payout, kỳ thuê chưa có payout → `unpaid`.
+   * Chủ nhà chỉ xem hợp đồng của mình (người khác 404); role khác (staff/admin) xem được mọi hợp đồng.
+   */
+  async getContractSummary(
+    contractId: string,
+    viewer: { userId: string; isLandlordScoped: boolean }
+  ): Promise<ContractPayoutSummaryDto> {
+    if (!this.contractRepository || !ObjectId.isValid(contractId)) {
+      throw new NotFoundException('CONTRACT_NOT_FOUND')
+    }
+    const contract = await this.contractRepository.findOne({
+      where: { _id: new ObjectId(contractId) },
+    })
+    if (!contract) throw new NotFoundException('CONTRACT_NOT_FOUND')
+    if (viewer.isLandlordScoped && contract.landlordId !== viewer.userId) {
+      throw new NotFoundException('CONTRACT_NOT_FOUND')
+    }
+    const landlordId = contract.landlordId
+
+    const wallet = await this.walletRepository.findOne({
+      where: { userId: landlordId, status: 'linked' },
+    })
+
+    const payouts = await this.payoutRepository.find({
+      where: { contractId },
+    })
+    const payoutsByPaymentId = new Map(
+      payouts.map(payout => [payout.paymentId, payout])
+    )
+
+    const items: ContractPayoutSummaryDto['items'] = []
+
+    const depositAgreement = this.depositAgreementRepository
+      ? await this.depositAgreementRepository.findOne({
+          where: { linkedLeaseContractId: contractId },
+        })
+      : null
+    if (depositAgreement) {
+      items.push({
+        kind: 'DEPOSIT',
+        ref: depositAgreement._id.toHexString(),
+        label: 'Tiền đặt cọc',
+        dueAt: null,
+        sentAmount: depositAgreement.amount,
+        receivedAmount: depositAgreement.amount,
+        status: this.depositLineStatus(depositAgreement),
+      })
+    }
+
+    const rentPayments = this.paymentRepository
+      ? await this.paymentRepository.find({
+          where: { contractId, type: 'rent' },
+        })
+      : []
+    for (const payment of rentPayments.sort((a, b) =>
+      (a.periodKey ?? '').localeCompare(b.periodKey ?? '')
+    )) {
+      const payout = payoutsByPaymentId.get(payment._id.toHexString())
+      items.push({
+        kind: 'RENT',
+        ref: payment._id.toHexString(),
+        label: payment.periodKey ? `Kỳ thuê ${payment.periodKey}` : 'Kỳ thuê',
+        dueAt: payment.dueDate ? new Date(payment.dueDate).toISOString() : null,
+        sentAmount: payout?.sentAmount ?? payment.amount,
+        receivedAmount: payout?.receivedAmount ?? payment.amount,
+        status: payout?.status ?? 'unpaid',
+      })
+    }
+
+    const totals = items.reduce(
+      (acc, item) => {
+        if (item.status === 'paid-out' || item.status === 'released') {
+          acc.received += item.receivedAmount
+        } else if (
+          item.status === 'pending' ||
+          item.status === 'awaiting-wallet' ||
+          item.status === 'HELD' ||
+          item.status === 'held'
+        ) {
+          acc.pending += item.receivedAmount
+        }
+        return acc
+      },
+      { received: 0, pending: 0 }
+    )
+
+    return {
+      contractId,
+      wallet: { linked: Boolean(wallet) },
+      items,
+      totals,
+    }
+  }
+
+  /** Dòng cọc: đọc trạng thái ký quỹ khi thỏa thuận có `escrow` (deposit-escrow-mocbank); nếu không, suy ra từ trạng thái thỏa thuận. */
+  private depositLineStatus(agreement: DepositAgreement): string {
+    if (agreement.escrow) {
+      switch (agreement.escrow.status) {
+        case 'HELD':
+          return 'held'
+        case 'SETTLED':
+          return agreement.status === 'released' ? 'released' : 'refunded'
+        case 'AUTO_REFUNDED':
+          return 'refunded'
+        default:
+          return 'unpaid'
+      }
+    }
+    if (agreement.status === 'released') return 'released'
+    if (agreement.status === 'refunded') return 'refunded'
+    if (
+      agreement.status === 'paid' ||
+      agreement.status === 'applied-to-lease-security'
+    ) {
+      // Ký quỹ chưa bật / chưa áp dụng cho thỏa thuận này: cọc đã trả nhưng chưa có payout cho chủ nhà
+      // (phần payout cọc đã bị bỏ khỏi change này, xem design.md D1/D2).
+      return 'unpaid'
+    }
+    return 'unpaid'
   }
 
   /** Lỗi thông báo không được làm hỏng payout đã ghi. */

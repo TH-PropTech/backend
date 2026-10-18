@@ -22,6 +22,7 @@
     "seed": "ts-node -r tsconfig-paths/register -r dotenv/config src/data/dataSeeder.ts",
     "seed:legal": "ts-node -r tsconfig-paths/register -r dotenv/config src/scripts/seed-legal-knowledge.ts",
     "transfer-landlord": "ts-node -r tsconfig-paths/register -r dotenv/config src/scripts/transfer-landlord.ts",
+    "backfill-move-in-settlements": "ts-node -r tsconfig-paths/register -r dotenv/config src/scripts/backfill-move-in-settlements.ts",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",

@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common'
 import { TypeOrmModule } from '@nestjs/typeorm'
 import { NotificationsModule } from '../notifications/notifications.module'
 import { Payment } from '../payments/schemas/payment.schema'
+import { Contract } from '../contracts/schemas/contract.schema'
+import { DepositAgreement } from '../contracts/schemas/deposit-agreement.schema'
 import { User } from '../users/schemas/user.schema'
 import { PayoutsController } from './controllers/payouts.controller'
 import { WalletController } from './controllers/wallet.controller'
@@ -14,7 +16,14 @@ import { WalletsService } from './services/wallets.service'
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Wallet, User, Payment, Payout]),
+    TypeOrmModule.forFeature([
+      Wallet,
+      User,
+      Payment,
+      Payout,
+      Contract,
+      DepositAgreement,
+    ]),
     NotificationsModule,
   ],
   controllers: [PayoutsController, WalletController],

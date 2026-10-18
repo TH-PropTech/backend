@@ -244,6 +244,42 @@ describe('MoveInSettlementsService', () => {
     expect(createdEvents).toHaveLength(1)
   })
 
+  it('is idempotent: retrying createForContract for the same contract creates exactly one settlement and no extra invoice', async () => {
+    const { service, settlementRepo, paymentRepo } = setup()
+    const firstPayment = {
+      _id: new ObjectId(),
+      amount: 30_000_000,
+      periodKey: '2030-01',
+    } as Payment
+    paymentRepo.find.mockResolvedValue([firstPayment])
+    const contract = {
+      _id: new ObjectId(),
+      tenantId: 'tenant',
+      landlordId: 'landlord',
+      deposit: 20_000_000,
+      startDate: new Date('2030-02-01T00:00:00.000Z'),
+      packageSnapshot: {
+        resolvedHoldingDepositAmount: 6_000_000,
+        settlementPolicy: { firstPaymentDueOffsetDays: 3 },
+      },
+    } as Contract
+
+    const created = await service.createForContract(
+      contract,
+      new Date('2030-01-01T00:00:00.000Z')
+    )
+    settlementRepo.findOne.mockResolvedValue(created)
+    paymentRepo.save.mockClear()
+    const second = await service.createForContract(
+      contract,
+      new Date('2030-01-01T00:00:00.000Z')
+    )
+
+    expect(second).toEqual(created)
+    expect(settlementRepo.save).toHaveBeenCalledTimes(1)
+    expect(paymentRepo.save).not.toHaveBeenCalled()
+  })
+
   it('reuses an existing settlement without querying payments', async () => {
     const { service, settlementRepo, paymentRepo } = setup()
     settlementRepo.findOne.mockResolvedValue({ contractId: 'existing' })

@@ -26,7 +26,11 @@ function getControllerHandler(
 function setup(): {
   controller: PayoutsController
   service: Record<
-    'listForLandlord' | 'getByTxRefForLandlord' | 'getForLandlord' | 'retry',
+    | 'listForLandlord'
+    | 'getByTxRefForLandlord'
+    | 'getForLandlord'
+    | 'retry'
+    | 'getContractSummary',
     jest.Mock
   >
 } {
@@ -35,6 +39,7 @@ function setup(): {
     getByTxRefForLandlord: jest.fn().mockResolvedValue({ txRef: 'T' }),
     getForLandlord: jest.fn().mockResolvedValue({ id: 'p1' }),
     retry: jest.fn().mockResolvedValue({ status: 'pending' }),
+    getContractSummary: jest.fn().mockResolvedValue({ contractId: 'c1' }),
   }
   return { controller: new PayoutsController(service as never), service }
 }
@@ -108,6 +113,55 @@ describe('PayoutsController', () => {
       switchToHttp: (): object => ({
         getRequest: (): object => ({
           user: { _id: 'l1', roles: ['landlord'] },
+        }),
+      }),
+    } as unknown as ExecutionContext
+
+    expect(() => guard.canActivate(context)).toThrow(ForbiddenException)
+  })
+
+  it('scopes the contract summary to the caller landlord and tells the service when the caller is staff/admin', async () => {
+    const { controller, service } = setup()
+
+    await controller.getContractSummary('c1', {
+      _id: 'l1',
+      roles: ['landlord'],
+    })
+    expect(service.getContractSummary).toHaveBeenCalledWith('c1', {
+      userId: 'l1',
+      isLandlordScoped: true,
+    })
+
+    await controller.getContractSummary('c1', { _id: 's1', roles: ['staff'] })
+    expect(service.getContractSummary).toHaveBeenCalledWith('c1', {
+      userId: 's1',
+      isLandlordScoped: false,
+    })
+  })
+
+  it('propagates 404 from the summary when the contract is not the caller landlord', async () => {
+    const { controller, service } = setup()
+    service.getContractSummary.mockRejectedValue(
+      new NotFoundException('CONTRACT_NOT_FOUND')
+    )
+
+    await expect(
+      controller.getContractSummary('c1', { _id: 'l1', roles: ['landlord'] })
+    ).rejects.toBeInstanceOf(NotFoundException)
+  })
+
+  it('marks the contract summary as landlord/staff/admin-only and rejects a tenant with 403', () => {
+    const handler = getControllerHandler('getContractSummary')
+    const roles: unknown = Reflect.getMetadata(ROLES_KEY, handler)
+    expect(roles).toEqual(['landlord', 'staff', 'admin'])
+
+    const guard = new RolesGuard(new Reflector())
+    const context = {
+      getHandler: (): ControllerHandler => handler,
+      getClass: (): typeof PayoutsController => PayoutsController,
+      switchToHttp: (): object => ({
+        getRequest: (): object => ({
+          user: { _id: 't1', roles: ['tenant'] },
         }),
       }),
     } as unknown as ExecutionContext

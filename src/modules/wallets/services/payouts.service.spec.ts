@@ -724,3 +724,141 @@ describe('PayoutsService simulated relay to the landlord Ví Mộc wallet', () =
     expect(client.payout).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('PayoutsService.getContractSummary', () => {
+  function setupSummary(): {
+    service: PayoutsService
+    contracts: Mocks<'findOne'>
+    payments: Mocks<'find'>
+    deposits: Mocks<'findOne'>
+    payouts: Mocks<'find'>
+    wallets: Mocks<'findOne'>
+  } {
+    const payouts = {
+      findOne: jest.fn(),
+      find: jest.fn().mockResolvedValue([]),
+    }
+    const wallets = { findOne: jest.fn().mockResolvedValue(null) }
+    const notifications = { createNotificationOnce: jest.fn() }
+    const contracts = { findOne: jest.fn() }
+    const payments = { find: jest.fn().mockResolvedValue([]) }
+    const deposits = { findOne: jest.fn().mockResolvedValue(null) }
+    const service = new PayoutsService(
+      payouts as never,
+      wallets as never,
+      notifications as never,
+      undefined,
+      contracts as never,
+      payments as never,
+      deposits as never
+    )
+    return { service, contracts, payments, deposits, payouts, wallets }
+  }
+
+  const contractId = new ObjectId().toHexString()
+
+  it('returns 404 when the contract does not exist', async () => {
+    const { service, contracts } = setupSummary()
+    contracts.findOne.mockResolvedValue(null)
+    await expect(
+      service.getContractSummary(contractId, {
+        userId: LANDLORD,
+        isLandlordScoped: true,
+      })
+    ).rejects.toBeInstanceOf(NotFoundException)
+  })
+
+  it('returns 404 when a different landlord asks for a contract that is not theirs', async () => {
+    const { service, contracts } = setupSummary()
+    contracts.findOne.mockResolvedValue({ landlordId: 'someone-else' })
+    await expect(
+      service.getContractSummary(contractId, {
+        userId: LANDLORD,
+        isLandlordScoped: true,
+      })
+    ).rejects.toBeInstanceOf(NotFoundException)
+  })
+
+  it('reports the deposit line, the first-rent payout, and an unpaid future rent, with wallet status', async () => {
+    const { service, contracts, payments, deposits, payouts, wallets } =
+      setupSummary()
+    contracts.findOne.mockResolvedValue({ landlordId: LANDLORD })
+    wallets.findOne.mockResolvedValue({ userId: LANDLORD, status: 'linked' })
+    deposits.findOne.mockResolvedValue({
+      _id: new ObjectId(),
+      amount: 10_000_000,
+      status: 'applied-to-lease-security',
+      escrow: { status: 'HELD' },
+    })
+    const firstRentId = new ObjectId()
+    const secondRentId = new ObjectId()
+    payments.find.mockResolvedValue([
+      {
+        _id: secondRentId,
+        periodKey: '2030-02',
+        amount: 5_000_000,
+        dueDate: new Date('2030-02-01'),
+      },
+      {
+        _id: firstRentId,
+        periodKey: '2030-01',
+        amount: 5_000_000,
+        dueDate: new Date('2030-01-01'),
+      },
+    ])
+    payouts.find.mockResolvedValue([
+      makePayout({
+        paymentId: firstRentId.toHexString(),
+        status: 'paid-out',
+        sentAmount: 5_000_000,
+        receivedAmount: 5_000_000,
+      }),
+    ])
+
+    const result = await service.getContractSummary(contractId, {
+      userId: LANDLORD,
+      isLandlordScoped: true,
+    })
+
+    expect(result.wallet).toEqual({ linked: true })
+    expect(result.items).toEqual([
+      expect.objectContaining({ kind: 'DEPOSIT', status: 'held' }),
+      expect.objectContaining({
+        kind: 'RENT',
+        ref: firstRentId.toHexString(),
+        status: 'paid-out',
+      }),
+      expect.objectContaining({
+        kind: 'RENT',
+        ref: secondRentId.toHexString(),
+        status: 'unpaid',
+      }),
+    ])
+    expect(result.totals).toEqual({ received: 5_000_000, pending: 10_000_000 })
+  })
+
+  it('reports the wallet as not linked so the UI can prompt linking it', async () => {
+    const { service, contracts, wallets } = setupSummary()
+    contracts.findOne.mockResolvedValue({ landlordId: LANDLORD })
+    wallets.findOne.mockResolvedValue(null)
+
+    const result = await service.getContractSummary(contractId, {
+      userId: LANDLORD,
+      isLandlordScoped: true,
+    })
+
+    expect(result.wallet).toEqual({ linked: false })
+  })
+
+  it('lets staff view any contract regardless of landlordId', async () => {
+    const { service, contracts } = setupSummary()
+    contracts.findOne.mockResolvedValue({ landlordId: 'someone-else' })
+
+    await expect(
+      service.getContractSummary(contractId, {
+        userId: 'staff-1',
+        isLandlordScoped: false,
+      })
+    ).resolves.toMatchObject({ contractId })
+  })
+})

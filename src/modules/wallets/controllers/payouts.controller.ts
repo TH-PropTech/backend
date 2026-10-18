@@ -18,6 +18,7 @@ import {
   type PayoutListResult,
 } from '../services/payouts.service'
 import type { Payout } from '../schemas/payout.schema'
+import type { ContractPayoutSummaryDto } from '../dto/contract-payout-summary.dto'
 
 @ApiTags('payouts')
 @ApiBearerAuth()
@@ -64,6 +65,28 @@ export class PayoutsController {
     @CurrentUser() user: UserPayload
   ): Promise<Payout> {
     return this.payoutsService.getForLandlord(id, this.requireUserId(user))
+  }
+
+  @Get('contracts/:contractId/summary')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('landlord', 'staff', 'admin')
+  @ApiOperation({
+    summary:
+      'Tổng hợp khoản chủ nhà nhận theo hợp đồng (cọc, kỳ thuê, trạng thái ví)',
+  })
+  getContractSummary(
+    @Param('contractId') contractId: string,
+    @CurrentUser() user: UserPayload
+  ): Promise<ContractPayoutSummaryDto> {
+    const roles = user.roles ?? []
+    const isLandlordScoped =
+      roles.includes('landlord') &&
+      !roles.includes('staff') &&
+      !roles.includes('admin')
+    return this.payoutsService.getContractSummary(contractId, {
+      userId: this.requireUserId(user),
+      isLandlordScoped,
+    })
   }
 
   @Post(':id/retry')
