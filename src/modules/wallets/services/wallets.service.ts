@@ -9,18 +9,20 @@ import { InjectRepository } from '@nestjs/typeorm'
 import { ObjectId } from 'mongodb'
 import type { MongoRepository } from 'typeorm'
 import { Payment } from '../../payments/schemas/payment.schema'
+import { Apartment } from '../../properties/schemas/apartment.schema'
 import { User } from '../../users/schemas/user.schema'
 import type { LinkWalletDto } from '../dto/wallet.dto'
 import {
-  MOCBANK_ACCOUNT_PATTERN,
   MOCBANK_BANK_CODE,
-  SUPPORTED_BANKS,
-  findBank,
   maskAccountNumber,
   normalizeHolderName,
 } from '../utils/supported-banks'
 import { Payout } from '../schemas/payout.schema'
 import { Wallet } from '../schemas/wallet.schema'
+import {
+  MocbankEscrowClient,
+  MocbankEscrowError,
+} from './mocbank-escrow.client'
 
 const DUPLICATE_KEY_CODE = 11000
 const DEFAULT_PAGE_SIZE = 20
@@ -93,14 +95,17 @@ export class WalletsService {
     @InjectRepository(Payment)
     private readonly paymentRepository: MongoRepository<Payment>,
     @InjectRepository(Payout)
-    private readonly payoutRepository: MongoRepository<Payout>
+    private readonly payoutRepository: MongoRepository<Payout>,
+    @InjectRepository(Apartment)
+    private readonly apartmentRepository: MongoRepository<Apartment>,
+    private readonly mocbankEscrowClient: MocbankEscrowClient
   ) {}
 
-  listBanks(): ReadonlyArray<{ code: string; name: string }> {
-    return SUPPORTED_BANKS
-  }
-
-  /** Staff/admin observability: every landlord plus their payout-wallet link status. */
+  /**
+   * Staff/admin observability: every user who owns at least one apartment
+   * listing (the real "landlord" set — `User.role` is not authoritative,
+   * any role can own listings) plus their payout-wallet link status.
+   */
   async listLandlordWallets(
     page = 1,
     limit = DEFAULT_PAGE_SIZE
@@ -110,25 +115,38 @@ export class WalletsService {
       MAX_PAGE_SIZE,
       Math.max(1, limit || DEFAULT_PAGE_SIZE)
     )
-    const [landlords, total] = await this.userRepository.findAndCount({
-      where: { role: 'landlord' },
-      order: { fullName: 'ASC' },
-      skip: (safePage - 1) * safeLimit,
-      take: safeLimit,
-    })
-    const ids = landlords.map(l => String(l._id))
-    const wallets = ids.length
-      ? await this.walletRepository.find({ where: { userId: { $in: ids } } })
-      : []
-    const items = landlords.map(landlord => {
-      const wallet = wallets.find(w => w.userId === String(landlord._id))
+    const [countFacet] = (await this.apartmentRepository
+      .aggregate([{ $group: { _id: '$landlordId' } }, { $count: 'n' }])
+      .toArray()) as Array<{ n: number }>
+    const total = countFacet?.n ?? 0
+    const ownerIdRows = (await this.apartmentRepository
+      .aggregate([
+        { $group: { _id: '$landlordId' } },
+        { $sort: { _id: 1 } },
+        { $skip: (safePage - 1) * safeLimit },
+        { $limit: safeLimit },
+      ])
+      .toArray()) as Array<{ _id: string }>
+    const ids = ownerIdRows.map(row => row._id).filter(Boolean)
+    const [landlords, wallets] = await Promise.all([
+      ids.length
+        ? this.userRepository.find({
+            where: { _id: { $in: ids.map(id => new ObjectId(id)) } },
+          })
+        : Promise.resolve([]),
+      ids.length
+        ? this.walletRepository.find({ where: { userId: { $in: ids } } })
+        : Promise.resolve([]),
+    ])
+    const items = ids.map(id => {
+      const landlord = landlords.find(u => String(u._id) === id)
       return {
-        userId: String(landlord._id),
-        name: landlord.fullName,
-        email: landlord.email,
-        wallet: wallet
-          ? this.toView(wallet)
-          : this.unlinkedView(String(landlord._id)),
+        userId: id,
+        name: landlord?.fullName ?? '(không rõ)',
+        email: landlord?.email ?? '',
+        wallet: wallets.find(w => w.userId === id)
+          ? this.toView(wallets.find(w => w.userId === id)!)
+          : this.unlinkedView(id),
       }
     })
     return { items, total, page: safePage, limit: safeLimit }
@@ -139,25 +157,34 @@ export class WalletsService {
     return wallet ? this.toView(wallet) : this.unlinkedView(userId)
   }
 
-  /** Liên kết (hoặc đổi) tài khoản ngân hàng; giữ nguyên số dư khi liên kết lại. */
+  /**
+   * Liên kết (hoặc đổi) ví Ví Mộc; tra cứu tên chủ ví thật qua Mộc Bank thay
+   * vì cho gõ tay, giữ nguyên số dư khi liên kết lại.
+   */
   async link(userId: string, dto: LinkWalletDto): Promise<WalletLinkResult> {
-    const bank = findBank(dto.bankCode)
-    if (!bank) throw new BadRequestException('WALLET_BANK_NOT_SUPPORTED')
-    await this.assertHolderMatchesProfile(userId, dto.accountHolder)
-    const isMocbank = bank.code === MOCBANK_BANK_CODE
-    if (isMocbank && !MOCBANK_ACCOUNT_PATTERN.test(dto.accountNumber)) {
-      throw new BadRequestException('ACCOUNT_NUMBER_INVALID')
+    let accountHolder: string
+    try {
+      accountHolder = await this.mocbankEscrowClient.resolveAccountHolder(
+        dto.accountNumber
+      )
+    } catch (error) {
+      if (error instanceof MocbankEscrowError) {
+        throw error.code === 'WALLET_NOT_FOUND'
+          ? new NotFoundException('WALLET_NOT_FOUND')
+          : new BadRequestException('MOCBANK_UNAVAILABLE')
+      }
+      throw error
     }
+    await this.assertHolderMatchesProfile(userId, accountHolder)
     const bankFields = {
-      bankCode: bank.code,
-      bankName: bank.name,
-      accountHolder: normalizeHolderName(dto.accountHolder),
+      bankCode: MOCBANK_BANK_CODE,
+      bankName: 'Ví Mộc',
+      accountHolder: normalizeHolderName(accountHolder),
       accountNumberMasked: maskAccountNumber(dto.accountNumber),
-      // Chỉ tài khoản Ví Mộc mới giữ số đầy đủ (làm tài khoản nhận trực tiếp).
-      mocbankAccountNumber: isMocbank ? dto.accountNumber : null,
-      provider: isMocbank ? ('mocbank' as const) : ('mock-bank' as const),
-      externalAccountRef: `${isMocbank ? 'mocbank' : 'mock-account'}:${userId}`,
-      simulation: !isMocbank,
+      mocbankAccountNumber: dto.accountNumber,
+      provider: 'mocbank' as const,
+      externalAccountRef: `mocbank:${userId}`,
+      simulation: false,
     }
     const existing = await this.walletRepository.findOne({ where: { userId } })
     if (existing) {

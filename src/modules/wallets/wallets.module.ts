@@ -4,6 +4,7 @@ import { NotificationsModule } from '../notifications/notifications.module'
 import { Payment } from '../payments/schemas/payment.schema'
 import { Contract } from '../contracts/schemas/contract.schema'
 import { DepositAgreement } from '../contracts/schemas/deposit-agreement.schema'
+import { Apartment } from '../properties/schemas/apartment.schema'
 import { User } from '../users/schemas/user.schema'
 import { AdminWalletsController } from './controllers/admin-wallets.controller'
 import { PayoutsController } from './controllers/payouts.controller'
@@ -24,6 +25,7 @@ import { WalletsService } from './services/wallets.service'
       Payout,
       Contract,
       DepositAgreement,
+      Apartment,
     ]),
     NotificationsModule,
   ],

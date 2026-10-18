@@ -1,17 +1,22 @@
 import { ObjectId } from 'mongodb'
+import { MocbankEscrowError } from './mocbank-escrow.client'
 import { WalletsService } from './wallets.service'
 
 const USER = new ObjectId().toHexString()
 const OTHER_USER = new ObjectId().toHexString()
-const LINK = {
-  bankCode: 'VCB',
-  accountNumber: '0123456789',
-  accountHolder: 'Nguyễn Văn A',
-}
+const ACCOUNT_NUMBER = '810000000002'
+const LINK = { accountNumber: ACCOUNT_NUMBER }
 
 type Doc = Record<string, unknown>
 
-function setup(options: { fullName?: string; wallet?: Doc | null } = {}): {
+function setup(
+  options: {
+    fullName?: string
+    wallet?: Doc | null
+    resolvedHolder?: string
+    resolveError?: Error
+  } = {}
+): {
   service: WalletsService
   wallets: Record<
     'findOne' | 'create' | 'save' | 'findOneAndUpdate' | 'updateOne',
@@ -19,6 +24,7 @@ function setup(options: { fullName?: string; wallet?: Doc | null } = {}): {
   >
   payments: Record<'find', jest.Mock>
   payouts: Record<'find', jest.Mock>
+  mocbank: Record<'resolveAccountHolder', jest.Mock>
 } {
   const wallets = {
     findOne: jest.fn().mockResolvedValue(options.wallet ?? null),
@@ -34,81 +40,110 @@ function setup(options: { fullName?: string; wallet?: Doc | null } = {}): {
   }
   const payments = { find: jest.fn().mockResolvedValue([]) }
   const payouts = { find: jest.fn().mockResolvedValue([]) }
+  const apartments = {
+    aggregate: jest.fn((): { toArray: () => Promise<unknown[]> } => ({
+      toArray: () => Promise.resolve([]),
+    })),
+  }
+  const mocbank = {
+    resolveAccountHolder: options.resolveError
+      ? jest.fn().mockRejectedValue(options.resolveError)
+      : jest.fn().mockResolvedValue(options.resolvedHolder ?? 'Nguyen Van A'),
+  }
   const service = new WalletsService(
     wallets as never,
     users as never,
     payments as never,
-    payouts as never
+    payouts as never,
+    apartments as never,
+    mocbank as never
   )
-  return { service, wallets, payments, payouts }
+  return { service, wallets, payments, payouts, mocbank }
 }
 
 describe('WalletsService.link', () => {
-  it('creates a wallet with a masked account and no balance fields in the response', async () => {
-    const { service, wallets } = setup()
+  it('resolves the Ví Mộc account holder and links the wallet', async () => {
+    const { service, mocbank } = setup()
 
     const { wallet, newlyLinked } = await service.link(USER, LINK)
 
+    expect(mocbank.resolveAccountHolder).toHaveBeenCalledWith(ACCOUNT_NUMBER)
     expect(newlyLinked).toBe(true)
     expect(wallet).toEqual(
       expect.objectContaining({
         status: 'linked',
-        bank: { code: 'VCB', name: 'Vietcombank' },
+        bank: { code: 'MOCBANK', name: 'Ví Mộc' },
         accountHolder: 'NGUYEN VAN A',
-        accountNumberMasked: '****6789',
+        accountNumberMasked: '****0002',
       })
     )
     expect(wallet).not.toHaveProperty('balance')
     expect(wallet).not.toHaveProperty('totalReceived')
     expect(wallet).not.toHaveProperty('totalFeesPaid')
-    expect(JSON.stringify(wallets.save.mock.calls)).not.toContain('0123456789')
+    expect(JSON.stringify(wallet)).not.toContain(ACCOUNT_NUMBER)
   })
 
-  it('re-links to a new bank account and updates the bank fields', async () => {
+  it('re-links to a new Ví Mộc account and updates the fields', async () => {
     const existing = {
       _id: new ObjectId(),
       userId: USER,
       status: 'linked',
-      simulation: true,
-      bankCode: 'VCB',
-      bankName: 'Vietcombank',
+      simulation: false,
+      provider: 'mocbank',
+      bankCode: 'MOCBANK',
+      bankName: 'Ví Mộc',
       accountHolder: 'NGUYEN VAN A',
-      accountNumberMasked: '****6789',
+      accountNumberMasked: '****0002',
+      mocbankAccountNumber: ACCOUNT_NUMBER,
       linkedAt: new Date('2026-01-01'),
     }
     const { service, wallets } = setup({ wallet: existing })
 
     const { wallet, newlyLinked } = await service.link(USER, {
-      ...LINK,
-      bankCode: 'TCB',
-      accountNumber: '9999999999',
+      accountNumber: '810000009999',
     })
 
     expect(newlyLinked).toBe(false)
-    expect(wallet.bank?.code).toBe('TCB')
     expect(wallet.accountNumberMasked).toBe('****9999')
     expect(wallet.linkedAt).toEqual(existing.linkedAt)
     expect(wallet).not.toHaveProperty('balance')
     expect(wallets.save).toHaveBeenCalledWith(
-      expect.objectContaining({ bankCode: 'TCB', status: 'linked' })
+      expect.objectContaining({ provider: 'mocbank', status: 'linked' })
     )
   })
 
-  it('rejects an unknown bank and a holder name that differs from the profile', async () => {
-    const { service } = setup()
-    await expect(
-      service.link(USER, { ...LINK, bankCode: 'XXX' })
-    ).rejects.toThrow('WALLET_BANK_NOT_SUPPORTED')
-    await expect(
-      service.link(USER, { ...LINK, accountHolder: 'Tran Thi B' })
-    ).rejects.toThrow('WALLET_HOLDER_NAME_MISMATCH')
+  it('rejects an account number Ví Mộc has no wallet for', async () => {
+    const { service, wallets } = setup({
+      resolveError: new MocbankEscrowError('WALLET_NOT_FOUND'),
+    })
+    await expect(service.link(USER, LINK)).rejects.toThrow('WALLET_NOT_FOUND')
+    expect(wallets.save).not.toHaveBeenCalled()
+  })
+
+  it('rejects when Ví Mộc is unreachable instead of silently linking', async () => {
+    const { service } = setup({
+      resolveError: new MocbankEscrowError('GATEWAY_UNAVAILABLE'),
+    })
+    await expect(service.link(USER, LINK)).rejects.toThrow(
+      'MOCBANK_UNAVAILABLE'
+    )
+  })
+
+  it('rejects a resolved holder name that differs from the profile', async () => {
+    const { service } = setup({ resolvedHolder: 'Tran Thi B' })
+    await expect(service.link(USER, LINK)).rejects.toThrow(
+      'WALLET_HOLDER_NAME_MISMATCH'
+    )
   })
 
   it('matches the holder ignoring accents, case and extra spaces', async () => {
-    const { service } = setup({ fullName: 'Nguyễn  Văn   Đạt' })
-    await expect(
-      service.link(USER, { ...LINK, accountHolder: 'nguyen van dat' })
-    ).resolves.toEqual(expect.objectContaining({ newlyLinked: true }))
+    const { service } = setup({
+      fullName: 'Nguyễn  Văn   Đạt',
+      resolvedHolder: 'nguyen van dat',
+    })
+    await expect(service.link(USER, LINK)).resolves.toEqual(
+      expect.objectContaining({ newlyLinked: true })
+    )
   })
 })
 
@@ -131,11 +166,12 @@ describe('WalletsService.getMine', () => {
         _id: new ObjectId(),
         userId: USER,
         status: 'linked',
-        simulation: true,
-        bankCode: 'VCB',
-        bankName: 'Vietcombank',
+        simulation: false,
+        provider: 'mocbank',
+        bankCode: 'MOCBANK',
+        bankName: 'Ví Mộc',
         accountHolder: 'NGUYEN VAN A',
-        accountNumberMasked: '****6789',
+        accountNumberMasked: '****0002',
         balance: 1_000_000,
         totalReceived: 1_000_000,
         totalFeesPaid: 0,
@@ -342,73 +378,35 @@ describe('WalletsService.listTransactions (D5: dựng từ Payout + Payment)', (
 })
 
 describe('WalletsService Ví Mộc account (tiền chủ nhà nhận trực tiếp)', () => {
-  const MOC = { ...LINK, bankCode: 'MOCBANK', accountNumber: '810000000002' }
-
   it('links a Ví Mộc account, keeping the full number server-side only', async () => {
     const { service, wallets } = setup()
 
-    const { wallet, newlyLinked } = await service.link(USER, MOC)
+    const { wallet, newlyLinked } = await service.link(USER, LINK)
 
     expect(newlyLinked).toBe(true)
     expect(wallets.save).toHaveBeenCalledWith(
       expect.objectContaining({
         provider: 'mocbank',
         simulation: false,
-        mocbankAccountNumber: '810000000002',
+        mocbankAccountNumber: ACCOUNT_NUMBER,
         externalAccountRef: `mocbank:${USER}`,
         accountNumberMasked: '****0002',
       })
     )
     expect(wallet).toMatchObject({
       simulation: false,
-      bank: { code: 'MOCBANK', name: 'Ví Mộc (sandbox)' },
+      bank: { code: 'MOCBANK', name: 'Ví Mộc' },
       accountNumberMasked: '****0002',
     })
-    expect(JSON.stringify(wallet)).not.toContain('810000000002')
-  })
-
-  it.each(['81000000000', '8100000000021', '81000000000a'])(
-    'rejects the Ví Mộc number %s that is not 12 digits',
-    async accountNumber => {
-      const { service, wallets } = setup()
-
-      await expect(
-        service.link(USER, { ...MOC, accountNumber })
-      ).rejects.toThrow('ACCOUNT_NUMBER_INVALID')
-      expect(wallets.save).not.toHaveBeenCalled()
-    }
-  )
-
-  it('drops the Ví Mộc number and returns to simulation when re-linked to another bank', async () => {
-    const existing = {
-      _id: new ObjectId(),
-      userId: USER,
-      status: 'linked',
-      provider: 'mocbank',
-      simulation: false,
-      mocbankAccountNumber: '810000000002',
-      linkedAt: new Date('2026-01-01'),
-    }
-    const { service, wallets } = setup({ wallet: existing })
-
-    await service.link(USER, LINK)
-
-    expect(wallets.save).toHaveBeenCalledWith(
-      expect.objectContaining({
-        provider: 'mock-bank',
-        simulation: true,
-        mocbankAccountNumber: null,
-        bankCode: 'VCB',
-      })
-    )
+    expect(JSON.stringify(wallet)).not.toContain(ACCOUNT_NUMBER)
   })
 
   it('returns the account only for a linked Ví Mộc wallet', async () => {
     const linked = setup({
-      wallet: { userId: USER, mocbankAccountNumber: '810000000002' },
+      wallet: { userId: USER, mocbankAccountNumber: ACCOUNT_NUMBER },
     })
     await expect(linked.service.getMocbankAccountNumber(USER)).resolves.toBe(
-      '810000000002'
+      ACCOUNT_NUMBER
     )
     expect(linked.wallets.findOne).toHaveBeenCalledWith({
       where: { userId: USER, status: 'linked', provider: 'mocbank' },

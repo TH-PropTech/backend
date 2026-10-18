@@ -110,6 +110,31 @@ export class MocbankEscrowClient {
     })
   }
 
+  /** Looks up the holder name of a Ví Mộc account before linking it as a payout wallet. */
+  async resolveAccountHolder(accountNumber: string): Promise<string> {
+    const { config, timeoutMs } = this.settings()
+    const reply = await getFromGateway(
+      this.fetcher,
+      `${config.baseUrl}/api/wallets/resolve/${encodeURIComponent(accountNumber)}`,
+      mocbankMerchantHeaders(config),
+      timeoutMs
+    )
+    const result = asRecord(reply.body)
+    const data = result?.success === true ? asRecord(result.data) : null
+    const accountName =
+      isSuccessStatus(reply.status) && data ? data.accountName : null
+    if (typeof accountName !== 'string' || !accountName) {
+      if (reply.status === 404) {
+        throw new MocbankEscrowError('WALLET_NOT_FOUND')
+      }
+      this.logger.warn(
+        `Ví Mộc account resolve failed http=${logField(reply.status)}`
+      )
+      throw new MocbankEscrowError('GATEWAY_UNAVAILABLE')
+    }
+    return accountName
+  }
+
   /** The platform's own disbursement wallet at Ví Mộc (not a per-escrow lookup). */
   async getPlatformWallet(): Promise<MocbankEscrowWallet> {
     const { config, timeoutMs } = this.settings()

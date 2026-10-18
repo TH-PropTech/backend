@@ -1,34 +1,19 @@
 import { ApiProperty } from '@nestjs/swagger'
 import { Transform } from 'class-transformer'
-import {
-  IsIn,
-  IsInt,
-  IsOptional,
-  IsString,
-  Matches,
-  MaxLength,
-  Min,
-  MinLength,
-} from 'class-validator'
-import { SUPPORTED_BANK_CODES } from '../utils/supported-banks'
+import { IsInt, IsOptional, Matches, Min } from 'class-validator'
+import { MOCBANK_ACCOUNT_PATTERN } from '../utils/supported-banks'
 
+/**
+ * Liên kết ví = liên kết một ví Ví Mộc có thật, xác minh qua tra cứu tên chủ
+ * ví (không cho gõ tay ngân hàng/tên chủ tài khoản như trước).
+ */
 export class LinkWalletDto {
-  @ApiProperty({ enum: SUPPORTED_BANK_CODES })
-  @IsIn(SUPPORTED_BANK_CODES)
-  bankCode!: string
-
-  @ApiProperty({ example: '0123456789', description: '6-19 chữ số' })
+  @ApiProperty({ example: '812345678901', description: '12 chữ số (Ví Mộc)' })
   @Transform(({ value }: { value: unknown }) =>
     typeof value === 'string' ? value.replace(/\s+/g, '') : value
   )
-  @Matches(/^\d{6,19}$/, { message: 'ACCOUNT_NUMBER_INVALID' })
+  @Matches(MOCBANK_ACCOUNT_PATTERN, { message: 'ACCOUNT_NUMBER_INVALID' })
   accountNumber!: string
-
-  @ApiProperty({ example: 'NGUYEN VAN A' })
-  @IsString()
-  @MinLength(2)
-  @MaxLength(100)
-  accountHolder!: string
 }
 
 export class WalletTransactionsQueryDto {

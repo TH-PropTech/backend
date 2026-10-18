@@ -39,12 +39,6 @@ export class WalletController {
     return this.walletsService.getMine(this.requireUserId(user))
   }
 
-  @Get('banks')
-  @ApiOperation({ summary: 'Banks a wallet can be linked to' })
-  banks(): ReadonlyArray<{ code: string; name: string }> {
-    return this.walletsService.listBanks()
-  }
-
   @Post('link')
   @ApiOperation({ summary: 'Link (or change) the bank account of my wallet' })
   async link(
