@@ -1,12 +1,17 @@
 import type { LegalChunkDraft } from './legal-knowledge.types'
+import { unwrapHardLines } from './legal-text'
 
 const DEFAULT_MAX_CHARS = 1200
 const DEFAULT_OVERLAP = 150
 const MIN_MAX_CHARS = 50
 const MAX_HEADING_CHARS = 200
 
-/** "Chương I", "Mục 2", "Điều 472." (case-insensitive) or a Markdown heading. */
-const HEADING_RE = /^(?:(?:Chương|Mục|Điều)\s+[IVXLC\d]+|#{1,6}\s+\S)/i
+/**
+ * "Chương I", "Mục 2.", "Điều 472." or a Markdown heading. A line that merely starts with a
+ * cross-reference ("Điều 19 của Luật này;") is NOT a heading.
+ */
+const HEADING_RE =
+  /^(?:[Cc]hương\s+[IVXLC\d]+\s*(?:[.:–-]|$)|[Mm]ục\s+\d+\s*(?:[.:–-]|$)|[Đđ]iều\s+\d+[a-zđ]?(?:\s*[.:]|\s*$|\s+\p{Lu})|#{1,6}\s+\S)/u
 const CHAPTER_RE = /^Chương\s+[IVXLC\d]+/i
 
 const PARAGRAPH_SEP = '\n\n'
@@ -69,7 +74,7 @@ export function chunkLegalText(
 }
 
 function splitSections(text: string): RawSection[] {
-  const lines = text.replace(/\r\n?/g, '\n').split('\n')
+  const lines = unwrapHardLines(text.replace(/\r\n?/g, '\n')).split('\n')
   const sections: RawSection[] = []
   let chapter: string | undefined
   let current: RawSection = {

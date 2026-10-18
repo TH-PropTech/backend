@@ -193,7 +193,36 @@ describe('LegalKnowledgeService', () => {
     expect(hits.every(hit => hit.title === 'Luật Nhà ở 2023')).toBe(true)
   })
 
-  it('lets one long doc fill only one result slot', async () => {
+  it('returns nothing for a question whose words the knowledge base does not contain', async () => {
+    const { service } = createService()
+    await service.create({
+      ...baseDoc,
+      title: 'Quy định thuê nhà',
+      content:
+        'Điều 1. Đặt cọc thuê nhà\nBên thuê đặt cọc thuê nhà cho bên cho thuê theo thỏa thuận.',
+      status: 'published',
+    })
+
+    expect(await service.search('cách nấu phở bò ngon', 4)).toEqual([])
+  })
+
+  it('reports how much of the question each passage covers', async () => {
+    const { service } = createService()
+    await service.create({
+      ...baseDoc,
+      title: 'Quy định thuê nhà',
+      content:
+        'Điều 1. Đặt cọc thuê nhà\nBên thuê đặt cọc thuê nhà cho bên cho thuê theo thỏa thuận.',
+      status: 'published',
+    })
+
+    const [hit] = await service.search('đặt cọc thuê nhà', 4)
+
+    expect(hit?.coverage).toBeGreaterThan(0.9)
+    expect(hit?.coverage).toBeLessThanOrEqual(1)
+  })
+
+  it('lets one long doc fill at most two result slots so other sources still appear', async () => {
     const { service } = createService()
     const articles = Array.from(
       { length: 6 },
@@ -219,7 +248,7 @@ describe('LegalKnowledgeService', () => {
     for (const hit of hits) {
       perDoc.set(hit.docId, (perDoc.get(hit.docId) ?? 0) + 1)
     }
-    expect(Math.max(...perDoc.values())).toBe(1)
+    expect(Math.max(...perDoc.values())).toBeLessThanOrEqual(2)
     expect(hits.some(hit => hit.title === 'Văn bản ngắn')).toBe(true)
   })
 

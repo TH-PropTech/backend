@@ -6,6 +6,7 @@ const hit = (overrides: Partial<LegalSearchHit>): LegalSearchHit => ({
   title: 'Văn bản',
   text: 'Nội dung.',
   score: 30,
+  coverage: 0.9,
   ...overrides,
 })
 
@@ -45,5 +46,24 @@ describe('buildRelatedSourcesAnswer', () => {
   it('returns undefined when matches are too weak or missing', () => {
     expect(buildRelatedSourcesAnswer([])).toBeUndefined()
     expect(buildRelatedSourcesAnswer([hit({ score: 12 })])).toBeUndefined()
+  })
+
+  it('stays silent when the hits only share common words with the question (out-of-scope topic)', () => {
+    // "thủ tục ly hôn đơn phương giấy tờ": high BM25 on "thủ tục"/"giấy tờ" but "ly hôn" is missing everywhere
+    const answer = buildRelatedSourcesAnswer([
+      hit({ title: 'Đăng ký thường trú', score: 35.8, coverage: 0.68 }),
+      hit({
+        docId: 'e',
+        title: 'Mẫu hợp đồng thuê nhà',
+        score: 31.9,
+        coverage: 0.6,
+      }),
+    ])
+    expect(answer).toBeUndefined()
+  })
+
+  it('does not talk about comparisons between years when the question was not about that', () => {
+    const answer = buildRelatedSourcesAnswer([hit({ title: 'A' })])
+    expect(answer).not.toContain('giữa các năm')
   })
 })

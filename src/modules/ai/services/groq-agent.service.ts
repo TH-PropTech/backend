@@ -30,6 +30,55 @@ export interface ToolCall {
 export const GROQ_CONNECTION_ERROR_REPLY =
   'Xin lỗi, trợ lý AI đang gặp sự cố kết nối. Vui lòng thử lại sau ít phút.'
 
+/** When to call the legal lookup tool (only needed in the first, tool-enabled request). */
+const LEGAL_ROUTING_RULES = `- Khi khách hỏi về luật, quy định, nghị định, thông tư, quy định thuê nhà, tiền đặt cọc, chấm dứt hợp đồng, quyền và nghĩa vụ của bên thuê hoặc bên cho thuê, tính hợp pháp, thủ tục, hoặc nội quy của nền tảng, BẮT BUỘC gọi tool \`search_legal_knowledge\` với tham số query là câu hỏi đã diễn đạt lại bằng các từ khóa chính.
+- KHÔNG gọi \`search_legal_knowledge\` cùng lượt với \`search_apartments\`, \`request_booking\` hoặc \`create_booking_draft\`.
+- CÂU HỎI MƠ HỒ: nếu câu hỏi không nêu chủ đề (ví dụ "Luật nói gì?", "Quy định thế nào?"), KHÔNG gọi \`search_legal_knowledge\`; hỏi lại khách muốn tìm hiểu quy định về vấn đề gì (đặt cọc, chấm dứt hợp đồng, tạm trú, thuế cho thuê...).`
+
+/** How to answer from lookup results. */
+const LEGAL_ANSWER_RULES = `- Chỉ trả lời DỰA TRÊN các đoạn nội dung mà tool trả về. Khi trích dẫn, ghi nguồn theo mẫu "Theo <tên văn bản>, <điều/mục>". TUYỆT ĐỐI KHÔNG tự bịa số điều, tên văn bản, mức phí, thời hạn hay nội dung không có trong kết quả tool.
+- Nếu tool trả về các đoạn liên quan MỘT PHẦN tới câu hỏi (ví dụ khách hỏi so sánh quy định giữa các năm nhưng kho chỉ có văn bản mới hoặc một khía cạnh như thuế, hồ sơ, thủ tục): HÃY trả lời phần mà các đoạn đó có, nêu rõ tên văn bản, ngày ban hành/hiệu lực nếu có trong đoạn, và nói rõ phần nào kho tri thức chưa có thông tin (ví dụ chưa có bản so sánh với năm trước). KHÔNG từ chối toàn bộ khi vẫn có nội dung liên quan; không tự suy diễn phần không có trong đoạn. Văn bản ghi là dự thảo thì phải nói rõ là chưa có hiệu lực.
+- Chỉ khi tool báo không tìm thấy nội dung phù hợp, hoặc các đoạn trả về hoàn toàn không liên quan tới câu hỏi: BẮT ĐẦU câu trả lời đúng bằng cụm "Hiện chưa có dữ liệu" (ví dụ: "Hiện chưa có dữ liệu về vấn đề này trong kho tri thức"), rồi gợi ý khách hàng tham khảo luật sư hoặc cổng thông tin chính thức của cơ quan có thẩm quyền. Trong trường hợp này TUYỆT ĐỐI KHÔNG nêu tên bất kỳ luật, nghị định, thông tư, số hiệu hay số điều cụ thể nào từ kiến thức riêng của bạn (kể cả làm ví dụ hoặc gợi ý tra cứu).
+- SỐ LIỆU: mọi con số (số tháng, số ngày, tỷ lệ %, số tiền) và mọi số điều, số nghị định phải CHÉP ĐÚNG như trong đoạn tra cứu. Không làm tròn, không đổi, không suy ra con số khác. Hệ thống sẽ loại bỏ câu trả lời nêu số liệu không có trong đoạn.
+- PHẠM VI ÁP DỤNG: mỗi đoạn có thể chỉ áp dụng cho một đối tượng hoặc loại nhà cụ thể (ví dụ nhà ở xã hội, nhà ở công vụ, nhà ở thương mại, thuê khoán, thế chấp). Nêu rõ phạm vi đó theo đúng đoạn trích. TUYỆT ĐỐI KHÔNG áp dụng quy định của loại này cho thuê nhà thông thường; nếu các đoạn không nói về thuê nhà thông thường thì nói rõ là kho chưa có quy định riêng cho trường hợp đó.
+- SUY LUẬN: chỉ khẳng định điều mà đoạn trích nói thẳng. Không suy diễn từ một điều khoản mẫu hoặc điều khoản về chủ đề khác (ví dụ điều khoản "các bản có giá trị như nhau" không chứng minh chữ ký điện tử có giá trị pháp lý). Khi nguồn không trả lời trực tiếp, nói rõ phần chưa có.
+- Với mọi câu trả lời pháp lý, kết thúc bằng một câu ngắn: nội dung chỉ mang tính tham khảo, không thay thế tư vấn pháp lý chuyên nghiệp.`
+
+/**
+ * Compact prompt for the request that WRITES the answer after a legal lookup. The full prompt (booking
+ * flow, 5-step rental process, tool rules) plus the tool definitions already exceed the per-request
+ * token budget, which squeezed the retrieved passages down to ~400 characters. The answer only needs
+ * the persona and the legal rules, which leaves the budget to the passages themselves.
+ */
+const LEGAL_ANSWER_PROMPT = `Bạn là trợ lý ảo AI của TH-PropTech, hệ thống quản lý thuê chung cư. Bạn trả lời thân thiện, chuyên nghiệp, ngắn gọn bằng tiếng Việt.
+Bạn vừa tra cứu kho tri thức pháp lý; kết quả nằm trong tin nhắn công cụ hoặc tin nhắn hệ thống phía dưới. Hãy trả lời câu hỏi của khách ngay, KHÔNG gọi thêm công cụ nào.
+
+TRI THỨC PHÁP LÝ / QUY ĐỊNH:
+${LEGAL_ANSWER_RULES}`
+
+const GROQ_RETRY_DELAY_MS = 500
+
+/** A non-2xx answer from Groq, keeping the status so the caller can decide whether to retry. */
+export class GroqRequestError extends Error {
+  constructor(
+    readonly status: number,
+    readonly body: string
+  ) {
+    super(`Groq API request failed with status ${status}: ${body}`)
+  }
+}
+
+/** Transient failures and malformed tool calls are worth another try; bad keys or bad requests are not. */
+export function isRetryableGroqError(error: unknown): boolean {
+  if (!(error instanceof GroqRequestError)) return true // network, timeout, unexpected shape
+  if (error.status === 400) {
+    return /tool_use_failed|failed_generation|failed to call a function/i.test(
+      error.body
+    )
+  }
+  return [408, 409, 425, 429].includes(error.status) || error.status >= 500
+}
+
 @Injectable()
 export class GroqAgentService {
   private readonly logger = new Logger(GroqAgentService.name)
@@ -136,7 +185,7 @@ export class GroqAgentService {
               query: {
                 type: 'string',
                 description:
-                  'Câu hỏi pháp lý của người dùng, được diễn đạt lại bằng các từ khóa chính (ví dụ: "đặt cọc thuê nhà tối đa bao nhiêu tháng", "chấm dứt hợp đồng thuê trước hạn").',
+                  'Câu hỏi pháp lý của người dùng, được diễn đạt lại bằng các từ khóa chính (ví dụ: "đặt cọc thuê nhà tối đa bao nhiêu tháng", "chấm dứt hợp đồng thuê trước hạn"). GIỮ NGUYÊN các từ khóa đặc trưng của câu hỏi, không thay bằng khái niệm khác (ví dụ "ly hôn" không được đổi thành "chấm dứt hợp đồng").',
               },
             },
             required: ['query'],
@@ -148,7 +197,8 @@ export class GroqAgentService {
 
   async chat(
     messages: ChatMessage[],
-    disableTools = false
+    disableTools = false,
+    options: { legalAnswer?: boolean } = {}
   ): Promise<{
     content: string | null
     toolCalls?: ToolCall[]
@@ -160,7 +210,7 @@ export class GroqAgentService {
       }
     }
 
-    const systemPrompt = `Bạn là trợ lý ảo AI thông minh của TH-PropTech, hệ thống quản lý thuê chung cư đáng tin cậy tích hợp công nghệ Blockchain và thực tế ảo.
+    const fullPrompt = `Bạn là trợ lý ảo AI thông minh của TH-PropTech, hệ thống quản lý thuê chung cư đáng tin cậy tích hợp công nghệ Blockchain và thực tế ảo.
 Bạn trò chuyện thân thiện, nhiệt tình, chuyên nghiệp bằng tiếng Việt.
 Bạn hỗ trợ khách thuê (cả khách đã đăng nhập và khách vãng lai) giải đáp quy trình thuê căn hộ, tìm kiếm căn hộ phù hợp và đặt lịch xem nhà.
 
@@ -195,12 +245,11 @@ Quy tắc quan trọng về luồng xử lý (BẮT BUỘC TUÂN THỦ TỪNG B�
    - Trả lời ngắn gọn, lịch sự, trực diện, không dài dòng.
 
 TRI THỨC PHÁP LÝ / QUY ĐỊNH:
-- Khi khách hỏi về luật, quy định, nghị định, thông tư, quy định thuê nhà, tiền đặt cọc, chấm dứt hợp đồng, quyền và nghĩa vụ của bên thuê hoặc bên cho thuê, tính hợp pháp, thủ tục, hoặc nội quy của nền tảng, BẮT BUỘC gọi tool \`search_legal_knowledge\` với tham số query là câu hỏi đã diễn đạt lại bằng các từ khóa chính.
-- KHÔNG gọi \`search_legal_knowledge\` cùng lượt với \`search_apartments\`, \`request_booking\` hoặc \`create_booking_draft\`.
-- Chỉ trả lời DỰA TRÊN các đoạn nội dung mà tool trả về. Khi trích dẫn, ghi nguồn theo mẫu "Theo <tên văn bản>, <điều/mục>". TUYỆT ĐỐI KHÔNG tự bịa số điều, tên văn bản, mức phí, thời hạn hay nội dung không có trong kết quả tool.
-- Nếu tool trả về các đoạn liên quan MỘT PHẦN tới câu hỏi (ví dụ khách hỏi so sánh quy định giữa các năm nhưng kho chỉ có văn bản mới hoặc một khía cạnh như thuế, hồ sơ, thủ tục): HÃY trả lời phần mà các đoạn đó có, nêu rõ tên văn bản, ngày ban hành/hiệu lực nếu có trong đoạn, và nói rõ phần nào kho tri thức chưa có thông tin (ví dụ chưa có bản so sánh với năm trước). KHÔNG từ chối toàn bộ khi vẫn có nội dung liên quan; không tự suy diễn phần không có trong đoạn. Văn bản ghi là dự thảo thì phải nói rõ là chưa có hiệu lực.
-- Chỉ khi tool báo không tìm thấy nội dung phù hợp, hoặc các đoạn trả về hoàn toàn không liên quan tới câu hỏi: BẮT ĐẦU câu trả lời đúng bằng cụm "Hiện chưa có dữ liệu" (ví dụ: "Hiện chưa có dữ liệu về vấn đề này trong kho tri thức"), rồi gợi ý khách hàng tham khảo luật sư hoặc cổng thông tin chính thức của cơ quan có thẩm quyền. Trong trường hợp này TUYỆT ĐỐI KHÔNG nêu tên bất kỳ luật, nghị định, thông tư, số hiệu hay số điều cụ thể nào từ kiến thức riêng của bạn (kể cả làm ví dụ hoặc gợi ý tra cứu).
-- Với mọi câu trả lời pháp lý, kết thúc bằng một câu ngắn: nội dung chỉ mang tính tham khảo, không thay thế tư vấn pháp lý chuyên nghiệp.`
+${LEGAL_ROUTING_RULES}
+${LEGAL_ANSWER_RULES}`
+
+    const systemPrompt = options.legalAnswer ? LEGAL_ANSWER_PROMPT : fullPrompt
+    const noTools = disableTools || options.legalAnswer === true
 
     // Safe sliding window: keep up to 5 user turns (including their subsequent tool calls & assistant replies)
     // to optimize token usage and avoid context dilution, while preserving tool calling structure.
@@ -222,28 +271,29 @@ TRI THỨC PHÁP LÝ / QUY ĐỊNH:
 
     // Keep the request inside the Groq per-minute token limit: system prompt and tool
     // definitions are fixed costs, history and tool results are trimmed to fit.
-    const fixedTokens =
-      estimateTokens(systemPrompt) +
-      (disableTools ? 0 : estimateTokens(JSON.stringify(this.getTools())))
-    const fullMessages = [
-      { role: 'system', content: systemPrompt },
-      ...fitMessagesToBudget(
-        fixedTokens,
-        slicedMessages.map(m => ({
-          role: m.role,
-          content: m.content || '',
-          name: m.name,
-          tool_call_id: m.tool_call_id,
-          tool_calls: m.tool_calls,
-        }))
-      ),
-    ]
-
-    try {
+    const requestOnce = async (
+      withTools: boolean
+    ): Promise<{ content: string | null; toolCalls?: ToolCall[] }> => {
+      const fixedTokens =
+        estimateTokens(systemPrompt) +
+        (withTools ? estimateTokens(JSON.stringify(this.getTools())) : 0)
+      const fullMessages = [
+        { role: 'system', content: systemPrompt },
+        ...fitMessagesToBudget(
+          fixedTokens,
+          slicedMessages.map(m => ({
+            role: m.role,
+            content: m.content || '',
+            name: m.name,
+            tool_call_id: m.tool_call_id,
+            tool_calls: m.tool_calls,
+          }))
+        ),
+      ]
       const body = JSON.stringify({
         model: this.model,
         messages: fullMessages,
-        ...(disableTools ? {} : { tools: this.getTools() }),
+        ...(withTools ? { tools: this.getTools() } : {}),
         temperature: 0.3,
         stream: false,
       })
@@ -259,10 +309,7 @@ TRI THỨC PHÁP LÝ / QUY ĐỊNH:
       )
 
       if (!response.ok) {
-        const errorText = await response.text()
-        throw new Error(
-          `Groq API request failed with status ${response.status}: ${errorText}`
-        )
+        throw new GroqRequestError(response.status, await response.text())
       }
 
       const data = (await response.json()) as {
@@ -316,11 +363,28 @@ TRI THỨC PHÁP LÝ / QUY ĐỊNH:
         content: choice.content || null,
         ...(parsedToolCalls ? { toolCalls: parsedToolCalls } : {}),
       }
-    } catch (error) {
-      this.logger.error('Error during chat completion with Groq:', error)
-      return {
-        content: GROQ_CONNECTION_ERROR_REPLY,
+    }
+
+    // The model sometimes emits a malformed tool call (HTTP 400) and Groq or the network can fail
+    // transiently: retry before telling the user something went wrong. The last attempt of a
+    // tool-enabled request drops the tools so the question still gets a plain answer.
+    const attempts = noTools ? [false, false] : [true, true, false]
+    for (let i = 0; i < attempts.length; i++) {
+      try {
+        return await requestOnce(attempts[i]!)
+      } catch (error) {
+        this.logger.error(
+          `Groq chat attempt ${i + 1}/${attempts.length} failed`,
+          error
+        )
+        if (!isRetryableGroqError(error) || i === attempts.length - 1) break
+        await new Promise(resolve =>
+          setTimeout(resolve, GROQ_RETRY_DELAY_MS * (i + 1))
+        )
       }
+    }
+    return {
+      content: GROQ_CONNECTION_ERROR_REPLY,
     }
   }
 }

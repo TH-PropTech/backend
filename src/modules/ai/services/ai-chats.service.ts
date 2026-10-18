@@ -9,6 +9,7 @@ import {
   LegalSearchHit,
 } from '../../legal/utils/legal-knowledge.types'
 import { buildRelatedSourcesAnswer } from './legal-fallback-answer'
+import { findScopeNotes, findUngroundedFigures } from './legal-answer-guard'
 import {
   GROQ_CONNECTION_ERROR_REPLY,
   GroqAgentService,
@@ -40,9 +41,17 @@ interface SearchLegalKnowledgeArgs {
 }
 
 const LEGAL_SEARCH_LIMIT = 4
-const LEGAL_RESULT_MAX_CHARS = 3400
+const LEGAL_RESULT_MAX_CHARS = 4400
 /** The prompt tells the model to open with this phrase when the knowledge base has no answer. */
 const LEGAL_NO_DATA_PATTERN = /^\s*(?:\*\*)?\s*hiện chưa có dữ liệu/i
+/** Shown when the model keeps stating figures that are not in the sources and no related document is worth listing. */
+const LEGAL_UNGROUNDED_ANSWER =
+  'Hiện chưa có dữ liệu đủ tin cậy trong kho tri thức để trả lời chính xác câu hỏi này (các số liệu và điều khoản phải có trong văn bản nguồn). Bạn nên tham khảo luật sư hoặc cổng thông tin chính thức của cơ quan có thẩm quyền. Nội dung chỉ mang tính tham khảo, không thay thế tư vấn pháp lý chuyên nghiệp.'
+
+function buildGroundingNudge(ungrounded: readonly string[]): string {
+  return `Hướng dẫn nội bộ (không nhắc lại với người dùng): câu trả lời trước nêu các số liệu hoặc điều khoản KHÔNG có trong các đoạn tra cứu ở trên: ${ungrounded.join(', ')}. Hãy viết lại câu trả lời chỉ dùng thông tin có trong các đoạn: chép đúng số liệu và số điều như trong đoạn, nêu rõ quy định đó áp dụng cho loại nhà hoặc đối tượng nào theo đúng đoạn trích (ví dụ nhà ở xã hội), không mở rộng sang trường hợp khác. Nếu các đoạn không có thông tin, bắt đầu bằng "Hiện chưa có dữ liệu".`
+}
+
 const LEGAL_NOT_FOUND_MESSAGE =
   'Không tìm thấy nội dung phù hợp trong kho tri thức pháp lý.'
 /** Sent once when the model refuses although the knowledge base returned excerpts. */
@@ -66,11 +75,16 @@ export class AiChatsService {
   ) {}
 
   /** Numbered excerpts for the LLM tool result (total capped at LEGAL_RESULT_MAX_CHARS). */
-  private formatLegalHits(hits: LegalSearchHit[]): string {
+  /** Numbered excerpts for the LLM, and the hits that actually fit (only those may be cited). */
+  private formatLegalHits(hits: LegalSearchHit[]): {
+    text: string
+    shown: LegalSearchHit[]
+  } {
     const lines: string[] = [
       `Tìm thấy ${hits.length} đoạn nội dung pháp lý trong kho tri thức (chỉ trả lời dựa trên các đoạn này). Nếu các đoạn chỉ trả lời được MỘT PHẦN câu hỏi, hãy trả lời phần có và nói rõ phần chưa có, không từ chối toàn bộ:`,
     ]
     let total = lines[0]?.length ?? 0
+    const shown: LegalSearchHit[] = []
     hits.forEach((hit, index) => {
       const head = [
         `[${index + 1}] Văn bản: ${hit.title}`,
@@ -86,9 +100,10 @@ export class AiChatsService {
       }`
       if (total + block.length + 1 > LEGAL_RESULT_MAX_CHARS) return
       lines.push(block)
+      shown.push(hit)
       total += block.length + 1
     })
-    return lines.join('\n')
+    return { text: lines.join('\n'), shown }
   }
 
   private toLegalCitations(hits: LegalSearchHit[]): LegalCitation[] {
@@ -550,13 +565,15 @@ export class AiChatsService {
             if (hits.length === 0) {
               toolResultContent = LEGAL_NOT_FOUND_MESSAGE
             } else {
-              toolResultContent = this.formatLegalHits(hits)
-              legalHits = hits
+              const formatted = this.formatLegalHits(hits)
+              toolResultContent = formatted.text
+              // only passages the model actually saw can be sources of its answer
+              legalHits = formatted.shown
               metadata = {
                 ...(metadata || {}),
                 legalCitations: this.mergeLegalCitations(
                   metadata?.legalCitations,
-                  this.toLegalCitations(hits)
+                  this.toLegalCitations(formatted.shown)
                 ),
               }
             }
@@ -596,7 +613,15 @@ export class AiChatsService {
       }
 
       // Call LLM again with tool results
-      response = await this.groqAgentService.chat(llmMessages, disableTools)
+      // after a legal lookup the model only has to write the answer: the compact legal prompt without
+      // tool definitions leaves room in the token budget for the passages themselves
+      response = await this.groqAgentService.chat(
+        llmMessages,
+        disableTools,
+        toolCall.function.name === 'search_legal_knowledge'
+          ? { legalAnswer: true }
+          : undefined
+      )
 
       if (disableTools) {
         break
@@ -650,9 +675,12 @@ export class AiChatsService {
     // The model sometimes refuses although the knowledge base returned excerpts:
     // ask once more, from the question and the excerpts only (no tool-call history,
     // so the model does not try to call the tool again).
+    // An empty reply after the lookup (the model kept asking for tools or returned nothing) is treated
+    // the same way: it must not reach the user as "tôi không thể xử lý yêu cầu của bạn".
+    const emptyAfterLookup = !response.content && legalHits.length > 0
     if (
       metadata?.legalCitations?.length &&
-      LEGAL_NO_DATA_PATTERN.test(finalAnswer)
+      (LEGAL_NO_DATA_PATTERN.test(finalAnswer) || emptyAfterLookup)
     ) {
       const excerpts = [...llmMessages].reverse().find(m => m.role === 'tool')
       if (excerpts) {
@@ -664,7 +692,8 @@ export class AiChatsService {
               content: excerpts.content + '\n\n' + LEGAL_RETRY_NUDGE,
             },
           ],
-          true
+          true,
+          { legalAnswer: true }
         )
         if (
           retry?.content &&
@@ -676,9 +705,69 @@ export class AiChatsService {
       }
     }
 
+    // Grounding guard: every figure and article/decree number in a legal answer must appear in the
+    // passages the model was given. One that does not is written again from the passages only; if it
+    // still invents figures the answer is replaced by the safe fallback below.
+    if (legalHits.length > 0 && !LEGAL_NO_DATA_PATTERN.test(finalAnswer)) {
+      const evidence = legalHits
+        .map(hit =>
+          [hit.title, hit.docNumber, hit.heading, hit.text]
+            .filter(Boolean)
+            .join(' ')
+        )
+        .join('\n')
+      let ungrounded = findUngroundedFigures(finalAnswer, evidence)
+      if (ungrounded.length > 0) {
+        this.logger.warn(
+          `Legal answer has figures not in the sources: ${ungrounded.join(', ')}`
+        )
+        const excerpts = [...llmMessages].reverse().find(m => m.role === 'tool')
+        if (excerpts) {
+          const retry = await this.groqAgentService.chat(
+            [
+              { role: 'user', content: text },
+              {
+                role: 'system',
+                content: `${excerpts.content}\n\n${buildGroundingNudge(ungrounded)}`,
+              },
+            ],
+            true,
+            { legalAnswer: true }
+          )
+          if (retry?.content && retry.content !== GROQ_CONNECTION_ERROR_REPLY) {
+            finalAnswer = retry.content
+            ungrounded = LEGAL_NO_DATA_PATTERN.test(finalAnswer)
+              ? []
+              : findUngroundedFigures(finalAnswer, evidence)
+          }
+        }
+        if (ungrounded.length > 0) {
+          finalAnswer =
+            buildRelatedSourcesAnswer(legalHits) ?? LEGAL_UNGROUNDED_ANSWER
+        }
+      }
+    }
+
+    // A rule taken from an article limited to one kind of housing (social housing, public-service
+    // housing, tenancy of land...) must say so, even when every figure in it is correct.
+    if (legalHits.length > 0 && !LEGAL_NO_DATA_PATTERN.test(finalAnswer)) {
+      const notes = findScopeNotes(text, finalAnswer, legalHits)
+      if (notes.length > 0) {
+        finalAnswer += `\n\n**Lưu ý phạm vi áp dụng:** ${notes.join(' ')}`
+      }
+    }
+
     // Still refusing although related documents exist: show them rather than "no data".
-    if (legalHits.length > 0 && LEGAL_NO_DATA_PATTERN.test(finalAnswer)) {
-      finalAnswer = buildRelatedSourcesAnswer(legalHits) ?? finalAnswer
+    const stillEmpty =
+      emptyAfterLookup &&
+      finalAnswer === 'Xin lỗi, tôi không thể xử lý yêu cầu của bạn.'
+    if (
+      legalHits.length > 0 &&
+      (LEGAL_NO_DATA_PATTERN.test(finalAnswer) || stillEmpty)
+    ) {
+      finalAnswer =
+        buildRelatedSourcesAnswer(legalHits) ??
+        (stillEmpty ? LEGAL_UNGROUNDED_ANSWER : finalAnswer)
     }
 
     // Citations only make sense when the answer actually used the knowledge base.

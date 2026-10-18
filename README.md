@@ -110,8 +110,6 @@ Chuẩn hóa theo mẫu `server_do_an_new` nhưng **không xóa gì**: entity đ
 | `RentalFlowProfile` + `RentalExecutionPolicy`                                         | `RentalFlowConfig{kind:'profile' \| 'policy'}` (collection `rental_flow_configs`, giữ `_id`; hai entity cũ không có unique nên chỉ có chỉ mục `(kind, key, status, version)` do migration tạo)          | 014       |
 | `ListingReviewCase` + `SafetyReport`                                                  | `ReviewCase{kind:'listing' \| 'safety'}` (collection `review_cases`, giữ `_id`; chỉ mục `(kind, status, createdAt)`)                                                                                    | 015       |
 | `SavedSearch` + `SearchAlert`                                                         | `SavedSearchRecord{kind:'search' \| 'alert'}` (collection `user_searches`, giữ `_id`, giữ `deduplicationKey`)                                                                                           | 016       |
-| `AreaProfile` + `RiskLayerData`                                                       | `DistrictData{kind:'area-profile' \| 'risk-layer'}` (collection `district_data`, giữ `_id`)                                                                                                             | 017       |
-| `ConditionAnalysis` + `LivingCostProfile`                                             | `ApartmentAnalysis{kind:'condition' \| 'living-cost'}` (collection `apartment_analyses`, giữ `_id`)                                                                                                     | 018       |
 | `Permission`                                                                          | nhúng `Role.permissions[]` (trần 6 action x 19 subject; khử trùng `(action, subject)`)                                                                                                                  | 019       |
 | `LegalKnowledgeDoc`, `LegalSource`, `PlatformRegulation`, `LegalTermsDocument`        | `LegalDocument{kind}` (collection `legal_documents`; `LegalSource.kind` đổi thành `docKind`; partial unique `key`/`code` chỉ khi dữ liệu thỏa)                                                          | 020       |
 | `EmailOtp` + `TransactionOtp`                                                         | `Otp{kind:'email' \| 'transaction'}` (collection `otps`, giữ `_id`)                                                                                                                                     | 021       |
@@ -124,6 +122,8 @@ Chuẩn hóa theo mẫu `server_do_an_new` nhưng **không xóa gì**: entity đ
 | `SigningGrant`                                                                        | `SmartCaSigningSession{kind:'grant'}` (collection `smartca_signing_sessions`; phiên giao dịch là `kind:'session'`)                                                                                      | 028       |
 | `Review`                                                                              | nhúng `Apartment.reviews[]` (trần 100 review/căn hộ; không có service/controller nào đọc, dữ liệu chỉ được giữ)                                                                                         | 030       |
 | `ConfigAudit` (`config_audits`)                                                       | `ActivityLog{kind:'config-audit'}` (giữ `_id`, không xóa `config_audits`; entity `ConfigAudit` `@deprecated`)                                                                                           | 031       |
+
+> Đã gỡ `AreaProfile`/`RiskLayerData` (`district_data`) và `ConditionAnalysis`/`LivingCostProfile` (`apartment_analyses`) cùng các endpoint `area-profiles`, `location-risk`, `condition-analyses`, `living-cost` khi rút gọn trang chi tiết căn hộ. Migration 017/018 được giữ nguyên cho lịch sử; hai collection không còn entity và dữ liệu cũ vẫn nằm trong DB (không bị xoá).
 
 `PropertyOwnershipTransferRecord` vẫn là entity riêng (không có trong bảng vì không gom): nằm trong 41 entity nạp.
 
@@ -251,3 +251,18 @@ E2E tests require a reachable MongoDB configured by `DATABASE_URL`:
 ```bash
 corepack pnpm test:e2e
 ```
+
+## Chatbot pháp lý: chất lượng tra cứu
+
+- `legal_knowledge_chunks` chỉ là dữ liệu dẫn xuất từ `legal_documents.content`. Nhiều trang luật được trích với ngắt dòng cứng ở khoảng 80 ký tự (cả giữa tiêu đề và giữa câu); bộ cắt (`legal-chunker`) nối lại các dòng đó trước khi cắt. Đổi logic cắt thì dựng lại chunk:
+
+  ```bash
+  pnpm build
+  node scripts/rechunk-legal.cjs                          # chạy thử, chỉ in so sánh
+  node scripts/rechunk-legal.cjs --apply --backup f.json  # ghi, có sao lưu chunk cũ
+  node scripts/rechunk-legal.cjs --restore f.json         # khôi phục
+  ```
+
+- Bước trả lời sau tra cứu dùng lời nhắc gọn riêng (`LEGAL_ANSWER_PROMPT`, không kèm định nghĩa công cụ). Lời nhắc tổng cộng định nghĩa công cụ đã vượt ngân sách token mỗi yêu cầu, khiến đoạn tra cứu bị rút còn ~400 ký tự.
+- Câu trả lời pháp lý đi qua `legal-answer-guard`: số liệu (tháng, ngày, %, tiền) và số điều/nghị định phải có trong đoạn trích; điều luật chỉ áp dụng cho một loại nhà (nhà ở xã hội, công vụ, thuê khoán...) được gắn ghi chú phạm vi.
+- Bộ câu hỏi kiểm tra chạy tay trên backend đang chạy (cần khoá Groq; mô hình không tất định nên đọc cả câu trả lời): `node scripts/legal-eval.cjs [--only id1,id2] [--json out.json]`.

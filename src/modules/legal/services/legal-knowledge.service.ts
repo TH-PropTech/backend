@@ -31,7 +31,11 @@ import type {
 } from '../utils/legal-knowledge.types'
 import { distillLegalPage } from '../utils/legal-distill'
 import { extractMainText } from '../utils/html-extract'
-import { foldVietnamese, pickMainExcerpt } from '../utils/legal-text'
+import {
+  expandLegalQuery,
+  foldVietnamese,
+  pickMainExcerpt,
+} from '../utils/legal-text'
 import { fetchPageHtml, SafeFetchError } from '../utils/safe-fetch'
 import { LegalKnowledgeChunk } from '../schemas/legal-knowledge-chunk.schema'
 import {
@@ -43,9 +47,16 @@ import { LegalDocumentScope } from '../utils/legal-document.scope'
 const DEFAULT_SEARCH_LIMIT = 4
 /** BM25 score floor; keyword-boosted hits are at least +2 so they always pass. */
 const SEARCH_MIN_SCORE = 0.5
-const HIT_TEXT_MAX = 800
-/** A doc may fill at most this many result slots, so one long source cannot crowd out the others. */
-const MAX_HITS_PER_DOC = 1
+/** A passage must contain at least this share of the question's weighted words (drops pure noise such as "cách nấu phở bò"). */
+const SEARCH_MIN_COVERAGE = 0.35
+/** Hits scoring below this share of the best hit are noise (an unrelated article that shares one common word). */
+const SEARCH_RELATIVE_FLOOR = 0.4
+const HIT_TEXT_MAX = 1000
+/**
+ * A doc may fill at most this many result slots, so one long source cannot crowd out the others. Two,
+ * not one: a long article is split into several passages and the answer is often in the second.
+ */
+const MAX_HITS_PER_DOC = 2
 /** Candidates fetched before the per-doc cap is applied. */
 const CANDIDATE_FACTOR = 4
 /** The index is rebuilt in the background when older than this, so docs added by scripts show up without a restart. */
@@ -222,9 +233,19 @@ export class LegalKnowledgeService
     limit: number = DEFAULT_SEARCH_LIMIT
   ): Promise<LegalSearchHit[]> {
     this.refreshIndexIfStale()
+    const expanded = expandLegalQuery(query)
     const perDoc = new Map<string, number>()
     const candidates = this.index
-      .search(query, limit * CANDIDATE_FACTOR, SEARCH_MIN_SCORE)
+      .search(
+        expanded,
+        limit * CANDIDATE_FACTOR,
+        SEARCH_MIN_SCORE,
+        SEARCH_MIN_COVERAGE
+      )
+      .filter(
+        (hit, _index, all) =>
+          hit.score >= (all[0]?.score ?? 0) * SEARCH_RELATIVE_FLOOR
+      )
       .filter(hit => {
         const used = perDoc.get(hit.meta.docId) ?? 0
         if (used >= MAX_HITS_PER_DOC) return false
@@ -238,8 +259,9 @@ export class LegalKnowledgeService
       docNumber: hit.meta.docNumber,
       issuer: hit.meta.issuer,
       heading: hit.meta.heading,
-      text: pickMainExcerpt(hit.meta.text, query, HIT_TEXT_MAX),
+      text: pickMainExcerpt(hit.meta.text, expanded, HIT_TEXT_MAX),
       score: hit.score,
+      coverage: hit.coverage,
       sourceUrl: hit.meta.sourceUrl,
       fetchedAt: hit.meta.fetchedAt,
     }))

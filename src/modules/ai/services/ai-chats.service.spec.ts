@@ -433,6 +433,197 @@ describe('AiChatsService', () => {
       expect(result.metadata?.legalCitations).toBeUndefined()
     })
 
+    describe('lớp chặn số liệu không có trong nguồn', () => {
+      const socialHousingHit = {
+        docId: 'lno',
+        title: 'Luật Nhà ở 2023',
+        docNumber: '27/2023/QH15',
+        issuer: 'Quốc hội',
+        heading: 'Điều 89. Bán, cho thuê mua, cho thuê nhà ở xã hội',
+        text: 'thu tiền đặt cọc thuê nhà ở tối đa bằng 12 tháng tiền thuê nhà tạm tính đối với nhà ở xã hội đang xây dựng.',
+        score: 40,
+        coverage: 0.9,
+      }
+
+      it('viết lại một lần khi câu trả lời nêu "2 tháng" không có trong đoạn trích', async () => {
+        legalSearch.search.mockResolvedValueOnce([socialHousingHit])
+        groqAgentService.chat
+          .mockResolvedValueOnce(legalToolCall('đặt cọc thuê nhà tối đa'))
+          .mockResolvedValueOnce({
+            content:
+              'Theo Luật Nhà ở 2023 (Điều 89), tiền đặt cọc không được vượt quá hai (2) tháng tiền thuê.',
+          })
+          .mockResolvedValueOnce({
+            content:
+              'Theo Luật Nhà ở 2023 (Điều 89), với nhà ở xã hội đang xây dựng, tiền đặt cọc tối đa bằng 12 tháng tiền thuê tạm tính. Nội dung chỉ mang tính tham khảo, không thay thế tư vấn pháp lý chuyên nghiệp.',
+          })
+
+        const result = await service.handleUserMessage(
+          { deviceId: 'device-legal-ground-1' },
+          'Đặt cọc thuê nhà tối đa bao nhiêu tháng?',
+          jest.fn()
+        )
+
+        expect(result.content).toContain('12 tháng')
+        expect(result.content).not.toContain('hai (2) tháng')
+        // lượt viết lại chỉ nhận câu hỏi + đoạn trích + lời nhắc, và được báo rõ số liệu sai
+        const rewrite = (groqAgentService.chat.mock.calls as unknown[][])[2]
+        const rewriteMessages = rewrite?.[0] as Array<{
+          role: string
+          content: string
+        }>
+        expect(rewriteMessages?.[1]?.content).toContain('2 tháng')
+        expect(rewriteMessages?.[1]?.content).toContain('nhà ở xã hội')
+        expect(rewrite?.[1]).toBe(true) // không cho gọi công cụ
+        expect(result.metadata?.legalCitations?.length).toBeGreaterThan(0)
+      })
+
+      it('thay bằng câu trả lời an toàn khi viết lại vẫn bịa số liệu', async () => {
+        legalSearch.search.mockResolvedValueOnce([
+          { ...socialHousingHit, coverage: 0.5 },
+        ])
+        groqAgentService.chat
+          .mockResolvedValueOnce(legalToolCall('đặt cọc thuê nhà tối đa'))
+          .mockResolvedValueOnce({
+            content: 'Đặt cọc tối đa 2 tháng theo Điều 89.',
+          })
+          .mockResolvedValueOnce({
+            content: 'Đặt cọc tối đa 3 tháng theo Điều 89.',
+          })
+
+        const result = await service.handleUserMessage(
+          { deviceId: 'device-legal-ground-2' },
+          'Đặt cọc thuê nhà tối đa bao nhiêu tháng?',
+          jest.fn()
+        )
+
+        expect(result.content).toMatch(/^Hiện chưa có dữ liệu/)
+        expect(result.content).not.toMatch(/\b[23] tháng/)
+        expect(result.metadata?.legalCitations).toBeUndefined()
+      })
+
+      it('gắn ghi chú phạm vi khi điều luật trích dẫn chỉ nói về nhà ở xã hội mà câu hỏi hỏi thuê nhà thường', async () => {
+        legalSearch.search.mockResolvedValueOnce([socialHousingHit])
+        groqAgentService.chat
+          .mockResolvedValueOnce(legalToolCall('đặt cọc thuê nhà tối đa'))
+          .mockResolvedValueOnce({
+            content:
+              'Theo Luật Nhà ở 2023 (Điều 89), tiền đặt cọc tối đa bằng 12 tháng tiền thuê tạm tính.',
+          })
+
+        const result = await service.handleUserMessage(
+          { deviceId: 'device-legal-scope-1' },
+          'Đặt cọc thuê nhà tối đa bao nhiêu tháng?',
+          jest.fn()
+        )
+
+        expect(result.content).toContain('12 tháng')
+        expect(result.content).toContain('Lưu ý phạm vi áp dụng')
+        expect(result.content).toContain('nhà ở xã hội')
+        expect(result.content).toContain('không phải quy định chung')
+      })
+
+      it('không gắn ghi chú phạm vi khi người dùng hỏi đúng về nhà ở xã hội', async () => {
+        legalSearch.search.mockResolvedValueOnce([socialHousingHit])
+        groqAgentService.chat
+          .mockResolvedValueOnce(legalToolCall('đặt cọc nhà ở xã hội'))
+          .mockResolvedValueOnce({
+            content:
+              'Theo Luật Nhà ở 2023 (Điều 89), nhà ở xã hội đang xây dựng được thu cọc tối đa 12 tháng tiền thuê tạm tính.',
+          })
+
+        const result = await service.handleUserMessage(
+          { deviceId: 'device-legal-scope-2' },
+          'Đặt cọc thuê nhà ở xã hội tối đa bao nhiêu?',
+          jest.fn()
+        )
+
+        expect(result.content).not.toContain('Lưu ý phạm vi áp dụng')
+      })
+
+      it('không để lọt "không thể xử lý yêu cầu" khi mô hình trả rỗng sau tra cứu: thử lại có nguồn', async () => {
+        legalSearch.search.mockResolvedValueOnce([socialHousingHit])
+        groqAgentService.chat
+          .mockResolvedValueOnce(legalToolCall('đặt cọc nhà ở xã hội'))
+          .mockResolvedValueOnce({ content: null })
+          .mockResolvedValueOnce({
+            content:
+              'Theo Luật Nhà ở 2023 (Điều 89), nhà ở xã hội đang xây dựng được thu cọc tối đa 12 tháng tiền thuê tạm tính.',
+          })
+
+        const result = await service.handleUserMessage(
+          { deviceId: 'device-legal-empty-1' },
+          'Đặt cọc thuê nhà ở xã hội tối đa bao nhiêu?',
+          jest.fn()
+        )
+
+        expect(result.content).toContain('12 tháng')
+        expect(result.content).not.toContain('không thể xử lý')
+      })
+
+      it('nếu thử lại vẫn rỗng thì liệt kê văn bản liên quan thay vì xin lỗi chung chung', async () => {
+        legalSearch.search.mockResolvedValueOnce([socialHousingHit])
+        groqAgentService.chat
+          .mockResolvedValueOnce(legalToolCall('đặt cọc nhà ở xã hội'))
+          .mockResolvedValueOnce({ content: null })
+          .mockResolvedValueOnce({ content: null })
+
+        const result = await service.handleUserMessage(
+          { deviceId: 'device-legal-empty-2' },
+          'Đặt cọc thuê nhà ở xã hội tối đa bao nhiêu?',
+          jest.fn()
+        )
+
+        expect(result.content).toContain('Luật Nhà ở 2023')
+        expect(result.content).not.toContain('không thể xử lý')
+      })
+
+      it('không can thiệp khi mọi số liệu đều có trong đoạn trích', async () => {
+        legalSearch.search.mockResolvedValueOnce([socialHousingHit])
+        groqAgentService.chat
+          .mockResolvedValueOnce(legalToolCall('đặt cọc nhà ở xã hội'))
+          .mockResolvedValueOnce({
+            content:
+              'Theo Luật Nhà ở 2023 (Điều 89), nhà ở xã hội đang xây dựng được thu cọc tối đa 12 tháng tiền thuê tạm tính.',
+          })
+
+        const result = await service.handleUserMessage(
+          { deviceId: 'device-legal-ground-3' },
+          'Đặt cọc thuê nhà ở xã hội tối đa bao nhiêu?',
+          jest.fn()
+        )
+
+        expect(result.content).toContain('12 tháng')
+        expect(groqAgentService.chat).toHaveBeenCalledTimes(2)
+      })
+
+      it('chỉ trích dẫn những đoạn đã thật sự đưa cho mô hình đọc', async () => {
+        const bigHits = Array.from({ length: 4 }, (_, i) => ({
+          ...socialHousingHit,
+          docId: `d${i}`,
+          title: `Văn bản ${i}`,
+          heading: `Điều ${i + 1}. Tên`,
+          text: 'nội dung dài '.repeat(160), // ~2000 ký tự mỗi đoạn: không đủ chỗ cho cả bốn
+        }))
+        legalSearch.search.mockResolvedValueOnce(bigHits)
+        groqAgentService.chat
+          .mockResolvedValueOnce(legalToolCall('nội dung dài'))
+          .mockResolvedValueOnce({ content: 'Tóm tắt không có số liệu.' })
+
+        const result = await service.handleUserMessage(
+          { deviceId: 'device-legal-ground-4' },
+          'Hỏi về nội dung dài',
+          jest.fn()
+        )
+
+        const toolMessage = getSecondCallMessages().at(-1)
+        const shownCount = (toolMessage?.content.match(/\[\d\] Văn bản/g) ?? [])
+          .length
+        expect(shownCount).toBeLessThan(4)
+        expect(result.metadata?.legalCitations).toHaveLength(shownCount)
+      })
+    })
+
     it('Thực thi tool, đưa nội dung đánh số vào LLM và gắn legalCitations vào metadata', async () => {
       legalSearch.search.mockResolvedValueOnce(sampleHits)
       groqAgentService.chat
