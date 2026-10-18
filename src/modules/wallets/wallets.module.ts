@@ -5,6 +5,7 @@ import { Payment } from '../payments/schemas/payment.schema'
 import { Contract } from '../contracts/schemas/contract.schema'
 import { DepositAgreement } from '../contracts/schemas/deposit-agreement.schema'
 import { User } from '../users/schemas/user.schema'
+import { AdminWalletsController } from './controllers/admin-wallets.controller'
 import { PayoutsController } from './controllers/payouts.controller'
 import { WalletController } from './controllers/wallet.controller'
 import { Payout } from './schemas/payout.schema'
@@ -26,7 +27,7 @@ import { WalletsService } from './services/wallets.service'
     ]),
     NotificationsModule,
   ],
-  controllers: [PayoutsController, WalletController],
+  controllers: [PayoutsController, WalletController, AdminWalletsController],
   providers: [
     WalletsService,
     PayoutsService,

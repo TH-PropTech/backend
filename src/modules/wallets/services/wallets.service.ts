@@ -39,6 +39,20 @@ export type WalletView = {
 
 export type WalletLinkResult = { wallet: WalletView; newlyLinked: boolean }
 
+export type LandlordWalletItem = {
+  userId: string
+  name: string
+  email: string
+  wallet: WalletView
+}
+
+export type LandlordWalletPage = {
+  items: LandlordWalletItem[]
+  total: number
+  page: number
+  limit: number
+}
+
 /** Một dòng sao kê dựng từ Payout/Payment (D5); không có balanceAfter, không phải sổ cái. */
 export type WalletStatementItem = {
   type: 'payout' | 'platform-fee'
@@ -84,6 +98,40 @@ export class WalletsService {
 
   listBanks(): ReadonlyArray<{ code: string; name: string }> {
     return SUPPORTED_BANKS
+  }
+
+  /** Staff/admin observability: every landlord plus their payout-wallet link status. */
+  async listLandlordWallets(
+    page = 1,
+    limit = DEFAULT_PAGE_SIZE
+  ): Promise<LandlordWalletPage> {
+    const safePage = Math.max(1, page || 1)
+    const safeLimit = Math.min(
+      MAX_PAGE_SIZE,
+      Math.max(1, limit || DEFAULT_PAGE_SIZE)
+    )
+    const [landlords, total] = await this.userRepository.findAndCount({
+      where: { role: 'landlord' },
+      order: { fullName: 'ASC' },
+      skip: (safePage - 1) * safeLimit,
+      take: safeLimit,
+    })
+    const ids = landlords.map(l => String(l._id))
+    const wallets = ids.length
+      ? await this.walletRepository.find({ where: { userId: { $in: ids } } })
+      : []
+    const items = landlords.map(landlord => {
+      const wallet = wallets.find(w => w.userId === String(landlord._id))
+      return {
+        userId: String(landlord._id),
+        name: landlord.fullName,
+        email: landlord.email,
+        wallet: wallet
+          ? this.toView(wallet)
+          : this.unlinkedView(String(landlord._id)),
+      }
+    })
+    return { items, total, page: safePage, limit: safeLimit }
   }
 
   async getMine(userId: string): Promise<WalletView> {

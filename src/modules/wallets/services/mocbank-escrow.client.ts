@@ -40,6 +40,16 @@ export type MocbankEscrowAllocation = {
   amount: number
 }
 
+/** The platform's own escrow/disbursement wallet at Ví Mộc, as that merchant. */
+export type MocbankEscrowWallet = {
+  accountNumber: string
+  accountName: string
+  availableBalance: number
+  heldBalance: number
+  currency: string
+  status: string
+}
+
 export type MocbankEscrowSettleInput = {
   /** Deterministic per agreement and kind so a retry never creates a second order. */
   settlementId: string
@@ -98,6 +108,29 @@ export class MocbankEscrowClient {
     return this.post(escrowId, 'extend', {
       autoRefundAt: autoRefundAt.toISOString(),
     })
+  }
+
+  /** The platform's own disbursement wallet at Ví Mộc (not a per-escrow lookup). */
+  async getPlatformWallet(): Promise<MocbankEscrowWallet> {
+    const { config, timeoutMs } = this.settings()
+    const reply = await getFromGateway(
+      this.fetcher,
+      `${config.baseUrl}/api/merchant/escrow-wallet`,
+      mocbankMerchantHeaders(config),
+      timeoutMs
+    )
+    const result = asRecord(reply.body)
+    const data = result?.success === true ? asRecord(result.data) : null
+    const wallet = isSuccessStatus(reply.status)
+      ? toEscrowWallet(data ? asRecord(data.escrowWallet) : null)
+      : null
+    if (!wallet) {
+      this.logger.warn(
+        `Ví Mộc platform wallet lookup failed http=${logField(reply.status)}`
+      )
+      throw new MocbankEscrowError('GATEWAY_UNAVAILABLE')
+    }
+    return wallet
   }
 
   private async post(
@@ -168,6 +201,29 @@ export class MocbankEscrowClient {
         'rentalFlow.payments.gatewayTimeoutMs'
       ),
     }
+  }
+}
+
+function toEscrowWallet(
+  data: Record<string, unknown> | null
+): MocbankEscrowWallet | null {
+  if (!data) return null
+  const { accountNumber, accountName, availableBalance, heldBalance } = data
+  if (
+    typeof accountNumber !== 'string' ||
+    typeof accountName !== 'string' ||
+    typeof availableBalance !== 'number' ||
+    typeof heldBalance !== 'number'
+  ) {
+    return null
+  }
+  return {
+    accountNumber,
+    accountName,
+    availableBalance,
+    heldBalance,
+    currency: typeof data.currency === 'string' ? data.currency : 'VND',
+    status: typeof data.status === 'string' ? data.status : 'ACTIVE',
   }
 }
 
