@@ -7,11 +7,16 @@ import {
   UpdateDateColumn,
 } from 'typeorm'
 
+/** Trạng thái duyệt bản nháp điều khoản; vắng mặt = 'editing'. */
+export type LegalTermsReviewStatus = 'editing' | 'in_review' | 'approved'
+
 export interface LegalTermsSection {
   id: string
   heading: string
   body: string
   order: number
+  /** `key` của các bản ghi Nguồn pháp lý (kind='source') làm căn cứ cho điều khoản này. */
+  sourceKeys?: string[]
 }
 
 /**

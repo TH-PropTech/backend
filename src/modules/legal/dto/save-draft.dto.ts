@@ -1,11 +1,13 @@
 import {
-  IsString,
+  ArrayMaxSize,
+  IsArray,
   IsNotEmpty,
   IsNumber,
-  IsArray,
-  ValidateNested,
+  IsOptional,
+  IsString,
   Min,
   MaxLength,
+  ValidateNested,
 } from 'class-validator'
 import { Type } from 'class-transformer'
 
@@ -26,6 +28,13 @@ export class LegalTermsSectionDto {
 
   @IsNumber()
   order!: number
+
+  /** `key` của Nguồn pháp lý (kind='source') đang có; backend kiểm tồn tại trước khi lưu. */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(10)
+  @IsString({ each: true })
+  sourceKeys?: string[]
 }
 
 export class SaveDraftDto {

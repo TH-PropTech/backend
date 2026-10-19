@@ -21,7 +21,10 @@ import type {
   LegalDocCategory,
   LegalDocStatus,
 } from '../utils/legal-knowledge.types'
-import type { LegalTermsSection } from './legal-terms-document.schema'
+import type {
+  LegalTermsReviewStatus,
+  LegalTermsSection,
+} from './legal-terms-document.schema'
 import type { LegalKnowledgeDoc } from './legal-knowledge-doc.schema'
 import type { LegalSource } from './legal-source.schema'
 import type { PlatformRegulation } from './platform-regulation.schema'
@@ -243,6 +246,29 @@ export class LegalDocument {
 
   @Column({ default: 1 })
   draftRevision?: number | undefined
+
+  /** Bản nháp: trạng thái duyệt hai bước (vắng mặt = 'editing'). */
+  @Column({ nullable: true })
+  reviewStatus?: LegalTermsReviewStatus | undefined
+
+  @Column({ nullable: true })
+  submittedBy?: string | undefined
+
+  @Column({ nullable: true })
+  submittedAt?: Date | undefined
+
+  @Column({ nullable: true })
+  reviewedBy?: string | undefined
+
+  @Column({ nullable: true })
+  reviewedAt?: Date | undefined
+
+  @Column({ nullable: true })
+  reviewNote?: string | undefined
+
+  /** Bản đã công bố: thời điểm có hiệu lực; vắng mặt/null = hiệu lực từ publishedAt. */
+  @Column({ nullable: true })
+  effectiveFrom?: Date | null | undefined
 
   // --- chung ---
 

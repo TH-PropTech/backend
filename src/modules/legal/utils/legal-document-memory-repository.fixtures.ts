@@ -30,8 +30,9 @@ function matches(row: LegalDocumentRow, where: Where | undefined): boolean {
       !(condition instanceof ObjectId) &&
       '$in' in condition
     ) {
+      // Mongo: `null` trong $in cũng khớp trường vắng mặt.
       return (condition as { $in: unknown[] }).$in.some(item =>
-        equal(row[field], item)
+        item === null ? row[field] == null : equal(row[field], item)
       )
     }
     return equal(row[field], condition)
@@ -107,6 +108,18 @@ export class LegalDocumentMemoryRepository {
       if (matchesCriteria(row, criteria)) Object.assign(row, patch)
     }
     return Promise.resolve()
+  }
+
+  /** Tập con của Mongo `updateOne`: `$set`/`$unset`, trả `matchedCount`. */
+  updateOne(
+    criteria: Where,
+    update: { $set?: Where; $unset?: Where }
+  ): Promise<{ matchedCount: number }> {
+    const row = this.rows.find(item => matches(item, criteria))
+    if (!row) return Promise.resolve({ matchedCount: 0 })
+    Object.assign(row, update.$set ?? {})
+    for (const field of Object.keys(update.$unset ?? {})) delete row[field]
+    return Promise.resolve({ matchedCount: 1 })
   }
 
   delete(criteria: Where | ObjectId): Promise<void> {
