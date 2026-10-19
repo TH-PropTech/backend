@@ -1,6 +1,5 @@
 export const SELECTABLE_PAYMENT_PROVIDERS = [
   'mock-bank',
-  'vnpay',
   'momo',
   'zalopay',
   'mocbank',
@@ -14,14 +13,6 @@ export type PaymentsConfig = {
   attemptTtlMinutes: number
   clientReturnUrl: string
   mobileReturnUrl: string
-  vnpay: {
-    tmnCode: string
-    hashSecret: string
-    payUrl: string
-    returnUrl: string
-    /** merchant_webapi `querydr` endpoint (reconciliation only). */
-    queryEndpoint: string
-  }
   momo: {
     partnerCode: string
     accessKey: string
@@ -242,29 +233,14 @@ export const configuration = (): {
       ),
       gatewayTimeoutMs: Number(envOr('PAYMENT_GATEWAY_TIMEOUT_MS', '10000')),
       attemptTtlMinutes: Number(envOr('PAYMENT_ATTEMPT_TTL_MINUTES', '15')),
-      clientReturnUrl:
-        envOr('PAYMENT_CLIENT_RETURN_URL', '') ||
-        envOr('VNPAY_CLIENT_RETURN_URL', 'http://localhost:3000'),
+      clientReturnUrl: envOr(
+        'PAYMENT_CLIENT_RETURN_URL',
+        'http://localhost:3000'
+      ),
       mobileReturnUrl: envOr(
         'PAYMENT_MOBILE_RETURN_URL',
         'thproptech://payment-result'
       ),
-      vnpay: {
-        tmnCode: envOr('VNPAY_TMN_CODE', ''),
-        hashSecret: envOr('VNPAY_HASH_SECRET', ''),
-        payUrl: envOr(
-          'VNPAY_PAY_URL',
-          'https://sandbox.vnpayment.vn/paymentv2/vpcpay.html'
-        ),
-        returnUrl: envOr(
-          'VNPAY_RETURN_URL',
-          'http://localhost:3001/api/v1/bank/vnpay/return'
-        ),
-        queryEndpoint: envOr(
-          'VNPAY_QUERY_ENDPOINT',
-          'https://sandbox.vnpayment.vn/merchant_webapi/api/transaction'
-        ),
-      },
       momo: {
         partnerCode: envOr('MOMO_PARTNER_CODE', ''),
         accessKey: envOr('MOMO_ACCESS_KEY', ''),

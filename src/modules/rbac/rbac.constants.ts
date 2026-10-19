@@ -14,7 +14,6 @@ export const RBAC_SUBJECTS = [
   'User',
   'Kyc',
   'Project',
-  'Building',
   'Apartment',
   'Booking',
   'RentalApplication',
@@ -77,7 +76,7 @@ export const DEFAULT_ROLES: DefaultRole[] = [
     name: 'landlord',
     description: 'Chủ nhà — quản lý tin đăng, hợp đồng và thu nhập của mình',
     permissions: [
-      ...can('manage', 'Apartment', 'Building', 'Project'),
+      ...can('manage', 'Apartment', 'Project'),
       ...can('read', 'Booking', 'RentalApplication', 'RentalTransaction'),
       ...can('manage', 'Contract', 'Payout', 'Wallet'),
     ],
@@ -86,7 +85,7 @@ export const DEFAULT_ROLES: DefaultRole[] = [
     name: 'tenant',
     description: 'Người thuê — đặt lịch, thuê nhà, thanh toán',
     permissions: [
-      ...can('read', 'Apartment', 'Building', 'Project'),
+      ...can('read', 'Apartment', 'Project'),
       ...can('manage', 'Booking', 'RentalApplication'),
       ...can('read', 'Contract'),
       ...can('create', 'Payment', 'Dispute', 'SupportTicket'),

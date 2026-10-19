@@ -71,14 +71,14 @@ describe('WalletsService.getReceivingStatus', () => {
     const extras = [
       extraMomo,
       { ...extraMomo, brand: 'zalopay', mocbankAccountNumber: '4' },
-      { ...extraMomo, brand: 'vnpay', mocbankAccountNumber: '5' },
+      { ...extraMomo, brand: 'zalopay', mocbankAccountNumber: '5' },
     ]
     const { service, mocbank } = setup(linkedWallet(extras))
     mocbank.resolveAccount.mockImplementation((n: string) => {
       if (n === ACCOUNT_NUMBER)
         return Promise.resolve({ accountName: 'A', brand: 'mocbank' })
       if (n === '810000000003')
-        return Promise.resolve({ accountName: 'A', brand: 'vnpay' })
+        return Promise.resolve({ accountName: 'A', brand: 'zalopay' })
       if (n === '4')
         return Promise.reject(new MocbankEscrowError('WALLET_NOT_FOUND'))
       return Promise.reject(new Error('boom'))
@@ -91,7 +91,7 @@ describe('WalletsService.getReceivingStatus', () => {
       ['mocbank', 'active'],
       ['momo', 'brand_mismatch'],
       ['zalopay', 'not_found'],
-      ['vnpay', 'unreachable'],
+      ['zalopay', 'unreachable'],
     ])
     expect(result.accounts[0]).toEqual(
       expect.objectContaining({

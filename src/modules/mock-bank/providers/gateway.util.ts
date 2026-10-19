@@ -59,12 +59,6 @@ function vnParts(date: Date): VnParts {
   }
 }
 
-/** `yyyyMMddHHmmss` in Asia/Ho_Chi_Minh (VNPAY create/expire dates). */
-export function formatVnTimestamp(date: Date): string {
-  const p = vnParts(date)
-  return `${p.year}${p.month}${p.day}${p.hour}${p.minute}${p.second}`
-}
-
 /** `yyMMdd` in Asia/Ho_Chi_Minh (ZaloPay app_trans_id prefix). */
 export function formatVnShortDate(date: Date): string {
   const p = vnParts(date)

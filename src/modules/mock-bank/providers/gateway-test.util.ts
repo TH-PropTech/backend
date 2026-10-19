@@ -2,19 +2,11 @@ import type { PaymentsConfig } from '../../../config/configuration'
 
 /** Synthetic sandbox-shaped config shared by gateway specs (no real keys). */
 export const TEST_PAYMENTS: PaymentsConfig = {
-  enabledProviders: ['mock-bank', 'vnpay', 'momo', 'zalopay', 'mocbank'],
+  enabledProviders: ['mock-bank', 'momo', 'zalopay', 'mocbank'],
   gatewayTimeoutMs: 5000,
   attemptTtlMinutes: 15,
   clientReturnUrl: 'http://localhost:3000',
   mobileReturnUrl: 'thproptech://payment-result',
-  vnpay: {
-    tmnCode: 'TESTTMN1',
-    hashSecret: 'vnpay-test-secret',
-    payUrl: 'https://sandbox.vnpayment.vn/paymentv2/vpcpay.html',
-    returnUrl: 'http://localhost:3001/api/v1/bank/vnpay/return',
-    queryEndpoint:
-      'https://sandbox.vnpayment.vn/merchant_webapi/api/transaction',
-  },
   momo: {
     partnerCode: 'MOMOTEST',
     accessKey: 'momo-access-key',
@@ -44,7 +36,6 @@ export const TEST_PAYMENTS: PaymentsConfig = {
 
 /** Every secret in TEST_PAYMENTS, for log-hygiene assertions. */
 export const TEST_SECRETS = [
-  TEST_PAYMENTS.vnpay.hashSecret,
   TEST_PAYMENTS.momo.accessKey,
   TEST_PAYMENTS.momo.secretKey,
   TEST_PAYMENTS.zalopay.key1,
@@ -64,7 +55,6 @@ export function testConfigService(
     'rentalFlow.payments.enabledProviders': payments.enabledProviders,
     'rentalFlow.payments.gatewayTimeoutMs': payments.gatewayTimeoutMs,
     'rentalFlow.payments.attemptTtlMinutes': payments.attemptTtlMinutes,
-    'rentalFlow.payments.vnpay': payments.vnpay,
     'rentalFlow.payments.momo': payments.momo,
     'rentalFlow.payments.zalopay': payments.zalopay,
     'rentalFlow.payments.mocbank': payments.mocbank,

@@ -2,7 +2,7 @@
  * Type definitions for the Naive Bayes recommendation engine.
  *
  * These interfaces mirror the data structures used by the Python
- * `BuildingRecommender` (recommender.py) — ported to TypeScript.
+ * `ApartmentRecommender` (recommender.py) — ported to TypeScript.
  */
 
 export type EngineStrategy = 'hybrid' | 'map' | 'weighted' | 'map-weighted'
@@ -14,8 +14,8 @@ export interface EngineConfig {
   ruleWeight: number
 }
 
-/** A flattened building/apartment record used by the NB model. */
-export interface BuildingRecord {
+/** A flattened apartment record used by the NB model. */
+export interface ApartmentRecord {
   id: string
   name: string
   district: string
@@ -52,8 +52,8 @@ export interface CategoricalStats {
   total: number
 }
 
-/** Per-building trained parameters. */
-export interface BuildingModelParams {
+/** Per-apartment trained parameters. */
+export interface ApartmentModelParams {
   prior: number
   gaussian: {
     age: GaussianStats

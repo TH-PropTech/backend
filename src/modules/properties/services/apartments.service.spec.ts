@@ -6,7 +6,6 @@ import { Apartment } from '../schemas/apartment.schema'
 import { User } from '../../users/schemas/user.schema'
 import type { NotificationsService } from '../../notifications/services/notifications.service'
 import type { ProjectsService } from './projects.service'
-import type { BuildingsService } from './buildings.service'
 import type { SavedSearchesService } from './saved-searches.service'
 
 describe('ApartmentsService current landlord projection', () => {
@@ -48,7 +47,6 @@ describe('ApartmentsService current landlord projection', () => {
       userRepository,
       {} as NotificationsService,
       {} as ProjectsService,
-      {} as BuildingsService,
       {} as SavedSearchesService
     )
 
@@ -160,7 +158,6 @@ describe('ApartmentsService.reserveRentalApplication', () => {
       userRepository,
       {} as NotificationsService,
       {} as ProjectsService,
-      {} as BuildingsService,
       {} as SavedSearchesService
     )
 

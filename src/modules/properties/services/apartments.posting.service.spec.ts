@@ -65,7 +65,6 @@ function createContext(apartment: Apartment | null = buildApartment()): {
   userRepository: { find: jest.Mock }
   notifications: { createNotification: jest.Mock }
   projects: { findOrCreate: jest.Mock }
-  buildings: { findOrCreate: jest.Mock }
   savedSearches: { generateAlertsForApartment: jest.Mock }
 } {
   const repository = {
@@ -89,12 +88,6 @@ function createContext(apartment: Apartment | null = buildApartment()): {
       name: 'Vinhomes Grand Park',
     }),
   }
-  const buildings = {
-    findOrCreate: jest.fn().mockResolvedValue({
-      _id: new ObjectId('507f1f77bcf86cd799439013'),
-      name: 'Block A',
-    }),
-  }
   const savedSearches = {
     generateAlertsForApartment: jest.fn().mockResolvedValue(undefined),
   }
@@ -103,7 +96,6 @@ function createContext(apartment: Apartment | null = buildApartment()): {
     userRepository as never,
     notifications as never,
     projects as never,
-    buildings as never,
     savedSearches as never
   )
   return {
@@ -112,7 +104,6 @@ function createContext(apartment: Apartment | null = buildApartment()): {
     userRepository,
     notifications,
     projects,
-    buildings,
     savedSearches,
   }
 }
@@ -130,26 +121,18 @@ describe('ApartmentsService listing posting', () => {
       expect(repository.save).toHaveBeenCalledTimes(1)
     })
 
-    it('find-or-creates project and building when only names are given', async () => {
-      const { service, projects, buildings } = createContext()
+    it('find-or-creates project when only name are given', async () => {
+      const { service, projects } = createContext()
       const result = await service.create(
         buildCreateDto({
           projectName: 'vinhomes grand park',
-          buildingName: 'block a',
         }),
         'landlord-1'
       )
 
       expect(projects.findOrCreate).toHaveBeenCalledTimes(1)
-      expect(buildings.findOrCreate).toHaveBeenCalledWith(
-        expect.objectContaining({
-          name: 'block a',
-          projectId: '507f1f77bcf86cd799439012',
-        })
-      )
       expect(result.projectId).toBe('507f1f77bcf86cd799439012')
       expect(result.projectName).toBe('Vinhomes Grand Park')
-      expect(result.buildingId).toBe('507f1f77bcf86cd799439013')
     })
 
     it('starts with empty VR/360 media: only staff attach them later', async () => {
@@ -215,19 +198,16 @@ describe('ApartmentsService listing posting', () => {
     })
 
     it('skips find-or-create when ids are already provided', async () => {
-      const { service, projects, buildings } = createContext()
+      const { service, projects } = createContext()
       await service.create(
         buildCreateDto({
           projectId: 'p-1',
           projectName: 'Existing',
-          buildingId: 'b-1',
-          buildingName: 'Existing block',
         }),
         'landlord-1'
       )
 
       expect(projects.findOrCreate).not.toHaveBeenCalled()
-      expect(buildings.findOrCreate).not.toHaveBeenCalled()
     })
 
     it('notifies every staff member of the new listing', async () => {

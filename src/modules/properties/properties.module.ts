@@ -1,7 +1,6 @@
 import { Module } from '@nestjs/common'
 import { TypeOrmModule } from '@nestjs/typeorm'
 import { Apartment } from './schemas/apartment.schema'
-import { Building } from './schemas/building.schema'
 import { Project } from './schemas/project.schema'
 import { ReviewCase } from './schemas/review-case.schema'
 import { SavedSearchRecord } from './schemas/saved-search-record.schema'
@@ -18,7 +17,6 @@ import { MaintenanceTicketsService } from './services/maintenance-tickets.servic
 import { ListingQualityService } from './services/listing-quality.service'
 import { ApartmentMediaUploadService } from './services/apartment-media-upload.service'
 import { ApartmentExpirationService } from './services/apartment-expiration.service'
-import { BuildingsService } from './services/buildings.service'
 import { ProjectsService } from './services/projects.service'
 import { ListingFreshnessService } from './services/listing-freshness.service'
 import { SavedSearchesService } from './services/saved-searches.service'
@@ -28,7 +26,6 @@ import { RecommendationsService } from './recommendations/services/recommendatio
 import { RecommendationConfigService } from './recommendations/services/recommendation-config.service'
 import { NaiveBayesEngine } from './recommendations/engine/naive-bayes.engine'
 import { ApartmentsController } from './controllers/apartments.controller'
-import { BuildingsController } from './controllers/buildings.controller'
 import { ProjectsController } from './controllers/projects.controller'
 import { SavedSearchesController } from './controllers/saved-searches.controller'
 import { PriceBenchmarkController } from './insights/controllers/price-benchmark.controller'
@@ -41,7 +38,6 @@ import { NotificationsModule } from '../notifications/notifications.module'
     TypeOrmModule.forFeature([
       Apartment,
       User,
-      Building,
       Project,
       ReviewCase,
       SavedSearchRecord,
@@ -59,7 +55,6 @@ import { NotificationsModule } from '../notifications/notifications.module'
     DesignRequestsService,
     ApartmentMediaUploadService,
     ApartmentExpirationService,
-    BuildingsService,
     ProjectsService,
     ListingFreshnessService,
     SavedSearchesService,
@@ -73,7 +68,6 @@ import { NotificationsModule } from '../notifications/notifications.module'
     ApartmentsController,
     ApartmentDesignsController,
     DesignRequestsController,
-    BuildingsController,
     ProjectsController,
     SavedSearchesController,
     PriceBenchmarkController,
@@ -85,7 +79,6 @@ import { NotificationsModule } from '../notifications/notifications.module'
     ApartmentsService,
     ApartmentDesignsService,
     ApartmentExpirationService,
-    BuildingsService,
     ProjectsService,
     ListingFreshnessService,
     SavedSearchesService,

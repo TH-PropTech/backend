@@ -29,7 +29,7 @@ export class MocbankPayoutError extends Error {
 }
 
 /**
- * Simulated disbursement: after a MoMo/VNPay/ZaloPay payment the platform moves
+ * Simulated disbursement: after a MoMo/ZaloPay payment the platform moves
  * the landlord's share from its own Ví Mộc wallet to the landlord's wallet
  * (`POST /api/payouts`). Sandbox only; real money needs a licensed disbursement
  * provider.

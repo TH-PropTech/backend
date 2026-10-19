@@ -19,11 +19,9 @@ describe('PaymentProviderRegistry', () => {
     return new PaymentProviderRegistry(
       testConfigService({ ...TEST_PAYMENTS, enabledProviders }) as never,
       adapter('mock-bank') as never,
-      adapter('vnpay') as never,
       adapter('momo') as never,
       adapter('zalopay') as never,
       adapter('mocbank') as never,
-      verifier('vnpay') as never,
       verifier('momo') as never,
       verifier('zalopay') as never,
       verifier('mocbank') as never
@@ -41,17 +39,17 @@ describe('PaymentProviderRegistry', () => {
   })
 
   it('returns the requested enabled adapter and defaults to the first enabled one', () => {
-    const registry = createRegistry(['vnpay', 'momo'])
+    const registry = createRegistry(['mocbank', 'momo'])
 
     expect(registry.get('momo').name).toBe('momo')
-    expect(registry.get().name).toBe('vnpay')
-    expect(registry.defaultProvider()).toBe('vnpay')
+    expect(registry.get().name).toBe('mocbank')
+    expect(registry.defaultProvider()).toBe('mocbank')
   })
 
   it.each(['zalopay', 'techcombank', 'sepay'] as const)(
     'fails closed for %s when it is not allow-listed',
     provider => {
-      const registry = createRegistry(['mock-bank', 'vnpay'])
+      const registry = createRegistry(['mock-bank', 'momo'])
 
       expect(() => registry.get(provider)).toThrow(
         'PAYMENT_PROVIDER_NOT_ENABLED'
@@ -67,12 +65,11 @@ describe('PaymentProviderRegistry', () => {
   })
 
   it('lists enabled providers with labels and simulation flags only', () => {
-    const registry = createRegistry(['mock-bank', 'vnpay', 'momo', 'zalopay'])
+    const registry = createRegistry(['mock-bank', 'momo', 'zalopay'])
     const listed = registry.listProviders()
 
     expect(listed).toEqual([
       { provider: 'mock-bank', label: 'Mock Bank (sandbox)', simulation: true },
-      { provider: 'vnpay', label: 'VNPAY', simulation: false },
       {
         provider: 'momo',
         label: 'MoMo',
@@ -83,29 +80,37 @@ describe('PaymentProviderRegistry', () => {
           expect.objectContaining({ method: 'card', maxAmount: 10_000_000 }),
         ],
       },
-      { provider: 'zalopay', label: 'ZaloPay', simulation: false },
+      {
+        provider: 'zalopay',
+        label: 'ZaloPay',
+        simulation: false,
+        methods: [
+          expect.objectContaining({ method: 'all' }),
+          expect.objectContaining({ method: 'card' }),
+        ],
+      },
     ])
-    expect(JSON.stringify(listed)).not.toContain(TEST_PAYMENTS.vnpay.tmnCode)
+    expect(JSON.stringify(listed)).not.toContain(TEST_PAYMENTS.momo.secretKey)
   })
 
   it("lists the same enabled providers for purpose 'deposit' (no escrow forcing)", () => {
-    const registry = createRegistry(['mock-bank', 'vnpay', 'momo', 'mocbank'])
+    const registry = createRegistry(['mock-bank', 'momo', 'mocbank'])
 
     expect(registry.listProviders('deposit')).toEqual(registry.listProviders())
     expect(
       registry.listProviders('deposit').map(item => item.provider)
-    ).toEqual(['mock-bank', 'vnpay', 'momo', 'mocbank'])
+    ).toEqual(['mock-bank', 'momo', 'mocbank'])
   })
 
   it("lists only Ví Mộc for purpose 'invoice'", () => {
-    const registry = createRegistry(['mock-bank', 'vnpay', 'mocbank'])
+    const registry = createRegistry(['mock-bank', 'momo', 'mocbank'])
     expect(
       registry.listProviders('invoice').map(item => item.provider)
     ).toEqual(['mocbank'])
   })
 
   it("lists nothing for purpose 'invoice' when Ví Mộc is not enabled", () => {
-    const registry = createRegistry(['mock-bank', 'vnpay'])
+    const registry = createRegistry(['mock-bank', 'momo'])
     expect(registry.listProviders('invoice')).toEqual([])
   })
 
@@ -122,7 +127,6 @@ describe('PaymentProviderRegistry', () => {
           { brand: 'mocbank', label: 'Ví Mộc' },
           { brand: 'momo', label: 'Momo (mô phỏng)' },
           { brand: 'zalopay', label: 'ZaloPay (mô phỏng)' },
-          { brand: 'vnpay', label: 'VNPay (mô phỏng)' },
         ],
       },
       { provider: 'mock-bank', label: 'Mock Bank (sandbox)', simulation: true },

@@ -35,7 +35,6 @@ import type { KycInfo } from '../modules/users/schemas/user.schema'
 import { ObjectId } from 'mongodb'
 import { Contract } from '../modules/contracts/schemas/contract.schema'
 import { Project } from '../modules/properties/schemas/project.schema'
-import { Building } from '../modules/properties/schemas/building.schema'
 import type { RecommendationHistory } from '../modules/properties/recommendations/schemas/recommendation-history.schema'
 import { ActivityLog } from '../modules/activity-log/schemas/activity-log.schema'
 import { KindScopedActivityLogRepository } from '../modules/activity-log/utils/kind-scoped-activity-log.repository'
@@ -59,9 +58,6 @@ async function bootstrap(): Promise<void> {
     const projectRepository = app.get<Repository<Project>>(
       getRepositoryToken(Project)
     )
-    const buildingRepository = app.get<Repository<Building>>(
-      getRepositoryToken(Building)
-    )
     const historyRepository = new KindScopedActivityLogRepository(
       app.get<Repository<ActivityLog>>(getRepositoryToken(ActivityLog)),
       'recommendation',
@@ -70,7 +66,6 @@ async function bootstrap(): Promise<void> {
 
     // 1. Dọn dẹp dữ liệu mẫu cũ (Tùy chọn)
     logger.log('Đang dọn dẹp các dữ liệu mẫu cũ...')
-    await buildingRepository.delete({})
     await userRepository.delete({
       email: {
         $in: [
@@ -286,69 +281,6 @@ async function bootstrap(): Promise<void> {
     const savedProject2 = await projectRepository.save(projectMasteri)
     logger.log(`Tạo dự án mẫu thành công: ${savedProject2.name}`)
 
-    // 4.5. Tạo các tòa nhà (Buildings) mẫu
-    logger.log('Đang tạo các tòa nhà mẫu...')
-
-    // Tòa nhà 1 thuộc Vinhomes Central Park
-    const buildingLandmark = buildingRepository.create({
-      name: 'Tòa Landmark 81',
-      projectId: savedProject1._id.toHexString(),
-      projectName: savedProject1.name,
-      description:
-        'Tòa nhà cao nhất Việt Nam, biểu tượng của sự thịnh vượng với đầy đủ tiện ích và trung tâm thương mại cao cấp.',
-      floorsCount: 81,
-      location: '208 Nguyễn Hữu Cảnh, Phường 22, Bình Thạnh, TP.HCM',
-      city: 'Hồ Chí Minh',
-      district: 'Bình Thạnh',
-      amenities: [
-        'Bể bơi vô cực',
-        'Phòng Gym',
-        'TTTM Vincom Landmark 81',
-        'Đài quan sát',
-        'Bảo vệ 24/7',
-      ],
-      images: [
-        'https://res.cloudinary.com/dehsnaot1/image/upload/v1781534819/toa1_fp0an5.jpg',
-        'https://res.cloudinary.com/dehsnaot1/image/upload/v1781535081/toa1_matsau_kh18qu.png',
-      ],
-      images360: [
-        'https://res.cloudinary.com/dehsnaot1/image/upload/v1781534880/toa1360do_jq98uv.png',
-        'https://res.cloudinary.com/dehsnaot1/image/upload/v1781535400/toa1360_matsau_f1jgyg.png',
-      ],
-    })
-    const savedBuildingLandmark =
-      await buildingRepository.save(buildingLandmark)
-
-    // Tòa nhà 2 thuộc Masteri Thảo Điền
-    const buildingMasteriT1 = buildingRepository.create({
-      name: 'Tháp T1',
-      projectId: savedProject2._id.toHexString(),
-      projectName: savedProject2.name,
-      description:
-        'Tháp căn hộ dịch vụ và chung cư cao cấp thuộc dự án Masteri Thảo Điền.',
-      floorsCount: 30,
-      location: '159 Xa lộ Hà Nội, Thảo Điền, Quận 2, TP.HCM',
-      city: 'Hồ Chí Minh',
-      district: 'Quận 2',
-      amenities: [
-        'Hồ bơi cảnh quan',
-        'Khu BBQ ngoài trời',
-        'TTTM Vincom Mega Mall',
-        'Phòng Gym hiện đại',
-      ],
-      images: [
-        'https://res.cloudinary.com/dehsnaot1/image/upload/v1781575156/toa2_zgy1zk.png',
-        'https://res.cloudinary.com/dehsnaot1/image/upload/v1781575156/toa2_matsau_ykiog8.png',
-      ],
-      images360: [
-        'https://res.cloudinary.com/dehsnaot1/image/upload/v1781575206/toa2_360_pku65l.png',
-        'https://res.cloudinary.com/dehsnaot1/image/upload/v1781575195/toa2_matsau360_wc1nsa.png',
-      ],
-    })
-    const savedBuildingMasteriT1 =
-      await buildingRepository.save(buildingMasteriT1)
-    logger.log('Tạo các tòa nhà mẫu thành công!')
-
     // 5. Tạo các căn hộ (Apartments) mẫu
     logger.log('Đang tạo các căn hộ mẫu...')
     await apartmentRepository.delete({})
@@ -404,8 +336,6 @@ async function bootstrap(): Promise<void> {
       landlordId: savedLandlord._id.toHexString(),
       projectId: savedProject1._id.toHexString(),
       projectName: savedProject1.name,
-      buildingId: savedBuildingLandmark._id.toHexString(),
-      buildingName: savedBuildingLandmark.name,
     })
     const savedApartment1 = await apartmentRepository.save(apartment1)
     logger.log(`Tạo căn hộ 1 thành công: ${savedApartment1.title}`)
@@ -461,8 +391,6 @@ async function bootstrap(): Promise<void> {
       landlordId: savedIndividualLandlord._id.toHexString(),
       projectId: null,
       projectName: null,
-      buildingId: null,
-      buildingName: null,
     })
     const savedApartment2 = await apartmentRepository.save(apartment2)
     logger.log(`Tạo căn hộ 2 thành công: ${savedApartment2.title}`)
@@ -518,8 +446,6 @@ async function bootstrap(): Promise<void> {
       landlordId: savedIndividualLandlord._id.toHexString(),
       projectId: null,
       projectName: null,
-      buildingId: null,
-      buildingName: null,
     })
     const savedApartment3 = await apartmentRepository.save(apartment3)
     logger.log(`Tạo căn hộ 3 thành công: ${savedApartment3.title}`)
@@ -568,8 +494,6 @@ async function bootstrap(): Promise<void> {
       landlordId: savedLandlord._id.toHexString(),
       projectId: savedProject2._id.toHexString(),
       projectName: savedProject2.name,
-      buildingId: savedBuildingMasteriT1._id.toHexString(),
-      buildingName: savedBuildingMasteriT1.name,
     })
     const savedApartment4 = await apartmentRepository.save(apartment4)
     logger.log(`Tạo căn hộ 4 thành công: ${savedApartment4.title}`)
@@ -618,8 +542,6 @@ async function bootstrap(): Promise<void> {
       landlordId: savedIndividualLandlord._id.toHexString(),
       projectId: null,
       projectName: null,
-      buildingId: null,
-      buildingName: null,
     })
     const savedApartment5 = await apartmentRepository.save(apartment5)
     logger.log(`Tạo căn hộ 5 thành công: ${savedApartment5.title}`)
@@ -675,8 +597,6 @@ async function bootstrap(): Promise<void> {
       landlordId: savedLandlord._id.toHexString(),
       projectId: savedProject1._id.toHexString(),
       projectName: savedProject1.name,
-      buildingId: savedBuildingLandmark._id.toHexString(),
-      buildingName: savedBuildingLandmark.name,
     })
     const savedApartment6 = await apartmentRepository.save(apartment6)
     logger.log(`Tạo căn hộ 6 thành công: ${savedApartment6.title}`)
@@ -725,8 +645,6 @@ async function bootstrap(): Promise<void> {
       landlordId: savedLandlord._id.toHexString(),
       projectId: savedProject2._id.toHexString(),
       projectName: savedProject2.name,
-      buildingId: savedBuildingMasteriT1._id.toHexString(),
-      buildingName: savedBuildingMasteriT1.name,
     })
     const savedApartment7 = await apartmentRepository.save(apartment7)
     logger.log(`Tạo căn hộ 7 thành công: ${savedApartment7.title}`)
@@ -782,8 +700,6 @@ async function bootstrap(): Promise<void> {
       landlordId: savedIndividualLandlord._id.toHexString(),
       projectId: null,
       projectName: null,
-      buildingId: null,
-      buildingName: null,
     })
     const savedApartment8 = await apartmentRepository.save(apartment8)
     logger.log(`Tạo căn hộ 8 thành công: ${savedApartment8.title}`)
@@ -833,8 +749,6 @@ async function bootstrap(): Promise<void> {
       landlordId: savedIndividualLandlord._id.toHexString(),
       projectId: null,
       projectName: null,
-      buildingId: null,
-      buildingName: null,
     })
     const savedApartment9 = await apartmentRepository.save(apartment9)
     logger.log(`Tạo căn hộ 9 thành công: ${savedApartment9.title}`)
@@ -889,7 +803,7 @@ async function bootstrap(): Promise<void> {
         '..',
         '..',
         'python',
-        'building-recommendation',
+        'apartment-recommendation',
         'dataset',
         'rental_history.csv'
       )

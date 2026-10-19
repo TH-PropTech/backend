@@ -38,7 +38,6 @@ export type PayoutSource = {
 
 /** Cổng sandbox thật: tiền vào tài khoản merchant của sàn, đối soát bằng API của cổng. */
 export const EXTERNAL_GATEWAY_PROVIDERS: readonly PaymentProviderName[] = [
-  'vnpay',
   'momo',
   'zalopay',
 ]

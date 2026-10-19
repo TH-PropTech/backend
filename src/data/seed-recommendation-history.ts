@@ -42,7 +42,7 @@ async function seedRecommendationHistory(): Promise<void> {
       '..',
       '..',
       'python',
-      'building-recommendation',
+      'apartment-recommendation',
       'dataset',
       'rental_history.csv'
     )

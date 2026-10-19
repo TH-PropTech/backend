@@ -14,7 +14,7 @@ async function errorsFor(body: Record<string, unknown>): Promise<string[]> {
 describe('PaymentInitChoiceDto brand', () => {
   it('accepts a missing brand and every supported brand', async () => {
     await expect(errorsFor({})).resolves.toEqual([])
-    for (const brand of ['mocbank', 'momo', 'zalopay', 'vnpay']) {
+    for (const brand of ['mocbank', 'momo', 'zalopay']) {
       await expect(errorsFor({ brand })).resolves.toEqual([])
     }
   })

@@ -19,6 +19,8 @@ import type { PaymentClientChannel } from '../../payments/schemas/payment-attemp
 import {
   MOMO_PAYMENT_METHODS,
   type MomoPaymentMethod,
+  ZALOPAY_PAYMENT_METHODS,
+  type ZalopayPaymentMethod,
 } from '../providers/payment-provider.port'
 
 /** Gateway choice shared by every init endpoint; server enforces the allow-list. */
@@ -53,6 +55,15 @@ export class PaymentInitChoiceDto {
   @IsOptional()
   @IsIn(MOMO_PAYMENT_METHODS)
   momoMethod?: MomoPaymentMethod
+
+  @ApiPropertyOptional({
+    enum: ZALOPAY_PAYMENT_METHODS,
+    default: 'all',
+    description: 'ZaloPay only: all methods on the gateway page, or card entry',
+  })
+  @IsOptional()
+  @IsIn(ZALOPAY_PAYMENT_METHODS)
+  zalopayMethod?: ZalopayPaymentMethod
 }
 
 export class InitDepositPaymentDto extends PaymentInitChoiceDto {

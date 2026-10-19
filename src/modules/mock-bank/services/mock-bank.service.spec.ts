@@ -1453,7 +1453,7 @@ describe('MockBankService', () => {
         status: 'expired',
       })
       context.payment.status = 'paid'
-      Object.assign(context.payment, { txRef: 'VNPAY-OTHER' })
+      Object.assign(context.payment, { txRef: 'ZP-OTHER' })
 
       await expect(
         context.service.settleVerifiedAttempt(
@@ -1498,28 +1498,28 @@ describe('MockBankService', () => {
 
     it('expires the live attempt and creates a new one when the provider changes', async () => {
       const context = createContext()
-      const vnpayAdapter = {
-        name: 'vnpay' as const,
-        newTxRef: jest.fn().mockReturnValue('VNPAY-new'),
+      const zalopayAdapter = {
+        name: 'zalopay' as const,
+        newTxRef: jest.fn().mockReturnValue('ZP-new'),
         createPaymentIntent: jest.fn().mockResolvedValue({
-          provider: 'vnpay',
-          txRef: 'VNPAY-new',
-          redirectUrl: 'https://sandbox.vnpayment.vn/pay?x=1',
+          provider: 'zalopay',
+          txRef: 'ZP-new',
+          redirectUrl: 'https://sb-openapi.zalopay.vn/pay?x=1',
           expiresAt: new Date(Date.now() + 60_000),
         }),
       }
-      context.providerRegistry.get.mockReturnValue(vnpayAdapter)
+      context.providerRegistry.get.mockReturnValue(zalopayAdapter)
 
       const result = await context.service.initRentPayment(
         paymentId,
         tenantId,
-        { provider: 'vnpay', clientChannel: 'mobile', clientIp: '10.0.0.1' }
+        { provider: 'zalopay', clientChannel: 'mobile', clientIp: '10.0.0.1' }
       )
 
       expect(result).toMatchObject({
-        provider: 'vnpay',
-        txRef: 'VNPAY-new',
-        deepLink: 'https://sandbox.vnpayment.vn/pay?x=1',
+        provider: 'zalopay',
+        txRef: 'ZP-new',
+        deepLink: 'https://sb-openapi.zalopay.vn/pay?x=1',
       })
       expect(context.attemptRepository.save).toHaveBeenNthCalledWith(
         1,
@@ -1528,15 +1528,15 @@ describe('MockBankService', () => {
       expect(context.attemptRepository.save).toHaveBeenNthCalledWith(
         2,
         expect.objectContaining({
-          provider: 'vnpay',
-          txRef: 'VNPAY-new',
+          provider: 'zalopay',
+          txRef: 'ZP-new',
           clientChannel: 'mobile',
           status: 'pending',
         })
       )
-      expect(vnpayAdapter.createPaymentIntent).toHaveBeenCalledWith(
+      expect(zalopayAdapter.createPaymentIntent).toHaveBeenCalledWith(
         expect.objectContaining({
-          txRef: 'VNPAY-new',
+          txRef: 'ZP-new',
           clientIp: '10.0.0.1',
           clientChannel: 'mobile',
         })
@@ -1665,7 +1665,7 @@ describe('MockBankService', () => {
   describe('landlord direct receipt (Ví Mộc)', () => {
     const LANDLORD_ACCOUNT = '810000000002'
 
-    function gatewayAdapter(name: 'mocbank' | 'momo' | 'vnpay' | 'zalopay'): {
+    function gatewayAdapter(name: 'mocbank' | 'momo' | 'zalopay'): {
       name: typeof name
       newTxRef: jest.Mock
       createPaymentIntent: jest.Mock
@@ -1683,7 +1683,7 @@ describe('MockBankService', () => {
     }
 
     function prepare(
-      name: 'mocbank' | 'momo' | 'vnpay' | 'zalopay',
+      name: 'mocbank' | 'momo' | 'zalopay',
       account: string | null = LANDLORD_ACCOUNT
     ): {
       context: ReturnType<typeof createContext>
@@ -1757,7 +1757,7 @@ describe('MockBankService', () => {
       await expect(
         context.service.initRentPayment(paymentId, tenantId, {
           provider: 'mocbank',
-          brand: 'vnpay',
+          brand: 'zalopay',
         })
       ).rejects.toThrow('LANDLORD_WALLET_NOT_LINKED')
       expect(adapter.createPaymentIntent).not.toHaveBeenCalled()
@@ -1817,7 +1817,7 @@ describe('MockBankService', () => {
         payeeRole: 'platform',
       })
 
-      for (const provider of ['momo', 'vnpay'] as const) {
+      for (const provider of ['momo', 'zalopay'] as const) {
         await expect(
           context.service.initInvoicePayment(paymentId, 'landlord-1', {
             provider,
@@ -1894,7 +1894,7 @@ describe('MockBankService', () => {
       )
     })
 
-    it.each(['vnpay', 'momo', 'zalopay'] as const)(
+    it.each(['momo', 'zalopay'] as const)(
       'accepts %s for a deposit (no DEPOSIT_PROVIDER_NOT_SUPPORTED)',
       async name => {
         const { context, adapter } = prepare(name)

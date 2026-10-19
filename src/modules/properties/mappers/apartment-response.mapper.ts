@@ -54,8 +54,6 @@ export interface WebApartmentResponse {
   ward: string
   street: string
   projectName: string | null
-  buildingId: string | null
-  buildingName: string | null
   bedrooms: number
   bathrooms: number
   direction: string
@@ -97,8 +95,6 @@ export interface MobileApartmentResponse {
   title: string
   projectName: string | null
   projectId: string | null
-  buildingId: string | null
-  buildingName: string | null
   location: string
   city: string
   district: string
@@ -180,8 +176,6 @@ export interface LandlordApartmentResponse {
   expiresAt: Date | null
   projectName: string
   projectId: string | null
-  buildingName: string
-  buildingId: string | null
   pricingMode: 'packages' | 'legacy'
   pricingRevision: number
   rentalPackages: RentalPackageResponse[]
@@ -247,8 +241,6 @@ export class ApartmentResponseMapper {
       expiresAt: apartment.expiresAt ?? null,
       projectName: apartment.projectName ?? '',
       projectId: apartment.projectId ?? null,
-      buildingName: apartment.buildingName ?? '',
-      buildingId: apartment.buildingId ?? null,
       pricingMode: apartment.pricingMode ?? 'legacy',
       pricingRevision: apartment.pricingRevision ?? 0,
       rentalPackages: ApartmentResponseMapper.mapRentalPackages(apartment),
@@ -381,8 +373,6 @@ export class ApartmentResponseMapper {
       ward: apartment.ward,
       street: apartment.street,
       projectName: apartment.projectName || null,
-      buildingId: apartment.buildingId || null,
-      buildingName: apartment.buildingName || null,
       bedrooms: apartment.bedrooms,
       bathrooms: apartment.bathrooms,
       direction: apartment.direction,
@@ -437,8 +427,6 @@ export class ApartmentResponseMapper {
       title: apartment.title,
       projectName: apartment.projectName || null,
       projectId: apartment.projectId || null,
-      buildingId: apartment.buildingId || null,
-      buildingName: apartment.buildingName || null,
       location: apartment.location,
       city: apartment.city,
       district: apartment.district,

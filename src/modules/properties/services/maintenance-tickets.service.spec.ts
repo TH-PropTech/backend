@@ -132,8 +132,6 @@ describe('Apartment.maintenanceTickets', () => {
       _id: new ObjectId(APARTMENT_ID),
       title: 'A',
       category: 'apartment',
-      buildingId: null,
-      buildingName: null,
       projectId: null,
       projectName: null,
       description: '',

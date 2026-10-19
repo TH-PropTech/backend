@@ -5,7 +5,6 @@ import type { Apartment } from '../schemas/apartment.schema'
 import type { User } from '../../users/schemas/user.schema'
 import type { NotificationsService } from '../../notifications/services/notifications.service'
 import type { ProjectsService } from './projects.service'
-import type { BuildingsService } from './buildings.service'
 import type { SavedSearchesService } from './saved-searches.service'
 
 function createApartment(overrides: Partial<Apartment> = {}): Apartment {
@@ -34,7 +33,6 @@ describe('ApartmentsService saved-search integration', () => {
     createNotification: jest.fn().mockResolvedValue(undefined),
   }
   const projectsService = {}
-  const buildingsService = {}
   const savedSearchesService = {
     generateAlertsForApartment: jest.fn().mockResolvedValue(undefined),
   }
@@ -48,7 +46,6 @@ describe('ApartmentsService saved-search integration', () => {
       userRepository as unknown as Repository<User>,
       notificationsService as unknown as NotificationsService,
       projectsService as unknown as ProjectsService,
-      buildingsService as unknown as BuildingsService,
       savedSearchesService as unknown as SavedSearchesService
     )
   })

@@ -9,7 +9,7 @@ import {
 import type { WalletBrand } from '../utils/supported-banks'
 import type { PaymentProviderName } from '../../mock-bank/providers/payment-provider.port'
 
-/** Tài khoản ví mô phỏng phụ (Momo/ZaloPay/VNPay) gắn trên ví chính. */
+/** Tài khoản ví mô phỏng phụ (Momo/ZaloPay) gắn trên ví chính. */
 export type WalletExtraAccount = {
   brand: Exclude<WalletBrand, 'mocbank'>
   mocbankAccountNumber: string

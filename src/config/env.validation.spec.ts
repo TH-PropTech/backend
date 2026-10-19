@@ -56,8 +56,6 @@ describe('envValidationSchema eKYC configuration', () => {
   })
 
   const gatewayEnvironment = {
-    VNPAY_TMN_CODE: 'TESTTMN1',
-    VNPAY_HASH_SECRET: 'vnpay-test-secret',
     MOMO_PARTNER_CODE: 'MOMOTEST',
     MOMO_ACCESS_KEY: 'momo-access',
     MOMO_SECRET_KEY: 'momo-secret',
@@ -77,7 +75,6 @@ describe('envValidationSchema eKYC configuration', () => {
   })
 
   it.each([
-    ['vnpay', 'VNPAY_HASH_SECRET'],
     ['momo', 'MOMO_SECRET_KEY'],
     ['zalopay', 'ZALOPAY_KEY2'],
     ['mocbank', 'MOCBANK_MERCHANT_ID'],
@@ -103,9 +100,9 @@ describe('envValidationSchema eKYC configuration', () => {
     const result = envValidationSchema.validate({
       ...baseEnvironment,
       EKYC_SERVICE_URL: 'https://ekyc.example.com',
-      PAYMENT_PROVIDER: 'vnpay',
+      PAYMENT_PROVIDER: 'momo',
     })
-    expect(result.error?.message).toContain('VNPAY_TMN_CODE')
+    expect(result.error?.message).toContain('MOMO_PARTNER_CODE')
   })
 
   it('accepts all three gateways when fully configured', () => {
@@ -113,7 +110,7 @@ describe('envValidationSchema eKYC configuration', () => {
       ...baseEnvironment,
       ...gatewayEnvironment,
       EKYC_SERVICE_URL: 'https://ekyc.example.com',
-      PAYMENT_PROVIDERS_ENABLED: 'mock-bank, vnpay,momo,zalopay,mocbank',
+      PAYMENT_PROVIDERS_ENABLED: 'mock-bank, momo,zalopay,mocbank',
     })
     expect(result.error).toBeUndefined()
   })
@@ -169,7 +166,7 @@ describe('envValidationSchema eKYC configuration', () => {
     const result = envValidationSchema.validate({
       ...baseEnvironment,
       EKYC_SERVICE_URL: 'https://ekyc.example.com',
-      PAYMENT_PROVIDERS_ENABLED: 'vnpay,paypal',
+      PAYMENT_PROVIDERS_ENABLED: 'momo,paypal',
     })
     expect(result.error?.message).toContain('PAYMENT_PROVIDERS_ENABLED')
   })
