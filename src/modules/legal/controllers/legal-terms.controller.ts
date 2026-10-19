@@ -17,9 +17,11 @@ import type { UserPayload } from '../../auth/interfaces/auth.interface'
 import { LegalTermsService } from '../services/legal-terms.service'
 import { SaveDraftDto } from '../dto/save-draft.dto'
 import { PublishTermsDto } from '../dto/publish-terms.dto'
+import { RequestChangesDto, ReviewTransitionDto } from '../dto/review-terms.dto'
 import {
   PublicLegalTermsResponse,
   AdminLegalTermsStateResponse,
+  TermsReviewResultResponse,
 } from '../dto/legal-terms-response.dto'
 import { Public } from '../../../common/decorators/public.decorator'
 
@@ -73,13 +75,63 @@ export class LegalTermsController {
   async saveDraft(
     @Body() dto: SaveDraftDto,
     @CurrentUser() user: UserPayload
-  ): Promise<{ success: boolean; draftRevision: number }> {
+  ): Promise<{
+    success: boolean
+    draftRevision: number
+    reviewStatus: 'editing'
+  }> {
     const actorId = user._id ?? 'admin'
     const updated = await this.service.saveDraft(dto, actorId)
     return {
       success: true,
       draftRevision: updated.draftRevision,
+      reviewStatus: 'editing',
     }
+  }
+
+  /**
+   * Admin: Gửi bản nháp đi duyệt (editing -> in_review)
+   */
+  @Post('admin/rental/submit-review')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  @ApiOperation({ summary: 'Admin gửi bản nháp điều khoản đi duyệt' })
+  async submitReview(
+    @Body() dto: ReviewTransitionDto,
+    @CurrentUser() user: UserPayload
+  ): Promise<TermsReviewResultResponse> {
+    return this.service.submitForReview(dto, user._id ?? 'admin')
+  }
+
+  /**
+   * Admin: Duyệt bản nháp (in_review -> approved)
+   */
+  @Post('admin/rental/approve')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  @ApiOperation({ summary: 'Admin duyệt bản nháp điều khoản' })
+  async approveDraft(
+    @Body() dto: ReviewTransitionDto,
+    @CurrentUser() user: UserPayload
+  ): Promise<TermsReviewResultResponse> {
+    return this.service.approveDraft(dto, user._id ?? 'admin')
+  }
+
+  /**
+   * Admin: Yêu cầu sửa lại bản nháp (in_review -> editing) kèm ghi chú
+   */
+  @Post('admin/rental/request-changes')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  @ApiOperation({ summary: 'Admin yêu cầu sửa lại bản nháp điều khoản' })
+  async requestChanges(
+    @Body() dto: RequestChangesDto,
+    @CurrentUser() user: UserPayload
+  ): Promise<TermsReviewResultResponse> {
+    return this.service.requestChanges(dto, user._id ?? 'admin')
   }
 
   /**

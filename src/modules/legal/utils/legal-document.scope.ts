@@ -1,4 +1,4 @@
-import type { FindOptionsWhere, Repository } from 'typeorm'
+import type { FindOptionsWhere, MongoRepository, Repository } from 'typeorm'
 import type { ObjectId } from 'mongodb'
 import type { LegalDocument } from '../schemas/legal-document.schema'
 
@@ -72,6 +72,20 @@ export class LegalDocumentScope<T extends LegalDocument> {
     }
     entity.kind = this.kind
     return this.repository.save(entity)
+  }
+
+  /**
+   * Cập nhật có điều kiện nguyên tử (`$set`/`$unset`) trong phạm vi `kind`.
+   * Trả số document khớp `where` (0 = điều kiện không còn đúng).
+   */
+  async updateAtomic(
+    where: Where,
+    update: Record<string, unknown>
+  ): Promise<number> {
+    const result = await (
+      this.repository as unknown as MongoRepository<LegalDocument>
+    ).updateOne(this.scoped(where), update)
+    return (result as unknown as { matchedCount: number }).matchedCount
   }
 
   update(id: ObjectId, patch: Where): Promise<unknown> {

@@ -105,6 +105,18 @@ export class LegalSourcesService implements OnApplicationBootstrap {
     return (await this.sourceRepository.count({ where: { key } })) > 0 // facade LegalDocumentScope đã gọi countBy đúng
   }
 
+  /** Trong các `keys` đưa vào, trả về những key thật sự có trong Nguồn pháp lý. */
+  async findExistingKeys(keys: readonly string[]): Promise<string[]> {
+    const unique = [...new Set(keys)]
+    if (!unique.length) return []
+    const found = await this.sourceRepository.find({
+      where: { key: { $in: unique } },
+    })
+    return found
+      .map(source => source.key)
+      .filter((key): key is string => Boolean(key))
+  }
+
   async create(
     dto: CreateLegalSourceDto,
     actorId: string

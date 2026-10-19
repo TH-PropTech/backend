@@ -117,6 +117,10 @@ export const configuration = (): {
     apiKey: string
     apiSecret: string
   }
+  legalTerms: {
+    /** Cho phép người sửa bản nháp tự duyệt (demo một admin). Production: false. */
+    allowSelfApproval: boolean
+  }
   rentalFlow: {
     enabled: boolean
     mockBankBaseUrl: string
@@ -223,6 +227,9 @@ export const configuration = (): {
     cloudName: process.env.CLOUDINARY_CLOUD_NAME ?? '',
     apiKey: process.env.CLOUDINARY_API_KEY ?? '',
     apiSecret: process.env.CLOUDINARY_API_SECRET ?? '',
+  },
+  legalTerms: {
+    allowSelfApproval: process.env.LEGAL_TERMS_ALLOW_SELF_APPROVAL === 'true',
   },
   rentalFlow: {
     enabled: process.env.RENTAL_FLOW_V4_ENABLED === 'true',

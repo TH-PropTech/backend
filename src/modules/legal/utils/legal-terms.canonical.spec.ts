@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { computeCanonicalTermsHash } from './legal-terms.canonical'
 
 describe('computeCanonicalTermsHash', () => {
@@ -73,5 +74,53 @@ describe('computeCanonicalTermsHash', () => {
     const hash1 = computeCanonicalTermsHash(baseInput)
     const hash2 = computeCanonicalTermsHash(modifiedInput)
     expect(hash1).not.toBe(hash2)
+  })
+
+  describe('sourceKeys', () => {
+    // Payload gốc trước khi có sourceKeys: hash cũ phải giữ nguyên byte.
+    const legacyHash = (): string =>
+      createHash('sha256')
+        .update(
+          JSON.stringify({
+            key: baseInput.key,
+            version: baseInput.version,
+            title: baseInput.title,
+            summary: baseInput.summary,
+            sections: [...baseInput.sections]
+              .sort((a, b) => a.order - b.order)
+              .map(({ id, heading, body, order }) => ({
+                id,
+                heading,
+                body,
+                order,
+              })),
+          })
+        )
+        .digest('hex')
+
+    it('keeps the hash of documents without sourceKeys byte-identical', () => {
+      expect(computeCanonicalTermsHash(baseInput)).toBe(legacyHash())
+    })
+
+    it('ignores absent or empty sourceKeys', () => {
+      const withEmpty = {
+        ...baseInput,
+        sections: baseInput.sections.map(s => ({ ...s, sourceKeys: [] })),
+      }
+      expect(computeCanonicalTermsHash(withEmpty)).toBe(legacyHash())
+    })
+
+    it('changes the hash when sourceKeys are present, independent of their order', () => {
+      const withKeys = (keys: string[]): typeof baseInput => ({
+        ...baseInput,
+        sections: baseInput.sections.map((s, i) =>
+          i === 0 ? { ...s, sourceKeys: keys } : s
+        ),
+      })
+      const a = computeCanonicalTermsHash(withKeys(['b-key', 'a-key']))
+      expect(a).not.toBe(legacyHash())
+      expect(a).toBe(computeCanonicalTermsHash(withKeys(['a-key', 'b-key'])))
+      expect(a).not.toBe(computeCanonicalTermsHash(withKeys(['a-key'])))
+    })
   })
 })

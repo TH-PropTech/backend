@@ -202,6 +202,7 @@ export const envValidationSchema = Joi.object({
   CLOUDINARY_CLOUD_NAME: Joi.string().allow('').optional(),
   CLOUDINARY_API_KEY: Joi.string().allow('').optional(),
   CLOUDINARY_API_SECRET: Joi.string().allow('').optional(),
+  LEGAL_TERMS_ALLOW_SELF_APPROVAL: Joi.boolean().default(false),
   RENTAL_FLOW_V4_ENABLED: Joi.boolean().default(false),
   PAYMENT_PROVIDER: Joi.string()
     .valid(

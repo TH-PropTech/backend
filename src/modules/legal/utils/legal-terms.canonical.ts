@@ -17,6 +17,8 @@ export function computeCanonicalTermsHash(input: CanonicalTermsInput): string {
       heading: s.heading.trim(),
       body: s.body.trim(),
       order: s.order,
+      // Chỉ khi có: hash của văn bản không có sourceKeys giữ nguyên byte.
+      ...(s.sourceKeys?.length ? { sourceKeys: [...s.sourceKeys].sort() } : {}),
     }))
 
   const canonicalPayload = JSON.stringify({

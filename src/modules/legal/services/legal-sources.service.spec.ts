@@ -92,6 +92,22 @@ describe('LegalSourcesService', () => {
     )
   })
 
+  describe('findExistingKeys', () => {
+    it('returns only the keys that exist among kind=source documents', async () => {
+      store.seed([sourceRow({ key: 'a' }), sourceRow({ key: 'b' })])
+
+      const result = await service.findExistingKeys(['a', 'c', 'a'])
+
+      expect(result).toEqual(['a'])
+    })
+
+    it('returns an empty array without querying when given no keys', async () => {
+      const result = await service.findExistingKeys([])
+
+      expect(result).toEqual([])
+    })
+  })
+
   describe('seed data', () => {
     const seededSources = buildSeedLegalSources()
     const seededRegulations = buildSeedPlatformRegulations()
