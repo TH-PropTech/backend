@@ -253,4 +253,22 @@ describe('ApartmentDesignsService', () => {
       service.update(APARTMENT_ID, 'd1', { name: '   ' })
     ).rejects.toBeInstanceOf(BadRequestException)
   })
+
+  it('setVisible sets the positional visible flag atomically', async () => {
+    const { service, repo } = build()
+    await service.setVisible(APARTMENT_ID, 'd1', true)
+    const [filter, update] = repo.updateOne.mock.calls[0] as [
+      Record<string, unknown>,
+      { $set: Record<string, unknown> },
+    ]
+    expect(filter['floorplanDesigns.id']).toBe('d1')
+    expect(update.$set['floorplanDesigns.$.visible']).toBe(true)
+  })
+
+  it('setVisible is 404 when the design is missing', async () => {
+    const { service } = build([], { matched: 0 })
+    await expect(
+      service.setVisible(APARTMENT_ID, 'ghost', false)
+    ).rejects.toBeInstanceOf(NotFoundException)
+  })
 })
