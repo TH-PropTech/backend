@@ -32,20 +32,12 @@ describe('RentalExecutionPoliciesService', () => {
     jest.clearAllMocks()
   })
 
-  it('seeds both allowlisted policies when absent', async () => {
+  it('seeds the sign-first policy when absent', async () => {
     policyRepo.findOne.mockResolvedValue(null)
 
     await service.onModuleInit()
 
-    expect(policyRepo.save).toHaveBeenCalledTimes(2)
-    expect(policyRepo.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        kind: 'policy',
-        key: 'deposit-first',
-        strategy: 'DEPOSIT_FIRST',
-        status: 'published',
-      })
-    )
+    expect(policyRepo.save).toHaveBeenCalledTimes(1)
     expect(policyRepo.create).toHaveBeenCalledWith(
       expect.objectContaining({
         kind: 'policy',
@@ -102,19 +94,19 @@ describe('RentalExecutionPoliciesService', () => {
     expect(auditRepo.save).toHaveBeenCalledTimes(1)
   })
 
-  it('rejects a reference whose hash or strategy does not match published data', async () => {
+  it('rejects a reference whose hash does not match published data', async () => {
     policyRepo.findOne.mockResolvedValue({
       kind: 'policy',
-      key: 'deposit-first',
+      key: 'sign-first',
       version: 1,
       status: 'published',
-      strategy: 'DEPOSIT_FIRST',
+      strategy: 'SIGN_FIRST',
       contentHash: 'server-hash',
     })
 
     await expect(
       service.resolvePublishedRef({
-        policyId: 'deposit-first',
+        policyId: 'sign-first',
         version: 1,
         strategy: 'SIGN_FIRST',
         contentHash: 'client-hash',
@@ -122,7 +114,7 @@ describe('RentalExecutionPoliciesService', () => {
     ).rejects.toThrow(ConflictException)
   })
 
-  it('normalizes an omitted package policy to deposit-first v1', async () => {
+  it('normalizes an omitted package policy to sign-first v1', async () => {
     const ref = getDefaultRentalExecutionPolicyRef()
     policyRepo.findOne.mockResolvedValue({
       kind: 'policy',
@@ -142,7 +134,7 @@ describe('RentalExecutionPoliciesService', () => {
   })
 
   it('computes a published hash from the immutable draft content', async () => {
-    const input = DEFAULT_RENTAL_EXECUTION_POLICY_INPUTS[1]
+    const input = DEFAULT_RENTAL_EXECUTION_POLICY_INPUTS[0]
     const draft = {
       kind: 'policy',
       key: input.policyId,

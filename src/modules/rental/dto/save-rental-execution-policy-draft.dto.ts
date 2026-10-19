@@ -17,7 +17,7 @@ export class SaveRentalExecutionPolicyDraftDto {
   @IsOptional()
   policyId?: string
 
-  @IsEnum(['DEPOSIT_FIRST', 'SIGN_FIRST'])
+  @IsEnum(['SIGN_FIRST'])
   strategy!: RentalExecutionStrategy
 
   @IsString()

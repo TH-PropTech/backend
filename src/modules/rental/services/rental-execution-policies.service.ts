@@ -223,9 +223,9 @@ export class RentalExecutionPoliciesService implements OnModuleInit {
   async resolvePublishedRef(
     ref: RentalExecutionPolicyRef
   ): Promise<RentalExecutionPolicyView> {
-    if (!isRentalExecutionStrategy(ref.strategy)) {
-      throw new ConflictException('UNSUPPORTED_RENTAL_EXECUTION_STRATEGY')
-    }
+    // Legacy refs (e.g. policyId 'deposit-first', strategy 'DEPOSIT_FIRST') are
+    // resolved against the stored published record as-is; behaviour is
+    // sign-first regardless of the stored strategy string.
     const policy = await this.policyRepo.findOne({
       where: {
         kind: 'policy',

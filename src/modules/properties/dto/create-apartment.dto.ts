@@ -30,7 +30,7 @@ class RentalExecutionPolicyRefDto implements RentalExecutionPolicyRef {
   @Min(1)
   version!: number
 
-  @IsIn(['DEPOSIT_FIRST', 'SIGN_FIRST'])
+  @IsIn(['SIGN_FIRST'])
   strategy!: RentalExecutionPolicyRef['strategy']
 
   @IsString()

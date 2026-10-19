@@ -330,7 +330,7 @@ describe('RentalExecutionPoliciesService where-clauses', () => {
         strategy: 'SIGN_FIRST',
         name: 'n',
         description: 'd',
-        disclosure: DEFAULT_RENTAL_EXECUTION_POLICY_INPUTS[1].disclosure,
+        disclosure: DEFAULT_RENTAL_EXECUTION_POLICY_INPUTS[0].disclosure,
       })
       .mockResolvedValueOnce(null)
     await service.publish('pol', { expectedRevision: 1, reason: 'r' }, 'a')

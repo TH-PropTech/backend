@@ -980,7 +980,7 @@ describe('ContractsService activation', () => {
       executionPolicySnapshot: {
         policyId: 'policy-1',
         version: 1,
-        strategy: 'DEPOSIT_FIRST',
+        strategy: 'SIGN_FIRST',
         contentHash: 'policy-hash',
       },
     } as unknown as Contract
@@ -1027,44 +1027,6 @@ describe('ContractsService activation', () => {
       .calls as unknown as ReadonlyArray<readonly unknown[]>
     const event = enqueueCalls[0]?.[0] as { dependencyKeys?: string[] }
     expect(event.dependencyKeys).toBeUndefined()
-  })
-
-  it('rejects contract activation if positive deposit is not paid', async () => {
-    const contract = {
-      _id: new ObjectId('507f1f77bcf86cd799439011'),
-      deposit: 20_000_000,
-      status: 'awaiting-signature' as const,
-      signedByTenant: true,
-      signedByLandlord: false,
-      tenantId: 'tenant-1',
-      landlordId: 'landlord-1',
-    } as unknown as Contract
-    const contractRepository = {
-      findOne: jest.fn().mockResolvedValue(contract),
-    }
-    const depositAgreementRepository = {
-      findOne: jest.fn().mockResolvedValue({
-        status: 'pending',
-      }),
-    }
-    const service = Object.create(
-      ContractsService.prototype
-    ) as ContractsService
-    Reflect.set(service, 'contractRepository', contractRepository)
-    Reflect.set(
-      service,
-      'depositAgreementRepository',
-      depositAgreementRepository
-    )
-    Reflect.set(service, 'kycService', {
-      findByUserId: jest.fn().mockResolvedValue({ status: 'verified' }),
-    })
-
-    await expect(
-      service.signContract(contract._id.toHexString(), 'landlord')
-    ).rejects.toThrow(
-      'Hợp đồng yêu cầu tiền cọc đã thanh toán trước khi có hiệu lực'
-    )
   })
 
   it('persists fully-signed-pending-deposit for the sign-first policy', async () => {
@@ -1166,7 +1128,7 @@ describe('ContractsService activation', () => {
       executionPolicySnapshot: {
         policyId: 'policy-1',
         version: 1,
-        strategy: options?.policy ?? 'DEPOSIT_FIRST',
+        strategy: options?.policy ?? 'SIGN_FIRST',
         contentHash: 'policy-hash',
       },
     } as unknown as Contract
@@ -1265,8 +1227,9 @@ describe('ContractsService activation', () => {
     )
   })
 
+  // DEPOSIT_FIRST is a legacy snapshot value that must behave exactly as SIGN_FIRST.
   it.each(['DEPOSIT_FIRST', 'SIGN_FIRST'] as const)(
-    'activates only after both valid SmartCA signatures (%s)',
+    'activates only after both valid SmartCA signatures (snapshot %s)',
     async policy => {
       const context = createSmartCaActivationContext({
         policy,

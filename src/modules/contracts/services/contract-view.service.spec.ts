@@ -320,7 +320,7 @@ describe('ContractViewService', () => {
       executionPolicySnapshot: {
         policyId: 'deposit-first',
         version: 1,
-        strategy: 'DEPOSIT_FIRST',
+        strategy: 'DEPOSIT_FIRST' as never, // legacy snapshot
         hash: 'policy-hash',
       },
     } as unknown as Contract)
@@ -359,7 +359,7 @@ describe('ContractViewService', () => {
 
     expect(tenantView.flow).toEqual(
       expect.objectContaining({
-        strategy: 'DEPOSIT_FIRST',
+        strategy: 'SIGN_FIRST',
         activeStage: 'document',
       })
     )
@@ -643,8 +643,7 @@ describe('ContractViewService', () => {
     expect(view.actions.signingEligibility.eligible).toBe(false)
     expect(view.actions.signingEligibility.reasonCode).toBe('KYC_NOT_VERIFIED')
   })
-
-  it('should return eligible=false with DEPOSIT_REQUIRED if deposit is unpaid', async () => {
+  it('should stay eligible to sign when the deposit is unpaid (sign-first)', async () => {
     const unpaidContract = {
       ...mockContract,
       depositPaidAt: null,
@@ -661,8 +660,8 @@ describe('ContractViewService', () => {
       false
     )
 
-    expect(view.actions.signingEligibility.eligible).toBe(false)
-    expect(view.actions.signingEligibility.reasonCode).toBe('DEPOSIT_REQUIRED')
+    expect(view.actions.signingEligibility.eligible).toBe(true)
+    expect(view.actions.signingEligibility.reasonCode).toBeNull()
   })
 
   it('should return eligible=false with ALREADY_SIGNED if participant already signed', async () => {

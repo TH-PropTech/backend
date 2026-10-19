@@ -53,7 +53,7 @@ describe('resolveDepositConfirmation (pure)', () => {
     expect(result.source).toBe('agreement')
   })
 
-  it('agreement ở trạng thái released: đã xác nhận (cổng DEPOSIT_FIRST)', () => {
+  it('agreement ở trạng thái released: đã xác nhận (cọc đã được xác nhận)', () => {
     const result = resolveDepositConfirmation(
       { deposit: 20_000_000, depositPaidAt: null },
       {

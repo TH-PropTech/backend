@@ -14,8 +14,6 @@ import {
   evaluateLockContent,
   evaluatePayDeposit,
   evaluateSigning,
-  isDepositGateOpen,
-  type ExecutionStrategy,
   type GuardResult,
 } from './flow-guards'
 
@@ -25,7 +23,6 @@ type ProjectedStageKey = Exclude<ContractFlowStageKey, 'move-in'>
 
 /** Dữ kiện đã lưu mà Contract View thu thập; projector không truy vấn DB. */
 export interface ContractFlowFacts {
-  strategy: ExecutionStrategy
   contractStatus: string
   executionMethod: string
   isConfigOutdated: boolean
@@ -68,10 +65,12 @@ type StageEvaluation = {
   activeBlockers: ContractFlowBlockerDto[]
 }
 
-const STAGE_ORDER: Record<ExecutionStrategy, ProjectedStageKey[]> = {
-  DEPOSIT_FIRST: ['document', 'deposit', 'signing', 'ledger'],
-  SIGN_FIRST: ['document', 'signing', 'deposit', 'ledger'],
-}
+const STAGE_ORDER: ProjectedStageKey[] = [
+  'document',
+  'signing',
+  'deposit',
+  'ledger',
+]
 const ACTIVATED_STATUSES: ReadonlySet<string> = new Set([
   'active',
   'terminated',
@@ -118,16 +117,7 @@ const evaluation = (
 })
 
 function evaluateDocument(facts: ContractFlowFacts): StageEvaluation {
-  const { agreement, contentLockedAt } = facts
-  if (facts.strategy === 'DEPOSIT_FIRST') {
-    const consentDone = Boolean(
-      agreement && (agreement.hasConsent || agreement.status !== 'draft')
-    )
-    return evaluation(
-      isActivated(facts) || consentDone || contentLockedAt !== null,
-      agreement?.consentedAt ?? contentLockedAt
-    )
-  }
+  const { contentLockedAt } = facts
   const lockDone =
     contentLockedAt !== null && (!requiresArtifact(facts) || facts.hasArtifact)
   return evaluation(isActivated(facts) || lockDone, contentLockedAt)
@@ -155,9 +145,6 @@ function signingActiveBlockers(
     blockers.push(blocker('CONTENT_NOT_LOCKED'))
   } else if (requiresArtifact(facts) && !facts.hasArtifact) {
     blockers.push(blocker('ARTIFACT_NOT_LOCKED'))
-  }
-  if (!isDepositGateOpen(facts.strategy, facts.deposit.confirmed)) {
-    blockers.push(blocker('DEPOSIT_REQUIRED'))
   }
   return blockers
 }
@@ -205,7 +192,7 @@ const STAGE_EVALUATORS: Record<
 function projectStages(facts: ContractFlowFacts): ContractFlowStageDto[] {
   const terminal = TERMINAL_STATUSES.has(facts.contractStatus)
   let activeAssigned = false
-  return STAGE_ORDER[facts.strategy].map((key): ContractFlowStageDto => {
+  return STAGE_ORDER.map((key): ContractFlowStageDto => {
     const result = STAGE_EVALUATORS[key](facts)
     const completedAt = result.done
       ? (result.completedAt?.toISOString() ?? null)
@@ -290,8 +277,6 @@ function signingActions(
     requiresArtifact: requiresArtifact(facts),
     hasArtifact: facts.hasArtifact,
     contractStatus: facts.contractStatus,
-    strategy: facts.strategy,
-    isDepositConfirmed: facts.deposit.confirmed,
     isKycVerified: facts.kycVerified[role],
   })
   const signAction = requiresArtifact(facts) ? 'SIGN_SMARTCA' : 'SIGN_ECONSENT'
@@ -383,7 +368,7 @@ export function projectContractFlow(facts: ContractFlowFacts): ContractFlowDto {
   )
   return {
     version: 1,
-    strategy: facts.strategy,
+    strategy: 'SIGN_FIRST',
     stages,
     activeStage: firstOpen?.key ?? 'completed',
     nextActions: projectActions(facts),

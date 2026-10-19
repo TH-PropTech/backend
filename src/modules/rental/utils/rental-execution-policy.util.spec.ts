@@ -6,8 +6,8 @@ import {
 } from './rental-execution-policy.util'
 
 describe('rental execution policy utilities', () => {
-  it('accepts only the two allowlisted strategies', () => {
-    expect(isRentalExecutionStrategy('DEPOSIT_FIRST')).toBe(true)
+  it('accepts only the SIGN_FIRST strategy', () => {
+    expect(isRentalExecutionStrategy('DEPOSIT_FIRST')).toBe(false)
     expect(isRentalExecutionStrategy('SIGN_FIRST')).toBe(true)
     expect(isRentalExecutionStrategy('CUSTOM_GRAPH')).toBe(false)
   })
@@ -20,12 +20,12 @@ describe('rental execution policy utilities', () => {
     expect(first).toHaveLength(64)
   })
 
-  it('provides a backward-compatible deposit-first reference', () => {
+  it('provides a sign-first default reference', () => {
     expect(getDefaultRentalExecutionPolicyRef()).toEqual(
       expect.objectContaining({
-        policyId: 'deposit-first',
+        policyId: 'sign-first',
         version: 1,
-        strategy: 'DEPOSIT_FIRST',
+        strategy: 'SIGN_FIRST',
       })
     )
   })

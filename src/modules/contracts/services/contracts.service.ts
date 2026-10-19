@@ -62,14 +62,13 @@ import {
   CONTRACT_CONTENT_HASH_SCHEMA_VERSION,
 } from '../legal/contract-canonical-payload'
 import { resolveDepositConfirmation } from './deposit-confirmation.resolver'
-import { evaluateLockContent, isDepositGateOpen } from '../flow/flow-guards'
+import { evaluateLockContent } from '../flow/flow-guards'
 import { FlowNotificationService } from '../flow/flow-notification.service'
 import { resolveEffectiveCommercial } from '../commercial/resolve-effective-commercial'
 import { MoveInSettlementsService } from '../../rental/services/move-in-settlements.service'
 import { ContractLayoutService } from '../layout/contract-layout.service'
 import { RentalTransactionEventService } from '../../rental/services/rental-transaction-event.service'
 import type { RentalTransactionActorRole } from '../../rental/schemas/rental-transaction-event.schema'
-import { DepositEscrowService } from './deposit-escrow.service'
 
 // ── Interfaces ──
 
@@ -219,9 +218,7 @@ export class ContractsService {
     private readonly governanceService?: FabricGovernanceService,
     @Optional()
     @InjectRepository(User)
-    private readonly userRepository?: Repository<User>,
-    @Optional()
-    private readonly depositEscrowService?: DepositEscrowService
+    private readonly userRepository?: Repository<User>
   ) {
     this.signingGrantRepository =
       new KindScopedSmartCaSigningRepository<SigningGrantDoc>(
@@ -1227,40 +1224,7 @@ export class ContractsService {
       reasonHash,
       terminatedAt,
     })
-    await this.refundDepositEscrowOnTermination(contract)
     return contract
-  }
-
-  /**
-   * D7: chấm dứt hợp đồng trước khi bàn giao hoàn cọc còn ở ký quỹ. Lỗi Ví
-   * Mộc không làm hỏng việc chấm dứt (D6); job retry xử lý phần còn lại.
-   */
-  private async refundDepositEscrowOnTermination(
-    contract: Contract
-  ): Promise<void> {
-    if (!this.depositEscrowService) return
-    try {
-      const agreement = await this.findDepositAgreementForContract(contract)
-      if (
-        !agreement?.escrow ||
-        agreement.status !== 'applied-to-lease-security'
-      ) {
-        return
-      }
-      const handoverCompleted =
-        await this.moveInSettlementsService?.hasCompletedHandover(
-          contract._id.toHexString()
-        )
-      if (handoverCompleted) return
-      await this.depositEscrowService.requestSettlement(
-        agreement._id.toHexString(),
-        'refund'
-      )
-    } catch (error) {
-      this.logger.warn(
-        `Deposit escrow refund on termination failed for contract ${contract._id.toHexString()}: ${error instanceof Error ? error.message : 'unknown'}`
-      )
-    }
   }
 
   private async enqueueTerminationLedgerEvent(
@@ -1439,20 +1403,6 @@ export class ContractsService {
       throw new ConflictException('SMARTCA_SIGNATURE_REQUIRED')
     }
 
-    const executionStrategy =
-      contract.executionPolicySnapshot?.strategy ?? 'DEPOSIT_FIRST'
-    if (
-      contract.deposit > 0 &&
-      !isDepositGateOpen(
-        executionStrategy,
-        await this.isDepositConfirmed(contract)
-      )
-    ) {
-      throw new BadRequestException(
-        'EXECUTION_POLICY_DEPOSIT_REQUIRED_BEFORE_SIGNING: Hợp đồng yêu cầu tiền cọc đã thanh toán trước khi có hiệu lực'
-      )
-    }
-
     const userId = role === 'tenant' ? contract.tenantId : contract.landlordId
 
     if (process.env.NODE_ENV === 'production') {
@@ -1495,13 +1445,8 @@ export class ContractsService {
           (depositAgreement.status !== 'paid' &&
             depositAgreement.status !== 'applied-to-lease-security')
         ) {
-          if (executionStrategy === 'SIGN_FIRST') {
-            contract.status = 'fully-signed-pending-deposit'
-            return this.contractRepository.save(contract)
-          }
-          throw new BadRequestException(
-            'Hợp đồng yêu cầu tiền cọc đã thanh toán trước khi có hiệu lực'
-          )
+          contract.status = 'fully-signed-pending-deposit'
+          return this.contractRepository.save(contract)
         }
 
         if (!depositAgreement.depositHash) {

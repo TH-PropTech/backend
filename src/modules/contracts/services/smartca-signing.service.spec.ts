@@ -330,7 +330,7 @@ describe('SmartCaSigningService', () => {
     expect(ctx.provider.requestSignature).not.toHaveBeenCalled()
   })
 
-  it('rejects outsiders, unavailable artifacts and unmet deposit-first policy', async () => {
+  it('rejects outsiders and unavailable artifacts', async () => {
     const outsider = context()
     await expect(
       outsider.service.createSession(contractId, 'outsider', signingInput)
@@ -343,23 +343,9 @@ describe('SmartCaSigningService', () => {
     await expect(
       superseded.service.createSession(contractId, 'tenant-1', signingInput)
     ).rejects.toThrow('CONTRACT_ARTIFACT_SUPERSEDED')
-
-    const depositFirst = context({
-      ...contract,
-      deposit: 10_000,
-      executionPolicySnapshot: {
-        policyId: 'deposit-first',
-        version: 1,
-        strategy: 'DEPOSIT_FIRST',
-        contentHash: 'policy-hash',
-      },
-    })
-    await expect(
-      depositFirst.service.createSession(contractId, 'tenant-1', signingInput)
-    ).rejects.toThrow('EXECUTION_POLICY_DEPOSIT_REQUIRED_BEFORE_SIGNING')
   })
 
-  it('allows deposit-first signing when the deposit agreement is paid even though contract.depositPaidAt is still null', async () => {
+  it('allows signing a legacy DEPOSIT_FIRST snapshot with an unpaid deposit (treated as sign-first)', async () => {
     const ctx = context({
       ...contract,
       deposit: 20_000_000,
@@ -367,18 +353,9 @@ describe('SmartCaSigningService', () => {
       executionPolicySnapshot: {
         policyId: 'deposit-first',
         version: 1,
-        strategy: 'DEPOSIT_FIRST',
+        strategy: 'DEPOSIT_FIRST' as never,
         contentHash: 'policy-hash',
       },
-    })
-    ctx.depositConfirmationResolver.resolve.mockResolvedValue({
-      confirmed: true,
-      required: true,
-      requiredAmount: 20_000_000,
-      source: 'agreement',
-      agreementId: 'agreement-1',
-      agreementStatus: 'paid',
-      paidAt: new Date('2026-09-01T00:00:00.000Z'),
     })
 
     const session = await ctx.service.createSession(
@@ -388,9 +365,7 @@ describe('SmartCaSigningService', () => {
     )
 
     expect(session.status).toBe('pending')
-    expect(ctx.depositConfirmationResolver.resolve).toHaveBeenCalledWith(
-      expect.objectContaining({ deposit: 20_000_000 })
-    )
+    expect(ctx.depositConfirmationResolver.resolve).not.toHaveBeenCalled()
   })
 
   it('allows sign-first policy before deposit confirmation', async () => {
