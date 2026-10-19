@@ -20,5 +20,5 @@ export function maskAccountNumber(accountNumber: string): string {
 }
 
 /** Thương hiệu ví mô phỏng trên cùng một tài khoản Ví Mộc (API dùng chữ thường). */
-export const WALLET_BRANDS = ['mocbank', 'momo', 'zalopay', 'vnpay'] as const
+export const WALLET_BRANDS = ['mocbank', 'momo', 'zalopay'] as const
 export type WalletBrand = (typeof WALLET_BRANDS)[number]

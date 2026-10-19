@@ -45,7 +45,7 @@ export type WalletView = {
   /** Full Ví Mộc account number, for the owner's own QR/receive-money display only. */
   accountNumber: string | null
   linkedAt: Date | null
-  /** Ví mô phỏng phụ (Momo/ZaloPay/VNPay) trên cùng tài khoản Ví Mộc. */
+  /** Ví mô phỏng phụ (Momo/ZaloPay) trên cùng tài khoản Ví Mộc. */
   extraAccounts: WalletExtraAccountView[]
 }
 

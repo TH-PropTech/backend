@@ -185,14 +185,13 @@ describe('MockBankController', () => {
   })
 
   it('lists enabled providers from the registry', () => {
-    const listed = [{ provider: 'vnpay', label: 'VNPAY', simulation: false }]
+    const listed = [{ provider: 'momo', label: 'MoMo', simulation: false }]
     const registry = { listProviders: jest.fn().mockReturnValue(listed) }
 
     expect(createController({}, registry).providers()).toBe(listed)
   })
 
   it.each([
-    ['vnpayReturn', 'vnpay'],
     ['momoReturn', 'momo'],
     ['zalopayReturn', 'zalopay'],
     ['mocbankReturn', 'mocbank'],
@@ -220,31 +219,6 @@ describe('MockBankController', () => {
       )
     }
   )
-
-  it('answers VNPAY IPN with the raw RspCode body (no envelope)', async () => {
-    const result = { ok: true, outcome: 'settled' }
-    const gateway = {
-      handleNotify: jest.fn().mockResolvedValue(result),
-      toVnpayAck: jest
-        .fn()
-        .mockReturnValue({ RspCode: '00', Message: 'Confirm Success' }),
-    }
-    const response = fakeResponse()
-
-    await createController({}, {}, gateway).vnpayIpn(
-      { vnp_TxnRef: 'V-1' },
-      response as never
-    )
-
-    expect(gateway.handleNotify).toHaveBeenCalledWith('vnpay', {
-      vnp_TxnRef: 'V-1',
-    })
-    expect(response.status).toHaveBeenCalledWith(200)
-    expect(response.json).toHaveBeenCalledWith({
-      RspCode: '00',
-      Message: 'Confirm Success',
-    })
-  })
 
   it('answers MoMo IPN with the mapped status code and no body', async () => {
     const gateway = {

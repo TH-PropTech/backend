@@ -18,9 +18,11 @@ import type {
   PaymentProviderName,
   ProviderAccountLink,
 } from './payment-provider.port'
-import { VnpayAdapter } from './vnpay.adapter'
-import { VnpayCallbackVerifier } from './vnpay-callback.verifier'
-import { ZalopayAdapter } from './zalopay.adapter'
+import {
+  ZALOPAY_METHOD_OPTIONS,
+  ZalopayAdapter,
+  type ZalopayMethodOption,
+} from './zalopay.adapter'
 import { ZalopayCallbackVerifier } from './zalopay-callback.verifier'
 
 export type PaymentProviderOption = {
@@ -28,7 +30,7 @@ export type PaymentProviderOption = {
   label: string
   simulation: boolean
   /** MoMo only: payment methods with their VND limits. */
-  methods?: MomoMethodOption[]
+  methods?: MomoMethodOption[] | ZalopayMethodOption[]
   /** Ví Mộc only: wallet brands the payer can route the landlord payout to. */
   brands?: Array<{ brand: WalletBrand; label: string }>
 }
@@ -37,12 +39,10 @@ const MOCBANK_BRAND_OPTIONS: Array<{ brand: WalletBrand; label: string }> = [
   { brand: 'mocbank', label: 'Ví Mộc' },
   { brand: 'momo', label: 'Momo (mô phỏng)' },
   { brand: 'zalopay', label: 'ZaloPay (mô phỏng)' },
-  { brand: 'vnpay', label: 'VNPay (mô phỏng)' },
 ]
 
 const PROVIDER_LABELS: Record<SelectablePaymentProvider, string> = {
   'mock-bank': 'Mock Bank (sandbox)',
-  vnpay: 'VNPAY',
   momo: 'MoMo',
   zalopay: 'ZaloPay',
   mocbank: 'Ví Mộc (sandbox)',
@@ -59,24 +59,20 @@ export class PaymentProviderRegistry {
   constructor(
     private readonly configService: ConfigService,
     mockBankAdapter: MockBankAdapter,
-    vnpayAdapter: VnpayAdapter,
     momoAdapter: MomoAdapter,
     zalopayAdapter: ZalopayAdapter,
     mocbankAdapter: MocbankAdapter,
-    vnpayVerifier: VnpayCallbackVerifier,
     momoVerifier: MomoCallbackVerifier,
     zalopayVerifier: ZalopayCallbackVerifier,
     mocbankVerifier: MocbankCallbackVerifier
   ) {
     this.adapters = {
       'mock-bank': mockBankAdapter,
-      vnpay: vnpayAdapter,
       momo: momoAdapter,
       zalopay: zalopayAdapter,
       mocbank: mocbankAdapter,
     }
     this.verifiers = {
-      vnpay: vnpayVerifier,
       momo: momoVerifier,
       zalopay: zalopayVerifier,
       mocbank: mocbankVerifier,
@@ -144,6 +140,7 @@ export class PaymentProviderRegistry {
       label: PROVIDER_LABELS[provider],
       simulation: provider === 'mock-bank',
       ...(provider === 'momo' ? { methods: MOMO_METHOD_OPTIONS } : {}),
+      ...(provider === 'zalopay' ? { methods: ZALOPAY_METHOD_OPTIONS } : {}),
       ...(provider === 'mocbank' ? { brands: MOCBANK_BRAND_OPTIONS } : {}),
     }))
   }

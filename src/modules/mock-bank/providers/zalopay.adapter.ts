@@ -14,6 +14,7 @@ import type {
   PaymentProviderAdapter,
   ProviderAccountLink,
   ProviderPaymentIntent,
+  ZalopayPaymentMethod,
 } from './payment-provider.port'
 import {
   asRecord,
@@ -29,6 +30,29 @@ import {
 } from './gateway.util'
 
 const MIN_EXPIRE_SECONDS = 300
+
+export type ZalopayMethodOption = {
+  method: ZalopayPaymentMethod
+  label: string
+}
+
+/** ZaloPay `bank_code` per method: "" = gateway page, CC = card entry page. */
+const ZALOPAY_METHODS: Record<
+  ZalopayPaymentMethod,
+  ZalopayMethodOption & { bankCode: string }
+> = {
+  all: { method: 'all', label: 'ZaloPay (ví / QR / ATM)', bankCode: '' },
+  card: {
+    method: 'card',
+    label: 'ZaloPay - Thẻ Visa / Master / JCB',
+    bankCode: 'CC',
+  },
+}
+
+/** Public method list for the provider picker (no request internals). */
+export const ZALOPAY_METHOD_OPTIONS: ZalopayMethodOption[] = Object.values(
+  ZALOPAY_METHODS
+).map(({ method, label }) => ({ method, label }))
 
 /** ZaloPay v2 `/create` adapter (form-urlencoded, key1 MAC). */
 @Injectable()
@@ -64,7 +88,7 @@ export class ZalopayAdapter implements PaymentProviderAdapter {
       item: '[]',
       embed_data: JSON.stringify({ redirecturl: config.returnUrl }),
       description: `TH-PropTech - ${input.description}`,
-      bank_code: '',
+      bank_code: ZALOPAY_METHODS[input.zalopayMethod ?? 'all'].bankCode,
       callback_url: config.callbackUrl,
       expire_duration_seconds: String(
         Math.max(

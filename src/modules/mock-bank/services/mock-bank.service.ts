@@ -33,6 +33,7 @@ import { PaymentProviderRegistry } from '../providers/payment-provider.registry'
 import type {
   GatewayVerdict,
   MomoPaymentMethod,
+  ZalopayPaymentMethod,
   PaymentProviderName,
 } from '../providers/payment-provider.port'
 import type { PaymentsConfig } from '../../../config/configuration'
@@ -88,6 +89,7 @@ export type PaymentInitOptions = {
   clientChannel?: PaymentClientChannel | undefined
   clientIp?: string | undefined
   momoMethod?: MomoPaymentMethod | undefined
+  zalopayMethod?: ZalopayPaymentMethod | undefined
   /** Ví Mộc: thương hiệu ví của chủ nhà nhận tiền (mặc định mocbank). */
   brand?: WalletBrand | undefined
 }
@@ -981,6 +983,8 @@ export class MockBankService {
     )
     const momoMethod =
       adapter.name === 'momo' ? (input.options.momoMethod ?? 'wallet') : null
+    const zalopayMethod =
+      adapter.name === 'zalopay' ? (input.options.zalopayMethod ?? 'all') : null
     const live = await this.attemptRepository.findOne({
       where: {
         paymentId: input.paymentId,
@@ -993,6 +997,7 @@ export class MockBankService {
       if (
         live.provider === adapter.name &&
         (live.momoMethod ?? null) === momoMethod &&
+        (live.zalopayMethod ?? null) === zalopayMethod &&
         (live.payeeAccountNumber ?? null) === payeeAccountNumber &&
         live.expiresAt.getTime() > Date.now()
       ) {
@@ -1019,6 +1024,7 @@ export class MockBankService {
       expiresAt: new Date(Date.now() + ttlMinutes * 60 * 1000),
       clientIp: input.options.clientIp,
       momoMethod: momoMethod ?? undefined,
+      zalopayMethod: zalopayMethod ?? undefined,
       clientChannel: input.options.clientChannel,
       payeeAccountNumber: payeeAccountNumber ?? undefined,
     })
@@ -1039,6 +1045,7 @@ export class MockBankService {
       providerTransactionId: null,
       clientChannel: input.options.clientChannel ?? 'web',
       momoMethod,
+      zalopayMethod,
       payeeAccountNumber,
     })
     await this.attemptRepository.save(attempt)
@@ -1062,7 +1069,7 @@ export class MockBankService {
   }
 
   /**
-   * Chỉ Ví Mộc trả thẳng vào tài khoản chủ nhà. Các cổng khác (MoMo, VNPay,
+   * Chỉ Ví Mộc trả thẳng vào tài khoản chủ nhà. Các cổng khác (MoMo,
    * ZaloPay, mock-bank) thu vào sàn và payout chuyển hộ sau (giả lập).
    */
   private async resolvePayeeAccount(
@@ -1397,22 +1404,20 @@ export class MockBankService {
 
   /**
    * HMAC key for internal receipt/deposit hashes, per settling provider
-   * (keeps the historical Mock Bank and VNPAY behaviour).
+   * (keeps the historical Mock Bank behaviour).
    */
   private receiptSecret(provider: PaymentProviderName): string {
     const payments = this.configService.get<PaymentsConfig>(
       'rentalFlow.payments'
     )
     const secret =
-      provider === 'vnpay'
-        ? payments?.vnpay.hashSecret
-        : provider === 'momo'
-          ? payments?.momo.secretKey
-          : provider === 'zalopay'
-            ? payments?.zalopay.key2
-            : provider === 'mocbank'
-              ? payments?.mocbank.merchantSecret
-              : undefined
+      provider === 'momo'
+        ? payments?.momo.secretKey
+        : provider === 'zalopay'
+          ? payments?.zalopay.key2
+          : provider === 'mocbank'
+            ? payments?.mocbank.merchantSecret
+            : undefined
     return secret || this.secret()
   }
 

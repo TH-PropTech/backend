@@ -70,6 +70,33 @@ describe('ZalopayAdapter', () => {
     )
   })
 
+  it.each([
+    [undefined, ''],
+    ['all', ''],
+    ['card', 'CC'],
+  ] as const)(
+    'sends bank_code for zalopayMethod %s',
+    async (method, bankCode) => {
+      const fetcher = jsonFetcher({
+        return_code: 1,
+        order_url: 'https://qcgateway.zalopay.vn/openinapp?order=abc',
+      })
+      const adapter = new ZalopayAdapter(testConfigService() as never, fetcher)
+
+      await adapter.createPaymentIntent({
+        amount: 3_000_000,
+        description: 'Deposit DP-9',
+        customerRef: 'tenant-1',
+        txRef: '261003_abc',
+        expiresAt: new Date(Date.now() + 15 * 60_000),
+        zalopayMethod: method,
+      })
+
+      const [, init] = fetcher.mock.calls[0] as [string, { body: string }]
+      expect(new URLSearchParams(init.body).get('bank_code')).toBe(bankCode)
+    }
+  )
+
   it('fails closed when ZaloPay rejects the order', async () => {
     const adapter = new ZalopayAdapter(
       testConfigService() as never,

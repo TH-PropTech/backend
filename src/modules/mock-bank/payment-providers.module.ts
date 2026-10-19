@@ -6,8 +6,6 @@ import { MocbankCallbackVerifier } from './providers/mocbank-callback.verifier'
 import { MomoAdapter } from './providers/momo.adapter'
 import { MomoCallbackVerifier } from './providers/momo-callback.verifier'
 import { PaymentProviderRegistry } from './providers/payment-provider.registry'
-import { VnpayAdapter } from './providers/vnpay.adapter'
-import { VnpayCallbackVerifier } from './providers/vnpay-callback.verifier'
 import { ZalopayAdapter } from './providers/zalopay.adapter'
 import { ZalopayCallbackVerifier } from './providers/zalopay-callback.verifier'
 
@@ -19,8 +17,6 @@ import { ZalopayCallbackVerifier } from './providers/zalopay-callback.verifier'
   imports: [ConfigModule],
   providers: [
     MockBankAdapter,
-    VnpayAdapter,
-    VnpayCallbackVerifier,
     MomoAdapter,
     MomoCallbackVerifier,
     ZalopayAdapter,

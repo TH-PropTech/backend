@@ -99,8 +99,8 @@ describe('GatewayCallbackService', () => {
   it('treats a reference owned by another provider as unknown', async () => {
     const context = createContext({ provider: 'momo' })
 
-    const result = await context.service.handleNotify('vnpay', {
-      vnp_TxnRef: 'MOMO-1',
+    const result = await context.service.handleNotify('zalopay', {
+      app_trans_id: 'MOMO-1',
     })
 
     expect(result).toMatchObject({ ok: false, reason: 'unknown-reference' })
@@ -176,22 +176,6 @@ describe('GatewayCallbackService', () => {
     expect(result).toMatchObject({ ok: false, reason: 'internal-error' })
     expect(context.service.toMomoStatus(result)).toBe(500)
     expect(context.service.toZalopayAck(result).return_code).toBe(0)
-    expect(context.service.toVnpayAck(result).RspCode).toBe('99')
-  })
-
-  it.each([
-    [{ ok: true, outcome: 'settled' }, '00'],
-    [{ ok: true, outcome: 'duplicate-paid' }, '00'],
-    [{ ok: true, outcome: 'failed' }, '00'],
-    [{ ok: true, outcome: 'replayed' }, '02'],
-    [{ ok: false, reason: 'unknown-reference' }, '01'],
-    [{ ok: false, reason: 'amount-mismatch' }, '04'],
-    [{ ok: false, reason: 'invalid-signature' }, '97'],
-  ])('maps %o to VNPAY RspCode %s', (result, code) => {
-    const { service } = createContext()
-    expect(
-      service.toVnpayAck({ attempt: null, ...result } as never).RspCode
-    ).toBe(code)
   })
 
   it('awaits an asynchronous verifier before settling', async () => {

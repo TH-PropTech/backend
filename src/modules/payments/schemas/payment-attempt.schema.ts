@@ -10,6 +10,7 @@ import {
 import type {
   MomoPaymentMethod,
   PaymentProviderName,
+  ZalopayPaymentMethod,
 } from '../../mock-bank/providers/payment-provider.port'
 
 export type PaymentAttemptStatus =
@@ -80,7 +81,7 @@ export class PaymentAttempt {
   @Column({ nullable: true })
   providerPaymentUrl!: string | null
 
-  /** Gateway-side id: vnp_TransactionNo | MoMo transId | zp_trans_id. */
+  /** Gateway-side id: MoMo transId | zp_trans_id. */
   @Column({ nullable: true })
   providerTransactionId?: string | null
 
@@ -94,6 +95,10 @@ export class PaymentAttempt {
   /** MoMo request type the tenant chose; null for other providers. */
   @Column({ type: 'string', nullable: true })
   momoMethod?: MomoPaymentMethod | null
+
+  /** ZaloPay channel the tenant chose; null for other providers. */
+  @Column({ type: 'string', nullable: true })
+  zalopayMethod?: ZalopayPaymentMethod | null
 
   /** Last status the gateway's own query API reported (admin recheck). Absent on legacy docs. */
   @Column({ type: 'string', nullable: true })

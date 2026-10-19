@@ -30,7 +30,7 @@ const STALE_PROCESSING_MINUTES = 15
 /** A payout sitting unresolved this long needs a human look. */
 const STALE_PAYOUT_HOURS = 24
 /** Real sandbox gateways: money sits in the platform merchant account there. */
-const EXTERNAL_PROVIDERS: PaymentProviderName[] = ['vnpay', 'momo', 'zalopay']
+const EXTERNAL_PROVIDERS: PaymentProviderName[] = ['momo', 'zalopay']
 const SETTLED_PAYMENT_STATUSES = [
   'paid',
   'released',

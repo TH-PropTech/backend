@@ -2,7 +2,6 @@ import type { PaymentClientChannel } from '../../payments/schemas/payment-attemp
 
 export type PaymentProviderName =
   | 'mock-bank'
-  | 'vnpay'
   | 'momo'
   | 'zalopay'
   | 'mocbank'
@@ -13,8 +12,15 @@ export type PaymentProviderName =
 export const MOMO_PAYMENT_METHODS = ['wallet', 'atm', 'card'] as const
 export type MomoPaymentMethod = (typeof MOMO_PAYMENT_METHODS)[number]
 
+/**
+ * How the tenant pays inside ZaloPay: `all` shows the whole gateway page
+ * (bank_code ""), `card` opens the credit/debit card entry page (bank_code CC).
+ */
+export const ZALOPAY_PAYMENT_METHODS = ['all', 'card'] as const
+export type ZalopayPaymentMethod = (typeof ZALOPAY_PAYMENT_METHODS)[number]
+
 /** External gateways that authenticate their own callbacks. */
-export type GatewayProviderName = 'vnpay' | 'momo' | 'zalopay' | 'mocbank'
+export type GatewayProviderName = 'momo' | 'zalopay' | 'mocbank'
 
 export type ProviderPaymentIntent = {
   provider: PaymentProviderName
@@ -39,6 +45,8 @@ export type PaymentIntentInput = {
   clientIp?: string | undefined
   /** MoMo only; other adapters ignore it. Defaults to `wallet`. */
   momoMethod?: MomoPaymentMethod | undefined
+  /** ZaloPay only; other adapters ignore it. Defaults to `all`. */
+  zalopayMethod?: ZalopayPaymentMethod | undefined
   /** Ví Mộc only; other adapters ignore it. Defaults to `web`. */
   clientChannel?: PaymentClientChannel | undefined
   /** Ví Mộc only: tài khoản nhận tiền thay cho ví của sàn (chủ nhà). */

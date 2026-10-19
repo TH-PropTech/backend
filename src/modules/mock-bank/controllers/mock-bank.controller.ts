@@ -56,7 +56,6 @@ import {
 } from '../providers/payment-provider.registry'
 import {
   GatewayCallbackService,
-  type VnpayIpnAck,
   type ZalopayCallbackAck,
 } from '../services/gateway-callback.service'
 import {
@@ -122,6 +121,7 @@ export class MockBankController {
         brand: dto.brand,
         clientChannel: dto.clientChannel,
         momoMethod: dto.momoMethod,
+        zalopayMethod: dto.zalopayMethod,
         clientIp,
       }
     )
@@ -140,6 +140,7 @@ export class MockBankController {
       brand: dto.brand,
       clientChannel: dto.clientChannel,
       momoMethod: dto.momoMethod,
+      zalopayMethod: dto.zalopayMethod,
       clientIp,
     })
   }
@@ -160,6 +161,7 @@ export class MockBankController {
         brand: dto.brand,
         clientChannel: dto.clientChannel,
         momoMethod: dto.momoMethod,
+        zalopayMethod: dto.zalopayMethod,
         clientIp,
       }
     )
@@ -178,6 +180,7 @@ export class MockBankController {
       brand: dto.brand,
       clientChannel: dto.clientChannel,
       momoMethod: dto.momoMethod,
+      zalopayMethod: dto.zalopayMethod,
       clientIp,
     })
   }
@@ -228,35 +231,6 @@ export class MockBankController {
       body,
       this.callbackHeaders(headers)
     )
-  }
-
-  @Public()
-  @Get('vnpay/return')
-  @ApiOperation({ summary: 'VNPAY browser return (signed)' })
-  @ApiResponse({ status: 302, description: 'Redirect to client result URL' })
-  async vnpayReturn(
-    @Query() query: GatewayQuery,
-    @Res() response: Response
-  ): Promise<void> {
-    response.redirect(
-      302,
-      await this.gatewayCallbackService.handleReturn('vnpay', query)
-    )
-  }
-
-  @Public()
-  @Get('vnpay/ipn')
-  @ApiOperation({ summary: 'VNPAY IPN (server-to-server, signed)' })
-  @ApiOkResponse({ description: '{ RspCode, Message } per VNPAY spec' })
-  async vnpayIpn(
-    @Query() query: GatewayQuery,
-    @Res() response: Response
-  ): Promise<void> {
-    // Raw body (no response envelope): VNPAY parses { RspCode, Message }.
-    const ack: VnpayIpnAck = this.gatewayCallbackService.toVnpayAck(
-      await this.gatewayCallbackService.handleNotify('vnpay', query)
-    )
-    response.status(200).json(ack)
   }
 
   @Public()

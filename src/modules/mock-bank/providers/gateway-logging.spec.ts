@@ -1,7 +1,6 @@
 import { Logger } from '@nestjs/common'
 import { MomoAdapter } from './momo.adapter'
 import { MomoCallbackVerifier } from './momo-callback.verifier'
-import { VnpayCallbackVerifier } from './vnpay-callback.verifier'
 import { ZalopayAdapter } from './zalopay.adapter'
 import { ZalopayCallbackVerifier } from './zalopay-callback.verifier'
 import {
@@ -45,7 +44,6 @@ describe('gateway log hygiene', () => {
       .createPaymentIntent(input)
       .catch(() => undefined)
     const verifiers = [
-      new VnpayCallbackVerifier(config),
       new MomoCallbackVerifier(config),
       new ZalopayCallbackVerifier(config),
     ]
@@ -54,10 +52,6 @@ describe('gateway log hygiene', () => {
       try {
         verifier.verify(
           {
-            vnp_TxnRef: 'a',
-            vnp_Amount: '1',
-            vnp_ResponseCode: '00',
-            vnp_SecureHash: 'bad',
             orderId: 'a',
             resultCode: 0,
             signature: 'bad',

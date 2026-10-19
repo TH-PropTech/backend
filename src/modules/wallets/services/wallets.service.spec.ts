@@ -512,7 +512,7 @@ describe('WalletsService extra brand accounts', () => {
             linkedAt: olderLinkedAt,
           },
           {
-            brand: 'vnpay',
+            brand: 'zalopay',
             mocbankAccountNumber: '810000002222',
             accountHolder: 'V',
             accountNumberMasked: '****2222',
@@ -592,7 +592,7 @@ describe('WalletsService extra brand accounts', () => {
       MOMO_NUMBER
     )
     await expect(
-      service.getMocbankAccountNumber(USER, 'vnpay')
+      service.getMocbankAccountNumber(USER, 'zalopay')
     ).resolves.toBeNull()
     await expect(service.getMocbankAccountNumber(USER)).resolves.toBe(
       ACCOUNT_NUMBER

@@ -345,7 +345,6 @@ describe('FabricGovernanceService (PROP-399 tasks 4.1/4.2)', () => {
       'DB_PASSWORD',
       'API_KEY',
       'apiKey',
-      'VNPAY_HASH_TOKEN',
       'FABRIC_PRIVATE_KEY',
       'AWS_CREDENTIALS',
     ])('rejects a policy key that looks like a secret: %s', async key => {

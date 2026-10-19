@@ -22,7 +22,6 @@ export type GatewayCallbackResult =
       attempt: PaymentAttempt | null
     }
 
-export type VnpayIpnAck = { RspCode: string; Message: string }
 export type ZalopayCallbackAck = { return_code: number; return_message: string }
 
 const SUCCESS_OUTCOMES: SettlementOutcome[] = [
@@ -32,7 +31,7 @@ const SUCCESS_OUTCOMES: SettlementOutcome[] = [
 ]
 
 /**
- * Verifies VNPAY / MoMo / ZaloPay / Ví Mộc notify + browser-return payloads against
+ * Verifies MoMo / ZaloPay / Ví Mộc notify + browser-return payloads against
  * the stored attempt and hands verified results to the single settlement
  * dispatcher. Never logs payload contents, keys or signatures.
  */
@@ -68,25 +67,6 @@ export class GatewayCallbackService {
       succeeded ? 'succeeded' : 'failed',
       result.ok
     )
-  }
-
-  toVnpayAck(result: GatewayCallbackResult): VnpayIpnAck {
-    if (result.ok) {
-      return result.outcome === 'replayed'
-        ? { RspCode: '02', Message: 'Order already confirmed' }
-        : { RspCode: '00', Message: 'Confirm Success' }
-    }
-    switch (result.reason) {
-      case 'invalid-signature':
-        return { RspCode: '97', Message: 'Invalid signature' }
-      case 'unknown-reference':
-      case 'merchant-mismatch':
-        return { RspCode: '01', Message: 'Order not found' }
-      case 'amount-mismatch':
-        return { RspCode: '04', Message: 'Invalid amount' }
-      default:
-        return { RspCode: '99', Message: 'Unknown error' }
-    }
   }
 
   /** MoMo IPN: 204 on handled results, 400 on rejected payloads, 500 to retry. */

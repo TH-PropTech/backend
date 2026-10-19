@@ -939,7 +939,7 @@ describe('PayoutsService real gateway (external settlement)', () => {
     return { ...base, service, client, users }
   }
 
-  it.each(['vnpay', 'momo', 'zalopay'] as const)(
+  it.each(['momo', 'zalopay'] as const)(
     'keeps a %s payment pending/external with no relay and no wallet lookup',
     async provider => {
       const { service, client, wallets, notifications } = externalSetup()
