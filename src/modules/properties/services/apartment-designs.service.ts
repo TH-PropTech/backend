@@ -200,6 +200,30 @@ export class ApartmentDesignsService {
     return toAdmin(updated)
   }
 
+  /**
+   * Bật/tắt hiển thị một thiết kế bằng `$set` vị trí nguyên tử. Idempotent: đặt lại cùng giá trị vẫn
+   * thành công (dùng khi duyệt yêu cầu thiết kế, được phép thử lại).
+   */
+  async setVisible(
+    apartmentId: string,
+    designId: string,
+    visible: boolean
+  ): Promise<void> {
+    const _id = this.toObjectId(apartmentId)
+    const result = await this.apartmentRepository.updateOne(
+      { _id, 'floorplanDesigns.id': designId },
+      {
+        $set: {
+          'floorplanDesigns.$.visible': visible,
+          'floorplanDesigns.$.updatedAt': new Date(),
+        },
+      }
+    )
+    if (result.matchedCount === 0) {
+      throw new NotFoundException('Không tìm thấy thiết kế')
+    }
+  }
+
   async remove(apartmentId: string, designId: string): Promise<void> {
     const _id = this.toObjectId(apartmentId)
     const result = await this.apartmentRepository.updateOne(

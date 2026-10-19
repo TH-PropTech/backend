@@ -5,6 +5,9 @@ import { Building } from './schemas/building.schema'
 import { Project } from './schemas/project.schema'
 import { ReviewCase } from './schemas/review-case.schema'
 import { SavedSearchRecord } from './schemas/saved-search-record.schema'
+import { DesignRequest } from './schemas/design-request.schema'
+import { DesignRequestsService } from './services/design-requests.service'
+import { DesignRequestsController } from './controllers/design-requests.controller'
 import { ActivityLog } from '../activity-log/schemas/activity-log.schema'
 import { SystemConfig } from './schemas/system-config.schema'
 import { User } from '../users/schemas/user.schema'
@@ -42,6 +45,7 @@ import { NotificationsModule } from '../notifications/notifications.module'
       Project,
       ReviewCase,
       SavedSearchRecord,
+      DesignRequest,
       ActivityLog,
       SystemConfig,
     ]),
@@ -52,6 +56,7 @@ import { NotificationsModule } from '../notifications/notifications.module'
     ListingQualityService,
     MaintenanceTicketsService,
     ApartmentDesignsService,
+    DesignRequestsService,
     ApartmentMediaUploadService,
     ApartmentExpirationService,
     BuildingsService,
@@ -67,6 +72,7 @@ import { NotificationsModule } from '../notifications/notifications.module'
   controllers: [
     ApartmentsController,
     ApartmentDesignsController,
+    DesignRequestsController,
     BuildingsController,
     ProjectsController,
     SavedSearchesController,
