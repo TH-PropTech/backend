@@ -19,6 +19,19 @@ export type PaymentAttemptStatus =
   | 'failed'
   | 'expired'
 
+export type GatewayStatus =
+  | 'succeeded'
+  | 'pending'
+  | 'failed'
+  | 'not_found'
+  | 'unavailable'
+
+export type ReconcileStatus =
+  | 'unverified'
+  | 'verified'
+  | 'mismatch'
+  | 'unavailable'
+
 export type PaymentClientChannel = 'web' | 'mobile'
 
 @Entity('payment_attempts')
@@ -81,6 +94,21 @@ export class PaymentAttempt {
   /** MoMo request type the tenant chose; null for other providers. */
   @Column({ type: 'string', nullable: true })
   momoMethod?: MomoPaymentMethod | null
+
+  /** Last status the gateway's own query API reported (admin recheck). Absent on legacy docs. */
+  @Column({ type: 'string', nullable: true })
+  gatewayStatus?: GatewayStatus | null
+
+  @Column({ nullable: true })
+  gatewayCheckedAt?: Date | null
+
+  /** VND amount the gateway reported on the last query; null when it reported none. */
+  @Column({ nullable: true })
+  gatewayAmount?: number | null
+
+  /** Absent/null = unverified (never reconciled against the gateway). */
+  @Column({ type: 'string', nullable: true })
+  reconcileStatus?: ReconcileStatus | null
 
   @CreateDateColumn()
   createdAt!: Date

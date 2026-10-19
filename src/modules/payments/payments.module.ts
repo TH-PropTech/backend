@@ -17,6 +17,7 @@ import { PlatformFeesService } from './services/platform-fees.service'
 import { AdminPaymentsService } from './services/admin-payments.service'
 import { NotificationsModule } from '../notifications/notifications.module'
 import { FabricModule } from '../fabric/fabric.module'
+import { PaymentProvidersModule } from '../mock-bank/payment-providers.module'
 import { WalletsModule } from '../wallets/wallets.module'
 import { ActivityLogModule } from '../activity-log/activity-log.module'
 
@@ -36,6 +37,7 @@ import { ActivityLogModule } from '../activity-log/activity-log.module'
     FabricModule,
     WalletsModule,
     ActivityLogModule,
+    PaymentProvidersModule,
   ],
   controllers: [
     PaymentsController,

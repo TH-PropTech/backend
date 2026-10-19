@@ -1,6 +1,13 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
 import { Transform } from 'class-transformer'
-import { IsIn, IsInt, IsOptional, Matches, Min } from 'class-validator'
+import {
+  IsBoolean,
+  IsIn,
+  IsInt,
+  IsOptional,
+  Matches,
+  Min,
+} from 'class-validator'
 import {
   MOCBANK_ACCOUNT_PATTERN,
   WALLET_BRANDS,
@@ -40,4 +47,18 @@ export class WalletTransactionsQueryDto {
   @IsInt()
   @Min(1)
   limit?: number
+}
+
+export class ReceivingStatusQueryDto {
+  @ApiPropertyOptional({
+    description: 'true để bỏ qua cache và kiểm tra lại ví ngay',
+    example: 'true',
+  })
+  @IsOptional()
+  @Transform(
+    ({ value }: { value: unknown }) =>
+      value === true || value === 'true' || value === '1'
+  )
+  @IsBoolean()
+  refresh?: boolean
 }

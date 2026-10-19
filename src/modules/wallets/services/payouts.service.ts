@@ -14,7 +14,10 @@ import { NotificationsService } from '../../notifications/services/notifications
 import { Payment } from '../../payments/schemas/payment.schema'
 import { Contract } from '../../contracts/schemas/contract.schema'
 import { DepositAgreement } from '../../contracts/schemas/deposit-agreement.schema'
-import { Payout } from '../schemas/payout.schema'
+import type { PaymentProviderName } from '../../mock-bank/providers/payment-provider.port'
+import { User, UserStatus } from '../../users/schemas/user.schema'
+import { Payout, payoutSettlementOf } from '../schemas/payout.schema'
+import { humanizePayoutReason } from '../utils/payout-reason'
 import { Wallet } from '../schemas/wallet.schema'
 import {
   MocbankPayoutClient,
@@ -29,7 +32,19 @@ export type PayoutSource = {
   amount: number
   /** Có khi khách đã trả thẳng vào tài khoản chủ nhà; payout ghi `paid-out` ngay. */
   directReceipt?: { paidAt: Date } | undefined
+  /** Cổng đã thu tiền (từ PaymentAttempt). Cổng thật = tiền ở merchant của sàn, không chuyển hộ. */
+  provider?: PaymentProviderName | undefined
 }
+
+/** Cổng sandbox thật: tiền vào tài khoản merchant của sàn, đối soát bằng API của cổng. */
+export const EXTERNAL_GATEWAY_PROVIDERS: readonly PaymentProviderName[] = [
+  'vnpay',
+  'momo',
+  'zalopay',
+]
+
+const MAX_REPORT_NOTE = 500
+const MAX_ADMIN_RECIPIENTS = 100
 
 export type PayoutOutcome = 'success' | 'failed'
 
@@ -47,6 +62,12 @@ const DUPLICATE_KEY_CODE = 11000
 /** Ví Mộc chỉ là mô phỏng: luôn nói rõ trong thông báo gửi chủ nhà. */
 const SANDBOX_WALLET_NOTE =
   'Ví Mộc là ví điện tử giả lập, đơn vị đối tác con của Techcombank; không phải tiền thật.'
+
+function isExternalProvider(
+  provider: PaymentProviderName | undefined
+): boolean {
+  return provider !== undefined && EXTERNAL_GATEWAY_PROVIDERS.includes(provider)
+}
 
 @Injectable()
 export class PayoutsService {
@@ -68,7 +89,10 @@ export class PayoutsService {
     private readonly paymentRepository?: MongoRepository<Payment>,
     @Optional()
     @InjectRepository(DepositAgreement)
-    private readonly depositAgreementRepository?: MongoRepository<DepositAgreement>
+    private readonly depositAgreementRepository?: MongoRepository<DepositAgreement>,
+    @Optional()
+    @InjectRepository(User)
+    private readonly userRepository?: MongoRepository<User>
   ) {}
 
   /** Tạo đúng một payout cho mỗi payment; gọi lại sẽ trả payout cũ. */
@@ -91,6 +115,11 @@ export class PayoutsService {
       failureReason: null,
       paidOutAt: null,
       directReceipt: false,
+      settlement: source.directReceipt
+        ? 'direct'
+        : isExternalProvider(source.provider)
+          ? 'external'
+          : 'relay',
     })
     try {
       if (source.directReceipt) {
@@ -98,6 +127,11 @@ export class PayoutsService {
           payout,
           source.directReceipt.paidAt
         )
+      }
+      if (isExternalProvider(source.provider)) {
+        // Tiền ở merchant của cổng: không chuyển hộ, không cần ví; nhân viên xử lý ngoài hệ thống.
+        payout.status = 'pending'
+        return await this.payoutRepository.save(payout)
       }
       const saved = await this.payoutRepository.save(payout)
       return this.initiate(saved)
@@ -138,6 +172,62 @@ export class PayoutsService {
       throw new ForbiddenException('PAYOUT_SIMULATION_ONLY')
     }
     return this.settle(payout, outcome)
+  }
+
+  /** Nhân viên đã chuyển tiền ngoài hệ thống: chốt payout external. Gọi lại là vô hại. */
+  async markSettledExternally(id: string, note?: string): Promise<Payout> {
+    const payout = await this.findById(id)
+    if (payoutSettlementOf(payout) !== 'external') {
+      throw new ConflictException('PAYOUT_NOT_EXTERNAL')
+    }
+    if (payout.status === 'paid-out') return payout
+    if (payout.status !== 'pending') {
+      throw new ConflictException('PAYOUT_NOT_PENDING')
+    }
+    const trimmed = note?.trim().slice(0, MAX_REPORT_NOTE)
+    const result = await this.payoutRepository.updateOne(
+      { _id: payout._id, status: 'pending' },
+      {
+        $set: {
+          status: 'paid-out',
+          paidOutAt: new Date(),
+          failureReason: null,
+          ...(trimmed
+            ? {
+                settlementNote: payout.settlementNote
+                  ? `${payout.settlementNote}\n${trimmed}`
+                  : trimmed,
+              }
+            : {}),
+        },
+      }
+    )
+    const fresh = await this.findById(id)
+    if (result.modifiedCount === 0 && fresh.status !== 'paid-out') {
+      throw new ConflictException('PAYOUT_NOT_PENDING')
+    }
+    return fresh
+  }
+
+  /** Chủ nhà báo vấn đề một lần; báo admin. Gọi lại trả payout cũ. */
+  async reportIssue(
+    id: string,
+    landlordId: string,
+    note?: string
+  ): Promise<Payout> {
+    const payout = await this.getForLandlord(id, landlordId)
+    if (payout.reportedAt) return payout
+    const trimmed = note?.trim().slice(0, MAX_REPORT_NOTE)
+    //  cũng khớp tài liệu cũ chưa có cột: chỉ một lần gọi thắng.
+    // `reportedAt: null` also matches legacy docs without the column; one caller wins.
+    const result = await this.payoutRepository.updateOne(
+      { _id: payout._id, reportedAt: null },
+      { $set: { reportedAt: new Date() } }
+    )
+    const fresh = await this.findById(id)
+    if (result.modifiedCount > 0)
+      await this.notifyAdminsReported(fresh, trimmed)
+    return fresh
   }
 
   async retry(id: string): Promise<Payout> {
@@ -255,7 +345,9 @@ export class PayoutsService {
       )
       payout.status = 'failed'
       payout.failureReason = reason
-      return this.payoutRepository.save(payout)
+      const failed = await this.payoutRepository.save(payout)
+      await this.notifyFailed(failed)
+      return failed
     }
   }
 
@@ -282,6 +374,7 @@ export class PayoutsService {
     // Chuyển tiền thành công chỉ ghi nhận trạng thái Payout (đã ở trên);
     // không còn cộng số dư ví nội bộ (xem design.md D3).
     if (outcome === 'success') await this.notifyReceived(fresh)
+    else await this.notifyFailed(fresh)
     return { payout: fresh, replayed: false }
   }
 
@@ -320,6 +413,45 @@ export class PayoutsService {
         }
       )
     )
+  }
+
+  private async notifyFailed(payout: Payout): Promise<void> {
+    const id = payout._id.toHexString()
+    await this.safeNotify(() =>
+      this.notificationsService.createNotificationOnce(
+        payout.landlordId,
+        `payout:${id}:failed:${payout.attempts}`,
+        'Chuyển tiền thất bại',
+        `Khoản ${payout.receivedAmount.toLocaleString('vi-VN')} VND chưa chuyển được. ${humanizePayoutReason(payout.status, payout.failureReason)}`,
+        'PAYOUT_FAILED',
+        { payoutId: id, link: '/profile?tab=wallet' }
+      )
+    )
+  }
+
+  private async notifyAdminsReported(
+    payout: Payout,
+    note: string | undefined
+  ): Promise<void> {
+    const users = this.userRepository
+    if (!users) return
+    const id = payout._id.toHexString()
+    await this.safeNotify(async () => {
+      const admins = await users.find({
+        where: { role: 'admin', status: UserStatus.ACTIVE } as never,
+        take: MAX_ADMIN_RECIPIENTS,
+      })
+      for (const admin of admins) {
+        await this.notificationsService.createNotificationOnce(
+          admin._id.toHexString(),
+          `payout:${id}:reported`,
+          'Chủ nhà báo vấn đề khoản tiền',
+          `Chủ nhà báo vấn đề với khoản ${payout.receivedAmount.toLocaleString('vi-VN')} VND (payout ${id}).${note ? ` Ghi chú: ${note}` : ''}`,
+          'PAYOUT_REPORTED',
+          { payoutId: id, link: '/admin/payment-history' }
+        )
+      }
+    })
   }
 
   private async notifyReceived(payout: Payout): Promise<void> {

@@ -18,7 +18,8 @@ import {
   maskAccountNumber,
   normalizeHolderName,
 } from '../utils/supported-banks'
-import { Payout } from '../schemas/payout.schema'
+import { Payout, type PayoutStatus } from '../schemas/payout.schema'
+import { humanizePayoutReason } from '../utils/payout-reason'
 import { Wallet, type WalletExtraAccount } from '../schemas/wallet.schema'
 import {
   MocbankEscrowClient,
@@ -29,6 +30,10 @@ const DUPLICATE_KEY_CODE = 11000
 const DEFAULT_PAGE_SIZE = 20
 const MAX_PAGE_SIZE = 100
 const PAYABLE_INVOICE_STATUSES = ['unpaid', 'overdue']
+const RECEIVING_CACHE_TTL_MS = 2 * 60 * 1000
+const RECEIVING_CACHE_MAX_USERS = 500
+const RECEIVING_CHECK_TIMEOUT_MS = 4000
+const RECEIVING_ISSUES_LIMIT = 20
 
 export type WalletView = {
   userId: string
@@ -97,9 +102,60 @@ export type PayableInvoice = {
   status: string
 }
 
+export type ReceivingAccountState =
+  | 'active'
+  | 'not_found'
+  | 'unreachable'
+  | 'brand_mismatch'
+
+export type ReceivingAccount = {
+  brand: WalletBrand
+  accountNumberMasked: string
+  accountHolder: string | null
+  state: ReceivingAccountState
+  message: string
+}
+
+export type ReceivingIssue = {
+  payoutId: string
+  contractId: string | null
+  amount: number
+  status: 'awaiting-wallet' | 'pending' | 'failed'
+  reasonCode: string | null
+  reason: string
+  createdAt: string
+  reportedAt: string | null
+}
+
+export type ReceivingStatus = {
+  checkedAt: string
+  hasLinkedWallet: boolean
+  accounts: ReceivingAccount[]
+  lastReceived: {
+    payoutId: string
+    contractId: string | null
+    amount: number
+    paidOutAt: string
+    reference: string | null
+  } | null
+  counts: { awaitingWallet: number; pending: number; failed: number }
+  issues: ReceivingIssue[]
+}
+
+const RECEIVING_MESSAGES: Record<ReceivingAccountState, string> = {
+  active: 'Ví đang hoạt động',
+  not_found: 'Không tìm thấy ví hoặc ví đã bị khóa',
+  unreachable: 'Không kết nối được tới Ví Mộc, thử lại sau',
+  brand_mismatch: 'Số tài khoản không còn thuộc loại ví đã liên kết',
+}
+
 @Injectable()
 export class WalletsService {
   private readonly logger = new Logger(WalletsService.name)
+  private readonly receivingCache = new Map<
+    string,
+    { expiresAt: number; checkedAt: string; accounts: ReceivingAccount[] }
+  >()
 
   constructor(
     @InjectRepository(Wallet)
@@ -316,6 +372,184 @@ export class WalletsService {
       total: merged.length,
       page: safePage,
       limit: safeLimit,
+    }
+  }
+
+  /**
+   * Trạng thái nhận tiền của chủ nhà: kiểm tra ví trực tiếp (cache theo user,
+   * TTL 2 phút) + số liệu payout luôn đọc mới từ DB. Kiểm tra ví không bao
+   * giờ ném lỗi ra ngoài.
+   */
+  async getReceivingStatus(
+    userId: string,
+    refresh = false
+  ): Promise<ReceivingStatus> {
+    const wallet = await this.walletRepository.findOne({ where: { userId } })
+    const linked = wallet?.status === 'linked'
+    const [live, payoutData] = await Promise.all([
+      wallet && linked
+        ? this.checkAccountsCached(userId, wallet, refresh)
+        : null,
+      this.loadReceivingPayouts(userId),
+    ])
+    return {
+      checkedAt: live?.checkedAt ?? new Date().toISOString(),
+      hasLinkedWallet: linked,
+      accounts: live?.accounts ?? [],
+      ...payoutData,
+    }
+  }
+
+  private async checkAccountsCached(
+    userId: string,
+    wallet: Wallet,
+    refresh: boolean
+  ): Promise<{ checkedAt: string; accounts: ReceivingAccount[] }> {
+    const now = Date.now()
+    const hit = this.receivingCache.get(userId)
+    if (!refresh && hit && hit.expiresAt > now) return hit
+    const targets: Array<{
+      brand: WalletBrand
+      accountNumber: string | null | undefined
+      masked: string
+      holder: string | null
+    }> = [
+      {
+        brand: 'mocbank',
+        accountNumber: wallet.mocbankAccountNumber,
+        masked: wallet.accountNumberMasked ?? '',
+        holder: wallet.accountHolder ?? null,
+      },
+      ...(wallet.extraAccounts ?? []).map(item => ({
+        brand: item.brand,
+        accountNumber: item.mocbankAccountNumber,
+        masked: item.accountNumberMasked,
+        holder: item.accountHolder ?? null,
+      })),
+    ]
+    const accounts = await Promise.all(
+      targets.map(async (target): Promise<ReceivingAccount> => {
+        const state = await this.checkAccountState(
+          target.accountNumber,
+          target.brand
+        )
+        return {
+          brand: target.brand,
+          accountNumberMasked: target.masked,
+          accountHolder: target.holder,
+          state,
+          message: RECEIVING_MESSAGES[state],
+        }
+      })
+    )
+    const entry = {
+      expiresAt: now + RECEIVING_CACHE_TTL_MS,
+      checkedAt: new Date(now).toISOString(),
+      accounts,
+    }
+    this.receivingCache.delete(userId)
+    this.receivingCache.set(userId, entry)
+    while (this.receivingCache.size > RECEIVING_CACHE_MAX_USERS) {
+      const oldest = this.receivingCache.keys().next().value
+      if (oldest === undefined) break
+      this.receivingCache.delete(oldest)
+    }
+    return entry
+  }
+
+  private async checkAccountState(
+    accountNumber: string | null | undefined,
+    brand: WalletBrand
+  ): Promise<ReceivingAccountState> {
+    if (!accountNumber) return 'not_found'
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      const resolved = await Promise.race([
+        this.mocbankEscrowClient.resolveAccount(accountNumber),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error('RECEIVING_CHECK_TIMEOUT')),
+            RECEIVING_CHECK_TIMEOUT_MS
+          )
+        }),
+      ])
+      return resolved.brand === brand ? 'active' : 'brand_mismatch'
+    } catch (error) {
+      if (
+        error instanceof MocbankEscrowError &&
+        error.code === 'WALLET_NOT_FOUND'
+      ) {
+        return 'not_found'
+      }
+      this.logger.warn(
+        `receiving check failed: ${(error as Error)?.message ?? String(error)}`
+      )
+      return 'unreachable'
+    } finally {
+      if (timer) clearTimeout(timer)
+    }
+  }
+
+  private async loadReceivingPayouts(
+    userId: string
+  ): Promise<Pick<ReceivingStatus, 'lastReceived' | 'counts' | 'issues'>> {
+    const problemStatuses: PayoutStatus[] = [
+      'awaiting-wallet',
+      'pending',
+      'failed',
+    ]
+    const [lastPaid, problems] = await Promise.all([
+      this.payoutRepository.find({
+        where: { landlordId: userId, status: 'paid-out' },
+        order: { paidOutAt: 'DESC' },
+        take: 1,
+      }),
+      this.payoutRepository.find({
+        where: {
+          landlordId: userId,
+          status: { $in: problemStatuses },
+        } as never,
+        order: { createdAt: 'DESC' },
+      }),
+    ])
+    const last = lastPaid[0]
+    const counts = { awaitingWallet: 0, pending: 0, failed: 0 }
+    for (const payout of problems) {
+      if (payout.status === 'awaiting-wallet') counts.awaitingWallet += 1
+      else if (payout.status === 'pending') counts.pending += 1
+      else if (payout.status === 'failed') counts.failed += 1
+    }
+    const issues: ReceivingIssue[] = [...problems]
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+      .slice(0, RECEIVING_ISSUES_LIMIT)
+      .map(payout => {
+        const reported = (payout as { reportedAt?: Date | null }).reportedAt
+        return {
+          payoutId: payout._id.toHexString(),
+          contractId: payout.contractId ?? null,
+          amount: payout.sentAmount,
+          status: payout.status as ReceivingIssue['status'],
+          reasonCode: payout.failureReason ?? null,
+          reason: humanizePayoutReason(
+            payout.status,
+            payout.failureReason ?? null
+          ),
+          createdAt: payout.createdAt.toISOString(),
+          reportedAt: reported ? new Date(reported).toISOString() : null,
+        }
+      })
+    return {
+      lastReceived: last
+        ? {
+            payoutId: last._id.toHexString(),
+            contractId: last.contractId ?? null,
+            amount: last.receivedAmount,
+            paidOutAt: (last.paidOutAt ?? last.updatedAt).toISOString(),
+            reference: last.relayRef ?? last.txRef ?? null,
+          }
+        : null,
+      counts,
+      issues,
     }
   }
 

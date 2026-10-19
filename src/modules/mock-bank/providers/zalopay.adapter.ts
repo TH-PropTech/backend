@@ -8,6 +8,8 @@ import { ConfigService } from '@nestjs/config'
 import { createHash, randomBytes } from 'node:crypto'
 import type { PaymentsConfig } from '../../../config/configuration'
 import type {
+  GatewayQueryInput,
+  GatewayQueryResult,
   PaymentIntentInput,
   PaymentProviderAdapter,
   ProviderAccountLink,
@@ -19,7 +21,10 @@ import {
   hmacHex,
   isHttpsUrl,
   logField,
+  parseVndAmount,
   postToGateway,
+  stringField,
+  unavailableQuery,
   type GatewayFetcher,
 } from './gateway.util'
 
@@ -106,6 +111,70 @@ export class ZalopayAdapter implements PaymentProviderAdapter {
       txRef: input.txRef,
       redirectUrl: result.order_url,
       expiresAt: input.expiresAt,
+    }
+  }
+
+  /** ZaloPay v2 `/query`: read-only status of an order (mac = HMAC(key1, app_id|app_trans_id|key1)). */
+  async queryStatus(input: GatewayQueryInput): Promise<GatewayQueryResult> {
+    try {
+      const config = this.configService.getOrThrow<PaymentsConfig['zalopay']>(
+        'rentalFlow.payments.zalopay'
+      )
+      const mac = hmacHex(
+        'sha256',
+        config.key1,
+        [config.appId, input.txRef, config.key1].join('|')
+      )
+      const reply = await postToGateway(
+        this.fetcher,
+        config.queryEndpoint,
+        {
+          headers: {
+            'content-type': 'application/x-www-form-urlencoded; charset=UTF-8',
+          },
+          body: new URLSearchParams({
+            app_id: config.appId,
+            app_trans_id: input.txRef,
+            mac,
+          }).toString(),
+        },
+        this.configService.getOrThrow<number>(
+          'rentalFlow.payments.gatewayTimeoutMs'
+        )
+      )
+      const result = asRecord(reply.body)
+      if (!result || typeof result.return_code !== 'number') {
+        this.logger.warn(
+          `ZaloPay query unavailable txRef=${input.txRef} http=${logField(reply.status)}`
+        )
+        return unavailableQuery('ZaloPay không phản hồi hợp lệ.')
+      }
+      const returnCode = result.return_code
+      const subCode = result.sub_return_code
+      const rawCode = `${returnCode}${typeof subCode === 'number' ? `/${subCode}` : ''}`
+      const message =
+        stringField(result, 'sub_return_message') ??
+        stringField(result, 'return_message')
+      const base = {
+        providerTransactionId: stringField(result, 'zp_trans_id'),
+        amount: parseVndAmount(result.amount),
+        rawCode,
+        message: message?.slice(0, 160) ?? null,
+      }
+      if (returnCode === 1) return { state: 'succeeded', ...base }
+      if (returnCode === 3 || result.is_processing === true) {
+        return { state: 'pending', ...base }
+      }
+      // Observed on sandbox: unknown order => return_code 2, sub_return_code -101.
+      if (returnCode === 2 && (subCode === -101 || subCode === -49)) {
+        return { state: 'not_found', ...base }
+      }
+      if (returnCode === -49) return { state: 'not_found', ...base }
+      if (returnCode === 2) return { state: 'failed', ...base }
+      return unavailableQuery('ZaloPay trả mã không xác định.', rawCode)
+    } catch {
+      this.logger.warn(`ZaloPay query error txRef=${input.txRef}`)
+      return unavailableQuery('Không truy vấn được ZaloPay.')
     }
   }
 

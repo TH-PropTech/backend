@@ -58,7 +58,7 @@ export class AdminPaymentsController {
   @Post(':txRef/recheck')
   @ApiOperation({
     summary:
-      'Đọc lại trạng thái mới nhất + dấu hiệu bất thường cho một giao dịch (không gọi cổng ngoài)',
+      'Đối soát một giao dịch với API truy vấn của cổng thật (VNPay/MoMo/ZaloPay) rồi trả dòng mới nhất; chỉ ghi kết quả đối soát, không đổi trạng thái thanh toán/payout',
   })
   async recheck(@Param('txRef') txRef: string): Promise<AdminPaymentRow> {
     const row = await this.service.recheck(txRef)

@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto'
+import type { GatewayQueryResult } from './payment-provider.port'
 
 export type GatewayFetchResponse = {
   ok: boolean
@@ -161,4 +162,29 @@ export function logField(value: unknown): string {
     return String(value)
   }
   return typeof value === 'string' ? value.slice(0, 120) : 'none'
+}
+
+/** Result for a query that could not be answered (transport/parse failure). */
+export function unavailableQuery(
+  message: string,
+  rawCode: string | null = null
+): GatewayQueryResult {
+  return {
+    state: 'unavailable',
+    providerTransactionId: null,
+    amount: null,
+    rawCode,
+    message: message.slice(0, 160),
+  }
+}
+
+/** Derive the sibling query endpoint from the configured create endpoint. */
+export function deriveEndpoint(
+  createEndpoint: string,
+  fromSuffix: string,
+  toSuffix: string
+): string {
+  return createEndpoint.endsWith(fromSuffix)
+    ? `${createEndpoint.slice(0, -fromSuffix.length)}${toSuffix}`
+    : createEndpoint
 }

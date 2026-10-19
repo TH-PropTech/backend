@@ -91,7 +91,9 @@ function makeUser(overrides: Partial<User> = {}): User {
 
 function setup(): {
   service: AdminPaymentsService
-  attempts: Mocks<'find' | 'findOne' | 'findAndCount'>
+  attempts: Mocks<'find' | 'findOne' | 'findAndCount' | 'updateOne'>
+  registry: { getForQuery: jest.Mock }
+  queryStatus: jest.Mock
   payments: Mocks<'find'>
   deposits: Mocks<'find'>
   payouts: Mocks<'find'>
@@ -101,6 +103,11 @@ function setup(): {
     find: jest.fn(),
     findOne: jest.fn(),
     findAndCount: jest.fn(),
+    updateOne: jest.fn().mockResolvedValue({ modifiedCount: 1 }),
+  }
+  const queryStatus = jest.fn()
+  const registry = {
+    getForQuery: jest.fn().mockReturnValue({ name: 'momo', queryStatus }),
   }
   const payments = { find: jest.fn() }
   const deposits = { find: jest.fn() }
@@ -111,9 +118,19 @@ function setup(): {
     payments as never,
     deposits as never,
     payouts as never,
-    users as never
+    users as never,
+    registry as never
   )
-  return { service, attempts, payments, deposits, payouts, users }
+  return {
+    service,
+    attempts,
+    payments,
+    deposits,
+    payouts,
+    users,
+    registry,
+    queryStatus,
+  }
 }
 
 describe('AdminPaymentsService.list', () => {
@@ -139,6 +156,16 @@ describe('AdminPaymentsService.list', () => {
     expect(row.paymentStatus).toBe('paid')
     expect(row.payout?.status).toBe('paid-out')
     expect(row.payout?.relayRef).toBe('MOCBANK-TX-1')
+    expect(row.payout?.settlement).toBe('relay')
+    // Legacy attempt (no reconcile columns) reads as unverified, no live call.
+    expect(row.gateway).toEqual({
+      kind: 'external',
+      reconcileStatus: 'unverified',
+      gatewayStatus: null,
+      providerTransactionId: 'gw-1',
+      checkedAt: null,
+    })
+    expect(row.anomalies).toContain('awaiting-reconciliation')
   })
 
   it('flags a paid payment with no payout row', async () => {
@@ -223,7 +250,120 @@ describe('AdminPaymentsService.list', () => {
   })
 })
 
+describe('AdminPaymentsService gateway view', () => {
+  it('marks internal providers not_applicable and external ones with stored values', async () => {
+    const { service, attempts, payments, deposits, payouts, users } = setup()
+    const checkedAt = new Date('2026-10-01T00:00:00.000Z')
+    attempts.findAndCount.mockResolvedValue([
+      [
+        makeAttempt({ provider: 'mock-bank', txRef: 'A' }),
+        makeAttempt({ provider: 'mocbank', txRef: 'B' }),
+        makeAttempt({
+          provider: 'zalopay',
+          txRef: 'C',
+          gatewayStatus: 'succeeded',
+          reconcileStatus: 'verified',
+          gatewayCheckedAt: checkedAt,
+        }),
+      ],
+      3,
+    ])
+    payments.find.mockResolvedValue([makePayment()])
+    deposits.find.mockResolvedValue([])
+    payouts.find.mockResolvedValue([
+      makePayout({ settlement: 'external', relayRef: null }),
+    ])
+    users.find.mockResolvedValue([])
+
+    const { items } = await service.list({})
+
+    expect(items[0]!.gateway).toMatchObject({
+      kind: 'internal',
+      reconcileStatus: 'not_applicable',
+    })
+    expect(items[0]!.anomalies).not.toContain('awaiting-reconciliation')
+    expect(items[1]!.gateway.kind).toBe('internal')
+    expect(items[2]!.gateway).toEqual({
+      kind: 'external',
+      reconcileStatus: 'verified',
+      gatewayStatus: 'succeeded',
+      providerTransactionId: 'gw-1',
+      checkedAt: checkedAt.toISOString(),
+    })
+    expect(items[2]!.anomalies).not.toContain('awaiting-reconciliation')
+    expect(items[2]!.payout?.settlement).toBe('external')
+  })
+
+  it('derives gateway anomalies from stored values', async () => {
+    const { service, attempts, payments, deposits, payouts, users } = setup()
+    attempts.findAndCount.mockResolvedValue([
+      [
+        makeAttempt({ txRef: 'N', gatewayStatus: 'not_found' }),
+        makeAttempt({
+          txRef: 'P',
+          status: 'failed',
+          gatewayStatus: 'succeeded',
+          gatewayAmount: 5_000_000,
+        }),
+        makeAttempt({
+          txRef: 'M',
+          gatewayStatus: 'succeeded',
+          gatewayAmount: 4_000_000,
+          reconcileStatus: 'mismatch',
+        }),
+      ],
+      3,
+    ])
+    payments.find.mockResolvedValue([makePayment()])
+    deposits.find.mockResolvedValue([])
+    payouts.find.mockResolvedValue([])
+    users.find.mockResolvedValue([])
+
+    const { items } = await service.list({})
+
+    expect(items[0]!.anomalies).toContain('gateway-not-confirmed')
+    expect(items[1]!.anomalies).toContain('gateway-paid-not-settled')
+    expect(items[2]!.anomalies).toContain('gateway-amount-mismatch')
+    expect(items[2]!.anomalies).not.toContain('awaiting-reconciliation')
+  })
+})
+
 describe('AdminPaymentsService.recheck', () => {
+  function recheckSetup(
+    attempt: PaymentAttempt,
+    afterUpdate?: Partial<PaymentAttempt>
+  ): ReturnType<typeof setup> {
+    const ctx = setup()
+    ctx.attempts.findOne
+      .mockResolvedValueOnce(attempt)
+      .mockResolvedValue({ ...attempt, ...afterUpdate })
+    ctx.payments.find.mockResolvedValue([makePayment()])
+    ctx.deposits.find.mockResolvedValue([])
+    ctx.payouts.find.mockResolvedValue([])
+    ctx.users.find.mockResolvedValue([])
+    return ctx
+  }
+  const gw = (
+    over: Partial<{
+      state: string
+      amount: number | null
+    }> = {}
+  ): object => ({
+    state: 'succeeded',
+    providerTransactionId: 'gw-1',
+    amount: 5_000_000,
+    rawCode: '0',
+    message: null,
+    ...over,
+  })
+  const storedSet = (ctx: ReturnType<typeof setup>): Record<string, unknown> =>
+    (
+      ctx.attempts.updateOne.mock.calls[0] as [
+        unknown,
+        { $set: Record<string, unknown> },
+      ]
+    )[1].$set
+
   it('returns null when the txRef does not exist', async () => {
     const { service, attempts } = setup()
     attempts.findOne.mockResolvedValue(null)
@@ -231,17 +371,106 @@ describe('AdminPaymentsService.recheck', () => {
     await expect(service.recheck('missing')).resolves.toBeNull()
   })
 
-  it('re-hydrates a single attempt by txRef', async () => {
-    const { service, attempts, payments, deposits, payouts, users } = setup()
-    attempts.findOne.mockResolvedValue(makeAttempt())
-    payments.find.mockResolvedValue([makePayment()])
-    deposits.find.mockResolvedValue([])
-    payouts.find.mockResolvedValue([makePayout()])
-    users.find.mockResolvedValue([])
+  it('verifies a succeeded attempt the gateway confirms, writing only reconcile fields', async () => {
+    const attempt = makeAttempt()
+    const ctx = recheckSetup(attempt, {
+      gatewayStatus: 'succeeded',
+      reconcileStatus: 'verified',
+      gatewayCheckedAt: new Date(),
+    })
+    ctx.queryStatus.mockResolvedValue(gw())
 
-    const row = await service.recheck('TX-1')
+    const row = await ctx.service.recheck('TX-1')
 
-    expect(row?.txRef).toBe('TX-1')
-    expect(row?.payout?.status).toBe('paid-out')
+    expect(ctx.registry.getForQuery).toHaveBeenCalledWith('momo')
+    expect(ctx.queryStatus).toHaveBeenCalledWith({
+      txRef: 'TX-1',
+      providerTransactionId: 'gw-1',
+      amount: 5_000_000,
+      createdAt: attempt.createdAt,
+    })
+    expect(ctx.attempts.updateOne).toHaveBeenCalledWith(
+      { _id: attempt._id },
+      expect.any(Object)
+    )
+    const set = storedSet(ctx)
+    expect(Object.keys(set).sort()).toEqual([
+      'gatewayAmount',
+      'gatewayCheckedAt',
+      'gatewayStatus',
+      'reconcileStatus',
+    ])
+    expect(set).toMatchObject({
+      gatewayStatus: 'succeeded',
+      reconcileStatus: 'verified',
+    })
+    expect(row?.gateway.reconcileStatus).toBe('verified')
+    expect(row?.attemptStatus).toBe('succeeded')
+    expect(row?.anomalies).not.toContain('awaiting-reconciliation')
+  })
+
+  it.each([
+    ['gateway failed vs paid attempt', 'succeeded', gw({ state: 'failed' })],
+    [
+      'gateway not_found vs paid attempt',
+      'succeeded',
+      gw({ state: 'not_found' }),
+    ],
+    ['gateway paid vs unpaid attempt', 'failed', gw()],
+    ['amount differs', 'succeeded', gw({ amount: 1_000 })],
+  ] as const)('flags mismatch: %s', async (_name, status, result) => {
+    const ctx = recheckSetup(makeAttempt({ status }))
+    ctx.queryStatus.mockResolvedValue(result)
+
+    await ctx.service.recheck('TX-1')
+
+    expect(storedSet(ctx)).toMatchObject({ reconcileStatus: 'mismatch' })
+  })
+
+  it('keeps unverified while the gateway is pending and records unavailable on failure', async () => {
+    const pending = recheckSetup(makeAttempt())
+    pending.queryStatus.mockResolvedValue(gw({ state: 'pending' }))
+    await pending.service.recheck('TX-1')
+    expect(storedSet(pending)).toMatchObject({
+      gatewayStatus: 'pending',
+      reconcileStatus: 'unverified',
+    })
+
+    const down = recheckSetup(makeAttempt())
+    down.queryStatus.mockResolvedValue(
+      gw({ state: 'unavailable', amount: null })
+    )
+    await down.service.recheck('TX-1')
+    expect(storedSet(down)).toMatchObject({
+      gatewayStatus: 'unavailable',
+      reconcileStatus: 'unavailable',
+    })
+
+    const boom = recheckSetup(makeAttempt())
+    boom.queryStatus.mockRejectedValue(new Error('adapter bug'))
+    await expect(boom.service.recheck('TX-1')).resolves.not.toBeNull()
+    expect(storedSet(boom)).toMatchObject({ reconcileStatus: 'unavailable' })
+  })
+
+  it('never writes attempt, payment or payout status', async () => {
+    const ctx = recheckSetup(makeAttempt({ status: 'processing' }))
+    ctx.queryStatus.mockResolvedValue(gw())
+
+    await ctx.service.recheck('TX-1')
+
+    expect(storedSet(ctx)).not.toHaveProperty('status')
+    expect(ctx.attempts.updateOne).toHaveBeenCalledTimes(1)
+    expect(ctx.payments.find).toHaveBeenCalled()
+    expect(Object.keys(ctx.payouts)).toEqual(['find'])
+  })
+
+  it('does not call a gateway for internal providers', async () => {
+    const ctx = recheckSetup(makeAttempt({ provider: 'mock-bank' }))
+
+    const row = await ctx.service.recheck('TX-1')
+
+    expect(ctx.registry.getForQuery).not.toHaveBeenCalled()
+    expect(ctx.attempts.updateOne).not.toHaveBeenCalled()
+    expect(row?.gateway.reconcileStatus).toBe('not_applicable')
   })
 })

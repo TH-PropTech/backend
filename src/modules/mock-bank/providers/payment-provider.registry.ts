@@ -109,6 +109,19 @@ export class PaymentProviderRegistry {
   }
 
   /**
+   * Adapter for read-only reconciliation of an existing attempt. Deliberately
+   * not gated by the allow-list (like verifierFor): a provider disabled for
+   * new payments can still be queried for attempts already made.
+   */
+  getForQuery(name: PaymentProviderName): PaymentProviderAdapter | null {
+    return (
+      (this.adapters as Partial<Record<string, PaymentProviderAdapter>>)[
+        name
+      ] ?? null
+    )
+  }
+
+  /**
    * Verifier for an existing attempt's provider. Deliberately not gated by
    * the allow-list so attempts created before a rollback can still settle.
    */

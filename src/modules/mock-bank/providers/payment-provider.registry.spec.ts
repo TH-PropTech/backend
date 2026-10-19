@@ -30,6 +30,16 @@ describe('PaymentProviderRegistry', () => {
     )
   }
 
+  it('hands out an adapter for read-only queries even when the provider is not enabled', () => {
+    const registry = createRegistry(['mock-bank'])
+
+    expect(() => registry.get('zalopay')).toThrow(
+      'PAYMENT_PROVIDER_NOT_ENABLED'
+    )
+    expect(registry.getForQuery('zalopay')?.name).toBe('zalopay')
+    expect(registry.getForQuery('techcombank')).toBeNull()
+  })
+
   it('returns the requested enabled adapter and defaults to the first enabled one', () => {
     const registry = createRegistry(['vnpay', 'momo'])
 

@@ -30,6 +30,8 @@ function setup(): {
     | 'getByTxRefForLandlord'
     | 'getForLandlord'
     | 'retry'
+    | 'reportIssue'
+    | 'markSettledExternally'
     | 'getContractSummary',
     jest.Mock
   >
@@ -39,6 +41,10 @@ function setup(): {
     getByTxRefForLandlord: jest.fn().mockResolvedValue({ txRef: 'T' }),
     getForLandlord: jest.fn().mockResolvedValue({ id: 'p1' }),
     retry: jest.fn().mockResolvedValue({ status: 'pending' }),
+    reportIssue: jest.fn().mockResolvedValue({ directReceipt: false }),
+    markSettledExternally: jest
+      .fn()
+      .mockResolvedValue({ settlement: 'external' }),
     getContractSummary: jest.fn().mockResolvedValue({ contractId: 'c1' }),
   }
   return { controller: new PayoutsController(service as never), service }
@@ -80,6 +86,25 @@ describe('PayoutsController', () => {
 
     await expect(controller.retry('p1')).resolves.toEqual({ status: 'pending' })
     expect(service.retry).toHaveBeenCalledWith('p1')
+  })
+
+  it('exposes settlement and restricts the new endpoints by role', async () => {
+    const { controller, service } = setup()
+
+    await expect(
+      controller.reportIssue('p1', { _id: 'l1' }, { note: 'x' })
+    ).resolves.toMatchObject({ settlement: 'relay' })
+    expect(service.reportIssue).toHaveBeenCalledWith('p1', 'l1', 'x')
+    await controller.markSettledExternally('p1', { note: 'n' })
+    expect(service.markSettledExternally).toHaveBeenCalledWith('p1', 'n')
+
+    const reflector = new Reflector()
+    expect(
+      reflector.get(ROLES_KEY, getControllerHandler('reportIssue'))
+    ).toEqual(['landlord'])
+    expect(
+      reflector.get(ROLES_KEY, getControllerHandler('markSettledExternally'))
+    ).toEqual(['admin'])
   })
 
   it('throws 401 when the token has no user id', () => {

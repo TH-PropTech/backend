@@ -1,4 +1,5 @@
 import {
+  Body,
   Controller,
   Get,
   Param,
@@ -7,7 +8,13 @@ import {
   UnauthorizedException,
   UseGuards,
 } from '@nestjs/common'
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiPropertyOptional,
+  ApiTags,
+} from '@nestjs/swagger'
+import { IsOptional, IsString, MaxLength } from 'class-validator'
 import { CurrentUser } from '../../../common/decorators/current-user.decorator'
 import { Roles } from '../../../common/decorators/roles.decorator'
 import { RolesGuard } from '../../../common/guards/roles.guard'
@@ -17,8 +24,35 @@ import {
   PayoutsService,
   type PayoutListResult,
 } from '../services/payouts.service'
-import type { Payout } from '../schemas/payout.schema'
+import {
+  payoutSettlementOf,
+  type Payout,
+  type PayoutSettlement,
+} from '../schemas/payout.schema'
 import type { ContractPayoutSummaryDto } from '../dto/contract-payout-summary.dto'
+
+export class ReportPayoutIssueBody {
+  @ApiPropertyOptional({ maxLength: 500 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  note?: string
+}
+
+export class MarkSettledExternallyBody {
+  @ApiPropertyOptional({ maxLength: 500 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  note?: string
+}
+
+type PayoutView = Payout & { settlement: PayoutSettlement }
+
+const withSettlement = (payout: Payout): PayoutView => ({
+  ...payout,
+  settlement: payoutSettlementOf(payout),
+})
 
 @ApiTags('payouts')
 @ApiBearerAuth()
@@ -34,12 +68,13 @@ export class PayoutsController {
     @CurrentUser() user: UserPayload,
     @Query('page') page?: string,
     @Query('limit') limit?: string
-  ): Promise<PayoutListResult> {
-    return this.payoutsService.listForLandlord(
-      this.requireUserId(user),
-      Number(page),
-      Number(limit)
-    )
+  ): Promise<Omit<PayoutListResult, 'items'> & { items: PayoutView[] }> {
+    return this.payoutsService
+      .listForLandlord(this.requireUserId(user), Number(page), Number(limit))
+      .then(result => ({
+        ...result,
+        items: (result.items ?? []).map(withSettlement),
+      }))
   }
 
   @Get('by-tx/:txRef')
@@ -49,11 +84,10 @@ export class PayoutsController {
   getByTxRef(
     @Param('txRef') txRef: string,
     @CurrentUser() user: UserPayload
-  ): Promise<Payout> {
-    return this.payoutsService.getByTxRefForLandlord(
-      txRef,
-      this.requireUserId(user)
-    )
+  ): Promise<PayoutView> {
+    return this.payoutsService
+      .getByTxRefForLandlord(txRef, this.requireUserId(user))
+      .then(withSettlement)
   }
 
   @Get(':id')
@@ -63,8 +97,10 @@ export class PayoutsController {
   getOne(
     @Param('id') id: string,
     @CurrentUser() user: UserPayload
-  ): Promise<Payout> {
-    return this.payoutsService.getForLandlord(id, this.requireUserId(user))
+  ): Promise<PayoutView> {
+    return this.payoutsService
+      .getForLandlord(id, this.requireUserId(user))
+      .then(withSettlement)
   }
 
   @Get('contracts/:contractId/summary')
@@ -95,6 +131,38 @@ export class PayoutsController {
   @ApiOperation({ summary: 'Retry a failed payout (admin)' })
   retry(@Param('id') id: string): Promise<Payout> {
     return this.payoutsService.retry(id)
+  }
+
+  @Post(':id/report-issue')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('landlord')
+  @ApiOperation({
+    summary: 'Chủ nhà báo vấn đề với khoản tiền (một lần, báo admin)',
+  })
+  reportIssue(
+    @Param('id') id: string,
+    @CurrentUser() user: UserPayload,
+    @Body() body: ReportPayoutIssueBody
+  ): Promise<PayoutView> {
+    return this.payoutsService
+      .reportIssue(id, this.requireUserId(user), body?.note)
+      .then(withSettlement)
+  }
+
+  @Post(':id/mark-settled-externally')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  @ApiOperation({
+    summary:
+      'Admin đánh dấu khoản qua cổng thật đã xử lý ngoài hệ thống (409 nếu không phải external/pending)',
+  })
+  markSettledExternally(
+    @Param('id') id: string,
+    @Body() body: MarkSettledExternallyBody
+  ): Promise<PayoutView> {
+    return this.payoutsService
+      .markSettledExternally(id, body?.note)
+      .then(withSettlement)
   }
 
   private requireUserId(user: UserPayload): string {

@@ -252,7 +252,8 @@ describe('PayoutsService.settleForLandlord', () => {
     const { service, payouts, notifications } = withPending()
     payouts.updateOne.mockResolvedValue({ modifiedCount: 1 })
     await service.settleForLandlord('PAYOUT-1', 'failed', LANDLORD)
-    expect(notifications.createNotificationOnce).not.toHaveBeenCalled()
+    expect(notifications.createNotificationOnce).toHaveBeenCalledTimes(1)
+    notifications.createNotificationOnce.mockClear()
 
     payouts.updateOne.mockResolvedValue({ modifiedCount: 0 })
     await service.settleForLandlord('PAYOUT-1', 'success', LANDLORD)
@@ -260,7 +261,7 @@ describe('PayoutsService.settleForLandlord', () => {
     expect(notifications.createNotificationOnce).not.toHaveBeenCalled()
   })
 
-  it('marks failed with a reason and does not send a received notification', async () => {
+  it('marks failed with a reason and tells the landlord, not "received"', async () => {
     const { service, payouts, notifications, pending } = withPending()
     payouts.updateOne.mockImplementation(() => {
       pending.status = 'failed'
@@ -276,7 +277,15 @@ describe('PayoutsService.settleForLandlord', () => {
 
     expect(result.payout.status).toBe('failed')
     expect(result.payout.failureReason).toBe('TRANSFER_FAILED')
-    expect(notifications.createNotificationOnce).not.toHaveBeenCalled()
+    expect(notifications.createNotificationOnce).toHaveBeenCalledTimes(1)
+    expect(notifications.createNotificationOnce).toHaveBeenCalledWith(
+      LANDLORD,
+      expect.stringMatching(/^payout:[0-9a-f]{24}:failed:1$/),
+      'Chuyển tiền thất bại',
+      expect.stringContaining('5.000.000'),
+      'PAYOUT_FAILED',
+      expect.objectContaining({ link: '/profile?tab=wallet' })
+    )
   })
 
   it('is idempotent when the payout is already final', async () => {
@@ -628,7 +637,7 @@ describe('PayoutsService simulated relay to the landlord Ví Mộc wallet', () =
     )
   })
 
-  it('marks the payout failed with the bank reason and sends no success notification', async () => {
+  it('marks the payout failed with the bank reason and sends only the failure notification', async () => {
     const { service, notifications } = relaySetup({
       payout: jest
         .fn()
@@ -641,7 +650,15 @@ describe('PayoutsService simulated relay to the landlord Ví Mộc wallet', () =
       status: 'failed',
       failureReason: 'INSUFFICIENT_BALANCE',
     })
-    expect(notifications.createNotificationOnce).not.toHaveBeenCalled()
+    expect(notifications.createNotificationOnce).toHaveBeenCalledTimes(1)
+    expect(notifications.createNotificationOnce).toHaveBeenCalledWith(
+      LANDLORD,
+      expect.stringContaining(':failed:1'),
+      'Chuyển tiền thất bại',
+      expect.any(String),
+      'PAYOUT_FAILED',
+      expect.objectContaining({ link: '/profile?tab=wallet' })
+    )
   })
 
   it('maps an unexpected error to TRANSFER_FAILED', async () => {
@@ -888,5 +905,209 @@ describe('PayoutsService.getContractSummary', () => {
         isLandlordScoped: false,
       })
     ).resolves.toMatchObject({ contractId })
+  })
+})
+
+describe('PayoutsService real gateway (external settlement)', () => {
+  function externalSetup(): ReturnType<typeof setup> & {
+    client: { isConfigured: jest.Mock; payout: jest.Mock }
+    users: Mocks<'find'>
+  } {
+    const base = setup()
+    const client = {
+      isConfigured: jest.fn().mockReturnValue(true),
+      payout: jest.fn().mockResolvedValue({ transactionCode: 'TX' }),
+    }
+    const users = { find: jest.fn() }
+    base.payouts.findOne.mockResolvedValue(null)
+    base.wallets.findOne.mockResolvedValue({
+      _id: walletId,
+      status: 'linked',
+      provider: 'mocbank',
+      mocbankAccountNumber: '9704',
+    })
+    const service = new PayoutsService(
+      base.payouts as never,
+      base.wallets as never,
+      base.notifications as never,
+      client as never,
+      undefined,
+      undefined,
+      undefined,
+      users as never
+    )
+    return { ...base, service, client, users }
+  }
+
+  it.each(['vnpay', 'momo', 'zalopay'] as const)(
+    'keeps a %s payment pending/external with no relay and no wallet lookup',
+    async provider => {
+      const { service, client, wallets, notifications } = externalSetup()
+
+      const payout = await service.createForPayment({ ...source, provider })
+
+      expect(payout).toMatchObject({
+        status: 'pending',
+        settlement: 'external',
+        failureReason: null,
+        directReceipt: false,
+        walletId: null,
+        txRef: null,
+      })
+      expect(payout.relayRef).toBeUndefined()
+      expect(client.payout).not.toHaveBeenCalled()
+      expect(wallets.findOne).not.toHaveBeenCalled()
+      expect(notifications.createNotificationOnce).not.toHaveBeenCalled()
+    }
+  )
+
+  it('still relays for internal providers and records direct Ví Mộc receipts', async () => {
+    const { service, client } = externalSetup()
+    const relayed = await service.createForPayment({
+      ...source,
+      provider: 'mock-bank',
+    })
+    expect(relayed.settlement).toBe('relay')
+    expect(client.payout).toHaveBeenCalledTimes(1)
+
+    const direct = await externalSetup().service.createForPayment({
+      ...source,
+      paymentId: 'pay-2',
+      provider: 'mocbank',
+      directReceipt: { paidAt: new Date() },
+    })
+    expect(direct).toMatchObject({ settlement: 'direct', status: 'paid-out' })
+  })
+
+  describe('markSettledExternally', () => {
+    const external = (o: Partial<Payout> = {}): Payout =>
+      makePayout({ settlement: 'external', txRef: null, walletId: null, ...o })
+
+    it('pays out a pending external payout and appends the note', async () => {
+      const { service, payouts } = externalSetup()
+      const pending = external({ settlementNote: 'đã gọi' })
+      payouts.findOne.mockResolvedValue(pending)
+      payouts.updateOne.mockImplementation(
+        (_f: unknown, update: { $set: Partial<Payout> }) => {
+          Object.assign(pending, update.$set)
+          return Promise.resolve({ modifiedCount: 1 })
+        }
+      )
+
+      const result = await service.markSettledExternally(
+        pending._id.toHexString(),
+        ' CK ngân hàng '
+      )
+
+      expect(payouts.updateOne).toHaveBeenCalledWith(
+        { _id: pending._id, status: 'pending' },
+        {
+          $set: expect.objectContaining({
+            status: 'paid-out',
+            paidOutAt: expect.any(Date) as Date,
+            settlementNote: 'đã gọi\nCK ngân hàng',
+          }) as object,
+        }
+      )
+      expect(result.status).toBe('paid-out')
+    })
+
+    it('is idempotent when already paid-out', async () => {
+      const { service, payouts } = externalSetup()
+      const done = external({ status: 'paid-out', paidOutAt: new Date() })
+      payouts.findOne.mockResolvedValue(done)
+
+      await expect(
+        service.markSettledExternally(done._id.toHexString())
+      ).resolves.toBe(done)
+      expect(payouts.updateOne).not.toHaveBeenCalled()
+    })
+
+    it('409s for non-external and non-pending payouts', async () => {
+      const { service, payouts } = externalSetup()
+      const relay = makePayout()
+      payouts.findOne.mockResolvedValue(relay)
+      await expect(
+        service.markSettledExternally(relay._id.toHexString())
+      ).rejects.toThrow(new ConflictException('PAYOUT_NOT_EXTERNAL'))
+
+      const failed = external({ status: 'failed' })
+      payouts.findOne.mockResolvedValue(failed)
+      await expect(
+        service.markSettledExternally(failed._id.toHexString())
+      ).rejects.toThrow(new ConflictException('PAYOUT_NOT_PENDING'))
+    })
+  })
+
+  describe('reportIssue', () => {
+    const admin = (id: string): { _id: ObjectId } => ({
+      _id: new ObjectId(id),
+    })
+
+    it('sets reportedAt once and notifies active admins', async () => {
+      const { service, payouts, users, notifications } = externalSetup()
+      const payout = makePayout({ status: 'failed' })
+      payouts.findOne.mockResolvedValue(payout)
+      payouts.updateOne.mockImplementation(
+        (_f: unknown, update: { $set: Partial<Payout> }) => {
+          Object.assign(payout, update.$set)
+          return Promise.resolve({ modifiedCount: 1 })
+        }
+      )
+      users.find.mockResolvedValue([
+        admin('507f1f77bcf86cd799439011'),
+        admin('507f1f77bcf86cd799439012'),
+      ])
+
+      const result = await service.reportIssue(
+        payout._id.toHexString(),
+        LANDLORD,
+        'chưa nhận'
+      )
+
+      expect(result.reportedAt).toBeInstanceOf(Date)
+      expect(payouts.updateOne).toHaveBeenCalledWith(
+        { _id: payout._id, reportedAt: null },
+        { $set: { reportedAt: expect.any(Date) as Date } }
+      )
+      expect(users.find).toHaveBeenCalledWith(
+        expect.objectContaining({ take: 100 })
+      )
+      expect(notifications.createNotificationOnce).toHaveBeenCalledTimes(2)
+      expect(notifications.createNotificationOnce).toHaveBeenCalledWith(
+        '507f1f77bcf86cd799439011',
+        `payout:${payout._id.toHexString()}:reported`,
+        expect.any(String),
+        expect.stringContaining('chưa nhận'),
+        'PAYOUT_REPORTED',
+        expect.objectContaining({ link: '/admin/payment-history' })
+      )
+    })
+
+    it('returns the existing reportedAt without notifying again', async () => {
+      const { service, payouts, notifications } = externalSetup()
+      const reportedAt = new Date('2026-01-01')
+      const payout = makePayout({ reportedAt })
+      payouts.findOne.mockResolvedValue(payout)
+
+      const result = await service.reportIssue(
+        payout._id.toHexString(),
+        LANDLORD
+      )
+
+      expect(result.reportedAt).toBe(reportedAt)
+      expect(payouts.updateOne).not.toHaveBeenCalled()
+      expect(notifications.createNotificationOnce).not.toHaveBeenCalled()
+    })
+
+    it('404s for a payout that belongs to someone else', async () => {
+      const { service, payouts } = externalSetup()
+      const payout = makePayout()
+      payouts.findOne.mockResolvedValue(payout)
+
+      await expect(
+        service.reportIssue(payout._id.toHexString(), 'other-landlord')
+      ).rejects.toThrow(NotFoundException)
+    })
   })
 })

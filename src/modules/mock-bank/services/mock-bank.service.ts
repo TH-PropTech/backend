@@ -886,6 +886,7 @@ export class MockBankService {
         contractId: payment.contractId ?? null,
         landlordId: payment.landlordId,
         amount: payment.amount,
+        provider: attempt.provider,
         directReceipt: isDirectReceiptAttempt(attempt)
           ? { paidAt: payment.paidAt ?? new Date() }
           : undefined,
@@ -1489,6 +1490,7 @@ export class MockBankService {
         contractId: agreement.linkedLeaseContractId ?? null,
         landlordId: agreement.landlordId,
         amount: agreement.amount,
+        provider: attempt.provider,
         directReceipt: isDirectReceiptAttempt(attempt) ? { paidAt } : undefined,
       })
     } catch (error) {
