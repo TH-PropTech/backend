@@ -21,6 +21,11 @@ import { OwnershipTransferResolver } from '../../contracts/services/ownership-tr
 import { resolveEffectiveCommercial } from '../../contracts/commercial/resolve-effective-commercial'
 import { RentalTransactionEventService } from '../../rental/services/rental-transaction-event.service'
 import { PayoutsService } from '../../wallets/services/payouts.service'
+import { PlatformFeeScheduleRepository } from '../utils/platform-fee-schedule.repository'
+
+/** Link chuông thông báo -> tab ví trong hồ sơ (nơi chủ nhà thanh toán hóa đơn). */
+const PLATFORM_FEE_NOTIFICATION_LINK = '/profile?tab=wallet'
+const DEFAULT_LANDLORD_FEE_DUE_DAYS = 7
 
 @Injectable()
 export class PaymentsService {
@@ -40,8 +45,56 @@ export class PaymentsService {
     // payments.module.ts import trực tiếp (né vòng contracts <-> payments)
     // → tra cứu lazy qua ModuleRef tại điểm gọi .canAccessPayment(...),
     // giữ nguyên ngữ nghĩa optional cũ (không có thì dùng fallback check).
-    @Optional() private readonly moduleRef?: ModuleRef
+    @Optional() private readonly moduleRef?: ModuleRef,
+    @Optional()
+    private readonly feeScheduleRepository?: PlatformFeeScheduleRepository
   ) {}
+
+  /** dueDaysAfterActivation theo biểu phí đã chốt trong snapshot hợp đồng; mặc định 7. */
+  private async resolveLandlordDueDays(contract: Contract): Promise<number> {
+    const snapshot = contract.feeSnapshot
+    if (!snapshot || !this.feeScheduleRepository)
+      return DEFAULT_LANDLORD_FEE_DUE_DAYS
+    try {
+      const schedule = await this.feeScheduleRepository.findOne({
+        where: { scheduleId: snapshot.scheduleId, version: snapshot.version },
+      })
+      const days = schedule?.rules?.landlordCommission?.dueDaysAfterActivation
+      return typeof days === 'number' && Number.isFinite(days) && days >= 0
+        ? days
+        : DEFAULT_LANDLORD_FEE_DUE_DAYS
+    } catch {
+      return DEFAULT_LANDLORD_FEE_DUE_DAYS
+    }
+  }
+
+  private async notifyPlatformFeeIssued(invoice: Payment): Promise<void> {
+    if (!this.notificationsService || !invoice.payerId) return
+    try {
+      const paymentId = invoice._id.toHexString()
+      const dueText = new Intl.DateTimeFormat('vi-VN', {
+        timeZone: 'Asia/Ho_Chi_Minh',
+      }).format(invoice.dueDate)
+      await this.notificationsService.createNotificationOnce(
+        invoice.payerId,
+        `fee:${paymentId}:issued`,
+        'Phí hoa hồng cần thanh toán',
+        `Bạn có khoản phí hoa hồng ${invoice.amount.toLocaleString('vi-VN')} VND cần thanh toán trước ngày ${dueText}. Quét mã Ví Mộc để thanh toán.`,
+        'PLATFORM_FEE_INVOICE',
+        {
+          paymentId,
+          contractId: invoice.contractId,
+          amount: invoice.amount,
+          dueDate: invoice.dueDate.toISOString(),
+          link: PLATFORM_FEE_NOTIFICATION_LINK,
+        }
+      )
+    } catch (error) {
+      this.logger.warn(
+        `Platform fee notification failed for ${invoice._id.toHexString()}: ${error instanceof Error ? error.message : 'unknown'}`
+      )
+    }
+  }
 
   private resolveOwnershipTransferResolver():
     | OwnershipTransferResolver
@@ -151,7 +204,10 @@ export class PaymentsService {
         line.payerRole === 'landlord' ? contract.landlordId : contract.tenantId
       const dueDate = new Date()
       dueDate.setDate(
-        dueDate.getDate() + (line.payerRole === 'landlord' ? 7 : 1)
+        dueDate.getDate() +
+          (line.payerRole === 'landlord'
+            ? await this.resolveLandlordDueDays(contract)
+            : 1)
       )
       const invoice = this.paymentRepository.create({
         contractId: contract._id.toHexString(),
@@ -184,6 +240,8 @@ export class PaymentsService {
         refs: { paymentId: saved._id.toHexString() },
         transitionKey: `fee:${saved._id.toHexString()}:issued`,
       })
+      if (line.payerRole === 'landlord')
+        await this.notifyPlatformFeeIssued(saved)
       created.push(saved)
     }
     return created
@@ -362,8 +420,14 @@ export class PaymentsService {
       if (!shouldMarkOverdue && !shouldRemind) continue
       if (shouldRemind) {
         if (!this.notificationsService) continue
+        const recipientId =
+          payment.type === 'platform-fee' &&
+          payment.payerRole === 'landlord' &&
+          payment.payerId
+            ? payment.payerId
+            : payment.tenantId
         await this.notificationsService.createNotification(
-          payment.tenantId,
+          recipientId,
           'Rent payment reminder',
           `Rent invoice ${payment.periodKey ?? payment._id.toString()} is due on ${dueDateKey}.`,
           'PAYMENT_REMINDER',

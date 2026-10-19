@@ -8,6 +8,16 @@ import {
   UseGuards,
 } from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
+import { Type } from 'class-transformer'
+import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  IsArray,
+  IsInt,
+  Max,
+  Min,
+  ValidateNested,
+} from 'class-validator'
 import { CurrentUser } from '../../../common/decorators/current-user.decorator'
 import { Roles } from '../../../common/decorators/roles.decorator'
 import { RolesGuard } from '../../../common/guards/roles.guard'
@@ -15,6 +25,26 @@ import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard'
 import type { UserPayload } from '../../auth/interfaces/auth.interface'
 import { filterFeeQuoteForRole } from '../utils/fee-visibility.policy'
 import { PlatformFeesService } from '../services/platform-fees.service'
+
+export class LandlordCommissionPackageDto {
+  @IsInt()
+  @Min(1)
+  @Max(60)
+  durationMonths!: number
+
+  @IsInt()
+  @Min(1)
+  monthlyRent!: number
+}
+
+export class LandlordCommissionPreviewDto {
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(8)
+  @ValidateNested({ each: true })
+  @Type(() => LandlordCommissionPackageDto)
+  packages!: LandlordCommissionPackageDto[]
+}
 
 @ApiTags('platform-fees')
 @ApiBearerAuth()
@@ -109,6 +139,28 @@ export class PlatformFeesController {
           ? 'landlord'
           : 'tenant'
     return { ...result, quote: filterFeeQuoteForRole(result.quote, role) }
+  }
+
+  @Get('apartments/:apartmentId/commission')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('landlord', 'staff', 'admin')
+  apartmentCommission(
+    @Param('apartmentId') apartmentId: string,
+    @CurrentUser() user: UserPayload
+  ): ReturnType<PlatformFeesService['quoteForApartment']> {
+    return this.service.quoteForApartment(apartmentId, {
+      id: user._id ?? '',
+      roles: user.roles ?? [],
+    })
+  }
+
+  @Post('landlord-commission/preview')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('landlord', 'staff', 'admin')
+  previewCommission(
+    @Body() body: LandlordCommissionPreviewDto
+  ): ReturnType<PlatformFeesService['previewLandlordCommission']> {
+    return this.service.previewLandlordCommission(body.packages)
   }
 
   @Get('revenue')

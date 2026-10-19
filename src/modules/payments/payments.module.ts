@@ -7,6 +7,7 @@ import { PlatformFeeScheduleRepository } from './utils/platform-fee-schedule.rep
 import { Contract } from '../contracts/schemas/contract.schema'
 import { DepositAgreement } from '../contracts/schemas/deposit-agreement.schema'
 import { User } from '../users/schemas/user.schema'
+import { Apartment } from '../properties/schemas/apartment.schema'
 import { Payout } from '../wallets/schemas/payout.schema'
 import { PaymentsController } from './controllers/payments.controller'
 import { PlatformFeesController } from './controllers/platform-fees.controller'
@@ -29,6 +30,7 @@ import { ActivityLogModule } from '../activity-log/activity-log.module'
       DepositAgreement,
       User,
       Payout,
+      Apartment,
     ]),
     NotificationsModule,
     FabricModule,
