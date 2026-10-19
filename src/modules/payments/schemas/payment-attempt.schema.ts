@@ -78,10 +78,6 @@ export class PaymentAttempt {
   @Column({ type: 'string', nullable: true })
   payeeAccountNumber?: string | null
 
-  /** Ví Mộc escrow opened by this attempt (deposit only); routes escrow webhooks. */
-  @Column({ type: 'string', nullable: true })
-  escrowId?: string | null
-
   /** MoMo request type the tenant chose; null for other providers. */
   @Column({ type: 'string', nullable: true })
   momoMethod?: MomoPaymentMethod | null

@@ -15,6 +15,7 @@ function setup(
     wallet?: Doc | null
     resolvedHolder?: string
     resolveError?: Error
+    resolvedBrand?: string
   } = {}
 ): {
   service: WalletsService
@@ -26,7 +27,7 @@ function setup(
   payments: Record<'find', jest.Mock>
   payouts: Record<'find', jest.Mock>
   apartments: Record<'aggregate', jest.Mock>
-  mocbank: Record<'resolveAccountHolder', jest.Mock>
+  mocbank: Record<'resolveAccount', jest.Mock>
 } {
   const wallets = {
     findOne: jest.fn().mockResolvedValue(options.wallet ?? null),
@@ -50,9 +51,12 @@ function setup(
     })),
   }
   const mocbank = {
-    resolveAccountHolder: options.resolveError
+    resolveAccount: options.resolveError
       ? jest.fn().mockRejectedValue(options.resolveError)
-      : jest.fn().mockResolvedValue(options.resolvedHolder ?? 'Nguyen Van A'),
+      : jest.fn().mockResolvedValue({
+          accountName: options.resolvedHolder ?? 'Nguyen Van A',
+          brand: options.resolvedBrand ?? 'mocbank',
+        }),
   }
   const service = new WalletsService(
     wallets as never,
@@ -71,7 +75,7 @@ describe('WalletsService.link', () => {
 
     const { wallet, newlyLinked } = await service.link(USER, LINK)
 
-    expect(mocbank.resolveAccountHolder).toHaveBeenCalledWith(ACCOUNT_NUMBER)
+    expect(mocbank.resolveAccount).toHaveBeenCalledWith(ACCOUNT_NUMBER)
     expect(newlyLinked).toBe(true)
     expect(wallet).toEqual(
       expect.objectContaining({
@@ -215,6 +219,7 @@ describe('WalletsService.getMine', () => {
         'accountNumber',
         'accountNumberMasked',
         'bank',
+        'extraAccounts',
         'linkedAt',
         'simulation',
         'status',
@@ -449,5 +454,155 @@ describe('WalletsService Ví Mộc account (tiền chủ nhà nhận trực ti�
     await expect(
       otherBank.service.getMocbankAccountNumber(USER)
     ).resolves.toBeNull()
+  })
+})
+
+describe('WalletsService extra brand accounts', () => {
+  const PRIMARY = {
+    _id: new ObjectId(),
+    userId: USER,
+    status: 'linked',
+    simulation: false,
+    provider: 'mocbank',
+    bankCode: 'MOCBANK',
+    bankName: 'Ví Mộc',
+    accountHolder: 'NGUYEN VAN A',
+    accountNumberMasked: '****0002',
+    mocbankAccountNumber: ACCOUNT_NUMBER,
+    linkedAt: new Date('2026-01-01'),
+  }
+  const MOMO_NUMBER = '810000007777'
+
+  it('links an extra brand onto the primary wallet', async () => {
+    const { service, wallets } = setup({
+      wallet: { ...PRIMARY },
+      resolvedBrand: 'momo',
+    })
+
+    const { wallet, newlyLinked } = await service.link(USER, {
+      accountNumber: MOMO_NUMBER,
+      brand: 'momo',
+    })
+
+    expect(newlyLinked).toBe(false)
+    expect(wallets.create).not.toHaveBeenCalled()
+    expect(wallet.accountNumber).toBe(ACCOUNT_NUMBER)
+    expect(wallet.extraAccounts).toEqual([
+      {
+        brand: 'momo',
+        accountHolder: 'NGUYEN VAN A',
+        accountNumberMasked: '****7777',
+        accountNumber: MOMO_NUMBER,
+        linkedAt: wallet.extraAccounts[0]?.linkedAt ?? null,
+      },
+    ])
+  })
+
+  it('replaces an existing entry of the same brand and keeps its linkedAt', async () => {
+    const olderLinkedAt = new Date('2026-02-02')
+    const { service } = setup({
+      wallet: {
+        ...PRIMARY,
+        extraAccounts: [
+          {
+            brand: 'momo',
+            mocbankAccountNumber: '810000001111',
+            accountHolder: 'OLD',
+            accountNumberMasked: '****1111',
+            linkedAt: olderLinkedAt,
+          },
+          {
+            brand: 'vnpay',
+            mocbankAccountNumber: '810000002222',
+            accountHolder: 'V',
+            accountNumberMasked: '****2222',
+            linkedAt: olderLinkedAt,
+          },
+        ],
+      },
+      resolvedBrand: 'momo',
+    })
+
+    const { wallet } = await service.link(USER, {
+      accountNumber: MOMO_NUMBER,
+      brand: 'momo',
+    })
+
+    expect(wallet.extraAccounts).toHaveLength(2)
+    expect(wallet.extraAccounts.find(item => item.brand === 'momo')).toEqual(
+      expect.objectContaining({
+        accountNumberMasked: '****7777',
+        linkedAt: olderLinkedAt.toISOString(),
+      })
+    )
+  })
+
+  it('rejects an extra brand when the resolved brand differs', async () => {
+    const { service, wallets } = setup({
+      wallet: { ...PRIMARY },
+      resolvedBrand: 'zalopay',
+    })
+    await expect(
+      service.link(USER, { accountNumber: MOMO_NUMBER, brand: 'momo' })
+    ).rejects.toThrow('WALLET_BRAND_MISMATCH')
+    expect(wallets.save).not.toHaveBeenCalled()
+  })
+
+  it('requires the primary wallet before linking an extra brand', async () => {
+    const { service, mocbank } = setup({ wallet: null, resolvedBrand: 'momo' })
+    await expect(
+      service.link(USER, { accountNumber: MOMO_NUMBER, brand: 'momo' })
+    ).rejects.toThrow('PRIMARY_WALLET_REQUIRED')
+    expect(mocbank.resolveAccount).not.toHaveBeenCalled()
+  })
+
+  it('maps an unknown extra account to WALLET_NOT_FOUND', async () => {
+    const { service } = setup({
+      wallet: { ...PRIMARY },
+      resolveError: new MocbankEscrowError('WALLET_NOT_FOUND'),
+    })
+    await expect(
+      service.link(USER, { accountNumber: MOMO_NUMBER, brand: 'momo' })
+    ).rejects.toThrow('WALLET_NOT_FOUND')
+  })
+
+  it('treats brand mocbank as the primary link', async () => {
+    const { service } = setup()
+    await expect(
+      service.link(USER, { ...LINK, brand: 'mocbank' })
+    ).resolves.toEqual(expect.objectContaining({ newlyLinked: true }))
+  })
+
+  it('returns the extra account number by brand, null when not linked', async () => {
+    const { service } = setup({
+      wallet: {
+        ...PRIMARY,
+        extraAccounts: [
+          {
+            brand: 'momo',
+            mocbankAccountNumber: MOMO_NUMBER,
+            accountHolder: 'A',
+            accountNumberMasked: '****7777',
+            linkedAt: new Date(),
+          },
+        ],
+      },
+    })
+    await expect(service.getMocbankAccountNumber(USER, 'momo')).resolves.toBe(
+      MOMO_NUMBER
+    )
+    await expect(
+      service.getMocbankAccountNumber(USER, 'vnpay')
+    ).resolves.toBeNull()
+    await expect(service.getMocbankAccountNumber(USER)).resolves.toBe(
+      ACCOUNT_NUMBER
+    )
+  })
+
+  it('shows legacy wallets without extraAccounts as an empty list', async () => {
+    const { service } = setup({ wallet: { ...PRIMARY } })
+    expect((await service.getMine(USER)).extraAccounts).toEqual([])
+    const none = setup({ wallet: null })
+    expect((await none.service.getMine(USER)).extraAccounts).toEqual([])
   })
 })

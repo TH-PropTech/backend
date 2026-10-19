@@ -18,3 +18,7 @@ export function normalizeHolderName(value: string): string {
 export function maskAccountNumber(accountNumber: string): string {
   return `****${accountNumber.slice(-4)}`
 }
+
+/** Thương hiệu ví mô phỏng trên cùng một tài khoản Ví Mộc (API dùng chữ thường). */
+export const WALLET_BRANDS = ['mocbank', 'momo', 'zalopay', 'vnpay'] as const
+export type WalletBrand = (typeof WALLET_BRANDS)[number]

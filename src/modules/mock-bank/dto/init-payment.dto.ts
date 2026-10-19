@@ -8,6 +8,10 @@ import {
   Min,
 } from 'class-validator'
 import {
+  WALLET_BRANDS,
+  type WalletBrand,
+} from '../../wallets/utils/supported-banks'
+import {
   SELECTABLE_PAYMENT_PROVIDERS,
   type SelectablePaymentProvider,
 } from '../../../config/configuration'
@@ -26,6 +30,15 @@ export class PaymentInitChoiceDto {
   @IsOptional()
   @IsIn(SELECTABLE_PAYMENT_PROVIDERS)
   provider?: SelectablePaymentProvider
+
+  @ApiPropertyOptional({
+    enum: WALLET_BRANDS,
+    description:
+      'Ví Mộc only: wallet brand of the landlord account to pay into; defaults to mocbank',
+  })
+  @IsOptional()
+  @IsIn(WALLET_BRANDS)
+  brand?: WalletBrand
 
   @ApiPropertyOptional({ enum: ['web', 'mobile'], default: 'web' })
   @IsOptional()

@@ -432,7 +432,7 @@ describe('RentalApplicationsService', () => {
 
   it('snapshots the tenant-selected execution policy when a package exposes two options', async () => {
     const depositFirst = getDefaultRentalExecutionPolicyRef()
-    const signFirstInput = DEFAULT_RENTAL_EXECUTION_POLICY_INPUTS[1]
+    const signFirstInput = DEFAULT_RENTAL_EXECUTION_POLICY_INPUTS[0]
     const signFirst = {
       policyId: signFirstInput.policyId,
       version: 1,
@@ -471,7 +471,7 @@ describe('RentalApplicationsService', () => {
 
   it('requires a selection when a package exposes multiple execution policies', async () => {
     const depositFirst = getDefaultRentalExecutionPolicyRef()
-    const signFirstInput = DEFAULT_RENTAL_EXECUTION_POLICY_INPUTS[1]
+    const signFirstInput = DEFAULT_RENTAL_EXECUTION_POLICY_INPUTS[0]
     const signFirst = {
       policyId: signFirstInput.policyId,
       version: 1,

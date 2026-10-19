@@ -17,7 +17,6 @@ import { KycService } from '../../users/services/kyc.service'
 import { ContractArtifactService } from './contract-artifact.service'
 import { ContractsService } from './contracts.service'
 import { DepositConfirmationResolver } from './deposit-confirmation.resolver'
-import { isDepositGateOpen } from '../flow/flow-guards'
 import { Contract } from '../schemas/contract.schema'
 import { SignedArtifactService } from '../signed-artifact/signed-artifact.service'
 import {
@@ -503,26 +502,6 @@ export class SmartCaSigningService {
       contract.artifactRef.contentType !== 'application/pdf'
     ) {
       throw new ConflictException('CONTRACT_ARTIFACT_NOT_LOCKED')
-    }
-
-    const strategy =
-      contract.executionPolicySnapshot?.strategy ?? 'DEPOSIT_FIRST'
-    if (strategy !== 'DEPOSIT_FIRST' && strategy !== 'SIGN_FIRST') {
-      throw new ConflictException('UNSUPPORTED_RENTAL_EXECUTION_STRATEGY')
-    }
-    if (strategy === 'DEPOSIT_FIRST' && contract.deposit > 0) {
-      // Nguồn sự thật duy nhất cho "cọc đã xác nhận": dùng
-      // DepositConfirmationResolver (đọc cả trạng thái thỏa thuận cọc, không
-      // chỉ contract.depositPaidAt vốn chỉ được ghi lúc kích hoạt). Khi
-      // resolver chưa được wire (ví dụ test cũ không set), giữ hành vi cũ.
-      const depositConfirmed = this.depositConfirmationResolver
-        ? (await this.depositConfirmationResolver.resolve(contract)).confirmed
-        : Boolean(contract.depositPaidAt)
-      if (!isDepositGateOpen(strategy, depositConfirmed)) {
-        throw new ConflictException(
-          'EXECUTION_POLICY_DEPOSIT_REQUIRED_BEFORE_SIGNING'
-        )
-      }
     }
 
     return {

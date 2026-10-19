@@ -9,7 +9,6 @@ const at = (iso: string): Date => new Date(iso)
 const facts = (
   overrides: Partial<ContractFlowFacts> = {}
 ): ContractFlowFacts => ({
-  strategy: 'DEPOSIT_FIRST',
   contractStatus: 'draft',
   executionMethod: 'POC_ECONSENT',
   isConfigOutdated: false,
@@ -63,63 +62,29 @@ const action = (
   flow.nextActions.find(candidate => candidate.action === key)
 
 describe('projectContractFlow — stages', () => {
-  it('DEPOSIT_FIRST vừa provision: document active, còn lại upcoming', () => {
+  it('vừa provision: document active, còn lại upcoming, thứ tự document → signing → deposit → ledger', () => {
     const flow = projectContractFlow(facts())
 
     expect(flow.version).toBe(1)
-    expect(flow.strategy).toBe('DEPOSIT_FIRST')
+    expect(flow.strategy).toBe('SIGN_FIRST')
     expect(flow.stages.map(stage => stage.key)).toEqual([
       'document',
-      'deposit',
       'signing',
+      'deposit',
       'ledger',
     ])
     expect(stageStatus(flow)).toEqual({
       document: 'active',
-      deposit: 'upcoming',
       signing: 'upcoming',
+      deposit: 'upcoming',
       ledger: 'upcoming',
     })
     expect(flow.activeStage).toBe('document')
   })
 
-  it('DEPOSIT_FIRST sau khi tenant đồng ý cọc: document done, deposit active', () => {
-    const flow = projectContractFlow(facts({ agreement: consented }))
-
-    expect(stageStatus(flow)).toMatchObject({
-      document: 'done',
-      deposit: 'active',
-    })
-    expect(flow.stages[0]?.completedAt).toBe('2026-09-20T01:00:00.000Z')
-    expect(flow.activeStage).toBe('deposit')
-  })
-
-  it('DEPOSIT_FIRST đã xác nhận cọc nhưng chưa khóa: signing active với CONTENT_NOT_LOCKED', () => {
-    const flow = projectContractFlow(
-      facts({
-        agreement: paid,
-        deposit: {
-          required: true,
-          confirmed: true,
-          paidAt: at('2026-09-21T01:00:00Z'),
-        },
-      })
-    )
-
-    const signing = flow.stages.find(stage => stage.key === 'signing')
-    expect(flow.activeStage).toBe('signing')
-    expect(signing?.status).toBe('active')
-    expect(signing?.blockers).toContainEqual({
-      code: 'CONTENT_NOT_LOCKED',
-      partyRole: null,
-    })
-    expect(flow.stages[1]?.completedAt).toBe('2026-09-21T01:00:00.000Z')
-  })
-
   it('SIGN_FIRST đã ký đủ hai bên nhưng chưa có cọc: signing done, deposit active', () => {
     const flow = projectContractFlow(
       facts({
-        strategy: 'SIGN_FIRST',
         contractStatus: 'fully-signed-pending-deposit',
         agreement: consented,
         contentLockedAt: at('2026-09-19T01:00:00Z'),
@@ -146,7 +111,6 @@ describe('projectContractFlow — stages', () => {
   it('SIGN_FIRST: tenant đồng ý cọc trước khi ký thì signing vẫn active', () => {
     const flow = projectContractFlow(
       facts({
-        strategy: 'SIGN_FIRST',
         contractStatus: 'awaiting-signature',
         agreement: consented,
         contentLockedAt: at('2026-09-19T01:00:00Z'),
@@ -158,7 +122,6 @@ describe('projectContractFlow — stages', () => {
 
   it('SIGN_FIRST với SmartCA: document chỉ xong khi artifact đã khóa', () => {
     const base = facts({
-      strategy: 'SIGN_FIRST',
       executionMethod: 'SMARTCA',
       contractStatus: 'awaiting-signature',
       contentLockedAt: at('2026-09-19T01:00:00Z'),
@@ -212,7 +175,6 @@ describe('projectContractFlow — stages', () => {
   it('kích hoạt lỗi sau khi nhận cọc: ledger blocked ACTIVATION_FAILED', () => {
     const flow = projectContractFlow(
       facts({
-        strategy: 'SIGN_FIRST',
         contractStatus: 'fully-signed-pending-deposit',
         agreement: paid,
         deposit: { required: true, confirmed: true, paidAt: null },
@@ -280,6 +242,8 @@ describe('projectContractFlow — stages', () => {
     const flow = projectContractFlow(
       facts({
         agreement: { ...consented, status: 'cancelled' },
+        contentLockedAt: at('2026-09-19T01:00:00Z'),
+        signatures: bothSigned,
       })
     )
 
@@ -308,6 +272,7 @@ describe('projectContractFlow — stages', () => {
       facts({
         agreement: null,
         contentLockedAt: at('2026-09-19T01:00:00Z'),
+        signatures: bothSigned,
       })
     )
 
@@ -352,7 +317,6 @@ describe('projectContractFlow — stages', () => {
   it('không báo KYC cho bên đã ký', () => {
     const flow = projectContractFlow(
       facts({
-        strategy: 'SIGN_FIRST',
         contractStatus: 'awaiting-signature',
         contentLockedAt: at('2026-09-19T01:00:00Z'),
         kycVerified: { tenant: false, landlord: true },
@@ -458,21 +422,6 @@ describe('projectContractFlow — nextActions', () => {
     expect(action(flow, 'SIGN_SMARTCA')).toMatchObject({ enabled: true })
   })
 
-  it('e-consent DEPOSIT_FIRST chưa có cọc: SIGN_ECONSENT tắt DEPOSIT_REQUIRED', () => {
-    const flow = projectContractFlow(
-      facts({
-        contractStatus: 'awaiting-signature',
-        agreement: consented,
-        contentLockedAt: at('2026-09-19T01:00:00Z'),
-      })
-    )
-
-    expect(action(flow, 'SIGN_ECONSENT')).toMatchObject({
-      enabled: false,
-      reasonCode: 'DEPOSIT_REQUIRED',
-    })
-  })
-
   it('landlord chưa eKYC: COMPLETE_KYC bật cho landlord, tenant không có', () => {
     const kycFacts = { kycVerified: { tenant: true, landlord: false } }
 
@@ -490,7 +439,6 @@ describe('projectContractFlow — nextActions', () => {
   it('bên đã ký không còn hành động ký', () => {
     const flow = projectContractFlow(
       facts({
-        strategy: 'SIGN_FIRST',
         contractStatus: 'awaiting-signature',
         contentLockedAt: at('2026-09-19T01:00:00Z'),
         signatures: {

@@ -1,61 +1,17 @@
 import { Injectable, Logger, Optional } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import type { PaymentsConfig } from '../../../config/configuration'
-import type { DepositEscrowStatus } from '../../contracts/schemas/deposit-agreement.schema'
 import {
   asRecord,
   getFromGateway,
   logField,
-  postToGateway,
   type GatewayFetcher,
-  type GatewayReply,
 } from '../../mock-bank/providers/gateway.util'
+import { WALLET_BRANDS, type WalletBrand } from '../utils/supported-banks'
 import {
   isSuccessStatus,
   mocbankMerchantHeaders,
 } from '../../mock-bank/providers/mocbank.adapter'
-
-const ESCROW_STATUSES: readonly DepositEscrowStatus[] = [
-  'AWAITING_PAYMENT',
-  'HELD',
-  'SETTLED',
-  'AUTO_REFUNDED',
-  'CANCELLED',
-  'EXPIRED',
-]
-
-/** Escrow as Ví Mộc reports it; only validated fields are exposed. */
-export type MocbankEscrow = {
-  escrowId: string
-  status: DepositEscrowStatus
-  amount: number
-  autoRefundAt: Date
-  transactionCodes: string[]
-  /** True once `autoRefundAt` passed and Ví Mộc is about to refund on its own. */
-  autoRefundDue: boolean
-}
-
-export type MocbankEscrowAllocation = {
-  party: 'PAYEE' | 'PAYER'
-  amount: number
-}
-
-/** The platform's own escrow/disbursement wallet at Ví Mộc, as that merchant. */
-export type MocbankEscrowWallet = {
-  accountNumber: string
-  accountName: string
-  availableBalance: number
-  heldBalance: number
-  currency: string
-  status: string
-}
-
-export type MocbankEscrowSettleInput = {
-  /** Deterministic per agreement and kind so a retry never creates a second order. */
-  settlementId: string
-  reason: string
-  allocations: MocbankEscrowAllocation[]
-}
 
 /** Raised when Ví Mộc did not confirm the call; `code` is safe to store and log. */
 export class MocbankEscrowError extends Error {
@@ -65,15 +21,7 @@ export class MocbankEscrowError extends Error {
   }
 }
 
-/** `409 ESCROW_ALREADY_SETTLED`: the caller must `get` the escrow and apply the real result. */
-export class MocbankEscrowAlreadySettledError extends MocbankEscrowError {
-  constructor() {
-    super('ESCROW_ALREADY_SETTLED')
-    this.name = 'MocbankEscrowAlreadySettledError'
-  }
-}
-
-/** Client for the Ví Mộc escrow API (`/api/escrows/:id`). */
+/** Ví Mộc account lookups used when linking a payout wallet (no funds are held by the platform). */
 @Injectable()
 export class MocbankEscrowClient {
   private readonly logger = new Logger(MocbankEscrowClient.name)
@@ -86,32 +34,15 @@ export class MocbankEscrowClient {
     this.fetcher = fetcher ?? globalThis.fetch
   }
 
-  async get(escrowId: string): Promise<MocbankEscrow> {
-    const { config, timeoutMs } = this.settings()
-    const reply = await getFromGateway(
-      this.fetcher,
-      this.url(config, escrowId),
-      mocbankMerchantHeaders(config),
-      timeoutMs
-    )
-    return this.parse(reply, escrowId, 'get')
-  }
-
-  async settle(
-    escrowId: string,
-    input: MocbankEscrowSettleInput
-  ): Promise<MocbankEscrow> {
-    return this.post(escrowId, 'settle', input)
-  }
-
-  async extend(escrowId: string, autoRefundAt: Date): Promise<MocbankEscrow> {
-    return this.post(escrowId, 'extend', {
-      autoRefundAt: autoRefundAt.toISOString(),
-    })
-  }
-
   /** Looks up the holder name of a Ví Mộc account before linking it as a payout wallet. */
   async resolveAccountHolder(accountNumber: string): Promise<string> {
+    return (await this.resolveAccount(accountNumber)).accountName
+  }
+
+  /** Holder name + wallet brand; a service that omits/garbles `brand` is treated as MOCBANK. */
+  async resolveAccount(
+    accountNumber: string
+  ): Promise<{ accountName: string; brand: WalletBrand }> {
     const { config, timeoutMs } = this.settings()
     const reply = await getFromGateway(
       this.fetcher,
@@ -132,82 +63,10 @@ export class MocbankEscrowClient {
       )
       throw new MocbankEscrowError('GATEWAY_UNAVAILABLE')
     }
-    return accountName
-  }
-
-  /** The platform's own disbursement wallet at Ví Mộc (not a per-escrow lookup). */
-  async getPlatformWallet(): Promise<MocbankEscrowWallet> {
-    const { config, timeoutMs } = this.settings()
-    const reply = await getFromGateway(
-      this.fetcher,
-      `${config.baseUrl}/api/merchant/escrow-wallet`,
-      mocbankMerchantHeaders(config),
-      timeoutMs
-    )
-    const result = asRecord(reply.body)
-    const data = result?.success === true ? asRecord(result.data) : null
-    const wallet = isSuccessStatus(reply.status)
-      ? toEscrowWallet(data ? asRecord(data.escrowWallet) : null)
-      : null
-    if (!wallet) {
-      this.logger.warn(
-        `Ví Mộc platform wallet lookup failed http=${logField(reply.status)}`
-      )
-      throw new MocbankEscrowError('GATEWAY_UNAVAILABLE')
-    }
-    return wallet
-  }
-
-  private async post(
-    escrowId: string,
-    action: 'settle' | 'extend',
-    body: object
-  ): Promise<MocbankEscrow> {
-    const { config, timeoutMs } = this.settings()
-    const reply = await postToGateway(
-      this.fetcher,
-      `${this.url(config, escrowId)}/${action}`,
-      {
-        headers: {
-          'content-type': 'application/json',
-          ...mocbankMerchantHeaders(config),
-        },
-        body: JSON.stringify(body),
-      },
-      timeoutMs
-    )
-    return this.parse(reply, escrowId, action)
-  }
-
-  private parse(
-    reply: GatewayReply,
-    escrowId: string,
-    action: string
-  ): MocbankEscrow {
-    const result = asRecord(reply.body)
-    const errorCode = asRecord(result?.error)?.code
-    if (reply.status === 409 && errorCode === 'ESCROW_ALREADY_SETTLED') {
-      throw new MocbankEscrowAlreadySettledError()
-    }
-    const escrow = isSuccessStatus(reply.status)
-      ? toEscrow(result?.success === true ? asRecord(result.data) : null)
-      : null
-    if (!escrow || escrow.escrowId !== escrowId) {
-      this.logger.warn(
-        `Ví Mộc escrow ${action} rejected escrowId=${escrowId} http=${logField(reply.status)} code=${logField(errorCode)}`
-      )
-      // The code comes from a remote system: keep only a plain upper-case token.
-      throw new MocbankEscrowError(
-        typeof errorCode === 'string' && /^[A-Z_]{1,60}$/.test(errorCode)
-          ? errorCode
-          : 'GATEWAY_UNAVAILABLE'
-      )
-    }
-    return escrow
-  }
-
-  private url(config: PaymentsConfig['mocbank'], escrowId: string): string {
-    return `${config.baseUrl}/api/escrows/${encodeURIComponent(escrowId)}`
+    const rawBrand =
+      typeof data?.brand === 'string' ? data.brand.toLowerCase() : ''
+    const brand = WALLET_BRANDS.find(item => item === rawBrand) ?? 'mocbank'
+    return { accountName, brand }
   }
 
   private settings(): {
@@ -226,60 +85,5 @@ export class MocbankEscrowClient {
         'rentalFlow.payments.gatewayTimeoutMs'
       ),
     }
-  }
-}
-
-function toEscrowWallet(
-  data: Record<string, unknown> | null
-): MocbankEscrowWallet | null {
-  if (!data) return null
-  const { accountNumber, accountName, availableBalance, heldBalance } = data
-  if (
-    typeof accountNumber !== 'string' ||
-    typeof accountName !== 'string' ||
-    typeof availableBalance !== 'number' ||
-    typeof heldBalance !== 'number'
-  ) {
-    return null
-  }
-  return {
-    accountNumber,
-    accountName,
-    availableBalance,
-    heldBalance,
-    currency: typeof data.currency === 'string' ? data.currency : 'VND',
-    status: typeof data.status === 'string' ? data.status : 'ACTIVE',
-  }
-}
-
-function toEscrow(data: Record<string, unknown> | null): MocbankEscrow | null {
-  if (!data) return null
-  const { escrowId, status, amount, autoRefundAt, transactionCodes } = data
-  const refundAt =
-    typeof autoRefundAt === 'string' ? new Date(autoRefundAt) : null
-  if (
-    typeof escrowId !== 'string' ||
-    !ESCROW_STATUSES.includes(status as DepositEscrowStatus) ||
-    typeof amount !== 'number' ||
-    !Number.isSafeInteger(amount) ||
-    !refundAt ||
-    Number.isNaN(refundAt.getTime())
-  ) {
-    return null
-  }
-  if (
-    transactionCodes !== undefined &&
-    (!Array.isArray(transactionCodes) ||
-      !transactionCodes.every(code => typeof code === 'string'))
-  ) {
-    return null
-  }
-  return {
-    escrowId,
-    status: status as DepositEscrowStatus,
-    amount,
-    autoRefundAt: refundAt,
-    transactionCodes: transactionCodes ?? [],
-    autoRefundDue: data.autoRefundDue === true,
   }
 }

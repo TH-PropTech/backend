@@ -14,11 +14,12 @@ import { User } from '../../users/schemas/user.schema'
 import type { LinkWalletDto } from '../dto/wallet.dto'
 import {
   MOCBANK_BANK_CODE,
+  type WalletBrand,
   maskAccountNumber,
   normalizeHolderName,
 } from '../utils/supported-banks'
 import { Payout } from '../schemas/payout.schema'
-import { Wallet } from '../schemas/wallet.schema'
+import { Wallet, type WalletExtraAccount } from '../schemas/wallet.schema'
 import {
   MocbankEscrowClient,
   MocbankEscrowError,
@@ -39,6 +40,17 @@ export type WalletView = {
   /** Full Ví Mộc account number, for the owner's own QR/receive-money display only. */
   accountNumber: string | null
   linkedAt: Date | null
+  /** Ví mô phỏng phụ (Momo/ZaloPay/VNPay) trên cùng tài khoản Ví Mộc. */
+  extraAccounts: WalletExtraAccountView[]
+}
+
+export type WalletExtraAccountView = {
+  brand: WalletBrand
+  accountHolder: string
+  accountNumberMasked: string
+  /** Chỉ trả cho chủ ví (cùng quy tắc với ví chính). */
+  accountNumber?: string
+  linkedAt: string | null
 }
 
 export type WalletLinkResult = { wallet: WalletView; newlyLinked: boolean }
@@ -165,19 +177,12 @@ export class WalletsService {
    * Không yêu cầu tên chủ ví trùng hồ sơ — chủ nhà có thể nhận hộ.
    */
   async link(userId: string, dto: LinkWalletDto): Promise<WalletLinkResult> {
-    let accountHolder: string
-    try {
-      accountHolder = await this.mocbankEscrowClient.resolveAccountHolder(
-        dto.accountNumber
-      )
-    } catch (error) {
-      if (error instanceof MocbankEscrowError) {
-        throw error.code === 'WALLET_NOT_FOUND'
-          ? new NotFoundException('WALLET_NOT_FOUND')
-          : new BadRequestException('MOCBANK_UNAVAILABLE')
-      }
-      throw error
+    if (dto.brand && dto.brand !== 'mocbank') {
+      return this.linkExtra(userId, dto.accountNumber, dto.brand)
     }
+    const { accountName: accountHolder } = await this.resolveOrThrow(
+      dto.accountNumber
+    )
     const bankFields = {
       bankCode: MOCBANK_BANK_CODE,
       bankName: 'Ví Mộc',
@@ -197,6 +202,52 @@ export class WalletsService {
     }
     const created = await this.createWallet(userId, bankFields)
     return { wallet: this.toView(created, true), newlyLinked: true }
+  }
+
+  private async resolveOrThrow(
+    accountNumber: string
+  ): Promise<{ accountName: string; brand: WalletBrand }> {
+    try {
+      return await this.mocbankEscrowClient.resolveAccount(accountNumber)
+    } catch (error) {
+      if (error instanceof MocbankEscrowError) {
+        throw error.code === 'WALLET_NOT_FOUND'
+          ? new NotFoundException('WALLET_NOT_FOUND')
+          : new BadRequestException('MOCBANK_UNAVAILABLE')
+      }
+      throw error
+    }
+  }
+
+  /** Liên kết ví mô phỏng phụ vào ví chính; thay mục cùng brand nếu đã có. */
+  private async linkExtra(
+    userId: string,
+    accountNumber: string,
+    brand: Exclude<WalletBrand, 'mocbank'>
+  ): Promise<WalletLinkResult> {
+    const primary = await this.walletRepository.findOne({ where: { userId } })
+    if (!primary || primary.status !== 'linked') {
+      throw new BadRequestException('PRIMARY_WALLET_REQUIRED')
+    }
+    const resolved = await this.resolveOrThrow(accountNumber)
+    if (resolved.brand !== brand) {
+      throw new BadRequestException('WALLET_BRAND_MISMATCH')
+    }
+    const current = primary.extraAccounts ?? []
+    const previous = current.find(item => item.brand === brand)
+    const entry: WalletExtraAccount = {
+      brand,
+      mocbankAccountNumber: accountNumber,
+      accountHolder: normalizeHolderName(resolved.accountName),
+      accountNumberMasked: maskAccountNumber(accountNumber),
+      linkedAt: previous?.linkedAt ?? new Date(),
+    }
+    primary.extraAccounts = [
+      ...current.filter(item => item.brand !== brand),
+      entry,
+    ]
+    const saved = await this.walletRepository.save(primary)
+    return { wallet: this.toView(saved, true), newlyLinked: false }
   }
 
   /**
@@ -269,11 +320,18 @@ export class WalletsService {
   }
 
   /** Tài khoản Ví Mộc nhận tiền trực tiếp của chủ nhà; null khi chưa liên kết. */
-  async getMocbankAccountNumber(userId: string): Promise<string | null> {
+  async getMocbankAccountNumber(
+    userId: string,
+    brand: WalletBrand = 'mocbank'
+  ): Promise<string | null> {
     const wallet = await this.walletRepository.findOne({
       where: { userId, status: 'linked', provider: 'mocbank' },
     })
-    return wallet?.mocbankAccountNumber ?? null
+    if (brand === 'mocbank') return wallet?.mocbankAccountNumber ?? null
+    return (
+      wallet?.extraAccounts?.find(item => item.brand === brand)
+        ?.mocbankAccountNumber ?? null
+    )
   }
 
   /** Hóa đơn phí sàn chủ nhà còn phải trả qua cổng thanh toán (`POST /bank/invoice/init`). */
@@ -343,6 +401,15 @@ export class WalletsService {
           ? (wallet.mocbankAccountNumber ?? null)
           : null,
       linkedAt: wallet.linkedAt ?? null,
+      extraAccounts: (wallet.extraAccounts ?? []).map(item => ({
+        brand: item.brand,
+        accountHolder: item.accountHolder,
+        accountNumberMasked: item.accountNumberMasked,
+        ...(includeFullAccountNumber && wallet.provider === 'mocbank'
+          ? { accountNumber: item.mocbankAccountNumber }
+          : {}),
+        linkedAt: item.linkedAt ? new Date(item.linkedAt).toISOString() : null,
+      })),
     }
   }
 
@@ -356,6 +423,7 @@ export class WalletsService {
       accountNumberMasked: null,
       accountNumber: null,
       linkedAt: null,
+      extraAccounts: [],
     }
   }
 }

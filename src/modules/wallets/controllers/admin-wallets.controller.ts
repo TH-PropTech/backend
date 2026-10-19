@@ -7,10 +7,6 @@ import {
   WalletsService,
   type LandlordWalletPage,
 } from '../services/wallets.service'
-import {
-  MocbankEscrowClient,
-  type MocbankEscrowWallet,
-} from '../services/mocbank-escrow.client'
 
 @ApiTags('admin-wallets')
 @ApiBearerAuth()
@@ -18,10 +14,7 @@ import {
 @Roles('staff', 'admin')
 @Controller('admin/wallets')
 export class AdminWalletsController {
-  constructor(
-    private readonly walletsService: WalletsService,
-    private readonly mocbankEscrowClient: MocbankEscrowClient
-  ) {}
+  constructor(private readonly walletsService: WalletsService) {}
 
   @Get('landlords')
   @ApiOperation({
@@ -32,13 +25,5 @@ export class AdminWalletsController {
     @Query('limit') limit?: string
   ): Promise<LandlordWalletPage> {
     return this.walletsService.listLandlordWallets(Number(page), Number(limit))
-  }
-
-  @Get('platform')
-  @ApiOperation({
-    summary: "The platform's own Ví Mộc disbursement (escrow) wallet",
-  })
-  platform(): Promise<MocbankEscrowWallet> {
-    return this.mocbankEscrowClient.getPlatformWallet()
   }
 }

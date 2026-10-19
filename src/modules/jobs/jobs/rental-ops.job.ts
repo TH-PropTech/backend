@@ -89,19 +89,3 @@ export class RentalOpsApplyDueAmendmentsJob extends BaseJob {
     return this.ops.applyDueAmendments()
   }
 }
-
-@Injectable()
-export class RentalOpsRetryStuckEscrowSettlementsJob extends BaseJob {
-  readonly name = 'rental-ops-retry-stuck-escrow-settlements'
-  readonly description =
-    'Retry các tất toán ký quỹ cọc failed/kẹt quá 10 phút (hằng giờ)'
-  readonly cron = CronExpression.EVERY_HOUR
-
-  constructor(private readonly ops: RentalOpsScheduler) {
-    super()
-  }
-
-  run(): Promise<number> {
-    return this.ops.retryStuckEscrowSettlements()
-  }
-}

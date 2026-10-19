@@ -361,7 +361,7 @@ function buildFullSecurityPackageSnapshot(): RentalPackageSnapshot {
 
 async function provisionContract(
   context: Context,
-  strategy: 'DEPOSIT_FIRST' | 'SIGN_FIRST',
+  strategy: 'SIGN_FIRST',
   packageSnapshot: RentalPackageSnapshot,
   options: {
     applicationId: string
@@ -372,7 +372,7 @@ async function provisionContract(
   const tenantId = 'tenant-e2e-1'
   const landlordId = 'landlord-e2e-1'
   const executionPolicySnapshot = {
-    policyId: strategy === 'DEPOSIT_FIRST' ? 'deposit-first' : 'sign-first',
+    policyId: 'sign-first',
     version: 1,
     strategy,
     contentHash: `policy-hash-${strategy.toLowerCase()}`,
@@ -466,14 +466,14 @@ async function signBothParties(
   })
 }
 
-// ── 16.1: DEPOSIT_FIRST + holding deposit + SmartCA + settlement + handover ──
+// ── 16.1: holding deposit paid early + SmartCA + settlement + handover ──
 
-describe('rental flow E2E integration — DEPOSIT_FIRST with holding deposit', () => {
+describe('rental flow E2E integration — SIGN_FIRST with holding deposit paid before signing', () => {
   const tenantId = 'tenant-e2e-1'
   const landlordId = 'landlord-e2e-1'
   const pdfBytes = Buffer.from('%PDF-1.7\nrental-flow-e2e-deposit-first')
 
-  it('carries DEPOSIT_FIRST through deposit, SmartCA signing, activation, settlement and handover in the documented stage order', async () => {
+  it('carries the sign-first flow (deposit paid before signatures) through deposit, SmartCA signing, activation, settlement and handover in the documented stage order', async () => {
     const context = buildContext()
     const packageSnapshot = buildHoldingPackageSnapshot()
     const feeSnapshot: Contract['feeSnapshot'] = {
@@ -500,7 +500,7 @@ describe('rental flow E2E integration — DEPOSIT_FIRST with holding deposit', (
 
     const { contractId, agreementId } = await provisionContract(
       context,
-      'DEPOSIT_FIRST',
+      'SIGN_FIRST',
       packageSnapshot,
       {
         applicationId: 'app-e2e-deposit-first-1',
@@ -556,13 +556,9 @@ describe('rental flow E2E integration — DEPOSIT_FIRST with holding deposit', (
       false
     )
     expect(view.deposit?.status).toBe('paid')
-    // Per D4, the `document` stage for DEPOSIT_FIRST is done once the tenant
-    // has consented to the deposit agreement (not gated on content lock), so
-    // both `document` and `deposit` are already done and the active stage
-    // has moved straight to `signing` even though content/artifact are not
-    // locked yet (the signing stage's own blockers - CONTENT_NOT_LOCKED,
-    // ARTIFACT_NOT_LOCKED - account for that).
-    expect(view.flow?.activeStage).toBe('signing')
+    // The `document` stage is only done once content/artifact are locked, so
+    // the early deposit does not advance the active stage past it.
+    expect(view.flow?.activeStage).toBe('document')
 
     // ── lock content + canonical artifact (signing prerequisites) ──
     const artifactHash = await lockContentAndArtifact(

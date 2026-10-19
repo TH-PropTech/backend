@@ -5,7 +5,7 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common'
 import { createHmac } from 'node:crypto'
-import { MOCBANK_ESCROW_MAX_AMOUNT, MocbankAdapter } from './mocbank.adapter'
+import { MocbankAdapter } from './mocbank.adapter'
 import { MocbankCallbackVerifier } from './mocbank-callback.verifier'
 import { GatewayVerificationError } from './payment-provider.port'
 import {
@@ -259,64 +259,6 @@ describe('MocbankAdapter', () => {
     ).rejects.toThrow(
       new UnprocessableEntityException('LANDLORD_PAYEE_ACCOUNT_INVALID')
     )
-  })
-
-  it('opens an escrow session instead of sending payeeAccountNumber', async () => {
-    const autoRefundAt = new Date('2027-01-14T00:00:00.000Z')
-    const fetcher = jsonFetcher(
-      createReply({ escrowId: 'ESC_1', amount: 100_000_000 })
-    )
-
-    const intent = await adapter(fetcher).createPaymentIntent({
-      ...input,
-      amount: 100_000_000,
-      payeeAccountNumber: '810000000002',
-      escrow: { autoRefundAt },
-    })
-
-    expect(intent).toMatchObject({ escrowId: 'ESC_1' })
-    expect(sentBody(fetcher)).toMatchObject({
-      escrow: { autoRefundAt: autoRefundAt.toISOString() },
-    })
-    expect(sentBody(fetcher)).not.toHaveProperty('payeeAccountNumber')
-  })
-
-  it('allows escrow amounts above the direct-transfer limit, up to the escrow cap', async () => {
-    const fetcher = jsonFetcher(
-      createReply({ escrowId: 'ESC_2', amount: MOCBANK_ESCROW_MAX_AMOUNT })
-    )
-
-    await expect(
-      adapter(fetcher).createPaymentIntent({
-        ...input,
-        amount: MOCBANK_ESCROW_MAX_AMOUNT,
-        escrow: { autoRefundAt: new Date() },
-      })
-    ).resolves.toMatchObject({ escrowId: 'ESC_2' })
-  })
-
-  it('rejects an escrow amount above the escrow cap before calling Ví Mộc', async () => {
-    const fetcher = jsonFetcher(createReply({ escrowId: 'ESC_3' }))
-
-    await expect(
-      adapter(fetcher).createPaymentIntent({
-        ...input,
-        amount: MOCBANK_ESCROW_MAX_AMOUNT + 1,
-        escrow: { autoRefundAt: new Date() },
-      })
-    ).rejects.toThrow(new BadRequestException('PAYMENT_AMOUNT_OUT_OF_RANGE'))
-    expect(fetcher).not.toHaveBeenCalled()
-  })
-
-  it('answers 503 when Ví Mộc confirms an escrow session without an escrowId', async () => {
-    const fetcher = jsonFetcher(createReply({ escrowId: undefined }))
-
-    await expect(
-      adapter(fetcher).createPaymentIntent({
-        ...input,
-        escrow: { autoRefundAt: new Date() },
-      })
-    ).rejects.toThrow(ServiceUnavailableException)
   })
 
   it('returns an unlinked external account link', async () => {

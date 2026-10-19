@@ -3,6 +3,7 @@ import { ObjectId } from 'mongodb'
 import type { Repository } from 'typeorm'
 import type { Contract } from '../../contracts/schemas/contract.schema'
 import { Payment } from '../schemas/payment.schema'
+import type { PlatformFeeScheduleRepository } from '../utils/platform-fee-schedule.repository'
 import { PaymentsService } from './payments.service'
 import type { NotificationsService } from '../../notifications/services/notifications.service'
 import type { LedgerOutboxService } from '../../fabric/services/ledger-outbox.service'
@@ -547,5 +548,119 @@ describe('PaymentsService', () => {
       event => event.eventType === 'fee.issued'
     )
     expect(issuedEvents).toHaveLength(1)
+  })
+
+  describe('landlord commission invoice', () => {
+    const contract = {
+      _id: new ObjectId(),
+      tenantId: 'tenant-1',
+      landlordId: 'landlord-1',
+      feeSnapshot: {
+        scheduleId: 'fee-v1',
+        version: 1,
+        contentHash: 'a'.repeat(64),
+        quote: [
+          {
+            feeKind: 'LANDLORD_COMMISSION' as const,
+            payerRole: 'landlord' as const,
+            amountBeforeVat: 1_000_000,
+            vatAmount: 100_000,
+            amount: 1_100_000,
+          },
+        ],
+      },
+    } as unknown as Contract
+    const scheduleRepo = {
+      findOne: jest.fn(),
+    }
+    const notifications = {
+      createNotification: jest.fn().mockResolvedValue({}),
+      createNotificationOnce: jest.fn().mockResolvedValue({}),
+    }
+    function build(): PaymentsService {
+      return new PaymentsService(
+        paymentRepository as unknown as Repository<Payment>,
+        contractRepository as unknown as Repository<Contract>,
+        notifications as unknown as NotificationsService,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        scheduleRepo as unknown as PlatformFeeScheduleRepository
+      )
+    }
+    beforeEach(() => {
+      scheduleRepo.findOne.mockResolvedValue({
+        rules: { landlordCommission: { dueDaysAfterActivation: 15 } },
+      })
+      paymentRepository.create.mockImplementation(
+        (value: Payment): Payment => value
+      )
+      paymentRepository.save.mockImplementation(
+        (value: Payment): Promise<Payment> =>
+          Promise.resolve({ ...value, _id: value._id ?? new ObjectId() })
+      )
+    })
+
+    it('uses dueDaysAfterActivation and notifies the landlord once', async () => {
+      paymentRepository.findOne.mockResolvedValueOnce(null)
+      const before = Date.now()
+      const [invoice] = await build().generatePlatformFeeInvoices(contract)
+      const days = (invoice!.dueDate.getTime() - before) / 86_400_000
+      expect(days).toBeGreaterThan(14.9)
+      expect(days).toBeLessThan(15.1)
+      expect(notifications.createNotificationOnce).toHaveBeenCalledWith(
+        'landlord-1',
+        `fee:${invoice!._id.toHexString()}:issued`,
+        'Phí hoa hồng cần thanh toán',
+        expect.stringContaining('VND'),
+        'PLATFORM_FEE_INVOICE',
+        expect.objectContaining({
+          amount: 1_100_000,
+          link: '/profile?tab=wallet',
+        })
+      )
+
+      notifications.createNotificationOnce.mockClear()
+      paymentRepository.findOne.mockResolvedValueOnce(invoice)
+      await build().generatePlatformFeeInvoices(contract)
+      expect(notifications.createNotificationOnce).not.toHaveBeenCalled()
+    })
+
+    it('falls back to 7 days and swallows notification failures', async () => {
+      scheduleRepo.findOne.mockResolvedValueOnce(null)
+      notifications.createNotificationOnce.mockRejectedValueOnce(new Error('x'))
+      paymentRepository.findOne.mockResolvedValueOnce(null)
+      const before = Date.now()
+      const [invoice] = await build().generatePlatformFeeInvoices(contract)
+      const days = (invoice!.dueDate.getTime() - before) / 86_400_000
+      expect(days).toBeGreaterThan(6.9)
+      expect(days).toBeLessThan(7.1)
+    })
+
+    it('sends the reminder for a landlord-payer fee invoice to the landlord', async () => {
+      const payment = {
+        _id: new ObjectId(),
+        contractId: 'c',
+        tenantId: 'tenant-1',
+        landlordId: 'landlord-1',
+        payerId: 'landlord-1',
+        payerRole: 'landlord',
+        type: 'platform-fee',
+        periodKey: 'FEE:LANDLORD_COMMISSION',
+        dueDate: new Date('2030-03-10T00:00:00.000Z'),
+        status: 'unpaid' as const,
+        reminderSentForDate: null,
+      } as Payment
+      paymentRepository.find.mockResolvedValue([payment])
+      await build().processReminders(new Date('2030-03-03T01:00:00.000Z'))
+      expect(notifications.createNotification).toHaveBeenCalledWith(
+        'landlord-1',
+        expect.anything(),
+        expect.anything(),
+        'PAYMENT_REMINDER',
+        expect.anything()
+      )
+    })
   })
 })

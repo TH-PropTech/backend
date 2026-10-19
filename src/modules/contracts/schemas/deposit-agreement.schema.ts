@@ -20,35 +20,6 @@ export type DepositAgreementStatus =
   | 'cancelled'
   | 'expired'
 
-/** Mirror of the Ví Mộc escrow status; the agreement status stays the business source of truth. */
-export type DepositEscrowStatus =
-  | 'AWAITING_PAYMENT'
-  | 'HELD'
-  | 'SETTLED'
-  | 'AUTO_REFUNDED'
-  | 'CANCELLED'
-  | 'EXPIRED'
-
-export type DepositEscrowSettlement = {
-  /** Deterministic `deposit:<agreementId>:<kind>` so a retry never creates a second order. */
-  settlementId: string
-  kind: 'release' | 'refund'
-  state: 'requested' | 'settled' | 'failed'
-  attempts: number
-  lastError?: string | null
-  transactionCodes: string[]
-  requestedAt: Date
-  settledAt?: Date | null
-}
-
-export type DepositEscrow = {
-  escrowId: string
-  status: DepositEscrowStatus
-  autoRefundAt: Date
-  heldAt?: Date | null
-  settlement?: DepositEscrowSettlement | null
-}
-
 @Entity('deposit_agreements')
 export class DepositAgreement {
   @ObjectIdColumn()
@@ -141,10 +112,6 @@ export class DepositAgreement {
     confirmedAt: Date
     note: string
   } | null
-
-  /** Ví Mộc escrow holding the deposit; null for legacy direct-receipt agreements. */
-  @Column({ nullable: true })
-  escrow?: DepositEscrow | null
 
   @Column({ nullable: true })
   linkedLeaseContractId!: string | null

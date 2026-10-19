@@ -10,7 +10,7 @@ export type GuardResult = {
   reasonCode: string | null
 }
 
-export type ExecutionStrategy = 'DEPOSIT_FIRST' | 'SIGN_FIRST'
+export type ExecutionStrategy = 'SIGN_FIRST'
 
 const ALLOWED: GuardResult = { enabled: true, reasonCode: null }
 const deny = (reasonCode: string): GuardResult => ({
@@ -97,14 +97,6 @@ export function evaluateLockArtifact(input: {
   return ALLOWED
 }
 
-/** DEPOSIT_FIRST chỉ cho ký khi cọc đã xác nhận; SIGN_FIRST cho ký trước. */
-export function isDepositGateOpen(
-  strategy: ExecutionStrategy,
-  isDepositConfirmed: boolean
-): boolean {
-  return strategy !== 'DEPOSIT_FIRST' || isDepositConfirmed
-}
-
 export type SigningGuardInput = {
   isParticipant: boolean
   hasSigned: boolean
@@ -114,8 +106,6 @@ export type SigningGuardInput = {
   requiresArtifact: boolean
   hasArtifact: boolean
   contractStatus: string
-  strategy: ExecutionStrategy
-  isDepositConfirmed: boolean
   isKycVerified: boolean
 }
 
@@ -166,12 +156,6 @@ export function evaluateSigning(input: SigningGuardInput): SigningGuardResult {
     return blockSigning(
       'WRONG_STATE',
       'Hợp đồng chưa sẵn sàng để ký kết (cần chờ duyệt hoặc hoàn tất đặt cọc).'
-    )
-  }
-  if (!isDepositGateOpen(input.strategy, input.isDepositConfirmed)) {
-    return blockSigning(
-      'DEPOSIT_REQUIRED',
-      'Cần hoàn tất thanh toán tiền đặt cọc trước khi ký hợp đồng.'
     )
   }
   if (!input.isKycVerified) {

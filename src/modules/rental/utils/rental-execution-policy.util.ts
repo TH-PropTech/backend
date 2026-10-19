@@ -1,9 +1,6 @@
 import { createHash } from 'node:crypto'
 
-export const RENTAL_EXECUTION_STRATEGIES = [
-  'DEPOSIT_FIRST',
-  'SIGN_FIRST',
-] as const
+export const RENTAL_EXECUTION_STRATEGIES = ['SIGN_FIRST'] as const
 
 export type RentalExecutionStrategy =
   (typeof RENTAL_EXECUTION_STRATEGIES)[number]
@@ -58,21 +55,6 @@ export function computeRentalExecutionPolicyHash(input: {
 }
 
 export const DEFAULT_RENTAL_EXECUTION_POLICY_INPUTS = [
-  {
-    policyId: 'deposit-first',
-    strategy: 'DEPOSIT_FIRST' as const,
-    name: 'Cọc trước, ký sau',
-    description:
-      'Xác nhận khoản cọc trước, sau đó tenant và landlord ký cùng canonical contract artifact.',
-    disclosure: {
-      sequenceLabel: 'Xác nhận cọc trước rồi mới ký hợp đồng số.',
-      depositLabel: 'Khoản cọc phải được xác nhận trước khi mở phiên ký.',
-      effectivenessLabel:
-        'Hợp đồng có hiệu lực khi đã xác nhận cọc và đủ hai chữ ký SmartCA.',
-      cancellationLabel:
-        'Quy tắc hoàn/hủy cọc áp dụng theo thỏa thuận cọc đã snapshot.',
-    },
-  },
   {
     policyId: 'sign-first',
     strategy: 'SIGN_FIRST' as const,

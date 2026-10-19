@@ -4,7 +4,6 @@ import {
   evaluateLockContent,
   evaluatePayDeposit,
   evaluateSigning,
-  isDepositGateOpen,
   type SigningGuardInput,
 } from './flow-guards'
 
@@ -170,17 +169,6 @@ describe('evaluateLockArtifact', () => {
   })
 })
 
-describe('isDepositGateOpen', () => {
-  it('SIGN_FIRST luôn mở cổng cọc trước khi ký', () => {
-    expect(isDepositGateOpen('SIGN_FIRST', false)).toBe(true)
-  })
-
-  it('DEPOSIT_FIRST chỉ mở khi cọc đã xác nhận', () => {
-    expect(isDepositGateOpen('DEPOSIT_FIRST', false)).toBe(false)
-    expect(isDepositGateOpen('DEPOSIT_FIRST', true)).toBe(true)
-  })
-})
-
 describe('evaluateSigning', () => {
   const eligible: SigningGuardInput = {
     isParticipant: true,
@@ -190,8 +178,6 @@ describe('evaluateSigning', () => {
     requiresArtifact: false,
     hasArtifact: false,
     contractStatus: 'awaiting-signature',
-    strategy: 'DEPOSIT_FIRST',
-    isDepositConfirmed: true,
     isKycVerified: true,
   }
 
@@ -210,7 +196,6 @@ describe('evaluateSigning', () => {
     [{ isContentLocked: false }, 'CONTENT_NOT_LOCKED'],
     [{ requiresArtifact: true, hasArtifact: false }, 'ARTIFACT_NOT_LOCKED'],
     [{ contractStatus: 'draft' }, 'WRONG_STATE'],
-    [{ isDepositConfirmed: false }, 'DEPOSIT_REQUIRED'],
     [{ isKycVerified: false }, 'KYC_NOT_VERIFIED'],
   ] as const)('chặn với %j → %s', (override, reasonCode) => {
     const result = evaluateSigning({ ...eligible, ...override })
@@ -225,16 +210,6 @@ describe('evaluateSigning', () => {
         ...eligible,
         requiresArtifact: true,
         hasArtifact: true,
-      }).eligible
-    ).toBe(true)
-  })
-
-  it('SIGN_FIRST cho ký khi cọc chưa xác nhận', () => {
-    expect(
-      evaluateSigning({
-        ...eligible,
-        strategy: 'SIGN_FIRST',
-        isDepositConfirmed: false,
       }).eligible
     ).toBe(true)
   })

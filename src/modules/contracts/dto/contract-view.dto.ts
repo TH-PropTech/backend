@@ -49,8 +49,8 @@ export class ContractExecutionPolicyViewDto {
   @ApiProperty()
   version!: number
 
-  @ApiProperty({ enum: ['DEPOSIT_FIRST', 'SIGN_FIRST'] })
-  strategy!: 'DEPOSIT_FIRST' | 'SIGN_FIRST'
+  @ApiProperty({ enum: ['SIGN_FIRST'] })
+  strategy!: 'SIGN_FIRST'
 
   @ApiProperty()
   depositConfirmed!: boolean
@@ -330,53 +330,6 @@ export class ContractDepositViewDto {
 
   @ApiProperty({ nullable: true })
   txHash!: string | null
-
-  /** D5/D11: trạng thái ký quỹ Ví Mộc; null cho cọc đã trả trực tiếp (legacy). Không lộ escrowId/transactionCodes. */
-  @ApiProperty({ type: () => ContractDepositEscrowViewDto, nullable: true })
-  escrow!: ContractDepositEscrowViewDto | null
-}
-
-export class ContractDepositEscrowSettlementViewDto {
-  @ApiProperty({ enum: ['release', 'refund'] })
-  kind!: 'release' | 'refund'
-
-  @ApiProperty({ enum: ['requested', 'settled', 'failed'] })
-  state!: 'requested' | 'settled' | 'failed'
-
-  @ApiProperty({ nullable: true })
-  settledAt!: string | null
-}
-
-export class ContractDepositEscrowViewDto {
-  @ApiProperty({
-    enum: [
-      'AWAITING_PAYMENT',
-      'HELD',
-      'SETTLED',
-      'AUTO_REFUNDED',
-      'CANCELLED',
-      'EXPIRED',
-    ],
-  })
-  status!:
-    | 'AWAITING_PAYMENT'
-    | 'HELD'
-    | 'SETTLED'
-    | 'AUTO_REFUNDED'
-    | 'CANCELLED'
-    | 'EXPIRED'
-
-  @ApiProperty()
-  autoRefundAt!: string
-
-  @ApiProperty({ nullable: true })
-  heldAt!: string | null
-
-  @ApiProperty({
-    type: () => ContractDepositEscrowSettlementViewDto,
-    nullable: true,
-  })
-  settlement!: ContractDepositEscrowSettlementViewDto | null
 }
 
 export class SigningEligibilityDto {
@@ -596,8 +549,8 @@ export class ContractFlowDto {
   @ApiProperty({ example: 1 })
   version!: 1
 
-  @ApiProperty({ enum: ['DEPOSIT_FIRST', 'SIGN_FIRST'] })
-  strategy!: 'DEPOSIT_FIRST' | 'SIGN_FIRST'
+  @ApiProperty({ enum: ['SIGN_FIRST'] })
+  strategy!: 'SIGN_FIRST'
 
   @ApiProperty({ type: [ContractFlowStageDto] })
   stages!: ContractFlowStageDto[]

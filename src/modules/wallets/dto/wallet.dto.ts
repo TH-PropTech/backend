@@ -1,7 +1,11 @@
-import { ApiProperty } from '@nestjs/swagger'
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
 import { Transform } from 'class-transformer'
-import { IsInt, IsOptional, Matches, Min } from 'class-validator'
-import { MOCBANK_ACCOUNT_PATTERN } from '../utils/supported-banks'
+import { IsIn, IsInt, IsOptional, Matches, Min } from 'class-validator'
+import {
+  MOCBANK_ACCOUNT_PATTERN,
+  WALLET_BRANDS,
+  type WalletBrand,
+} from '../utils/supported-banks'
 
 /**
  * Liên kết ví = liên kết một ví Ví Mộc có thật, xác minh qua tra cứu tên chủ
@@ -14,6 +18,14 @@ export class LinkWalletDto {
   )
   @Matches(MOCBANK_ACCOUNT_PATTERN, { message: 'ACCOUNT_NUMBER_INVALID' })
   accountNumber!: string
+
+  @ApiPropertyOptional({
+    enum: WALLET_BRANDS,
+    description: 'Thương hiệu ví; mặc định mocbank (ví chính)',
+  })
+  @IsOptional()
+  @IsIn(WALLET_BRANDS)
+  brand?: WalletBrand
 }
 
 export class WalletTransactionsQueryDto {

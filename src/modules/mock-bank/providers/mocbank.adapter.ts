@@ -25,8 +25,6 @@ import {
 
 /** Ví Mộc per-transaction limit in VND (INTEGRATION.md section 1). */
 export const MOCBANK_MAX_AMOUNT = 50_000_000
-/** Trần riêng cho phiên ký quỹ (escrow), cao hơn trần chuyển thẳng thường. */
-export const MOCBANK_ESCROW_MAX_AMOUNT = 500_000_000
 const MAX_DESCRIPTION_LENGTH = 200
 const MIN_EXPIRES_MINUTES = 1
 const MAX_EXPIRES_MINUTES = 60
@@ -73,10 +71,7 @@ export class MocbankAdapter implements PaymentProviderAdapter {
   async createPaymentIntent(
     input: PaymentIntentInput
   ): Promise<ProviderPaymentIntent> {
-    const maxAmount = input.escrow
-      ? MOCBANK_ESCROW_MAX_AMOUNT
-      : MOCBANK_MAX_AMOUNT
-    if (input.amount > maxAmount) {
+    if (input.amount > MOCBANK_MAX_AMOUNT) {
       // Fail before calling Ví Mộc so the tenant sees why, not a gateway error.
       throw new BadRequestException('PAYMENT_AMOUNT_OUT_OF_RANGE')
     }
@@ -100,13 +95,10 @@ export class MocbankAdapter implements PaymentProviderAdapter {
       ...(config.webhookUrl ? { webhookUrl: config.webhookUrl } : {}),
       expiresInMinutes,
       channel: input.clientChannel ?? 'web',
-      // Ký quỹ: tiền dừng ở escrow của Ví Mộc, không gửi payeeAccountNumber ngoài.
-      ...(input.escrow
-        ? { escrow: { autoRefundAt: input.escrow.autoRefundAt.toISOString() } }
-        : input.payeeAccountNumber
-          ? // Có thì tiền đi thẳng vào tài khoản này (chủ nhà), không qua ví của sàn.
-            { payeeAccountNumber: input.payeeAccountNumber }
-          : {}),
+      // Có thì tiền đi thẳng vào tài khoản này (chủ nhà), không qua ví của sàn.
+      ...(input.payeeAccountNumber
+        ? { payeeAccountNumber: input.payeeAccountNumber }
+        : {}),
     }
     const reply = await postToGateway(
       this.fetcher,
@@ -129,7 +121,6 @@ export class MocbankAdapter implements PaymentProviderAdapter {
       // Tài khoản nhận của chủ nhà không tồn tại trên Ví Mộc: khách chưa mất tiền.
       throw new UnprocessableEntityException('LANDLORD_PAYEE_ACCOUNT_INVALID')
     }
-    const escrowId = data?.escrowId
     if (
       !isSuccessStatus(reply.status) ||
       !result ||
@@ -138,8 +129,7 @@ export class MocbankAdapter implements PaymentProviderAdapter {
       !isHttpsUrl(paymentUrl) ||
       !sameOrigin(paymentUrl, config.baseUrl) ||
       data.orderId !== input.txRef ||
-      data.amount !== input.amount ||
-      (input.escrow && typeof escrowId !== 'string')
+      data.amount !== input.amount
     ) {
       this.logger.warn(
         `Ví Mộc create rejected txRef=${input.txRef} http=${logField(reply.status)} code=${logField(asRecord(result?.error)?.code)}`
@@ -151,7 +141,6 @@ export class MocbankAdapter implements PaymentProviderAdapter {
       txRef: input.txRef,
       redirectUrl: paymentUrl,
       expiresAt: input.expiresAt,
-      ...(input.escrow ? { escrowId: escrowId as string } : {}),
     }
   }
 

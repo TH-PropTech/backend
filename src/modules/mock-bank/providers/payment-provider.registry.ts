@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import type { SelectablePaymentProvider } from '../../../config/configuration'
+import type { WalletBrand } from '../../wallets/utils/supported-banks'
 import { MockBankAdapter } from './mock-bank.adapter'
 import { MocbankAdapter } from './mocbank.adapter'
 import { MocbankCallbackVerifier } from './mocbank-callback.verifier'
@@ -28,7 +29,16 @@ export type PaymentProviderOption = {
   simulation: boolean
   /** MoMo only: payment methods with their VND limits. */
   methods?: MomoMethodOption[]
+  /** Ví Mộc only: wallet brands the payer can route the landlord payout to. */
+  brands?: Array<{ brand: WalletBrand; label: string }>
 }
+
+const MOCBANK_BRAND_OPTIONS: Array<{ brand: WalletBrand; label: string }> = [
+  { brand: 'mocbank', label: 'Ví Mộc' },
+  { brand: 'momo', label: 'Momo (mô phỏng)' },
+  { brand: 'zalopay', label: 'ZaloPay (mô phỏng)' },
+  { brand: 'vnpay', label: 'VNPay (mô phỏng)' },
+]
 
 const PROVIDER_LABELS: Record<SelectablePaymentProvider, string> = {
   'mock-bank': 'Mock Bank (sandbox)',
@@ -107,28 +117,22 @@ export class PaymentProviderRegistry {
   }
 
   /**
-   * `purpose: 'deposit'` + `DEPOSIT_ESCROW_ENABLED=true`: cọc chỉ trả qua Ví
-   * Mộc (D2), vì chỉ cổng này có ký quỹ.
+   * `purpose` 'invoice' (phí hoa hồng nền tảng) chỉ cho phép Ví Mộc; các purpose
+   * khác liệt kê mọi provider đang bật.
    */
-  listProviders(purpose?: 'deposit'): PaymentProviderOption[] {
+  listProviders(purpose?: 'deposit' | 'invoice'): PaymentProviderOption[] {
+    const enabled = this.enabledProviders()
     const providers =
-      purpose === 'deposit' && this.depositEscrowEnabled()
-        ? (['mocbank'] as const)
-        : this.enabledProviders()
+      purpose === 'invoice'
+        ? enabled.filter(provider => provider === 'mocbank')
+        : enabled
     return providers.map(provider => ({
       provider,
       label: PROVIDER_LABELS[provider],
       simulation: provider === 'mock-bank',
       ...(provider === 'momo' ? { methods: MOMO_METHOD_OPTIONS } : {}),
+      ...(provider === 'mocbank' ? { brands: MOCBANK_BRAND_OPTIONS } : {}),
     }))
-  }
-
-  private depositEscrowEnabled(): boolean {
-    return Boolean(
-      this.configService.get<boolean>(
-        'rentalFlow.payments.depositEscrowEnabled'
-      )
-    )
   }
 
   getAccountLink(userId: string): Promise<ProviderAccountLink> {

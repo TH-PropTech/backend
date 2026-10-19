@@ -78,12 +78,43 @@ describe('PaymentProviderRegistry', () => {
     expect(JSON.stringify(listed)).not.toContain(TEST_PAYMENTS.vnpay.tmnCode)
   })
 
+  it("lists the same enabled providers for purpose 'deposit' (no escrow forcing)", () => {
+    const registry = createRegistry(['mock-bank', 'vnpay', 'momo', 'mocbank'])
+
+    expect(registry.listProviders('deposit')).toEqual(registry.listProviders())
+    expect(
+      registry.listProviders('deposit').map(item => item.provider)
+    ).toEqual(['mock-bank', 'vnpay', 'momo', 'mocbank'])
+  })
+
+  it("lists only Ví Mộc for purpose 'invoice'", () => {
+    const registry = createRegistry(['mock-bank', 'vnpay', 'mocbank'])
+    expect(
+      registry.listProviders('invoice').map(item => item.provider)
+    ).toEqual(['mocbank'])
+  })
+
+  it("lists nothing for purpose 'invoice' when Ví Mộc is not enabled", () => {
+    const registry = createRegistry(['mock-bank', 'vnpay'])
+    expect(registry.listProviders('invoice')).toEqual([])
+  })
+
   it('lists Ví Mộc as an external gateway without credentials or URLs', () => {
     const registry = createRegistry(['mocbank', 'mock-bank'])
     const listed = registry.listProviders()
 
     expect(listed).toEqual([
-      { provider: 'mocbank', label: 'Ví Mộc (sandbox)', simulation: false },
+      {
+        provider: 'mocbank',
+        label: 'Ví Mộc (sandbox)',
+        simulation: false,
+        brands: [
+          { brand: 'mocbank', label: 'Ví Mộc' },
+          { brand: 'momo', label: 'Momo (mô phỏng)' },
+          { brand: 'zalopay', label: 'ZaloPay (mô phỏng)' },
+          { brand: 'vnpay', label: 'VNPay (mô phỏng)' },
+        ],
+      },
       { provider: 'mock-bank', label: 'Mock Bank (sandbox)', simulation: true },
     ])
     expect(registry.get('mocbank').name).toBe('mocbank')

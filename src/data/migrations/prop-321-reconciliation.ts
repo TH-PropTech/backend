@@ -1,5 +1,5 @@
 export type ReconciliationExecutionPolicy = {
-  strategy?: 'DEPOSIT_FIRST' | 'SIGN_FIRST'
+  strategy?: string
 }
 
 export type ReconciliationPackage = {

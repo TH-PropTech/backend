@@ -12,8 +12,6 @@ export type PaymentsConfig = {
   enabledProviders: SelectablePaymentProvider[]
   gatewayTimeoutMs: number
   attemptTtlMinutes: number
-  /** Deposits go through Ví Mộc escrow (and only Ví Mộc) when true. */
-  depositEscrowEnabled: boolean
   clientReturnUrl: string
   mobileReturnUrl: string
   vnpay: {
@@ -284,7 +282,6 @@ export const configuration = (): {
           'http://localhost:3001/api/v1/bank/zalopay/callback'
         ),
       },
-      depositEscrowEnabled: envOr('DEPOSIT_ESCROW_ENABLED', 'false') === 'true',
       mocbank: {
         // Trailing slash stripped: adapters append `/api/...` paths.
         baseUrl: envOr(
