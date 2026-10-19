@@ -28,7 +28,6 @@ import {
 import { UpdateApartmentMediaDto } from '../dto/update-apartment-media.dto'
 import { NotificationsService } from '../../notifications/services/notifications.service'
 import { ProjectsService } from './projects.service'
-import { BuildingsService } from './buildings.service'
 import { SavedSearchesService } from './saved-searches.service'
 import { RentalExecutionPoliciesService } from '../../rental/services/rental-execution-policies.service'
 
@@ -39,7 +38,6 @@ interface ApartmentMongoQuery {
   ward?: string | Record<string, unknown>
   street?: string | Record<string, unknown>
   projectName?: string | Record<string, unknown>
-  buildingId?: string
   category?: string
   priceMonthly?: { $gte?: number; $lte?: number }
   area?: { $gte?: number; $lte?: number }
@@ -306,7 +304,6 @@ export class ApartmentsService {
     private readonly userRepository: Repository<User>,
     private readonly notificationsService: NotificationsService,
     private readonly projectsService: ProjectsService,
-    private readonly buildingsService: BuildingsService,
     private readonly savedSearchesService: SavedSearchesService,
     @Optional()
     private readonly executionPoliciesService?: RentalExecutionPoliciesService
@@ -413,7 +410,6 @@ export class ApartmentsService {
         internet,
         isVerified,
         hasMedia,
-        buildingId,
         amenities,
       } = filters
 
@@ -451,9 +447,6 @@ export class ApartmentsService {
       }
       if (projectName && projectName.trim() !== '') {
         query.projectName = { $regex: projectName, $options: 'i' }
-      }
-      if (buildingId && buildingId.trim() !== '') {
-        query.buildingId = buildingId
       }
 
       // 4. Phân loại căn hộ
@@ -1036,26 +1029,8 @@ export class ApartmentsService {
       resolvedProjectName = project.name
     }
 
-    // Auto find-or-create Building nếu có tên nhưng không có ID
-    let resolvedBuildingId = dto.buildingId || null
-    let resolvedBuildingName = dto.buildingName || ''
-    if (!resolvedBuildingId && resolvedBuildingName) {
-      const building = await this.buildingsService.findOrCreate({
-        name: resolvedBuildingName,
-        projectId: resolvedProjectId ?? null,
-        projectName: resolvedProjectName || null,
-        city: dto.city,
-        district: dto.district ?? '',
-        location: resolveLocation(dto),
-      })
-      resolvedBuildingId = building._id.toString()
-      resolvedBuildingName = building.name
-    }
-
     const apartment = this.apartmentRepository.create({
       title: dto.title,
-      buildingId: resolvedBuildingId,
-      buildingName: resolvedBuildingName,
       projectId: resolvedProjectId,
       projectName: resolvedProjectName,
       category: dto.category,
@@ -1214,8 +1189,6 @@ export class ApartmentsService {
     // Cập nhật thông tin mới
     Object.assign(apartment, {
       title: dto.title,
-      buildingId: dto.buildingId || null,
-      buildingName: dto.buildingName || '',
       projectId: dto.projectId || null,
       projectName: dto.projectName || '',
       category: dto.category,

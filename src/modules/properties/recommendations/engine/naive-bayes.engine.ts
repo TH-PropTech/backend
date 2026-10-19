@@ -1,10 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common'
 import {
-  BuildingRecord,
+  ApartmentRecord,
   TrainingRecord,
   UserProfile,
   RecommendationOutput,
-  BuildingModelParams,
+  ApartmentModelParams,
   RecommendationContributions,
   EngineConfig,
 } from './naive-bayes.types'
@@ -92,11 +92,11 @@ export class NaiveBayesEngine {
     'Củ Chi': ['Hóc Môn'],
   }
 
-  private buildings: BuildingRecord[] = []
+  private apartments: ApartmentRecord[] = []
   private history: TrainingRecord[] = []
 
   private priors: Record<string, number> = {}
-  private buildingParams: Record<string, BuildingModelParams> = {}
+  private apartmentParams: Record<string, ApartmentModelParams> = {}
 
   private districtVocabSize = 8
   private roomsVocabSize = 3
@@ -129,8 +129,8 @@ export class NaiveBayesEngine {
    * @remarks
    * **Price-based heuristic fallback** — does NOT learn from historical data.
    * The age and income ranges are fixed rule tiers used to seed `target_age_min`,
-   * `target_age_max`, and `min_income` on `BuildingRecord` when no historical
-   * signal is available for a building. This makes it a domain heuristic,
+   * `target_age_max`, and `min_income` on `ApartmentRecord` when no historical
+   * signal is available for a apartment. This makes it a domain heuristic,
    * not a statistical model output.
    */
   public inferDemographics(price: number): {
@@ -150,7 +150,7 @@ export class NaiveBayesEngine {
   }
 
   public train(
-    buildings: BuildingRecord[],
+    apartments: ApartmentRecord[],
     history: TrainingRecord[],
     config?: EngineConfig
   ): void {
@@ -158,20 +158,20 @@ export class NaiveBayesEngine {
       this.currentConfig = { ...config }
     }
 
-    this.buildings = buildings
+    this.apartments = apartments
     this.history = history
     this.priors = {}
-    this.buildingParams = {}
+    this.apartmentParams = {}
 
-    if (buildings.length === 0) {
+    if (apartments.length === 0) {
       this.isTrained = false
-      this.logger.warn('No buildings provided for training Naive Bayes.')
+      this.logger.warn('No apartments provided for training Naive Bayes.')
       return
     }
 
     const totalRecords = history.length
-    const buildingIds = Array.from(new Set(buildings.map(b => b.id)))
-    const numBuildings = buildingIds.length
+    const apartmentIds = Array.from(new Set(apartments.map(b => b.id)))
+    const numApartments = apartmentIds.length
 
     // Distinct vocabs from history
     const distinctDistricts = new Set(history.map(h => h.preferred_district))
@@ -205,7 +205,7 @@ export class NaiveBayesEngine {
           (totalRecords - 1)
         : 100_000_000_000_000
 
-    // Group history by building ID
+    // Group history by apartment ID
     const grouped = new Map<string, TrainingRecord[]>()
     for (const record of history) {
       const bId = record.rented_apartment_id
@@ -219,13 +219,13 @@ export class NaiveBayesEngine {
       this.currentConfig.strategy === 'map-weighted'
     const alpha = isMap ? (this.currentConfig.alpha ?? 1.0) : 1.0 // Dirichlet prior for MAP, Laplace smoothing (1.0) for hybrid
 
-    for (const bId of buildingIds) {
+    for (const bId of apartmentIds) {
       const bData = grouped.get(bId) || []
       const bCount = bData.length
 
-      // Prior P(Building_i)
+      // Prior P(Apartment_i)
       this.priors[bId] =
-        (bCount + alpha) / (totalRecords + alpha * numBuildings)
+        (bCount + alpha) / (totalRecords + alpha * numApartments)
 
       if (bCount > 0) {
         // Continuous: Age
@@ -274,7 +274,7 @@ export class NaiveBayesEngine {
             (parkingCounts[r.requires_parking] || 0) + 1
         }
 
-        this.buildingParams[bId] = {
+        this.apartmentParams[bId] = {
           prior: this.priors[bId],
           gaussian: {
             age: { mean: ageMean, var: ageVar },
@@ -288,8 +288,8 @@ export class NaiveBayesEngine {
           },
         }
       } else {
-        // Fallback for buildings without prior history
-        this.buildingParams[bId] = {
+        // Fallback for apartments without prior history
+        this.apartmentParams[bId] = {
           prior: this.priors[bId],
           gaussian: {
             age: { mean: globalAgeMean, var: globalAgeVar },
@@ -314,7 +314,7 @@ export class NaiveBayesEngine {
 
     this.isTrained = true
     this.logger.log(
-      `Naive Bayes trained successfully on ${totalRecords} history records across ${numBuildings} buildings using strategy '${this.currentConfig.strategy}'.`
+      `Naive Bayes trained successfully on ${totalRecords} history records across ${numApartments} apartments using strategy '${this.currentConfig.strategy}'.`
     )
   }
 
@@ -345,7 +345,7 @@ export class NaiveBayesEngine {
       parking: r => String(r.requires_parking),
     }
 
-    // Marginal counts for building (B)
+    // Marginal counts for apartment (B)
     const bCounts = new Map<string, number>()
     for (const r of history) {
       bCounts.set(
@@ -459,7 +459,7 @@ export class NaiveBayesEngine {
     userProfile: UserProfile,
     limit = 5
   ): RecommendationOutput[] {
-    if (!this.isTrained || this.buildings.length === 0) {
+    if (!this.isTrained || this.apartments.length === 0) {
       this.logger.warn('Recommender called without being trained.')
       return []
     }
@@ -476,14 +476,14 @@ export class NaiveBayesEngine {
     const prefGym = userHasGym ? 1 : 0
     const prefParking = userHasParking ? 1 : 0
 
-    // Filter buildings exceeding 50% monthly income
-    const validBuildings = this.buildings.filter(b => {
+    // Filter apartments exceeding 50% monthly income
+    const validApartments = this.apartments.filter(b => {
       const rent = Number(b.rent_price)
       if (rent > userIncome * 0.5) return false
-      return b.id in this.buildingParams
+      return b.id in this.apartmentParams
     })
 
-    if (validBuildings.length === 0) {
+    if (validApartments.length === 0) {
       return []
     }
 
@@ -502,10 +502,10 @@ export class NaiveBayesEngine {
       }
     > = {}
 
-    // Compute log-likelihood for each valid building
-    for (const b of validBuildings) {
+    // Compute log-likelihood for each valid apartment
+    for (const b of validApartments) {
       const bId = b.id
-      const params = this.buildingParams[bId]
+      const params = this.apartmentParams[bId]
       if (!params) continue
 
       let logProb = Math.log(params.prior)
@@ -592,7 +592,7 @@ export class NaiveBayesEngine {
     // Step 4: Content-based Checklist Score & 4-Pillar breakdown
     const recommendations: RecommendationOutput[] = []
 
-    for (const b of validBuildings) {
+    for (const b of validApartments) {
       const bId = b.id
       const rent = Number(b.rent_price)
       const probs = compProbs[bId]
@@ -755,7 +755,7 @@ export class NaiveBayesEngine {
       }
 
       const historyCount =
-        this.buildingParams[bId]?.categorical?.district?.total || 0
+        this.apartmentParams[bId]?.categorical?.district?.total || 0
       const totalHistory = this.history.length
       const historyRatio = totalHistory > 0 ? historyCount / totalHistory : 0
       const confidence: 'Cao' | 'Trung bình' | 'Thấp' =

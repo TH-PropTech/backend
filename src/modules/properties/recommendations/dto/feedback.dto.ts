@@ -20,7 +20,7 @@ export class FeedbackDto {
     description: 'ID của căn hộ',
   })
   @IsString()
-  building_id!: string
+  apartment_id!: string
 
   @ApiProperty({ example: 28, description: 'Tuổi của khách hàng' })
   @IsNumber()

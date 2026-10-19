@@ -207,16 +207,6 @@ export class CreateApartmentDto {
   @MaxLength(200)
   title!: string
 
-  @ApiPropertyOptional({ description: 'ID tòa nhà' })
-  @IsString()
-  @IsOptional()
-  buildingId?: string | null
-
-  @ApiPropertyOptional({ description: 'Tên tòa nhà' })
-  @IsString()
-  @IsOptional()
-  buildingName?: string | null
-
   @ApiPropertyOptional({ description: 'ID dự án' })
   @IsString()
   @IsOptional()

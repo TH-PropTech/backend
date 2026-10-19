@@ -107,8 +107,6 @@ function createApartment(overrides: Partial<Apartment> = {}): Apartment {
   return {
     _id: new ObjectId(),
     title: 'Two-bedroom apartment',
-    buildingId: null,
-    buildingName: null,
     projectId: null,
     projectName: null,
     category: 'apartment',

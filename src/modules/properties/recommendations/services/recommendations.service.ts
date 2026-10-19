@@ -16,7 +16,7 @@ import { ActivityLog } from '../../../activity-log/schemas/activity-log.schema'
 import { KindScopedActivityLogRepository } from '../../../activity-log/utils/kind-scoped-activity-log.repository'
 import { toRecommendationHistory } from '../../../activity-log/utils/legacy-log.mapper'
 import {
-  BuildingRecord,
+  ApartmentRecord,
   TrainingRecord,
   UserProfile,
   EngineConfig,
@@ -58,9 +58,9 @@ export class RecommendationsService implements OnApplicationBootstrap {
   }
 
   /**
-   * Maps an Apartment entity into a BuildingRecord for the Naive Bayes engine.
+   * Maps an Apartment entity into a ApartmentRecord for the Naive Bayes engine.
    */
-  private mapApartmentToBuilding(apt: Apartment): BuildingRecord {
+  private mapApartmentToRecord(apt: Apartment): ApartmentRecord {
     const amenities = (apt.amenities || []).map(a => a.toLowerCase())
     const price = apt.priceMonthly || 0
     const demo = this.nbEngine.inferDemographics(price)
@@ -82,8 +82,7 @@ export class RecommendationsService implements OnApplicationBootstrap {
       : 0
 
     const aptId = apt._id ? apt._id.toString() : ''
-    const title =
-      apt.buildingName || apt.projectName || apt.title || 'Căn hộ chung cư'
+    const title = apt.projectName || apt.title || 'Căn hộ chung cư'
 
     return {
       id: aptId,
@@ -106,7 +105,7 @@ export class RecommendationsService implements OnApplicationBootstrap {
    * applying the active engine strategy and hyperparameters from RecommendationConfigService.
    */
   public async retrainModel(): Promise<{
-    buildingCount: number
+    apartmentCount: number
     historyRecords: number
   }> {
     const allApartments = await this.apartmentsService.findAll()
@@ -114,8 +113,8 @@ export class RecommendationsService implements OnApplicationBootstrap {
       apt => apt.status === 'available'
     )
 
-    const buildingRecords: BuildingRecord[] = availableApartments.map(apt =>
-      this.mapApartmentToBuilding(apt)
+    const apartmentRecords: ApartmentRecord[] = availableApartments.map(apt =>
+      this.mapApartmentToRecord(apt)
     )
 
     const dbHistories = await this.historyRepository.find()
@@ -154,15 +153,15 @@ export class RecommendationsService implements OnApplicationBootstrap {
       )
     }
 
-    this.nbEngine.train(buildingRecords, trainingRecords, engineConfig)
+    this.nbEngine.train(apartmentRecords, trainingRecords, engineConfig)
     this.isModelTrained = true
 
     this.logger.log(
-      `Model retrained: ${buildingRecords.length} available apartments, ${trainingRecords.length} history records using strategy '${engineConfig.strategy}'.`
+      `Model retrained: ${apartmentRecords.length} available apartments, ${trainingRecords.length} history records using strategy '${engineConfig.strategy}'.`
     )
 
     return {
-      buildingCount: buildingRecords.length,
+      apartmentCount: apartmentRecords.length,
       historyRecords: trainingRecords.length,
     }
   }
@@ -214,7 +213,7 @@ export class RecommendationsService implements OnApplicationBootstrap {
         preferredBedrooms: dto.rooms,
         requiresGym: dto.has_gym ? 1 : 0,
         requiresParking: dto.has_parking ? 1 : 0,
-        rentedApartmentId: dto.building_id,
+        rentedApartmentId: dto.apartment_id,
         satisfactionScore: 5.0,
       })
 
@@ -241,11 +240,11 @@ export class RecommendationsService implements OnApplicationBootstrap {
    * Admin endpoint to sync data and trigger retraining.
    */
   async sync(): Promise<SyncResponse> {
-    const { buildingCount } = await this.retrainModel()
+    const { apartmentCount } = await this.retrainModel()
     return {
       status: 'success',
       message: 'Apartment data synced and model retrained successfully',
-      apartments_loaded: buildingCount,
+      apartments_loaded: apartmentCount,
     }
   }
 }

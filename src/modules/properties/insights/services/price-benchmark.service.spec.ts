@@ -14,8 +14,6 @@ function createApartment(
   return {
     _id: new ObjectId(),
     title: 'Căn hộ kiểm thử',
-    buildingId: null,
-    buildingName: null,
     projectId: null,
     projectName: null,
     category: 'apartment',

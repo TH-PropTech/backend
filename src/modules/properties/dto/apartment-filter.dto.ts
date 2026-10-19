@@ -125,11 +125,6 @@ export class ApartmentFilterDto {
   @Type(() => Boolean)
   hasMedia?: boolean
 
-  @ApiPropertyOptional({ description: 'Mã tòa nhà' })
-  @IsString()
-  @IsOptional()
-  buildingId?: string
-
   @ApiPropertyOptional({
     description: 'Danh sách tiện ích (ngăn cách bằng dấu phẩy)',
   })

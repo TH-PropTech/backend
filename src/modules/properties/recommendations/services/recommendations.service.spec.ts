@@ -33,8 +33,6 @@ describe('RecommendationsService', () => {
     {
       _id: new ObjectId('60d5ec4b8f72a43b64f78e41'),
       title: 'Vinhomes Central Park',
-      buildingId: 'b1',
-      buildingName: 'Vinhomes Central Park',
       projectId: 'p1',
       projectName: 'Vinhomes',
       category: 'Chung cư cao cấp',
@@ -69,8 +67,6 @@ describe('RecommendationsService', () => {
     {
       _id: new ObjectId('60d5ec4b8f72a43b64f78e42'),
       title: 'Masteri Thảo Điền',
-      buildingId: 'b2',
-      buildingName: 'Masteri Thảo Điền',
       projectId: 'p2',
       projectName: 'Masteri',
       category: 'Chung cư cao cấp',
@@ -238,7 +234,7 @@ describe('RecommendationsService', () => {
   describe('Dimension 3: Feedback (Like & Dislike online learning)', () => {
     it('should handle positive feedback (like) by saving to DB and retraining on-the-fly', async () => {
       const dto: FeedbackDto = {
-        building_id: '60d5ec4b8f72a43b64f78e41',
+        apartment_id: '60d5ec4b8f72a43b64f78e41',
         age: 28,
         income: 50_000_000,
         preferred_district: 'Bình Thạnh',
@@ -267,7 +263,7 @@ describe('RecommendationsService', () => {
 
     it('should handle negative feedback (dislike) without inserting into training data', async () => {
       const dto: FeedbackDto = {
-        building_id: '60d5ec4b8f72a43b64f78e42',
+        apartment_id: '60d5ec4b8f72a43b64f78e42',
         age: 28,
         income: 50_000_000,
         preferred_district: 'Quận 2',
@@ -304,7 +300,7 @@ describe('RecommendationsService', () => {
 
       const res = await service.retrainModel()
       expect(mockConfigService.getConfig).toHaveBeenCalled()
-      expect(res.buildingCount).toBe(2)
+      expect(res.apartmentCount).toBe(2)
       expect(nbEngine.getConfig().strategy).toBe('map')
       expect(nbEngine.getConfig().alpha).toBe(2.5)
     })
@@ -315,7 +311,7 @@ describe('RecommendationsService', () => {
       )
 
       const res = await service.retrainModel()
-      expect(res.buildingCount).toBe(2)
+      expect(res.apartmentCount).toBe(2)
       expect(nbEngine.getConfig().strategy).toBe('hybrid')
       expect(nbEngine.getConfig().alpha).toBe(1.0)
       expect(nbEngine.getConfig().nbWeight).toBe(0.5)

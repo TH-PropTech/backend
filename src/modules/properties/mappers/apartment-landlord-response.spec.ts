@@ -36,8 +36,6 @@ function buildApartment(overrides: Partial<Apartment> = {}): Apartment {
     expiresAt: null,
     projectName: 'Vinhomes Grand Park',
     projectId: 'p-1',
-    buildingName: 'Block A',
-    buildingId: 'b-1',
     pricingMode: 'legacy',
     pricingRevision: 0,
     rentalPackages: [],
@@ -96,7 +94,6 @@ describe('ApartmentResponseMapper.toLandlordJson', () => {
       water: 'Giá nhà nước',
       internet: 'Miễn phí',
       projectId: 'p-1',
-      buildingId: 'b-1',
       status: 'rejected',
       rejectedReason: 'Ảnh không rõ ràng',
     })
@@ -129,8 +126,6 @@ describe('ApartmentResponseMapper.toLandlordJson', () => {
         amenities: undefined,
         projectName: undefined,
         projectId: undefined,
-        buildingName: undefined,
-        buildingId: undefined,
         rejectedReason: undefined,
         submittedAt: undefined,
         expiresAt: undefined,
@@ -145,8 +140,6 @@ describe('ApartmentResponseMapper.toLandlordJson', () => {
     expect(json.amenities).toEqual([])
     expect(json.projectName).toBe('')
     expect(json.projectId).toBeNull()
-    expect(json.buildingName).toBe('')
-    expect(json.buildingId).toBeNull()
     expect(json.rejectedReason).toBeNull()
     expect(json.submittedAt).toBeNull()
     expect(json.expiresAt).toBeNull()

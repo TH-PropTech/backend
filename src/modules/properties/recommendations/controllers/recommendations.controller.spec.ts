@@ -77,7 +77,7 @@ describe('RecommendationsController', () => {
       apartments_loaded: 25,
     }),
     retrainModel: jest.fn().mockResolvedValue({
-      buildingCount: 25,
+      apartmentCount: 25,
       historyRecords: 100,
     }),
   }
@@ -126,7 +126,7 @@ describe('RecommendationsController', () => {
 
   it('should call service.feedback and return feedback response', async () => {
     const dto: FeedbackDto = {
-      building_id: 'apt1',
+      apartment_id: 'apt1',
       age: 28,
       income: 50_000_000,
       preferred_district: 'Bình Thạnh',

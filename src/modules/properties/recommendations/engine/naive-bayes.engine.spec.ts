@@ -1,6 +1,6 @@
 import { NaiveBayesEngine } from './naive-bayes.engine'
 import {
-  BuildingRecord,
+  ApartmentRecord,
   TrainingRecord,
   UserProfile,
 } from './naive-bayes.types'
@@ -8,7 +8,7 @@ import {
 describe('NaiveBayesEngine', () => {
   let engine: NaiveBayesEngine
 
-  const mockBuildings: BuildingRecord[] = [
+  const mockApartments: ApartmentRecord[] = [
     {
       id: 'b1',
       name: 'Vinhomes Central Park',
@@ -95,7 +95,7 @@ describe('NaiveBayesEngine', () => {
 
   describe('Dimension 1: Happy Path', () => {
     it('should train model and produce top recommendations with valid match scores', () => {
-      engine.train(mockBuildings, mockHistory)
+      engine.train(mockApartments, mockHistory)
 
       const profile: UserProfile = {
         age: 28,
@@ -135,12 +135,12 @@ describe('NaiveBayesEngine', () => {
       expect(results).toEqual([])
     })
 
-    it('should filter out buildings whose rent exceeds 50% of monthly income (hard constraint)', () => {
-      engine.train(mockBuildings, mockHistory)
+    it('should filter out apartments whose rent exceeds 50% of monthly income (hard constraint)', () => {
+      engine.train(mockApartments, mockHistory)
 
       const profile: UserProfile = {
         age: 25,
-        income: 8_000_000, // 50% = 4,000,000. All buildings rent >= 5M
+        income: 8_000_000, // 50% = 4,000,000. All apartments rent >= 5M
         preferred_district: 'Bình Tân',
         rooms: 1,
         has_gym: false,
@@ -151,7 +151,7 @@ describe('NaiveBayesEngine', () => {
       expect(results).toEqual([])
     })
 
-    it('should handle training with empty buildings array gracefully', () => {
+    it('should handle training with empty apartments array gracefully', () => {
       engine.train([], mockHistory)
       const results = engine.recommend({
         age: 25,
@@ -165,7 +165,7 @@ describe('NaiveBayesEngine', () => {
     })
 
     it('should handle training with empty history array gracefully using global fallbacks', () => {
-      engine.train(mockBuildings, [])
+      engine.train(mockApartments, [])
       const results = engine.recommend({
         age: 28,
         income: 50_000_000,
@@ -245,7 +245,7 @@ describe('NaiveBayesEngine', () => {
 
   describe('Dimension 5: Full Branch Coverage (Amenities & Penalty)', () => {
     it('should handle rent ratio penalty when rent > 35% of income', () => {
-      engine.train(mockBuildings, mockHistory)
+      engine.train(mockApartments, mockHistory)
 
       // rent is 18M, income is 40M => rentRatio = 0.45 (> 0.35)
       const profile: UserProfile = {
@@ -267,7 +267,7 @@ describe('NaiveBayesEngine', () => {
     })
 
     it('should award extra points for matching room count and amenities', () => {
-      engine.train(mockBuildings, mockHistory)
+      engine.train(mockApartments, mockHistory)
 
       const profile1PN: UserProfile = {
         age: 22,
@@ -288,7 +288,7 @@ describe('NaiveBayesEngine', () => {
   describe('Dimension 6: Normalized Location Score & Confidence Ratio', () => {
     it('should keep contributions.location in [0,100] for exact district match (denominator fix)', () => {
       // Task 1.3: denominator changed from 45 to 30; exact match = 30pts → 100%
-      engine.train(mockBuildings, mockHistory)
+      engine.train(mockApartments, mockHistory)
 
       const profile: UserProfile = {
         age: 28,
@@ -310,7 +310,7 @@ describe('NaiveBayesEngine', () => {
 
     it('should compute ratio-based confidence: ≥5% of total history → Cao', () => {
       // Task 3.2: b1 has 2 records out of 4 total = 50% → Cao
-      engine.train(mockBuildings, mockHistory)
+      engine.train(mockApartments, mockHistory)
 
       const profile: UserProfile = {
         age: 28,
@@ -329,7 +329,7 @@ describe('NaiveBayesEngine', () => {
 
     it('should return Thấp confidence when total history is empty', () => {
       // Task 3.2: zero history → ratio = 0 → Thấp
-      engine.train(mockBuildings, [])
+      engine.train(mockApartments, [])
 
       const profile: UserProfile = {
         age: 28,
@@ -347,9 +347,9 @@ describe('NaiveBayesEngine', () => {
       }
     })
 
-    it('should return Thấp confidence when building ratio < 1% of total history', () => {
+    it('should return Thấp confidence when apartment ratio < 1% of total history', () => {
       // Task 3.2: b3 has 1 record; if total is large, ratio < 1% → Thấp
-      // Simulate with many extra records for other buildings
+      // Simulate with many extra records for other apartments
       const extraHistory = Array.from({ length: 200 }, (_, i) => ({
         user_age: 28 + (i % 10),
         user_income: 50_000_000,
@@ -359,7 +359,7 @@ describe('NaiveBayesEngine', () => {
         requires_parking: 1,
         rented_apartment_id: 'b1',
       }))
-      engine.train(mockBuildings, [...mockHistory, ...extraHistory])
+      engine.train(mockApartments, [...mockHistory, ...extraHistory])
       // b3 has 1 record out of 204 total ≈ 0.49% < 1% → Thấp
 
       const profile: UserProfile = {
@@ -380,7 +380,7 @@ describe('NaiveBayesEngine', () => {
 
   describe('Engine Strategy Pattern & Configuration', () => {
     it('should default to hybrid strategy with alpha=1.0 and 50/50 weights', () => {
-      engine.train(mockBuildings, mockHistory)
+      engine.train(mockApartments, mockHistory)
       const config = engine.getConfig()
       expect(config.strategy).toBe('hybrid')
       expect(config.alpha).toBe(1.0)
@@ -389,7 +389,7 @@ describe('NaiveBayesEngine', () => {
     })
 
     it('should train with hybrid strategy and produce valid recommendations', () => {
-      engine.train(mockBuildings, mockHistory, {
+      engine.train(mockApartments, mockHistory, {
         strategy: 'hybrid',
         alpha: 1.0,
         nbWeight: 0.5,
@@ -415,7 +415,7 @@ describe('NaiveBayesEngine', () => {
     })
 
     it('should train with MAP strategy and use custom alpha', () => {
-      engine.train(mockBuildings, mockHistory, {
+      engine.train(mockApartments, mockHistory, {
         strategy: 'map',
         alpha: 2.0,
         nbWeight: 0.7,
@@ -439,7 +439,7 @@ describe('NaiveBayesEngine', () => {
     })
 
     it('should train with weighted strategy and compute feature weights summing to 1.0', () => {
-      engine.train(mockBuildings, mockHistory, {
+      engine.train(mockApartments, mockHistory, {
         strategy: 'weighted',
         alpha: 1.0,
         nbWeight: 0.5,
@@ -476,7 +476,7 @@ describe('NaiveBayesEngine', () => {
     })
 
     it('should train with map-weighted strategy and produce complete recommendations', () => {
-      engine.train(mockBuildings, mockHistory, {
+      engine.train(mockApartments, mockHistory, {
         strategy: 'map-weighted',
         alpha: 1.5,
         nbWeight: 0.6,
@@ -502,7 +502,7 @@ describe('NaiveBayesEngine', () => {
     })
 
     it('should assign uniform 0.25 weights when history is empty', () => {
-      engine.train(mockBuildings, [], {
+      engine.train(mockApartments, [], {
         strategy: 'weighted',
         alpha: 1.0,
         nbWeight: 0.5,
