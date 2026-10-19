@@ -106,6 +106,43 @@ describe('MocbankEscrowClient', () => {
     })
   })
 
+  it('resolves account name and lower-cases the service brand', async () => {
+    const fetcher = jsonFetcher({
+      success: true,
+      data: {
+        accountNumber: '810000007777',
+        accountName: 'A B',
+        brand: 'MOMO',
+      },
+    })
+    await expect(
+      clientWith(fetcher).resolveAccount('810000007777')
+    ).resolves.toEqual({ accountName: 'A B', brand: 'momo' })
+    const [url] = fetcher.mock.calls[0] as [string]
+    expect(url).toBe(`${moc.baseUrl}/api/wallets/resolve/810000007777`)
+  })
+
+  it('treats a missing or unknown brand as mocbank and keeps resolveAccountHolder returning the name', async () => {
+    const missing = jsonFetcher({ success: true, data: { accountName: 'A B' } })
+    await expect(
+      clientWith(missing).resolveAccount('810000000002')
+    ).resolves.toEqual({ accountName: 'A B', brand: 'mocbank' })
+    const unknown = jsonFetcher({
+      success: true,
+      data: { accountName: 'A B', brand: 'PAYPAL' },
+    })
+    await expect(
+      clientWith(unknown).resolveAccount('810000000002')
+    ).resolves.toEqual({ accountName: 'A B', brand: 'mocbank' })
+    const holder = jsonFetcher({
+      success: true,
+      data: { accountName: 'A B', brand: 'ZALOPAY' },
+    })
+    await expect(
+      clientWith(holder).resolveAccountHolder('810000000002')
+    ).resolves.toBe('A B')
+  })
+
   it('extends with an ISO autoRefundAt', async () => {
     const fetcher = jsonFetcher(escrowReply({ status: 'HELD' }))
 

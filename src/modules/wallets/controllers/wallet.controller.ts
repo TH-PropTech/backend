@@ -47,7 +47,9 @@ export class WalletController {
   ): Promise<WalletView> {
     const userId = this.requireUserId(user)
     const { wallet } = await this.walletsService.link(userId, dto)
-    await this.payoutsService.releaseAwaitingWallet(userId)
+    if (!dto.brand || dto.brand === 'mocbank') {
+      await this.payoutsService.releaseAwaitingWallet(userId)
+    }
     return wallet
   }
 

@@ -6,7 +6,17 @@ import {
   ObjectIdColumn,
   UpdateDateColumn,
 } from 'typeorm'
+import type { WalletBrand } from '../utils/supported-banks'
 import type { PaymentProviderName } from '../../mock-bank/providers/payment-provider.port'
+
+/** Tài khoản ví mô phỏng phụ (Momo/ZaloPay/VNPay) gắn trên ví chính. */
+export type WalletExtraAccount = {
+  brand: Exclude<WalletBrand, 'mocbank'>
+  mocbankAccountNumber: string
+  accountHolder: string
+  accountNumberMasked: string
+  linkedAt: Date
+}
 
 /**
  * Ví = liên kết tài khoản ngân hàng, không lưu ký (xem openspec
@@ -53,6 +63,10 @@ export class Wallet {
    */
   @Column({ type: 'string', nullable: true })
   mocbankAccountNumber?: string | null
+
+  /** Ví mô phỏng phụ theo thương hiệu; document cũ không có trường này. */
+  @Column({ type: 'json', nullable: true })
+  extraAccounts?: WalletExtraAccount[] | null
 
   @Column({ nullable: true })
   linkedAt!: Date | null

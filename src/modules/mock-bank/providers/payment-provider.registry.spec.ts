@@ -83,7 +83,17 @@ describe('PaymentProviderRegistry', () => {
     const listed = registry.listProviders()
 
     expect(listed).toEqual([
-      { provider: 'mocbank', label: 'Ví Mộc (sandbox)', simulation: false },
+      {
+        provider: 'mocbank',
+        label: 'Ví Mộc (sandbox)',
+        simulation: false,
+        brands: [
+          { brand: 'mocbank', label: 'Ví Mộc' },
+          { brand: 'momo', label: 'Momo (mô phỏng)' },
+          { brand: 'zalopay', label: 'ZaloPay (mô phỏng)' },
+          { brand: 'vnpay', label: 'VNPay (mô phỏng)' },
+        ],
+      },
       { provider: 'mock-bank', label: 'Mock Bank (sandbox)', simulation: true },
     ])
     expect(registry.get('mocbank').name).toBe('mocbank')

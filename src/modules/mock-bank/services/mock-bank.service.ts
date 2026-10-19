@@ -28,6 +28,7 @@ import {
 } from '../../payments/schemas/payment-attempt.schema'
 import type { PaymentCallbackDto } from '../dto/init-payment.dto'
 import { ObjectId } from 'mongodb'
+import type { WalletBrand } from '../../wallets/utils/supported-banks'
 import { PaymentProviderRegistry } from '../providers/payment-provider.registry'
 import type {
   GatewayVerdict,
@@ -97,6 +98,8 @@ export type PaymentInitOptions = {
   clientChannel?: PaymentClientChannel | undefined
   clientIp?: string | undefined
   momoMethod?: MomoPaymentMethod | undefined
+  /** Ví Mộc: thương hiệu ví của chủ nhà nhận tiền (mặc định mocbank). */
+  brand?: WalletBrand | undefined
 }
 
 type PaymentType = PaymentAttempt['paymentType']
@@ -1029,7 +1032,11 @@ export class MockBankService {
     const useEscrow = Boolean(input.escrowAutoRefundAt)
     const payeeAccountNumber = useEscrow
       ? null
-      : await this.resolvePayeeAccount(adapter.name, input.payeeLandlordId)
+      : await this.resolvePayeeAccount(
+          adapter.name,
+          input.payeeLandlordId,
+          input.options.brand ?? 'mocbank'
+        )
     const momoMethod =
       adapter.name === 'momo' ? (input.options.momoMethod ?? 'wallet') : null
     const live = await this.attemptRepository.findOne({
@@ -1131,11 +1138,13 @@ export class MockBankService {
    */
   private async resolvePayeeAccount(
     provider: PaymentProviderName,
-    landlordId: string | null | undefined
+    landlordId: string | null | undefined,
+    brand: WalletBrand = 'mocbank'
   ): Promise<string | null> {
     if (!landlordId || provider !== 'mocbank') return null
     const account =
-      (await this.walletsService?.getMocbankAccountNumber(landlordId)) ?? null
+      (await this.walletsService?.getMocbankAccountNumber(landlordId, brand)) ??
+      null
     if (!account) throw new ConflictException('LANDLORD_WALLET_NOT_LINKED')
     return account
   }

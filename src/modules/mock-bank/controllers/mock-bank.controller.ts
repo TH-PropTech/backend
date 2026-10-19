@@ -119,6 +119,7 @@ export class MockBankController {
       userId,
       {
         provider: dto.provider,
+        brand: dto.brand,
         clientChannel: dto.clientChannel,
         momoMethod: dto.momoMethod,
         clientIp,
@@ -136,6 +137,7 @@ export class MockBankController {
   ): Promise<MockPaymentInit> {
     return this.mockBankService.initRentPayment(dto.paymentId, userId, {
       provider: dto.provider,
+      brand: dto.brand,
       clientChannel: dto.clientChannel,
       momoMethod: dto.momoMethod,
       clientIp,
@@ -155,6 +157,7 @@ export class MockBankController {
       userId,
       {
         provider: dto.provider,
+        brand: dto.brand,
         clientChannel: dto.clientChannel,
         momoMethod: dto.momoMethod,
         clientIp,
@@ -172,6 +175,7 @@ export class MockBankController {
   ): Promise<PaymentRequestView> {
     return this.mockBankService.initInvoicePayment(dto.paymentId, userId, {
       provider: dto.provider,
+      brand: dto.brand,
       clientChannel: dto.clientChannel,
       momoMethod: dto.momoMethod,
       clientIp,

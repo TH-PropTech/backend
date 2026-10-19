@@ -1708,6 +1708,39 @@ describe('MockBankService', () => {
       expect(context.attemptRepository.save).not.toHaveBeenCalled()
     })
 
+    it('routes the payee account to the chosen wallet brand', async () => {
+      const { context, adapter } = prepare('mocbank')
+      const wallets = Reflect.get(context.service, 'walletsService') as {
+        getMocbankAccountNumber: jest.Mock
+      }
+      wallets.getMocbankAccountNumber.mockResolvedValue('810000007777')
+
+      await context.service.initRentPayment(paymentId, tenantId, {
+        provider: 'mocbank',
+        brand: 'momo',
+      })
+
+      expect(wallets.getMocbankAccountNumber).toHaveBeenCalledWith(
+        'landlord-1',
+        'momo'
+      )
+      expect(adapter.createPaymentIntent).toHaveBeenCalledWith(
+        expect.objectContaining({ payeeAccountNumber: '810000007777' })
+      )
+    })
+
+    it('refuses the payment when the chosen brand is not linked', async () => {
+      const { context, adapter } = prepare('mocbank', null)
+
+      await expect(
+        context.service.initRentPayment(paymentId, tenantId, {
+          provider: 'mocbank',
+          brand: 'vnpay',
+        })
+      ).rejects.toThrow('LANDLORD_WALLET_NOT_LINKED')
+      expect(adapter.createPaymentIntent).not.toHaveBeenCalled()
+    })
+
     it('refuses the payment when the wallets service is unavailable', async () => {
       const { context } = prepare('mocbank')
       Reflect.set(context.service, 'walletsService', undefined)
@@ -1815,7 +1848,10 @@ describe('MockBankService', () => {
         { provider: 'mocbank' }
       )
 
-      expect(wallets.getMocbankAccountNumber).toHaveBeenCalledWith('landlord-9')
+      expect(wallets.getMocbankAccountNumber).toHaveBeenCalledWith(
+        'landlord-9',
+        'mocbank'
+      )
       expect(adapter.createPaymentIntent).toHaveBeenCalledWith(
         expect.objectContaining({ payeeAccountNumber: LANDLORD_ACCOUNT })
       )

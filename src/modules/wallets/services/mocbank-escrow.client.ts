@@ -10,6 +10,7 @@ import {
   type GatewayFetcher,
   type GatewayReply,
 } from '../../mock-bank/providers/gateway.util'
+import { WALLET_BRANDS, type WalletBrand } from '../utils/supported-banks'
 import {
   isSuccessStatus,
   mocbankMerchantHeaders,
@@ -112,6 +113,13 @@ export class MocbankEscrowClient {
 
   /** Looks up the holder name of a Ví Mộc account before linking it as a payout wallet. */
   async resolveAccountHolder(accountNumber: string): Promise<string> {
+    return (await this.resolveAccount(accountNumber)).accountName
+  }
+
+  /** Holder name + wallet brand; a service that omits/garbles `brand` is treated as MOCBANK. */
+  async resolveAccount(
+    accountNumber: string
+  ): Promise<{ accountName: string; brand: WalletBrand }> {
     const { config, timeoutMs } = this.settings()
     const reply = await getFromGateway(
       this.fetcher,
@@ -132,7 +140,10 @@ export class MocbankEscrowClient {
       )
       throw new MocbankEscrowError('GATEWAY_UNAVAILABLE')
     }
-    return accountName
+    const rawBrand =
+      typeof data?.brand === 'string' ? data.brand.toLowerCase() : ''
+    const brand = WALLET_BRANDS.find(item => item === rawBrand) ?? 'mocbank'
+    return { accountName, brand }
   }
 
   /** The platform's own disbursement wallet at Ví Mộc (not a per-escrow lookup). */
