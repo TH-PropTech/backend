@@ -788,7 +788,6 @@ describe('PayoutsService.getContractSummary', () => {
       _id: new ObjectId(),
       amount: 10_000_000,
       status: 'applied-to-lease-security',
-      escrow: { status: 'HELD' },
     })
     const firstRentId = new ObjectId()
     const secondRentId = new ObjectId()
@@ -822,7 +821,10 @@ describe('PayoutsService.getContractSummary', () => {
 
     expect(result.wallet).toEqual({ linked: true })
     expect(result.items).toEqual([
-      expect.objectContaining({ kind: 'DEPOSIT', status: 'held' }),
+      expect.objectContaining({
+        kind: 'DEPOSIT',
+        status: 'paid-pending-disbursement',
+      }),
       expect.objectContaining({
         kind: 'RENT',
         ref: firstRentId.toHexString(),
@@ -834,10 +836,10 @@ describe('PayoutsService.getContractSummary', () => {
         status: 'unpaid',
       }),
     ])
-    expect(result.totals).toEqual({ received: 5_000_000, pending: 10_000_000 })
+    expect(result.totals).toEqual({ received: 5_000_000, pending: 0 })
   })
 
-  it('reports a paid deposit without escrow as pending disbursement, not unpaid', async () => {
+  it('reports a paid deposit as pending disbursement, not unpaid', async () => {
     const { service, contracts, payments, deposits, payouts, wallets } =
       setupSummary()
     contracts.findOne.mockResolvedValue({ landlordId: LANDLORD })

@@ -59,29 +59,4 @@ describe('payment provider configuration', () => {
       })
     })
   })
-
-  describe('rentalFlow.payments.depositEscrowEnabled', () => {
-    const saved = process.env.DEPOSIT_ESCROW_ENABLED
-
-    afterEach(() => {
-      if (saved === undefined) delete process.env.DEPOSIT_ESCROW_ENABLED
-      else process.env.DEPOSIT_ESCROW_ENABLED = saved
-    })
-
-    it.each([
-      [undefined, false],
-      ['', false],
-      ['false', false],
-      ['yes', false],
-      ['true', true],
-      [' true ', true],
-    ])('reads %j as %s', (value, expected) => {
-      if (value === undefined) delete process.env.DEPOSIT_ESCROW_ENABLED
-      else process.env.DEPOSIT_ESCROW_ENABLED = value
-
-      expect(configuration().rentalFlow.payments.depositEscrowEnabled).toBe(
-        expected
-      )
-    })
-  })
 })

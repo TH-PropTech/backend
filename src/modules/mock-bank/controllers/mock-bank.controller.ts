@@ -90,7 +90,7 @@ export class MockBankController {
   })
   providers(@Query('purpose') purpose?: string): PaymentProviderOption[] {
     return this.providerRegistry.listProviders(
-      purpose === 'deposit' ? 'deposit' : undefined
+      purpose === 'deposit' || purpose === 'invoice' ? purpose : undefined
     )
   }
 
@@ -353,27 +353,15 @@ export class MockBankController {
       response.status(HttpStatus.OK).end()
       return
     }
+    // Ví Mộc may still emit legacy `escrow.*` events; the platform holds no funds, so ack and ignore.
     if (envelope.event.startsWith('escrow.')) {
-      const handled = await this.mockBankService.handleEscrowWebhook(
-        envelope.event,
-        envelope.body
-      )
-      response.status(handled ? HttpStatus.OK : HttpStatus.BAD_REQUEST).end()
+      response.status(HttpStatus.OK).end()
       return
     }
     const result = await this.gatewayCallbackService.handleNotify(
       'mocbank',
       envelope.body
     )
-    if (
-      result.ok &&
-      (envelope.event === 'payment.cancelled' ||
-        envelope.event === 'payment.expired')
-    ) {
-      await this.mockBankService.syncEscrowStatusFromPaymentWebhook(
-        envelope.body
-      )
-    }
     response.status(this.gatewayCallbackService.toMocbankStatus(result)).end()
   }
 

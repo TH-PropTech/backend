@@ -50,18 +50,8 @@ import { WalletsService } from '../../wallets/services/wallets.service'
 import { RentalTransactionEventService } from '../../rental/services/rental-transaction-event.service'
 import type { RentalTransactionActorRole } from '../../rental/schemas/rental-transaction-event.schema'
 import { RentalApplication } from '../../rental/schemas/rental-application.schema'
-import { DepositEscrowService } from '../../contracts/services/deposit-escrow.service'
-import {
-  MocbankEscrowClient,
-  type MocbankEscrow,
-} from '../../wallets/services/mocbank-escrow.client'
 
 const CALLBACK_WINDOW_MS = 5 * 60 * 1000
-/** D8: autoRefundAt = ngày dự kiến vào ở + 30 ngày, kẹp [now+1, now+400]. */
-const AUTO_REFUND_OFFSET_DAYS = 30
-const AUTO_REFUND_MIN_DAYS = 1
-const AUTO_REFUND_MAX_DAYS = 400
-const DAY_MS = 24 * 60 * 60 * 1000
 
 /** Khoản thuộc về sàn (phí sàn, phí dịch vụ khách thuê), không trả cho chủ nhà. */
 const isPlatformPayment = (payment: Payment): boolean =>
@@ -174,20 +164,8 @@ export class MockBankService {
     private readonly walletsService?: WalletsService,
     @Optional()
     @InjectRepository(RentalApplication)
-    private readonly rentalApplicationRepository?: Repository<RentalApplication>,
-    @Optional()
-    private readonly depositEscrowService?: DepositEscrowService,
-    @Optional()
-    private readonly mocbankEscrowClient?: MocbankEscrowClient
+    private readonly rentalApplicationRepository?: Repository<RentalApplication>
   ) {}
-
-  private depositEscrowEnabled(): boolean {
-    return Boolean(
-      this.configService.get<boolean>(
-        'rentalFlow.payments.depositEscrowEnabled'
-      )
-    )
-  }
 
   private async recordTransactionEvent(input: {
     transactionKey: string
@@ -239,20 +217,12 @@ export class MockBankService {
     if (agreement.tenantId !== currentUserId) {
       throw new ForbiddenException('PAYMENT_ACCESS_DENIED')
     }
-    const escrowEnabled = this.depositEscrowEnabled()
     const provider = this.providerRegistry.get(options.provider).name
-    if (escrowEnabled && provider !== 'mocbank') {
-      throw new UnprocessableEntityException('DEPOSIT_PROVIDER_NOT_SUPPORTED')
-    }
     const contract =
       !agreement.linkedLeaseContractId && agreement.applicationId
         ? await this.contractRepository.findOne({
             where: { rentalApplicationId: agreement.applicationId },
           })
-        : null
-    const autoRefundAt =
-      escrowEnabled && provider === 'mocbank'
-        ? await this.computeAutoRefundAt(agreement.applicationId)
         : null
     const { payment, reused } = await this.createAttempt({
       userId: agreement.tenantId,
@@ -263,7 +233,6 @@ export class MockBankService {
       contractId:
         agreement.linkedLeaseContractId ?? contract?._id.toHexString() ?? null,
       payeeLandlordId: agreement.landlordId,
-      escrowAutoRefundAt: autoRefundAt,
       options: { ...options, provider },
     })
     if (!reused) {
@@ -273,32 +242,6 @@ export class MockBankService {
       )
     }
     return this.toDepositPaymentRequest(agreement, payment)
-  }
-
-  /** D8: ngày dự kiến vào ở + 30 ngày, kẹp [now+1, now+400]; log khi kẹp. */
-  private async computeAutoRefundAt(
-    applicationId: string | null
-  ): Promise<Date> {
-    const application =
-      applicationId && ObjectId.isValid(applicationId)
-        ? await this.rentalApplicationRepository?.findOne({
-            where: { _id: new ObjectId(applicationId) },
-          })
-        : null
-    const moveInDate = application?.moveInDate
-      ? new Date(application.moveInDate)
-      : new Date()
-    const now = Date.now()
-    const raw = moveInDate.getTime() + AUTO_REFUND_OFFSET_DAYS * DAY_MS
-    const min = now + AUTO_REFUND_MIN_DAYS * DAY_MS
-    const max = now + AUTO_REFUND_MAX_DAYS * DAY_MS
-    const clamped = Math.min(Math.max(raw, min), max)
-    if (clamped !== raw) {
-      this.logger.warn(
-        `autoRefundAt clamped applicationId=${applicationId ?? 'none'} raw=${new Date(raw).toISOString()} clamped=${new Date(clamped).toISOString()}`
-      )
-    }
-    return new Date(clamped)
   }
 
   async getGatewayPaymentResult(
@@ -523,6 +466,9 @@ export class MockBankService {
     if (invoice.status === 'paid' || invoice.status === 'waived') {
       throw new ConflictException('PAYMENT_ALREADY_PAID')
     }
+    if (options.provider && options.provider !== 'mocbank') {
+      throw new UnprocessableEntityException('INVOICE_PROVIDER_NOT_SUPPORTED')
+    }
     const { payment } = await this.createAttempt({
       userId: currentUserId,
       amount: invoice.amount,
@@ -530,7 +476,7 @@ export class MockBankService {
       paymentId: invoice._id.toHexString(),
       paymentType: 'invoice',
       contractId: invoice.contractId,
-      options,
+      options: { ...options, provider: 'mocbank' },
     })
     return this.toInvoicePaymentRequest(invoice, payment)
   }
@@ -1024,19 +970,14 @@ export class MockBankService {
     paymentIds?: string[] | null
     /** Chủ nhà nhận khoản này; không có khi khoản thuộc về sàn. */
     payeeLandlordId?: string | null
-    /** Cọc có ký quỹ (D1-D11): mở phiên escrow thay vì chuyển thẳng. */
-    escrowAutoRefundAt?: Date | null
     options: PaymentInitOptions
   }): Promise<{ payment: MockPaymentInit; reused: boolean }> {
     const adapter = this.providerRegistry.get(input.options.provider)
-    const useEscrow = Boolean(input.escrowAutoRefundAt)
-    const payeeAccountNumber = useEscrow
-      ? null
-      : await this.resolvePayeeAccount(
-          adapter.name,
-          input.payeeLandlordId,
-          input.options.brand ?? 'mocbank'
-        )
+    const payeeAccountNumber = await this.resolvePayeeAccount(
+      adapter.name,
+      input.payeeLandlordId,
+      input.options.brand ?? 'mocbank'
+    )
     const momoMethod =
       adapter.name === 'momo' ? (input.options.momoMethod ?? 'wallet') : null
     const live = await this.attemptRepository.findOne({
@@ -1079,19 +1020,7 @@ export class MockBankService {
       momoMethod: momoMethod ?? undefined,
       clientChannel: input.options.clientChannel,
       payeeAccountNumber: payeeAccountNumber ?? undefined,
-      ...(input.escrowAutoRefundAt
-        ? { escrow: { autoRefundAt: input.escrowAutoRefundAt } }
-        : {}),
     })
-    if (useEscrow && input.paymentType === 'deposit') {
-      await this.depositAgreementsService.attachEscrow(input.paymentId, {
-        escrowId: intent.escrowId ?? '',
-        status: 'AWAITING_PAYMENT',
-        autoRefundAt: input.escrowAutoRefundAt!,
-        heldAt: null,
-        settlement: null,
-      })
-    }
     const attempt = this.attemptRepository.create({
       provider: intent.provider,
       txRef: intent.txRef,
@@ -1110,7 +1039,6 @@ export class MockBankService {
       clientChannel: input.options.clientChannel ?? 'web',
       momoMethod,
       payeeAccountNumber,
-      escrowId: intent.escrowId ?? null,
     })
     await this.attemptRepository.save(attempt)
     await this.recordTransactionEvent({
@@ -1545,96 +1473,7 @@ export class MockBankService {
       ],
       metadata: { details: { paymentAttemptId: attempt._id.toString() } },
     })
-    if (attempt.escrowId) {
-      // D9: cọc có ký quỹ dừng ở HELD, không tạo payout trực tiếp.
-      await this.reconcileEscrowHeld(
-        agreement._id.toHexString(),
-        attempt.escrowId
-      )
-    } else {
-      await this.createDepositPayout(agreement, attempt, paidAt)
-    }
-  }
-
-  /**
-   * D9: xử lý webhook `escrow.held` / `escrow.settled` / `escrow.auto_refunded`.
-   * Luôn đối soát bằng `GET /api/escrows/:id` trước khi áp kết quả (idempotent).
-   */
-  async handleEscrowWebhook(
-    event: string,
-    body: Record<string, unknown>
-  ): Promise<boolean> {
-    const escrowId = typeof body.escrowId === 'string' ? body.escrowId : null
-    if (!escrowId || !this.depositEscrowService || !this.mocbankEscrowClient) {
-      return false
-    }
-    try {
-      const escrow = await this.mocbankEscrowClient.get(escrowId)
-      const attempt = await this.attemptRepository.findOne({
-        where: { escrowId },
-      })
-      switch (event) {
-        case 'escrow.held':
-          if (attempt) {
-            await this.depositEscrowService.markHeld(attempt.paymentId, escrow)
-          }
-          return true
-        case 'escrow.settled':
-          await this.depositEscrowService.applyWebhookSettled(escrowId, escrow)
-          return true
-        case 'escrow.auto_refunded':
-          await this.depositEscrowService.applyAutoRefunded(escrowId, escrow)
-          return true
-        default:
-          return false
-      }
-    } catch (error) {
-      this.logger.warn(
-        `Ví Mộc escrow webhook failed event=${event} escrowId=${escrowId}: ${error instanceof Error ? error.message : 'unknown'}`
-      )
-      return false
-    }
-  }
-
-  /** D9: `payment.cancelled`/`payment.expired` mang thêm `escrowStatus`. */
-  async syncEscrowStatusFromPaymentWebhook(
-    body: Record<string, unknown>
-  ): Promise<void> {
-    const escrowId = typeof body.escrowId === 'string' ? body.escrowId : null
-    const escrowStatus =
-      typeof body.escrowStatus === 'string' ? body.escrowStatus : null
-    if (!escrowId || !escrowStatus || !this.depositEscrowService) return
-    const attempt = await this.attemptRepository.findOne({
-      where: { escrowId },
-    })
-    if (!attempt) return
-    await this.depositEscrowService.syncStatus(
-      attempt.paymentId,
-      escrowStatus as never
-    )
-  }
-
-  /** D9: đối soát `GET /api/escrows/:id` = HELD rồi ghi `escrow.status`/`heldAt`. */
-  private async reconcileEscrowHeld(
-    agreementId: string,
-    escrowId: string
-  ): Promise<void> {
-    if (!this.depositEscrowService) return
-    try {
-      const escrow = this.mocbankEscrowClient
-        ? await this.mocbankEscrowClient.get(escrowId)
-        : ({ status: 'HELD' } as MocbankEscrow)
-      if (escrow.status !== 'HELD') {
-        this.logger.warn(
-          `Ví Mộc escrow ${escrowId} chưa HELD sau payment.success (status=${escrow.status})`
-        )
-      }
-      await this.depositEscrowService.markHeld(agreementId, escrow)
-    } catch (error) {
-      this.logger.warn(
-        `Ví Mộc escrow reconcile failed agreementId=${agreementId}: ${error instanceof Error ? error.message : 'unknown'}`
-      )
-    }
+    await this.createDepositPayout(agreement, attempt, paidAt)
   }
 
   /** Tiền cọc chuyển tiếp về ví chủ nhà như các khoản thanh toán khác; lỗi payout không làm hỏng cọc đã ghi nhận. */

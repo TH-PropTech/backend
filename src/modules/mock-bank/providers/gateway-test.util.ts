@@ -5,7 +5,6 @@ export const TEST_PAYMENTS: PaymentsConfig = {
   enabledProviders: ['mock-bank', 'vnpay', 'momo', 'zalopay', 'mocbank'],
   gatewayTimeoutMs: 5000,
   attemptTtlMinutes: 15,
-  depositEscrowEnabled: false,
   clientReturnUrl: 'http://localhost:3000',
   mobileReturnUrl: 'thproptech://payment-result',
   vnpay: {

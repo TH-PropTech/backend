@@ -30,7 +30,6 @@ function makeAttempt(overrides: Partial<PaymentAttempt> = {}): PaymentAttempt {
     providerTransactionId: 'gw-1',
     clientChannel: 'web',
     payeeAccountNumber: null,
-    escrowId: null,
     momoMethod: null,
     createdAt: now,
     updatedAt: now,

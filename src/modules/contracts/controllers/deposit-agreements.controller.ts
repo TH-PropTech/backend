@@ -11,17 +11,13 @@ import {
 } from '../dto/deposit-agreement.dto'
 import { DepositAgreementsService } from '../services/deposit-agreements.service'
 import { DepositAgreement } from '../schemas/deposit-agreement.schema'
-import { DepositEscrowService } from '../services/deposit-escrow.service'
 
 @ApiTags('deposit-agreements')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('deposit-agreements')
 export class DepositAgreementsController {
-  constructor(
-    private readonly service: DepositAgreementsService,
-    private readonly escrowService: DepositEscrowService
-  ) {}
+  constructor(private readonly service: DepositAgreementsService) {}
 
   @Get(':id')
   @Roles('tenant', 'landlord', 'staff', 'admin')
@@ -31,22 +27,7 @@ export class DepositAgreementsController {
   ): Promise<DepositAgreement> {
     const isStaff =
       user.roles?.some(role => ['staff', 'admin'].includes(role)) ?? false
-    const agreement = await this.service.getAgreement(
-      id,
-      user._id ?? '',
-      isStaff
-    )
-    // D5: tenant/landlord không thấy escrowId/transactionCodes (chỉ staff).
-    if (!isStaff && agreement.escrow) {
-      agreement.escrow = {
-        ...agreement.escrow,
-        escrowId: '',
-        settlement: agreement.escrow.settlement
-          ? { ...agreement.escrow.settlement, transactionCodes: [] }
-          : null,
-      }
-    }
-    return agreement
+    return this.service.getAgreement(id, user._id ?? '', isStaff)
   }
 
   @Post(':id/consent')
@@ -89,12 +70,5 @@ export class DepositAgreementsController {
   @Roles('staff', 'admin')
   expire(@Param('id') id: string): Promise<DepositAgreement> {
     return this.service.expire(id)
-  }
-
-  /** D6: staff retry thủ công một settlement ký quỹ đang `failed`. */
-  @Post(':id/escrow/retry-settlement')
-  @Roles('staff', 'admin')
-  retrySettlement(@Param('id') id: string): Promise<DepositAgreement> {
-    return this.escrowService.retryManually(id)
   }
 }

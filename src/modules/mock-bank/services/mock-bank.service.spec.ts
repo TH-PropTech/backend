@@ -161,9 +161,7 @@ describe('MockBankService', () => {
           ? 'secret-for-tests-012345678901234567'
           : key === 'rentalFlow.paymentProvider'
             ? 'mock-bank'
-            : key === 'rentalFlow.payments.depositEscrowEnabled'
-              ? false
-              : 'test'
+            : 'test'
       ),
     }
     const mockAdapter = {
@@ -1383,11 +1381,7 @@ describe('MockBankService', () => {
     it('settles a late Ví Mộc success on an attempt expired by a provider switch', async () => {
       const context = createContext()
       context.configService.get.mockImplementation((key: string) =>
-        key === 'rentalFlow.payments'
-          ? TEST_PAYMENTS
-          : key === 'rentalFlow.payments.depositEscrowEnabled'
-            ? false
-            : 'test'
+        key === 'rentalFlow.payments' ? TEST_PAYMENTS : 'test'
       )
       Object.assign(context.attempt, {
         provider: 'mocbank',
@@ -1414,11 +1408,7 @@ describe('MockBankService', () => {
     it('records duplicate-paid when a late Ví Mộc success meets a target paid elsewhere', async () => {
       const context = createContext()
       context.configService.get.mockImplementation((key: string) =>
-        key === 'rentalFlow.payments'
-          ? TEST_PAYMENTS
-          : key === 'rentalFlow.payments.depositEscrowEnabled'
-            ? false
-            : 'test'
+        key === 'rentalFlow.payments' ? TEST_PAYMENTS : 'test'
       )
       Object.assign(context.service, {
         transactionEventService: {
@@ -1643,7 +1633,7 @@ describe('MockBankService', () => {
   describe('landlord direct receipt (Ví Mộc)', () => {
     const LANDLORD_ACCOUNT = '810000000002'
 
-    function gatewayAdapter(name: 'mocbank' | 'momo'): {
+    function gatewayAdapter(name: 'mocbank' | 'momo' | 'vnpay' | 'zalopay'): {
       name: typeof name
       newTxRef: jest.Mock
       createPaymentIntent: jest.Mock
@@ -1661,7 +1651,7 @@ describe('MockBankService', () => {
     }
 
     function prepare(
-      name: 'mocbank' | 'momo',
+      name: 'mocbank' | 'momo' | 'vnpay' | 'zalopay',
       account: string | null = LANDLORD_ACCOUNT
     ): {
       context: ReturnType<typeof createContext>
@@ -1741,6 +1731,21 @@ describe('MockBankService', () => {
       expect(adapter.createPaymentIntent).not.toHaveBeenCalled()
     })
 
+    it('defaults a platform invoice to Ví Mộc when no provider is sent', async () => {
+      const { context, adapter } = prepare('mocbank')
+      Object.assign(context.payment, {
+        type: 'platform-fee',
+        payerId: 'landlord-1',
+        payerRole: 'landlord',
+        payeeRole: 'platform',
+      })
+
+      await context.service.initInvoicePayment(paymentId, 'landlord-1')
+
+      expect(context.providerRegistry.get).toHaveBeenCalledWith('mocbank')
+      expect(adapter.createPaymentIntent).toHaveBeenCalledTimes(1)
+    })
+
     it('refuses the payment when the wallets service is unavailable', async () => {
       const { context } = prepare('mocbank')
       Reflect.set(context.service, 'walletsService', undefined)
@@ -1771,7 +1776,7 @@ describe('MockBankService', () => {
       )
     })
 
-    it('lets a landlord pay a platform invoice through MoMo with no payee account', async () => {
+    it('rejects non-Ví Mộc providers for a platform invoice', async () => {
       const { context, adapter } = prepare('momo')
       Object.assign(context.payment, {
         type: 'platform-fee',
@@ -1780,14 +1785,14 @@ describe('MockBankService', () => {
         payeeRole: 'platform',
       })
 
-      await context.service.initInvoicePayment(paymentId, 'landlord-1', {
-        provider: 'momo',
-      })
-
-      expect(adapter.createPaymentIntent).toHaveBeenCalledTimes(1)
-      expect(adapter.createPaymentIntent).toHaveBeenCalledWith(
-        expect.objectContaining({ payeeAccountNumber: undefined })
-      )
+      for (const provider of ['momo', 'vnpay'] as const) {
+        await expect(
+          context.service.initInvoicePayment(paymentId, 'landlord-1', {
+            provider,
+          })
+        ).rejects.toThrow('INVOICE_PROVIDER_NOT_SUPPORTED')
+      }
+      expect(adapter.createPaymentIntent).not.toHaveBeenCalled()
     })
 
     it('does not treat a platform-owned rent line as landlord money', async () => {
@@ -1856,6 +1861,31 @@ describe('MockBankService', () => {
         expect.objectContaining({ payeeAccountNumber: LANDLORD_ACCOUNT })
       )
     })
+
+    it.each(['vnpay', 'momo', 'zalopay'] as const)(
+      'accepts %s for a deposit (no DEPOSIT_PROVIDER_NOT_SUPPORTED)',
+      async name => {
+        const { context, adapter } = prepare(name)
+        context.depositAgreementsService.getAgreement.mockResolvedValue({
+          _id: new ObjectId('507f1f77bcf86cd799439011'),
+          agreementCode: 'DPA-1',
+          tenantId,
+          landlordId: 'landlord-9',
+          amount: 5_000_000,
+          status: 'accepted',
+          tenantConsent: { consentedAt: new Date(), contentHash: 'hash' },
+        })
+
+        await expect(
+          context.service.initDepositPayment(
+            '507f1f77bcf86cd799439011',
+            tenantId,
+            { provider: name }
+          )
+        ).resolves.toBeDefined()
+        expect(adapter.createPaymentIntent).toHaveBeenCalledTimes(1)
+      }
+    )
 
     describe('settlement split', () => {
       const settlementId = new ObjectId().toHexString()
@@ -1999,11 +2029,7 @@ describe('MockBankService', () => {
       } {
         const context = createContext()
         context.configService.get.mockImplementation((key: string) =>
-          key === 'rentalFlow.payments'
-            ? TEST_PAYMENTS
-            : key === 'rentalFlow.payments.depositEscrowEnabled'
-              ? false
-              : 'test'
+          key === 'rentalFlow.payments' ? TEST_PAYMENTS : 'test'
         )
         const payoutsService = {
           createForPayment: jest.fn().mockResolvedValue({}),

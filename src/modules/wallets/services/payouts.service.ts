@@ -355,8 +355,8 @@ export class PayoutsService {
   }
 
   /**
-   * Tổng hợp "khoản chủ nhà nhận" cho một hợp đồng: cọc (trạng thái ký quỹ khi có,
-   * xem `deposit-escrow-mocbank`), kỳ thuê đã có payout, kỳ thuê chưa có payout → `unpaid`.
+   * Tổng hợp "khoản chủ nhà nhận" cho một hợp đồng: cọc (suy ra từ trạng thái thỏa thuận),
+   * kỳ thuê đã có payout, kỳ thuê chưa có payout → `unpaid`.
    * Chủ nhà chỉ xem hợp đồng của mình (người khác 404); role khác (staff/admin) xem được mọi hợp đồng.
    */
   async getContractSummary(
@@ -431,9 +431,7 @@ export class PayoutsService {
           acc.received += item.receivedAmount
         } else if (
           item.status === 'pending' ||
-          item.status === 'awaiting-wallet' ||
-          item.status === 'HELD' ||
-          item.status === 'held'
+          item.status === 'awaiting-wallet'
         ) {
           acc.pending += item.receivedAmount
         }
@@ -450,30 +448,16 @@ export class PayoutsService {
     }
   }
 
-  /** Dòng cọc: đọc trạng thái ký quỹ khi thỏa thuận có `escrow` (deposit-escrow-mocbank); nếu không, suy ra từ trạng thái thỏa thuận. */
+  /** Dòng cọc: suy ra từ trạng thái thỏa thuận. */
   private depositLineStatus(agreement: DepositAgreement): string {
-    if (agreement.escrow) {
-      switch (agreement.escrow.status) {
-        case 'HELD':
-          return 'held'
-        case 'SETTLED':
-          return agreement.status === 'released' ? 'released' : 'refunded'
-        case 'AUTO_REFUNDED':
-          return 'refunded'
-        default:
-          return 'unpaid'
-      }
-    }
     if (agreement.status === 'released') return 'released'
     if (agreement.status === 'refunded') return 'refunded'
     if (
       agreement.status === 'paid' ||
       agreement.status === 'applied-to-lease-security'
     ) {
-      // Ký quỹ chưa bật / chưa áp dụng cho thỏa thuận này: cọc đã trả nhưng
-      // chưa có payout cho chủ nhà (phần payout cọc đã bị bỏ khỏi change
-      // này, xem design.md D1/D2) — khác với "chưa trả", nên không dùng
-      // `unpaid` kẻo hiểu nhầm là khách thuê chưa đóng cọc.
+      // Cọc đã trả nhưng chưa có payout cho chủ nhà — khác với "chưa trả",
+      // nên không dùng `unpaid` kẻo hiểu nhầm là khách thuê chưa đóng cọc.
       return 'paid-pending-disbursement'
     }
     return 'unpaid'
