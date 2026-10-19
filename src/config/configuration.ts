@@ -19,12 +19,16 @@ export type PaymentsConfig = {
     hashSecret: string
     payUrl: string
     returnUrl: string
+    /** merchant_webapi `querydr` endpoint (reconciliation only). */
+    queryEndpoint: string
   }
   momo: {
     partnerCode: string
     accessKey: string
     secretKey: string
     endpoint: string
+    /** Order query endpoint (reconciliation only). */
+    queryEndpoint: string
     returnUrl: string
     ipnUrl: string
   }
@@ -33,6 +37,8 @@ export type PaymentsConfig = {
     key1: string
     key2: string
     endpoint: string
+    /** Order query endpoint (reconciliation only). */
+    queryEndpoint: string
     returnUrl: string
     callbackUrl: string
   }
@@ -247,6 +253,10 @@ export const configuration = (): {
           'VNPAY_RETURN_URL',
           'http://localhost:3001/api/v1/bank/vnpay/return'
         ),
+        queryEndpoint: envOr(
+          'VNPAY_QUERY_ENDPOINT',
+          'https://sandbox.vnpayment.vn/merchant_webapi/api/transaction'
+        ),
       },
       momo: {
         partnerCode: envOr('MOMO_PARTNER_CODE', ''),
@@ -255,6 +265,13 @@ export const configuration = (): {
         endpoint: envOr(
           'MOMO_ENDPOINT',
           'https://test-payment.momo.vn/v2/gateway/api/create'
+        ),
+        queryEndpoint: envOr(
+          'MOMO_QUERY_ENDPOINT',
+          envOr(
+            'MOMO_ENDPOINT',
+            'https://test-payment.momo.vn/v2/gateway/api/create'
+          ).replace(/\/create\/?$/, '/query')
         ),
         returnUrl: envOr(
           'MOMO_RETURN_URL',
@@ -272,6 +289,13 @@ export const configuration = (): {
         endpoint: envOr(
           'ZALOPAY_ENDPOINT',
           'https://sb-openapi.zalopay.vn/v2/create'
+        ),
+        queryEndpoint: envOr(
+          'ZALOPAY_QUERY_ENDPOINT',
+          envOr(
+            'ZALOPAY_ENDPOINT',
+            'https://sb-openapi.zalopay.vn/v2/create'
+          ).replace(/\/create\/?$/, '/query')
         ),
         returnUrl: envOr(
           'ZALOPAY_RETURN_URL',

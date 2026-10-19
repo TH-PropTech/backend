@@ -7,16 +7,21 @@ import {
   UnauthorizedException,
   UseGuards,
 } from '@nestjs/common'
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
+import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger'
 import { CurrentUser } from '../../../common/decorators/current-user.decorator'
 import { Roles } from '../../../common/decorators/roles.decorator'
 import { RolesGuard } from '../../../common/guards/roles.guard'
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard'
 import type { UserPayload } from '../../auth/interfaces/auth.interface'
-import { LinkWalletDto, WalletTransactionsQueryDto } from '../dto/wallet.dto'
+import {
+  LinkWalletDto,
+  ReceivingStatusQueryDto,
+  WalletTransactionsQueryDto,
+} from '../dto/wallet.dto'
 import {
   WalletsService,
   type PayableInvoice,
+  type ReceivingStatus,
   type WalletTransactionPage,
   type WalletView,
 } from '../services/wallets.service'
@@ -72,6 +77,22 @@ export class WalletController {
   })
   invoices(@CurrentUser() user: UserPayload): Promise<PayableInvoice[]> {
     return this.walletsService.listPayableInvoices(this.requireUserId(user))
+  }
+
+  @Get('receiving-status')
+  @ApiOperation({
+    summary:
+      'Receiving status: live wallet check, last payout received, stuck payouts',
+  })
+  @ApiQuery({ name: 'refresh', required: false, type: Boolean })
+  receivingStatus(
+    @Query() query: ReceivingStatusQueryDto,
+    @CurrentUser() user: UserPayload
+  ): Promise<ReceivingStatus> {
+    return this.walletsService.getReceivingStatus(
+      this.requireUserId(user),
+      query.refresh === true
+    )
   }
 
   private requireUserId(user: UserPayload): string {

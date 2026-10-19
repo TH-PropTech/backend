@@ -1,5 +1,5 @@
 import { getMetadataArgsStorage } from 'typeorm'
-import { Payout } from './payout.schema'
+import { Payout, payoutSettlementOf } from './payout.schema'
 
 describe('Payout persistence schema', () => {
   it('uses unique payment and sparse unique transfer-reference indexes', () => {
@@ -21,5 +21,21 @@ describe('Payout persistence schema', () => {
         expect.objectContaining({ columns: ['landlordId', 'createdAt'] }),
       ])
     )
+  })
+})
+
+describe('payoutSettlementOf', () => {
+  it('prefers the stored settlement', () => {
+    expect(
+      payoutSettlementOf({ settlement: 'external', directReceipt: false })
+    ).toBe('external')
+  })
+
+  it('derives legacy documents from directReceipt and relayRef', () => {
+    expect(payoutSettlementOf({ directReceipt: true })).toBe('direct')
+    expect(payoutSettlementOf({ directReceipt: false, relayRef: 'TX' })).toBe(
+      'relay'
+    )
+    expect(payoutSettlementOf({ directReceipt: false })).toBe('relay')
   })
 })

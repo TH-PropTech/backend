@@ -1,15 +1,26 @@
-import { Injectable } from '@nestjs/common'
+import { Injectable, Logger, Optional } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { ObjectId } from 'mongodb'
 import type { MongoRepository } from 'typeorm'
-import type { PaymentProviderName } from '../../mock-bank/providers/payment-provider.port'
+import type {
+  GatewayQueryResult,
+  PaymentProviderName,
+} from '../../mock-bank/providers/payment-provider.port'
+import { PaymentProviderRegistry } from '../../mock-bank/providers/payment-provider.registry'
 import { DepositAgreement } from '../../contracts/schemas/deposit-agreement.schema'
 import { User } from '../../users/schemas/user.schema'
-import { Payout, type PayoutStatus } from '../../wallets/schemas/payout.schema'
+import {
+  Payout,
+  payoutSettlementOf,
+  type PayoutSettlement,
+  type PayoutStatus,
+} from '../../wallets/schemas/payout.schema'
 import { Payment } from '../schemas/payment.schema'
 import {
   PaymentAttempt,
+  type GatewayStatus,
   type PaymentAttemptStatus,
+  type ReconcileStatus,
 } from '../schemas/payment-attempt.schema'
 
 const DEFAULT_PAGE_SIZE = 20
@@ -18,6 +29,8 @@ const MAX_PAGE_SIZE = 100
 const STALE_PROCESSING_MINUTES = 15
 /** A payout sitting unresolved this long needs a human look. */
 const STALE_PAYOUT_HOURS = 24
+/** Real sandbox gateways: money sits in the platform merchant account there. */
+const EXTERNAL_PROVIDERS: PaymentProviderName[] = ['vnpay', 'momo', 'zalopay']
 const SETTLED_PAYMENT_STATUSES = [
   'paid',
   'released',
@@ -35,6 +48,15 @@ export interface AdminPaymentPayoutView {
   relayRef: string | null
   failureReason: string | null
   paidOutAt: Date | null
+  settlement: PayoutSettlement
+}
+
+export interface AdminPaymentGatewayView {
+  kind: 'external' | 'internal'
+  reconcileStatus: ReconcileStatus | 'not_applicable'
+  gatewayStatus: GatewayStatus | null
+  providerTransactionId: string | null
+  checkedAt: string | null
 }
 
 export interface AdminPaymentRow {
@@ -51,6 +73,8 @@ export interface AdminPaymentRow {
   paymentStatus: string | null
   paidAt: Date | null
   payout: AdminPaymentPayoutView | null
+  /** Stored reconciliation against the gateway's own query API (no live call on list). */
+  gateway: AdminPaymentGatewayView
   /** Reconciliation hints derived from stored state; no live gateway call. */
   anomalies: string[]
 }
@@ -85,8 +109,12 @@ export class AdminPaymentsService {
     @InjectRepository(Payout)
     private readonly payoutRepository: MongoRepository<Payout>,
     @InjectRepository(User)
-    private readonly userRepository: MongoRepository<User>
+    private readonly userRepository: MongoRepository<User>,
+    @Optional()
+    private readonly providerRegistry?: PaymentProviderRegistry
   ) {}
+
+  private readonly logger = new Logger(AdminPaymentsService.name)
 
   async list(filter: AdminPaymentsFilter): Promise<AdminPaymentsPage> {
     const page = Math.max(1, filter.page || 1)
@@ -136,12 +164,84 @@ export class AdminPaymentsService {
     return { items: await this.hydrate(attempts), total, page, limit }
   }
 
-  /** Re-reads current state for one txRef; does not call VNPay/MoMo/ZaloPay. */
+  /**
+   * Asks the gateway itself about one txRef and stores the verdict on the
+   * attempt. Report only: never changes attempt/payment/payout status.
+   */
   async recheck(txRef: string): Promise<AdminPaymentRow | null> {
-    const attempt = await this.attemptRepository.findOne({ where: { txRef } })
+    let attempt = await this.attemptRepository.findOne({ where: { txRef } })
     if (!attempt) return null
+    if (EXTERNAL_PROVIDERS.includes(attempt.provider)) {
+      const query = await this.queryGateway(attempt)
+      if (query) {
+        const outcome = this.reconcile(attempt, query)
+        await this.attemptRepository.updateOne(
+          { _id: attempt._id },
+          {
+            $set: {
+              gatewayStatus: query.state,
+              gatewayCheckedAt: new Date(),
+              gatewayAmount: query.amount,
+              reconcileStatus: outcome,
+            },
+          }
+        )
+        attempt =
+          (await this.attemptRepository.findOne({ where: { txRef } })) ??
+          attempt
+      }
+    }
     const [row] = await this.hydrate([attempt])
     return row ?? null
+  }
+
+  private async queryGateway(
+    attempt: PaymentAttempt
+  ): Promise<GatewayQueryResult | null> {
+    const adapter = this.providerRegistry?.getForQuery(attempt.provider)
+    if (!adapter?.queryStatus) return null
+    try {
+      return await adapter.queryStatus({
+        txRef: attempt.txRef,
+        providerTransactionId: attempt.providerTransactionId ?? null,
+        amount: attempt.amount,
+        createdAt: attempt.createdAt,
+      })
+    } catch (error) {
+      this.logger.warn(
+        `Gateway query threw txRef=${attempt.txRef}: ${error instanceof Error ? error.name : 'unknown'}`
+      )
+      return {
+        state: 'unavailable',
+        providerTransactionId: null,
+        amount: null,
+        rawCode: null,
+        message: null,
+      }
+    }
+  }
+
+  /** verified = both paid and amounts agree; mismatch = they disagree; pending/unpaid stays unverified. */
+  private reconcile(
+    attempt: PaymentAttempt,
+    query: GatewayQueryResult
+  ): ReconcileStatus {
+    const attemptPaid = attempt.status === 'succeeded'
+    switch (query.state) {
+      case 'unavailable':
+        return 'unavailable'
+      case 'pending':
+        return 'unverified'
+      case 'succeeded':
+        if (!attemptPaid) return 'mismatch'
+        if (query.amount !== null && query.amount !== attempt.amount) {
+          return 'mismatch'
+        }
+        return 'verified'
+      default:
+        // failed / not_found at the gateway
+        return attemptPaid ? 'mismatch' : 'unverified'
+    }
   }
 
   private async hydrate(
@@ -260,6 +360,34 @@ export class AdminPaymentsService {
         }
       }
 
+      const external = EXTERNAL_PROVIDERS.includes(attempt.provider)
+      const gatewayStatus = attempt.gatewayStatus ?? null
+      const reconcileStatus = attempt.reconcileStatus ?? 'unverified'
+      if (external) {
+        if (
+          attempt.status === 'succeeded' &&
+          (gatewayStatus === 'failed' || gatewayStatus === 'not_found')
+        ) {
+          anomalies.push('gateway-not-confirmed')
+        }
+        if (gatewayStatus === 'succeeded' && attempt.status !== 'succeeded') {
+          anomalies.push('gateway-paid-not-settled')
+        }
+        if (
+          gatewayStatus === 'succeeded' &&
+          typeof attempt.gatewayAmount === 'number' &&
+          attempt.gatewayAmount !== attempt.amount
+        ) {
+          anomalies.push('gateway-amount-mismatch')
+        }
+        if (
+          attempt.status === 'succeeded' &&
+          reconcileStatus === 'unverified'
+        ) {
+          anomalies.push('awaiting-reconciliation')
+        }
+      }
+
       return {
         txRef: attempt.txRef,
         provider: attempt.provider,
@@ -279,8 +407,18 @@ export class AdminPaymentsService {
               relayRef: payout.relayRef ?? null,
               failureReason: payout.failureReason,
               paidOutAt: payout.paidOutAt,
+              settlement: payoutSettlementOf(payout),
             }
           : null,
+        gateway: {
+          kind: external ? 'external' : 'internal',
+          reconcileStatus: external ? reconcileStatus : 'not_applicable',
+          gatewayStatus,
+          providerTransactionId: attempt.providerTransactionId ?? null,
+          checkedAt: attempt.gatewayCheckedAt
+            ? new Date(attempt.gatewayCheckedAt).toISOString()
+            : null,
+        },
         anomalies,
       }
     })

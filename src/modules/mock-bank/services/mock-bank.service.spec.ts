@@ -1002,7 +1002,38 @@ describe('MockBankService', () => {
         contractId: 'contract-1',
         landlordId: 'landlord-1',
         amount: 2_000_000,
+        provider: 'mock-bank',
       })
+    })
+
+    it('passes the real gateway provider so the payout is not relayed to Ví Mộc', async () => {
+      const context = createContext()
+      const payoutsService = {
+        createForPayment: jest.fn().mockResolvedValue({}),
+        releaseAwaitingWallet: jest.fn(),
+      }
+      Reflect.set(context.service, 'payoutsService', payoutsService)
+      Reflect.set(context.payment, 'landlordId', 'landlord-1')
+      const internals = context.service as unknown as {
+        createPayoutFor(
+          payment: unknown,
+          attempt: { provider: string; payeeAccountNumber: null }
+        ): Promise<void>
+      }
+
+      await internals.createPayoutFor(context.payment, {
+        provider: 'zalopay',
+        payeeAccountNumber: null,
+      })
+
+      expect(payoutsService.createForPayment).toHaveBeenCalledWith(
+        expect.objectContaining({ provider: 'zalopay' })
+      )
+      const arg = payoutsService.createForPayment.mock.calls[0]?.[0] as Record<
+        string,
+        unknown
+      >
+      expect(arg.directReceipt).toBeUndefined()
     })
 
     it('does not create a payout for a platform-fee payment', async () => {
@@ -1174,6 +1205,7 @@ describe('MockBankService', () => {
       contractId: 'contract-1',
       landlordId: 'landlord-1',
       amount: agreement.amount,
+      provider: 'mock-bank',
     })
   })
 

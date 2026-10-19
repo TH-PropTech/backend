@@ -9,6 +9,8 @@ import { ConfigService } from '@nestjs/config'
 import { randomBytes, randomUUID } from 'node:crypto'
 import type { PaymentsConfig } from '../../../config/configuration'
 import type {
+  GatewayQueryInput,
+  GatewayQueryResult,
   MomoPaymentMethod,
   PaymentIntentInput,
   PaymentProviderAdapter,
@@ -20,9 +22,17 @@ import {
   hmacHex,
   isHttpsUrl,
   logField,
+  parseVndAmount,
   postToGateway,
+  stringField,
+  unavailableQuery,
   type GatewayFetcher,
 } from './gateway.util'
+
+/** MoMo resultCodes still in flight (docs: result-handling/resultcode). */
+const MOMO_PENDING_CODES = new Set([1000, 7000, 7002, 9000])
+/** MoMo resultCodes for an unknown order (sandbox: 1005 "expired or did not exist"). */
+const MOMO_NOT_FOUND_CODES = new Set([42, 1005])
 
 export type MomoMethodOption = {
   method: MomoPaymentMethod
@@ -147,6 +157,64 @@ export class MomoAdapter implements PaymentProviderAdapter {
       txRef: input.txRef,
       redirectUrl: result.payUrl,
       expiresAt: input.expiresAt,
+    }
+  }
+
+  /** MoMo `/query`: read-only order status (HMAC-SHA256 over accessKey/orderId/partnerCode/requestId). */
+  async queryStatus(input: GatewayQueryInput): Promise<GatewayQueryResult> {
+    try {
+      const config = this.configService.getOrThrow<PaymentsConfig['momo']>(
+        'rentalFlow.payments.momo'
+      )
+      const requestId = randomUUID()
+      const rawSignature =
+        `accessKey=${config.accessKey}&orderId=${input.txRef}` +
+        `&partnerCode=${config.partnerCode}&requestId=${requestId}`
+      const reply = await postToGateway(
+        this.fetcher,
+        config.queryEndpoint,
+        {
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            partnerCode: config.partnerCode,
+            requestId,
+            orderId: input.txRef,
+            lang: 'vi',
+            signature: hmacHex('sha256', config.secretKey, rawSignature),
+          }),
+        },
+        this.configService.getOrThrow<number>(
+          'rentalFlow.payments.gatewayTimeoutMs'
+        )
+      )
+      const result = asRecord(reply.body)
+      const code = result?.resultCode
+      if (!result || typeof code !== 'number') {
+        this.logger.warn(
+          `MoMo query unavailable txRef=${input.txRef} http=${logField(reply.status)}`
+        )
+        return unavailableQuery('MoMo không phản hồi hợp lệ.')
+      }
+      const base = {
+        providerTransactionId: stringField(result, 'transId'),
+        amount: parseVndAmount(result.amount),
+        rawCode: String(code),
+        message: stringField(result, 'message')?.slice(0, 160) ?? null,
+      }
+      if (code === 0) return { state: 'succeeded', ...base }
+      if (MOMO_PENDING_CODES.has(code)) return { state: 'pending', ...base }
+      if (MOMO_NOT_FOUND_CODES.has(code)) return { state: 'not_found', ...base }
+      // 10/11 are merchant-side system errors, not a verdict on the order.
+      if (code === 10 || code === 11) {
+        return unavailableQuery(
+          base.message ?? 'MoMo đang bảo trì.',
+          base.rawCode
+        )
+      }
+      return { state: 'failed', ...base }
+    } catch {
+      this.logger.warn(`MoMo query error txRef=${input.txRef}`)
+      return unavailableQuery('Không truy vấn được MoMo.')
     }
   }
 

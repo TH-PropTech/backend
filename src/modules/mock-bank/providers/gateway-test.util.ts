@@ -12,12 +12,15 @@ export const TEST_PAYMENTS: PaymentsConfig = {
     hashSecret: 'vnpay-test-secret',
     payUrl: 'https://sandbox.vnpayment.vn/paymentv2/vpcpay.html',
     returnUrl: 'http://localhost:3001/api/v1/bank/vnpay/return',
+    queryEndpoint:
+      'https://sandbox.vnpayment.vn/merchant_webapi/api/transaction',
   },
   momo: {
     partnerCode: 'MOMOTEST',
     accessKey: 'momo-access-key',
     secretKey: 'momo-secret-key',
     endpoint: 'https://test-payment.momo.vn/v2/gateway/api/create',
+    queryEndpoint: 'https://test-payment.momo.vn/v2/gateway/api/query',
     returnUrl: 'http://localhost:3001/api/v1/bank/momo/return',
     ipnUrl: 'https://tunnel.example/api/v1/bank/momo/ipn',
   },
@@ -26,6 +29,7 @@ export const TEST_PAYMENTS: PaymentsConfig = {
     key1: 'zalopay-key1',
     key2: 'zalopay-key2',
     endpoint: 'https://sb-openapi.zalopay.vn/v2/create',
+    queryEndpoint: 'https://sb-openapi.zalopay.vn/v2/query',
     returnUrl: 'http://localhost:3001/api/v1/bank/zalopay/return',
     callbackUrl: 'https://tunnel.example/api/v1/bank/zalopay/callback',
   },

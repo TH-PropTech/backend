@@ -49,8 +49,38 @@ export type PaymentIntentInput = {
  * Boundary for a licensed/approved bank adapter. The platform never owns or
  * debits provider funds; it only stores intent and webhook references.
  */
+export type GatewayQueryState =
+  | 'succeeded'
+  | 'pending'
+  | 'failed'
+  | 'not_found'
+  | 'unavailable'
+
+export type GatewayQueryInput = {
+  txRef: string
+  providerTransactionId?: string | null | undefined
+  amount: number
+  /** When the attempt (and so the gateway order) was created. */
+  createdAt: Date
+}
+
+/** Result of asking the gateway itself about an order. Never throws. */
+export type GatewayQueryResult = {
+  state: GatewayQueryState
+  providerTransactionId: string | null
+  /** VND amount reported by the gateway; null when it did not report one. */
+  amount: number | null
+  rawCode: string | null
+  message: string | null
+}
+
 export interface PaymentProviderAdapter {
   readonly name: PaymentProviderName
+  /**
+   * Optional read-only reconciliation against the gateway's own query API.
+   * Implementations must never throw and never move money.
+   */
+  queryStatus?(input: GatewayQueryInput): Promise<GatewayQueryResult>
   /** Server-generated reference in the format the provider accepts. */
   newTxRef(): string
   createPaymentIntent(input: PaymentIntentInput): Promise<ProviderPaymentIntent>
