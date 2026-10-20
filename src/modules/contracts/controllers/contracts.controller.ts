@@ -81,6 +81,7 @@ import {
   toSmartCaCertificateListDto,
   toSmartCaSigningSessionDto,
 } from '../dto/smartca-signing.dto'
+import { RequirePermission } from '../../rbac/decorators/require-permission.decorator'
 
 // ── DTOs ──
 
@@ -263,6 +264,7 @@ export class ContractsController {
 
   /** Lấy chi tiết hợp đồng phong phú cho Contract Workspace */
   @Get(':id/view')
+  @RequirePermission('read', 'Contract')
   @Roles('admin', 'staff', 'landlord', 'tenant')
   async getContractView(
     @Param('id') id: string,
@@ -362,12 +364,14 @@ export class ContractsController {
 
   /** Tạo hợp đồng nháp — chỉ Admin và Nhân viên */
   @Post()
+  @RequirePermission('create', 'Contract')
   @Roles('admin', 'staff')
   async create(@Body() dto: CreateContractDto): Promise<Contract> {
     return this.contractsService.createContract(dto)
   }
 
   @Post(':id/deposit-agreement')
+  @RequirePermission('create', 'Contract')
   @Roles('admin', 'staff')
   @ApiCreatedResponse({ type: DepositAgreement })
   async createDepositAgreement(
@@ -398,6 +402,7 @@ export class ContractsController {
 
   /** Lấy chi tiết một hợp đồng — Admin, Nhân viên, Chủ nhà, Khách thuê */
   @Get(':id')
+  @RequirePermission('read', 'Contract')
   @Roles('admin', 'staff', 'landlord', 'tenant')
   async findOne(
     @Param('id') id: string,
@@ -616,6 +621,7 @@ export class ContractsController {
   }
 
   @Post(':id/smartca/sign-v2')
+  @RequirePermission('approve', 'Contract')
   @Roles('landlord', 'tenant')
   @ApiCreatedResponse({ type: SmartCaSigningSessionDto })
   async signSmartCaV2(
@@ -738,6 +744,7 @@ export class ContractsController {
 
   /** Lấy danh sách hợp đồng theo userId — Admin, Nhân viên, Chủ nhà, Khách thuê */
   @Get()
+  @RequirePermission('read', 'Contract')
   @Roles('admin', 'staff', 'landlord', 'tenant')
   async findByUser(
     @Query('userId') requestedUserId: string,
@@ -752,6 +759,7 @@ export class ContractsController {
 
   /** Ký hợp đồng (tenant hoặc landlord) — yêu cầu KYC đã verified */
   @Put(':id/sign')
+  @RequirePermission('approve', 'Contract')
   @Roles('landlord', 'tenant')
   async sign(
     @Param('id') id: string,
@@ -776,6 +784,7 @@ export class ContractsController {
   }
 
   @Put(':id/content')
+  @RequirePermission('update', 'Contract')
   @Roles('admin', 'staff', 'landlord')
   saveContent(
     @Param('id') id: string,
@@ -794,6 +803,7 @@ export class ContractsController {
   }
 
   @Post(':id/lock-content')
+  @RequirePermission('update', 'Contract')
   @Roles('admin', 'staff', 'landlord')
   lockContent(
     @Param('id') id: string,
@@ -811,6 +821,7 @@ export class ContractsController {
   }
 
   @Post(':id/artifacts/lock')
+  @RequirePermission('update', 'Contract')
   @Roles('admin', 'staff', 'landlord')
   @ApiConsumes('multipart/form-data')
   @UseInterceptors(FileInterceptor('artifact'))
@@ -833,6 +844,7 @@ export class ContractsController {
   }
 
   @Post(':id/artifacts/render-lock')
+  @RequirePermission('update', 'Contract')
   @Roles('admin', 'staff', 'landlord')
   renderAndLockCanonicalArtifact(
     @Param('id') id: string,
@@ -848,6 +860,7 @@ export class ContractsController {
   }
 
   @Post(':id/terminate')
+  @RequirePermission('update', 'Contract')
   @Roles('admin', 'staff')
   terminate(
     @Param('id') id: string,

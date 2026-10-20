@@ -137,22 +137,9 @@ export class OperationsService {
       return d >= cutoff
     })
 
-    const hasRecentData = filtered.length > 0
-
     // Build daily trend
     const trend: ChartPoint[] = []
     const weekdayLabels = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7']
-
-    // Demo fallback values if no recent bookings in DB
-    const sampleTrendValues = [
-      { bookings: 4, confirmed: 3, pending: 1, cancelled: 0 },
-      { bookings: 7, confirmed: 5, pending: 1, cancelled: 1 },
-      { bookings: 5, confirmed: 4, pending: 1, cancelled: 0 },
-      { bookings: 9, confirmed: 7, pending: 2, cancelled: 0 },
-      { bookings: 12, confirmed: 9, pending: 2, cancelled: 1 },
-      { bookings: 15, confirmed: 11, pending: 3, cancelled: 1 },
-      { bookings: 8, confirmed: 6, pending: 2, cancelled: 0 },
-    ]
 
     for (let i = days - 1; i >= 0; i--) {
       const day = new Date()
@@ -171,43 +158,21 @@ export class OperationsService {
         weekdayLabels[day.getDay()] ?? `${day.getDate()}/${day.getMonth() + 1}`
       const dateStr = day.toISOString().split('T')[0] ?? ''
 
-      if (hasRecentData) {
-        trend.push({
-          label: dayLabel,
-          date: dateStr,
-          bookings: dayBookings.length,
-          confirmed: dayBookings.filter(
-            b => b.status === 'confirmed' || b.status === 'completed'
-          ).length,
-          pending: dayBookings.filter(b => b.status === 'pending').length,
-          cancelled: dayBookings.filter(
-            b => b.status === 'cancelled' || b.status === 'rejected'
-          ).length,
-        })
-      } else {
-        // Fallback sample data if no recent bookings in cutoff range
-        const sample = sampleTrendValues[
-          (days - 1 - i) % sampleTrendValues.length
-        ] ?? {
-          bookings: 3,
-          confirmed: 2,
-          pending: 1,
-          cancelled: 0,
-        }
-        trend.push({
-          label: dayLabel,
-          date: dateStr,
-          ...sample,
-        })
-      }
+      trend.push({
+        label: dayLabel,
+        date: dateStr,
+        bookings: dayBookings.length,
+        confirmed: dayBookings.filter(
+          b => b.status === 'confirmed' || b.status === 'completed'
+        ).length,
+        pending: dayBookings.filter(b => b.status === 'pending').length,
+        cancelled: dayBookings.filter(
+          b => b.status === 'cancelled' || b.status === 'rejected'
+        ).length,
+      })
     }
 
     // Build status breakdown
-    const sourceForBreakdown = hasRecentData
-      ? filtered
-      : bookings.length > 0
-        ? bookings
-        : []
 
     const statuses = [
       { status: 'pending', label: 'Chờ xác nhận', color: 'var(--warning)' },
@@ -217,42 +182,12 @@ export class OperationsService {
       { status: 'rejected', label: 'Từ chối', color: 'var(--danger)' },
     ]
 
-    let statusBreakdown = statuses
+    const statusBreakdown = statuses
       .map(s => ({
         ...s,
-        count: sourceForBreakdown.filter(b => b.status === s.status).length,
+        count: filtered.filter(b => b.status === s.status).length,
       }))
       .filter(s => s.count > 0)
-
-    // Fallback status breakdown if DB has 0 bookings total
-    if (statusBreakdown.length === 0) {
-      statusBreakdown = [
-        {
-          status: 'pending',
-          label: 'Chờ xác nhận',
-          count: 12,
-          color: 'var(--warning)',
-        },
-        {
-          status: 'confirmed',
-          label: 'Đã xác nhận',
-          count: 28,
-          color: 'var(--success)',
-        },
-        {
-          status: 'completed',
-          label: 'Hoàn thành',
-          count: 18,
-          color: 'var(--info)',
-        },
-        {
-          status: 'cancelled',
-          label: 'Đã huỷ',
-          count: 5,
-          color: 'var(--danger)',
-        },
-      ]
-    }
 
     return { trend, statusBreakdown }
   }

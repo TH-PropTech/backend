@@ -27,14 +27,14 @@ export class RentalFlowProfilesController {
   constructor(private readonly profilesService: RentalFlowProfilesService) {}
 
   @Get()
-  @Roles('admin', 'staff')
+  @Roles('admin')
   @ApiOperation({ summary: 'Admin/Staff xem danh sách Flow Profiles' })
   async listProfiles(): Promise<RentalFlowProfileView[]> {
     return this.profilesService.listProfiles()
   }
 
   @Get(':profileId')
-  @Roles('admin', 'staff')
+  @Roles('admin')
   @ApiOperation({
     summary: 'Admin/Staff xem chi tiết profile gồm draft và published versions',
   })
@@ -46,7 +46,7 @@ export class RentalFlowProfilesController {
   }
 
   @Get(':profileId/draft')
-  @Roles('admin', 'staff')
+  @Roles('admin')
   @ApiOperation({
     summary: 'Lấy bản nháp đang soạn hoặc khởi tạo bản nháp mới',
   })

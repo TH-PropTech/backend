@@ -29,7 +29,6 @@ import {
   type CreateDesignRequestDto,
   type DeliverDesignRequestDto,
   type DesignRequestNoteDto,
-  type DesignRequestOptionalNoteDto,
   type DesignRequestQueueQueryDto,
   type MyDesignRequestsQueryDto,
 } from '../dto/design-request.dto'
@@ -56,7 +55,10 @@ export interface DesignRequestSummary {
   status: DesignRequestStatus
   revision: number
   deliveredDesignId: string | null
+  /** Id người đã nhận thiết kế (nhân viên, hoặc admin nếu admin tự làm). Tên trường giữ nguyên để khỏi phải migrate dữ liệu cũ. */
   assignedAdminId: string | null
+  /** Người đã nhận thiết kế, kèm tên để hiển thị. */
+  assignee: { id: string; name: string } | null
   createdAt: string
   updatedAt: string
 }
@@ -105,7 +107,8 @@ interface NotificationTarget {
 const MAX_FAN_OUT = 100
 const DEFAULT_LIMIT = 20
 const MAX_LIMIT = 100
-const ADMIN_LINK = '/admin/design-requests'
+/** Nhân viên dùng chung tiền tố /admin của dashboard nhân viên. */
+const STAFF_LINK = '/admin/design-requests'
 const LANDLORD_LINK = '/profile?tab=listings'
 
 const toIso = (value: Date | string | undefined): string =>
@@ -131,8 +134,10 @@ function clampPaging(
 }
 
 /**
- * Luồng yêu cầu thiết kế 3D: chủ nhà gửi -> staff phân loại -> admin thiết kế & bàn giao -> chủ nhà
- * duyệt hoặc phản hồi (không giới hạn vòng). Mọi chuyển trạng thái là một `updateOne` có điều kiện
+ * Luồng yêu cầu thiết kế 3D: chủ nhà gửi -> nhân viên nhận (hoặc hỏi thêm / từ chối), tự thiết kế &
+ * bàn giao -> chủ nhà duyệt hoặc phản hồi (không giới hạn vòng). Admin không nằm trong luồng nhưng
+ * vẫn có quyền như nhân viên. Trạng thái `escalated` chỉ còn cho dữ liệu cũ: nhân viên nhận thẳng
+ * từ đó. Mọi chuyển trạng thái là một `updateOne` có điều kiện
  * `{_id, status: {$in: allowedFrom}}` nên các lệnh đồng thời không thể áp dụng hai lần.
  */
 @Injectable()
@@ -371,20 +376,6 @@ export class DesignRequestsService {
     })
   }
 
-  async escalate(
-    id: string,
-    actor: DesignRequestActor,
-    dto: DesignRequestOptionalNoteDto
-  ): Promise<DesignRequestDetail> {
-    const request = await this.findOrThrow(id)
-    return this.transition(request, actor, {
-      allowedFrom: ['submitted'],
-      to: 'escalated',
-      eventType: 'escalated',
-      note: dto.note || null,
-    })
-  }
-
   async reject(
     id: string,
     actor: DesignRequestActor,
@@ -400,14 +391,18 @@ export class DesignRequestsService {
     })
   }
 
+  /**
+   * Nhận thiết kế. Là một `updateOne` có điều kiện trạng thái nên hai nhân viên bấm cùng lúc thì chỉ
+   * một người thắng, người còn lại nhận 409.
+   */
   async start(
     id: string,
     actor: DesignRequestActor
   ): Promise<DesignRequestDetail> {
-    this.assertAdmin(actor)
+    this.assertDesigner(actor)
     const request = await this.findOrThrow(id)
     return this.transition(request, actor, {
-      allowedFrom: ['escalated', 'changes_requested'],
+      allowedFrom: ['submitted', 'escalated', 'changes_requested'],
       to: 'in_progress',
       eventType: 'started',
       set: { assignedAdminId: actor.id },
@@ -419,9 +414,16 @@ export class DesignRequestsService {
     actor: DesignRequestActor,
     dto: DeliverDesignRequestDto
   ): Promise<DesignRequestDetail> {
-    this.assertAdmin(actor)
+    this.assertDesigner(actor)
     const request = await this.findOrThrow(id)
     this.assertState(request, ['in_progress'])
+    if (
+      actor.role !== 'admin' &&
+      request.assignedAdminId &&
+      request.assignedAdminId !== actor.id
+    ) {
+      throw new ForbiddenException('DESIGN_REQUEST_NOT_ASSIGNEE')
+    }
     const existing = await this.designs.listAll(request.apartmentId)
     if (!existing.some(d => d.id === dto.designId)) {
       throw new BadRequestException('DESIGN_NOT_FOUND')
@@ -484,9 +486,9 @@ export class DesignRequestsService {
     }
   }
 
-  private assertAdmin(actor: DesignRequestActor): void {
-    if (actor.role !== 'admin') {
-      throw new ForbiddenException('DESIGN_REQUEST_ADMIN_ONLY')
+  private assertDesigner(actor: DesignRequestActor): void {
+    if (actor.role !== 'staff' && actor.role !== 'admin') {
+      throw new ForbiddenException('DESIGN_REQUEST_STAFF_ONLY')
     }
   }
 
@@ -599,6 +601,8 @@ export class DesignRequestsService {
   ): DesignRequestSummary {
     const title = titles.get(r.apartmentId)
     const landlord = users.get(r.landlordId)
+    const assigneeId = r.assignedAdminId ?? null
+    const assignee = assigneeId ? users.get(assigneeId) : undefined
     return {
       id: r._id.toString(),
       apartmentId: r.apartmentId,
@@ -614,7 +618,9 @@ export class DesignRequestsService {
       status: r.status,
       revision: r.revision ?? 0,
       deliveredDesignId: r.deliveredDesignId ?? null,
-      assignedAdminId: r.assignedAdminId ?? null,
+      assignedAdminId: assigneeId,
+      assignee:
+        assigneeId && assignee ? { id: assigneeId, name: assignee.name } : null,
       createdAt: toIso(r.createdAt),
       updatedAt: toIso(r.updatedAt),
     }
@@ -626,7 +632,11 @@ export class DesignRequestsService {
     if (rows.length === 0) return []
     const [titles, users] = await Promise.all([
       this.apartmentTitles(rows.map(r => r.apartmentId)),
-      this.userNames(rows.map(r => r.landlordId)),
+      this.userNames(
+        rows.flatMap(r =>
+          r.assignedAdminId ? [r.landlordId, r.assignedAdminId] : [r.landlordId]
+        )
+      ),
     ])
     return rows.map(r => this.buildSummary(r, titles, users))
   }
@@ -635,7 +645,11 @@ export class DesignRequestsService {
     const events = r.events ?? []
     const [titles, users] = await Promise.all([
       this.apartmentTitles([r.apartmentId]),
-      this.userNames([r.landlordId, ...events.map(e => e.actorId)]),
+      this.userNames([
+        r.landlordId,
+        ...(r.assignedAdminId ? [r.assignedAdminId] : []),
+        ...events.map(e => e.actorId),
+      ]),
     ])
     let deliveredDesign: AdminApartmentDesign | null = null
     if (r.deliveredDesignId) {
@@ -734,39 +748,24 @@ export class DesignRequestsService {
           await this.usersWithRole('staff'),
           'Yêu cầu thiết kế 3D mới',
           `Có yêu cầu thiết kế 3D mới cho căn hộ "${apartmentTitle}" cần phân loại.`,
-          ADMIN_LINK
+          STAFF_LINK
         )
       case 'info_provided':
         return to(
           await this.usersWithRole('staff'),
           'Chủ nhà đã bổ sung thông tin',
           `Chủ nhà đã bổ sung thông tin cho yêu cầu thiết kế 3D của căn hộ "${apartmentTitle}".`,
-          ADMIN_LINK
+          STAFF_LINK
         )
-      case 'escalated':
-        return [
-          ...to(
-            await this.usersWithRole('admin'),
-            'Yêu cầu thiết kế 3D cần xử lý',
-            `Yêu cầu thiết kế 3D của căn hộ "${apartmentTitle}" đã được chuyển cho quản trị viên.`,
-            ADMIN_LINK
-          ),
-          ...to(
-            [r.landlordId],
-            'Yêu cầu đã chuyển cho quản trị viên',
-            `Yêu cầu thiết kế 3D của căn hộ "${apartmentTitle}" đã được chuyển cho quản trị viên.`,
-            LANDLORD_LINK
-          ),
-        ]
       case 'feedback': {
-        const admins = r.assignedAdminId
+        const designers = r.assignedAdminId
           ? [r.assignedAdminId]
-          : await this.usersWithRole('admin')
+          : await this.usersWithRole('staff')
         return to(
-          admins,
+          designers,
           'Chủ nhà yêu cầu chỉnh sửa thiết kế',
           `Chủ nhà đã gửi phản hồi cho thiết kế 3D của căn hộ "${apartmentTitle}" (lần ${r.revision}).`,
-          ADMIN_LINK
+          STAFF_LINK
         )
       }
       case 'info_requested':
@@ -786,8 +785,8 @@ export class DesignRequestsService {
       case 'started':
         return to(
           [r.landlordId],
-          'Quản trị viên đã bắt đầu thiết kế',
-          `Quản trị viên đã bắt đầu thiết kế 3D cho căn hộ "${apartmentTitle}".`,
+          'Nhân viên đã bắt đầu thiết kế',
+          `Nhân viên đã bắt đầu thiết kế 3D cho căn hộ "${apartmentTitle}".`,
           LANDLORD_LINK
         )
       case 'delivered':
@@ -803,7 +802,7 @@ export class DesignRequestsService {
               [r.assignedAdminId],
               'Chủ nhà đã duyệt thiết kế 3D',
               `Chủ nhà đã duyệt thiết kế 3D của căn hộ "${apartmentTitle}".`,
-              ADMIN_LINK
+              STAFF_LINK
             )
           : []
       default:

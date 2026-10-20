@@ -28,7 +28,21 @@ export const RBAC_SUBJECTS = [
   'LegalSource',
   'Role',
   'Job',
+  'CommunityPost',
+  'SafetyReport',
+  'DesignRequest',
+  'AuditLog',
+  'Report',
+  'SavedSearch',
+  'ViewingNote',
 ] as const
+
+/** Vai trò mà ma trận phân quyền điều chỉnh được. Admin luôn toàn quyền, không nằm trong danh sách. */
+export const MANAGED_ROLES = ['tenant', 'landlord', 'staff'] as const
+export type ManagedRole = (typeof MANAGED_ROLES)[number]
+
+/** Metadata key của `@RequirePermission`. */
+export const REQUIRE_PERMISSION_KEY = 'rbac:require-permission'
 
 export type RbacAction = (typeof RBAC_ACTIONS)[number]
 export type RbacSubject = (typeof RBAC_SUBJECTS)[number]
@@ -92,3 +106,18 @@ export const DEFAULT_ROLES: DefaultRole[] = [
     ],
   },
 ]
+
+/** Hành động áp lên một đối tượng cụ thể (không gồm `manage`). */
+export type PermissionAction = Exclude<RbacAction, 'manage'>
+/** Đối tượng cụ thể (không gồm `all`). */
+export type PermissionSubject = Exclude<RbacSubject, 'all'>
+
+export interface RequiredPermission {
+  action: PermissionAction
+  subject: PermissionSubject
+  /**
+   * Vai trò thực hiện route này, dùng để dựng bảng phân quyền. Không khai báo thì lấy từ `@Roles`,
+   * không có `@Roles` thì coi là mọi vai trò quản lý được.
+   */
+  audience?: readonly ManagedRole[]
+}

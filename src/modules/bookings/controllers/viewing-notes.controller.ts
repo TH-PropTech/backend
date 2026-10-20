@@ -29,6 +29,7 @@ import {
   ViewingNoteListResult,
   ViewingNotesService,
 } from '../services/viewing-notes.service'
+import { RequirePermission } from '../../rbac/decorators/require-permission.decorator'
 
 @ApiTags('viewing-notes')
 @ApiBearerAuth()
@@ -39,6 +40,7 @@ export class ViewingNotesController {
 
   /** POST /api/v1/viewing-notes [uc_customer_booking] [uc_book_viewing] */
   @Post()
+  @RequirePermission('create', 'ViewingNote', ['tenant', 'landlord'])
   @ApiOperation({ summary: 'Create a private viewing note' })
   @ApiCreatedResponse({ type: ViewingNote })
   async create(
@@ -49,6 +51,7 @@ export class ViewingNotesController {
   }
 
   @Get()
+  @RequirePermission('read', 'ViewingNote', ['tenant', 'landlord'])
   @ApiOperation({ summary: 'List current user viewing notes' })
   @ApiOkResponse({ description: 'Paginated private viewing notes' })
   async findAll(
@@ -59,6 +62,7 @@ export class ViewingNotesController {
   }
 
   @Get(':id')
+  @RequirePermission('read', 'ViewingNote', ['tenant', 'landlord'])
   @ApiOperation({ summary: 'Get a private viewing note' })
   @ApiOkResponse({ type: ViewingNote })
   async findOne(
@@ -69,6 +73,7 @@ export class ViewingNotesController {
   }
 
   @Patch(':id')
+  @RequirePermission('update', 'ViewingNote', ['tenant', 'landlord'])
   @ApiOperation({ summary: 'Update a private viewing note' })
   @ApiOkResponse({ type: ViewingNote })
   async update(
@@ -80,6 +85,7 @@ export class ViewingNotesController {
   }
 
   @Delete(':id')
+  @RequirePermission('delete', 'ViewingNote', ['tenant', 'landlord'])
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Delete a private viewing note' })
   @ApiNoContentResponse()

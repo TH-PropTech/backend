@@ -7,12 +7,15 @@ import { UsersModule } from '../users/users.module'
 import { LegalDocument } from '../legal/schemas/legal-document.schema'
 import { PropertiesModule } from '../properties/properties.module'
 import { SupportTicket } from '../community/schemas/support-ticket.schema'
+import { SystemConfig } from '../properties/schemas/system-config.schema'
 import { GroqKeysController } from './controllers/groq-keys.controller'
 import { ListingFreshnessController } from './controllers/listing-freshness.controller'
+import { NavConfigController } from './controllers/nav-config.controller'
 import { OperationsController } from './controllers/operations.controller'
 import { PlatformRegulationsController } from './controllers/platform-regulations.controller'
 import { RentalFlowAssignmentsController } from './controllers/rental-flow-assignments.controller'
 import { RentalFlowProfilesController } from './controllers/rental-flow-profiles.controller'
+import { NavConfigService } from './services/nav-config.service'
 import { OperationsService } from './services/operations.service'
 import { PlatformRegulationsService } from './services/platform-regulations.service'
 
@@ -29,6 +32,8 @@ import { PlatformRegulationsService } from './services/platform-regulations.serv
       SupportTicket,
       // PlatformRegulationsService (G-LEG: legal_documents, kind regulation/source)
       LegalDocument,
+      // NavConfigService (SystemConfig scope 'admin-nav')
+      SystemConfig,
     ]),
     PropertiesModule,
     AiModule,
@@ -42,7 +47,8 @@ import { PlatformRegulationsService } from './services/platform-regulations.serv
     GroqKeysController,
     OperationsController,
     ListingFreshnessController,
+    NavConfigController,
   ],
-  providers: [OperationsService, PlatformRegulationsService],
+  providers: [OperationsService, PlatformRegulationsService, NavConfigService],
 })
 export class AdminModule {}

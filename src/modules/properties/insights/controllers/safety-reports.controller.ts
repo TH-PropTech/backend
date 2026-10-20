@@ -28,6 +28,7 @@ import {
 import { SafetyReportQueryDto } from '../dto/safety-report-query.dto'
 import { SafetyReport } from '../schemas/safety-report.schema'
 import { UserPayload } from '../../../auth/interfaces/auth.interface'
+import { RequirePermission } from '../../../rbac/decorators/require-permission.decorator'
 
 @ApiTags('safety-reports')
 @Controller('safety-reports')
@@ -41,6 +42,7 @@ export class SafetyReportsController {
    * [uc_safety_report_create]
    */
   @Post()
+  @RequirePermission('create', 'SafetyReport')
   @Roles('tenant', 'landlord', 'staff', 'admin')
   @UseGuards(RolesGuard)
   @HttpCode(HttpStatus.CREATED)
@@ -70,6 +72,7 @@ export class SafetyReportsController {
    * Hàng đợi kiểm duyệt cho staff/admin
    */
   @Get('queue')
+  @RequirePermission('read', 'SafetyReport')
   @Roles('staff', 'admin')
   @UseGuards(RolesGuard)
   async getReportQueue(
@@ -83,6 +86,7 @@ export class SafetyReportsController {
    * Chi tiết báo cáo (staff/admin)
    */
   @Get(':id')
+  @RequirePermission('read', 'SafetyReport')
   @Roles('staff', 'admin')
   @UseGuards(RolesGuard)
   async getReportById(@Param('id') id: string): Promise<SafetyReport> {
@@ -94,6 +98,7 @@ export class SafetyReportsController {
    * Cập nhật trạng thái báo cáo
    */
   @Patch(':id/status')
+  @RequirePermission('update', 'SafetyReport')
   @Roles('staff', 'admin')
   @UseGuards(RolesGuard)
   async updateStatus(
@@ -109,6 +114,7 @@ export class SafetyReportsController {
    * Ẩn tạm listing bị báo cáo
    */
   @Patch(':id/hide-target')
+  @RequirePermission('update', 'SafetyReport')
   @Roles('staff', 'admin')
   @UseGuards(RolesGuard)
   @HttpCode(HttpStatus.OK)
@@ -124,6 +130,7 @@ export class SafetyReportsController {
    * Khiếu nại kết quả xử lý
    */
   @Post(':id/appeal')
+  @RequirePermission('update', 'SafetyReport', ['tenant', 'landlord', 'staff'])
   @HttpCode(HttpStatus.OK)
   async appealReport(
     @Param('id') id: string,

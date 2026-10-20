@@ -11,6 +11,7 @@ import {
 } from '../dto/deposit-agreement.dto'
 import { DepositAgreementsService } from '../services/deposit-agreements.service'
 import { DepositAgreement } from '../schemas/deposit-agreement.schema'
+import { RequirePermission } from '../../rbac/decorators/require-permission.decorator'
 
 @ApiTags('deposit-agreements')
 @ApiBearerAuth()
@@ -46,6 +47,7 @@ export class DepositAgreementsController {
   }
 
   @Post(':id/confirm-payment')
+  @RequirePermission('update', 'Payment')
   @Roles('staff', 'admin')
   confirmPayment(
     @Param('id') id: string,
@@ -67,6 +69,7 @@ export class DepositAgreementsController {
   }
 
   @Post(':id/expire')
+  @RequirePermission('update', 'Payment')
   @Roles('staff', 'admin')
   expire(@Param('id') id: string): Promise<DepositAgreement> {
     return this.service.expire(id)

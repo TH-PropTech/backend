@@ -93,7 +93,7 @@ export class ContractLayoutsController {
   }
 
   @Post('admin/:profileKey/preview')
-  @Roles('admin', 'staff')
+  @Roles('admin')
   previewDraft(
     @Param('profileKey') profileKey: string
   ): Promise<ContractLayoutProfile> {

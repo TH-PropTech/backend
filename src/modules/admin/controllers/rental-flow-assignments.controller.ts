@@ -31,7 +31,7 @@ export class RentalFlowAssignmentsController {
   ) {}
 
   @Get()
-  @Roles('admin', 'staff')
+  @Roles('admin')
   @ApiOperation({
     summary: 'Admin/Staff xem danh sách gán cấu hình (assignments)',
   })
@@ -40,7 +40,7 @@ export class RentalFlowAssignmentsController {
   }
 
   @Post('preview')
-  @Roles('admin', 'staff')
+  @Roles('admin')
   @ApiOperation({
     summary: 'Xem trước cấu hình hiệu lực và thống kê tác động trên hợp đồng',
   })
@@ -71,7 +71,7 @@ export class RentalFlowAssignmentsController {
   }
 
   @Get('audit')
-  @Roles('admin', 'staff')
+  @Roles('admin')
   @ApiOperation({
     summary: 'Admin/Staff truy vấn nhật ký kiểm toán thay đổi cấu hình',
   })

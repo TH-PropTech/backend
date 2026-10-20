@@ -169,9 +169,11 @@ export class UsersController {
       throw new NotFoundException('Người dùng không tồn tại')
     }
 
-    // Ghi từng trường (không save toàn document) để không ghi đè smartOTP.devices
+    // Ghi từng trường (không save toàn document) để không ghi đè smartOTP.devices.
+    // Đổi vai trò gốc thì bỏ vai trò tùy chỉnh (nó chỉ hợp lệ với đúng vai trò gốc cũ).
     await this.userRepository.update(user._id, {
       role,
+      ...(user.role !== role ? { permissionProfile: null } : {}),
       updatedAt: new Date(),
     })
 

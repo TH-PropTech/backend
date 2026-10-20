@@ -79,7 +79,7 @@ export class RecommendationsController {
 
   @Get('engine-config')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('admin', 'staff')
+  @Roles('admin')
   @ApiBearerAuth()
   @ApiOperation({
     summary: 'Lấy cấu hình chiến lược AI engine hiện tại (Staff+)',

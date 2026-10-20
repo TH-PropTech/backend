@@ -16,6 +16,7 @@ import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard'
 import type { UserPayload } from '../../auth/interfaces/auth.interface'
 import { Payment } from '../schemas/payment.schema'
 import { PaymentsService } from '../services/payments.service'
+import { RequirePermission } from '../../rbac/decorators/require-permission.decorator'
 
 @ApiTags('payments')
 @ApiBearerAuth()
@@ -25,6 +26,7 @@ export class PaymentsController {
   constructor(private readonly paymentsService: PaymentsService) {}
 
   @Get()
+  @RequirePermission('read', 'Payment')
   @Roles('tenant', 'landlord', 'staff', 'admin')
   getByContract(
     @Query('contractId') contractId: string,
@@ -39,18 +41,21 @@ export class PaymentsController {
   }
 
   @Get('overdue')
+  @RequirePermission('read', 'Payment')
   @Roles('staff', 'admin')
   getOverdue(): Promise<Payment[]> {
     return this.paymentsService.getOverdue()
   }
 
   @Post('overdue/process')
+  @RequirePermission('update', 'Payment')
   @Roles('staff', 'admin')
   async processOverdue(): Promise<{ overdue: number; reminders: number }> {
     return this.paymentsService.processReminders()
   }
 
   @Post(':id/confirm')
+  @RequirePermission('update', 'Payment')
   @Roles('staff', 'admin')
   confirm(
     @Param('id') paymentId: string,

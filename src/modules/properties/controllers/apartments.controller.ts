@@ -47,6 +47,7 @@ import {
   apartmentImageFilter,
 } from '../utils/apartment-upload.options'
 import { Public } from '../../../common/decorators/public.decorator'
+import { RequirePermission } from '../../rbac/decorators/require-permission.decorator'
 
 function isStaffOrAdmin(user: UserPayload): boolean {
   return user.roles?.some(role => ['staff', 'admin'].includes(role)) ?? false
@@ -62,6 +63,7 @@ export class ApartmentsController {
   ) {}
 
   @Get('my-listings')
+  @RequirePermission('read', 'Apartment')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('landlord')
   @ApiOkResponse({ type: QualityScoreResponseDto })
@@ -84,6 +86,7 @@ export class ApartmentsController {
   }
 
   @Get('pending')
+  @RequirePermission('read', 'Apartment')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('staff', 'admin')
   async getPendingListings(
@@ -97,6 +100,7 @@ export class ApartmentsController {
   }
 
   @Get('manage')
+  @RequirePermission('read', 'Apartment')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('staff', 'admin')
   async getManageListings(): Promise<StaffApartmentResponse[]> {
@@ -105,6 +109,7 @@ export class ApartmentsController {
   }
 
   @Get('rejected')
+  @RequirePermission('read', 'Apartment')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('staff', 'admin')
   async getRejectedListings(
@@ -136,6 +141,7 @@ export class ApartmentsController {
 
   /** GET /api/v1/apartments/:id/quality — Owner listing quality [uc_staff_apartment] */
   @Get(':id/quality')
+  @RequirePermission('read', 'Apartment')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('landlord')
   async getQualityScore(
@@ -162,6 +168,7 @@ export class ApartmentsController {
   }
 
   @Post()
+  @RequirePermission('create', 'Apartment')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('landlord', 'staff', 'admin')
   async create(
@@ -176,6 +183,7 @@ export class ApartmentsController {
   }
 
   @Patch(':id')
+  @RequirePermission('update', 'Apartment')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('landlord', 'staff', 'admin')
   async update(
@@ -194,6 +202,7 @@ export class ApartmentsController {
   }
 
   @Patch(':id/approve')
+  @RequirePermission('approve', 'Apartment')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('staff', 'admin')
   async approve(
@@ -205,6 +214,7 @@ export class ApartmentsController {
   }
 
   @Patch(':id/reject')
+  @RequirePermission('approve', 'Apartment')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('staff', 'admin')
   async reject(
@@ -219,6 +229,7 @@ export class ApartmentsController {
   }
 
   @Patch(':id/resubmit')
+  @RequirePermission('update', 'Apartment')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('landlord')
   async resubmit(
@@ -235,6 +246,7 @@ export class ApartmentsController {
   }
 
   @Patch(':id/renew')
+  @RequirePermission('update', 'Apartment')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('landlord', 'staff', 'admin')
   async renew(
@@ -251,6 +263,7 @@ export class ApartmentsController {
   }
 
   @Patch(':id/price')
+  @RequirePermission('update', 'Apartment')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('landlord')
   async updatePrice(
@@ -267,6 +280,7 @@ export class ApartmentsController {
   }
 
   @Patch(':id/packages')
+  @RequirePermission('update', 'Apartment')
   @Post(':id/rental-packages')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('landlord', 'staff', 'admin')
@@ -285,6 +299,7 @@ export class ApartmentsController {
   }
 
   @Patch(':id/status')
+  @RequirePermission('update', 'Apartment')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('staff')
   async updateStatus(
@@ -302,6 +317,7 @@ export class ApartmentsController {
   }
 
   @Patch(':id/media')
+  @RequirePermission('update', 'Apartment')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('staff', 'admin')
   async updateMedia(
@@ -313,6 +329,7 @@ export class ApartmentsController {
   }
 
   @Post('upload')
+  @RequirePermission('create', 'Apartment')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('landlord', 'staff', 'admin')
   @UseInterceptors(

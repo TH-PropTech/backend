@@ -165,7 +165,7 @@ export class PlatformFeesController {
 
   @Get('revenue')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('staff', 'admin')
+  @Roles('admin')
   revenue(): ReturnType<PlatformFeesService['revenue']> {
     return this.service.revenue()
   }

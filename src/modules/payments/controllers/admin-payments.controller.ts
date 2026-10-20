@@ -24,7 +24,7 @@ import type { PayoutStatus } from '../../wallets/schemas/payout.schema'
 @ApiTags('admin-payments')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('staff', 'admin')
+@Roles('admin')
 @Controller('admin/payments')
 export class AdminPaymentsController {
   constructor(private readonly service: AdminPaymentsService) {}

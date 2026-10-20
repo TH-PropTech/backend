@@ -47,6 +47,13 @@ export class Role {
   @Column({ default: true }) isActive!: boolean
   /** Role mặc định do seed tạo ra: không được xóa hoặc đổi tên */
   @Column({ default: false }) isSystem!: boolean
+  /** Tên hiển thị (vai trò tùy chỉnh). Vai trò mặc định dùng tên giao diện cố định. */
+  @Column({ type: 'string', nullable: true }) label?: string | null
+  /**
+   * Chỉ có ở vai trò tùy chỉnh: vai trò gốc (tenant | landlord | staff) quyết định route dùng được
+   * và danh sách thao tác bật/tắt được. Người dùng được gán vai trò này phải có đúng vai trò gốc.
+   */
+  @Column({ type: 'string', nullable: true }) baseRole?: string | null
   /**
    * Quyền nhúng. Ghi bằng `updateOne` ($set toàn mảng khi PUT); KHÔNG `save(role)`
    * toàn document khi đang giữ bản nạp cũ. Role cũ chưa có trường này: coi như [].

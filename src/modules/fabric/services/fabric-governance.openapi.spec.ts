@@ -1,3 +1,4 @@
+import { PermissionsGuard } from '../../rbac/guards/permissions.guard'
 import { Test } from '@nestjs/testing'
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger'
 import { getRepositoryToken } from '@nestjs/typeorm'
@@ -26,6 +27,8 @@ describe('OpenAPI contract for governance routes (PROP-399 task 4.4)', () => {
         Reflector,
       ],
     })
+      .overrideGuard(PermissionsGuard)
+      .useValue({ canActivate: () => true })
       .overrideGuard(JwtAuthGuard)
       .useValue({ canActivate: () => true })
       .overrideGuard(RolesGuard)

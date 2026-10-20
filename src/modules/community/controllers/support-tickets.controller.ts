@@ -32,6 +32,7 @@ import {
 import { SupportTicket } from '../schemas/support-ticket.schema'
 import { TicketMessage } from '../schemas/ticket-message.schema'
 import { UserPayload } from '../../auth/interfaces/auth.interface'
+import { RequirePermission } from '../../rbac/decorators/require-permission.decorator'
 
 @ApiTags('support-tickets')
 @Controller('support-tickets')
@@ -45,6 +46,7 @@ export class SupportTicketsController {
    * [uc_support_ticket_create]
    */
   @Post()
+  @RequirePermission('create', 'SupportTicket', ['tenant', 'landlord', 'staff'])
   @HttpCode(HttpStatus.CREATED)
   async create(
     @Body() dto: CreateSupportTicketDto,
@@ -60,6 +62,7 @@ export class SupportTicketsController {
    * Lấy danh sách yêu cầu hỗ trợ của tôi
    */
   @Get('my')
+  @RequirePermission('read', 'SupportTicket', ['tenant', 'landlord', 'staff'])
   async getMyTickets(
     @CurrentUser('id') userId: string,
     @Query() query: SupportTicketQueryDto
@@ -72,6 +75,7 @@ export class SupportTicketsController {
    * Hàng đợi yêu cầu hỗ trợ cho staff/admin
    */
   @Get('queue')
+  @RequirePermission('read', 'SupportTicket')
   @Roles('staff', 'admin')
   @UseGuards(RolesGuard)
   async getQueue(
@@ -99,6 +103,7 @@ export class SupportTicketsController {
    * Gửi tin nhắn / phản hồi mới
    */
   @Post(':id/messages')
+  @RequirePermission('create', 'SupportTicket', ['tenant', 'landlord', 'staff'])
   @HttpCode(HttpStatus.CREATED)
   async addMessage(
     @Param('id') id: string,
@@ -115,6 +120,7 @@ export class SupportTicketsController {
    * Gán nhân viên xử lý
    */
   @Patch(':id/assign')
+  @RequirePermission('update', 'SupportTicket')
   @Roles('staff', 'admin')
   @UseGuards(RolesGuard)
   async assign(
@@ -130,6 +136,7 @@ export class SupportTicketsController {
    * Leo thang / chuyển giao ticket
    */
   @Patch(':id/escalate')
+  @RequirePermission('update', 'SupportTicket')
   @Roles('staff', 'admin')
   @UseGuards(RolesGuard)
   async escalate(
@@ -145,6 +152,7 @@ export class SupportTicketsController {
    * Đánh dấu đã giải quyết (Staff/Admin)
    */
   @Patch(':id/resolve')
+  @RequirePermission('update', 'SupportTicket')
   @Roles('staff', 'admin')
   @UseGuards(RolesGuard)
   async resolve(
@@ -160,6 +168,7 @@ export class SupportTicketsController {
    * Đóng ticket
    */
   @Patch(':id/close')
+  @RequirePermission('update', 'SupportTicket', ['tenant', 'landlord', 'staff'])
   @HttpCode(HttpStatus.OK)
   async close(
     @Param('id') id: string,

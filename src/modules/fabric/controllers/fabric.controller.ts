@@ -75,6 +75,7 @@ import {
   RepairFindingResponseDto,
   StartReconciliationRunDto,
 } from '../dto/ledger-reconciliation.dto'
+import { RequirePermission } from '../../rbac/decorators/require-permission.decorator'
 
 // ── DTOs ──
 
@@ -214,6 +215,7 @@ export class FabricController {
 
   /** Trạng thái kết nối Hyperledger Fabric — Admin, Nhân viên */
   @Get('status')
+  @RequirePermission('read', 'AuditLog')
   @Roles('admin', 'staff')
   async getStatus(): Promise<FabricStatusResponseDto> {
     const status = this.fabricService.getStatus()
@@ -226,6 +228,7 @@ export class FabricController {
 
   /** Retry terminal failed outbox event — Admin, Nhân viên */
   @Post('outbox/:id/retry')
+  @RequirePermission('update', 'AuditLog')
   @Roles('admin', 'staff')
   async retryOutboxEvent(
     @Param('id') id: string,
@@ -261,6 +264,7 @@ export class FabricController {
 
   /** Truy vấn dữ liệu từ blockchain (read-only) — Admin, Nhân viên */
   @Post('query')
+  @RequirePermission('update', 'AuditLog')
   @Roles('admin', 'staff')
   async queryTx(@Body() dto: QueryTxDto): Promise<unknown> {
     try {
@@ -273,6 +277,7 @@ export class FabricController {
 
   /** Xem lịch sử log giao dịch blockchain — Admin, Nhân viên */
   @Get('logs')
+  @RequirePermission('read', 'AuditLog')
   @Roles('admin', 'staff')
   async getLogs(
     @Query('contractId') contractId?: string,
@@ -324,6 +329,7 @@ export class FabricController {
 
   /** Danh sách snapshot governance (mới nhất trước) — Admin, Nhân viên */
   @Get('governance-snapshots')
+  @RequirePermission('read', 'AuditLog')
   @Roles('admin', 'staff')
   @ApiOperation({ summary: 'Danh sách governance snapshot (phân trang)' })
   @ApiOkResponse({ type: GovernanceSnapshotPageResponseDto })
@@ -345,6 +351,7 @@ export class FabricController {
 
   /** Chi tiết snapshot governance — Admin, Nhân viên */
   @Get('governance-snapshots/:id')
+  @RequirePermission('read', 'AuditLog')
   @Roles('admin', 'staff')
   @ApiOperation({ summary: 'Chi tiết governance snapshot' })
   @ApiOkResponse({ type: GovernanceSnapshotResponseDto })
@@ -359,6 +366,7 @@ export class FabricController {
 
   /** Đối chiếu manifestHash cục bộ với Fabric (read-only) — Admin, Nhân viên */
   @Get('governance-snapshots/:id/verify')
+  @RequirePermission('read', 'AuditLog')
   @Roles('admin', 'staff')
   @ApiOperation({
     summary:
@@ -378,6 +386,7 @@ export class FabricController {
 
   /** Tổng quan runtime, outbox, độ phủ bằng chứng và đối soát — Admin, Nhân viên */
   @Get('audit/overview')
+  @RequirePermission('read', 'AuditLog')
   @Roles('admin', 'staff')
   @ApiOperation({
     summary:
@@ -391,6 +400,7 @@ export class FabricController {
 
   /** Danh sách sự kiện bằng chứng (lọc phía server, phân trang) — Admin, Nhân viên */
   @Get('audit/events')
+  @RequirePermission('read', 'AuditLog')
   @Roles('admin', 'staff')
   @ApiOperation({ summary: 'Danh sách sự kiện bằng chứng, lọc phía server' })
   @ApiOkResponse({ type: AuditEventsPageResponseDto })
@@ -414,6 +424,7 @@ export class FabricController {
 
   /** Chi tiết sự kiện đã khử nhạy cảm — Admin, Nhân viên */
   @Get('audit/events/:id')
+  @RequirePermission('read', 'AuditLog')
   @Roles('admin', 'staff')
   @ApiOperation({
     summary: 'Chi tiết sự kiện: phụ thuộc, xác minh ledger, liên kết Explorer',
@@ -454,6 +465,7 @@ export class FabricController {
 
   /** Danh sách lần đối soát — Admin, Nhân viên */
   @Get('reconciliation-runs')
+  @RequirePermission('read', 'AuditLog')
   @Roles('admin', 'staff')
   @ApiOperation({ summary: 'Danh sách lần đối soát (mới nhất trước)' })
   @ApiOkResponse({ type: ReconciliationRunsPageResponseDto })
@@ -474,6 +486,7 @@ export class FabricController {
 
   /** Chi tiết lần đối soát và bộ đếm — Admin, Nhân viên */
   @Get('reconciliation-runs/:id')
+  @RequirePermission('read', 'AuditLog')
   @Roles('admin', 'staff')
   @ApiOperation({ summary: 'Chi tiết lần đối soát' })
   @ApiOkResponse({ type: ReconciliationRunResponseDto })
@@ -488,6 +501,7 @@ export class FabricController {
 
   /** Phát hiện của một lần đối soát (đã khử nhạy cảm) — Admin, Nhân viên */
   @Get('reconciliation-runs/:id/findings')
+  @RequirePermission('read', 'AuditLog')
   @Roles('admin', 'staff')
   @ApiOperation({
     summary: 'Các phát hiện của lần đối soát, lọc theo nhóm/trạng thái',

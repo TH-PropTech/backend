@@ -48,7 +48,6 @@ function setup(): {
     'feedback',
     'cancel',
     'requestInfo',
-    'escalate',
     'reject',
     'start',
     'deliver',
@@ -62,16 +61,11 @@ function setup(): {
 describe('DesignRequestsController', () => {
   it('maps the actor role (admin > staff > landlord) for staff-side endpoints', async () => {
     const { controller, service } = setup()
-    await controller.escalate(
-      'r1',
-      { note: 'x' },
-      { _id: 'a1', roles: ['staff', 'admin'] }
-    )
-    expect(service.escalate).toHaveBeenCalledWith(
-      'r1',
-      { id: 'a1', role: 'admin' },
-      { note: 'x' }
-    )
+    await controller.start('r1', { _id: 'a1', roles: ['staff', 'admin'] })
+    expect(service.start).toHaveBeenCalledWith('r1', {
+      id: 'a1',
+      role: 'admin',
+    })
     await controller.reject(
       'r1',
       { note: 'x' },
@@ -114,8 +108,8 @@ describe('DesignRequestsController', () => {
   })
 
   it.each([
-    ['start', ['admin']],
-    ['deliver', ['admin']],
+    ['start', ['staff', 'admin']],
+    ['deliver', ['staff', 'admin']],
     ['create', ['landlord']],
     ['listMine', ['landlord']],
     ['reply', ['landlord']],
@@ -124,7 +118,6 @@ describe('DesignRequestsController', () => {
     ['cancel', ['landlord']],
     ['queue', ['staff', 'admin']],
     ['requestInfo', ['staff', 'admin']],
-    ['escalate', ['staff', 'admin']],
     ['reject', ['staff', 'admin']],
     ['getOne', ['landlord', 'staff', 'admin']],
   ] as const)('%s has @Roles %j', (name, expected) => {
@@ -132,12 +125,13 @@ describe('DesignRequestsController', () => {
     expect(roles).toEqual(expected)
   })
 
-  it('RolesGuard: staff gets 403 on start/deliver, admin passes', () => {
-    expect(() => guardAllows('start', ['staff'])).toThrow(ForbiddenException)
-    expect(() => guardAllows('deliver', ['staff'])).toThrow(ForbiddenException)
+  it('RolesGuard: staff and admin may start/deliver, landlord gets 403', () => {
+    expect(() => guardAllows('start', ['landlord'])).toThrow(ForbiddenException)
     expect(() => guardAllows('deliver', ['landlord'])).toThrow(
       ForbiddenException
     )
+    expect(guardAllows('start', ['staff'])).toBe(true)
+    expect(guardAllows('deliver', ['staff'])).toBe(true)
     expect(guardAllows('start', ['admin'])).toBe(true)
     expect(guardAllows('deliver', ['admin'])).toBe(true)
     expect(() => guardAllows('queue', ['landlord'])).toThrow(ForbiddenException)

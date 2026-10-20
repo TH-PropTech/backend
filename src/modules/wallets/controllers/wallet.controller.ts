@@ -26,6 +26,7 @@ import {
   type WalletView,
 } from '../services/wallets.service'
 import { PayoutsService } from '../services/payouts.service'
+import { RequirePermission } from '../../rbac/decorators/require-permission.decorator'
 
 @ApiTags('wallet')
 @ApiBearerAuth()
@@ -39,12 +40,14 @@ export class WalletController {
   ) {}
 
   @Get()
+  @RequirePermission('read', 'Wallet')
   @ApiOperation({ summary: 'My payout bank link (no balance held by us)' })
   getMine(@CurrentUser() user: UserPayload): Promise<WalletView> {
     return this.walletsService.getMine(this.requireUserId(user))
   }
 
   @Post('link')
+  @RequirePermission('create', 'Wallet')
   @ApiOperation({ summary: 'Link (or change) the bank account of my wallet' })
   async link(
     @Body() dto: LinkWalletDto,
@@ -59,6 +62,7 @@ export class WalletController {
   }
 
   @Get('transactions')
+  @RequirePermission('read', 'Wallet')
   @ApiOperation({ summary: 'Wallet statement: payouts in, platform fees out' })
   transactions(
     @Query() query: WalletTransactionsQueryDto,
@@ -72,6 +76,7 @@ export class WalletController {
   }
 
   @Get('invoices')
+  @RequirePermission('read', 'Wallet')
   @ApiOperation({
     summary: 'Platform-fee invoices I owe, payable via the payment gateway',
   })
@@ -80,6 +85,7 @@ export class WalletController {
   }
 
   @Get('receiving-status')
+  @RequirePermission('read', 'Wallet')
   @ApiOperation({
     summary:
       'Receiving status: live wallet check, last payout received, stuck payouts',

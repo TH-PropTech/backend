@@ -11,7 +11,7 @@ import {
 @ApiTags('admin-wallets')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('staff', 'admin')
+@Roles('admin')
 @Controller('admin/wallets')
 export class AdminWalletsController {
   constructor(private readonly walletsService: WalletsService) {}

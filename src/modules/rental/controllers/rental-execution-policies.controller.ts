@@ -32,7 +32,7 @@ export class RentalExecutionPoliciesController {
 
   @Get('admin')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('admin', 'staff')
+  @Roles('admin')
   async listAll(): Promise<RentalExecutionPolicyView[]> {
     return this.service.listAll()
   }
