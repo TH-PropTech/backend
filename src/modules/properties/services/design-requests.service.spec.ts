@@ -25,6 +25,7 @@ const landlord: DesignRequestActor = { id: LANDLORD_ID, role: 'landlord' }
 const stranger: DesignRequestActor = { id: STRANGER_ID, role: 'landlord' }
 const staff: DesignRequestActor = { id: STAFF_ID, role: 'staff' }
 const admin: DesignRequestActor = { id: ADMIN_ID, role: 'admin' }
+const staff_2: DesignRequestActor = { id: STAFF_2, role: 'staff' }
 
 interface FakeDesign {
   id: string
@@ -85,6 +86,7 @@ function setup(
   const users = opts.users ?? [
     { id: LANDLORD_ID, fullName: 'Chủ Nhà', email: 'cn@x.vn' },
     { id: ADMIN_ID, fullName: 'Admin A', email: 'a@x.vn' },
+    { id: STAFF_ID, fullName: 'Nhân Viên A', email: 's@x.vn' },
   ]
   const activeUsers = opts.activeUsers ?? [
     { id: STAFF_ID, role: 'staff' },
@@ -226,7 +228,7 @@ function recipientsOf(n: {
 
 describe('DesignRequestsService', () => {
   describe('happy path', () => {
-    it('submit -> escalate -> start -> deliver -> approve (create)', async () => {
+    it('submit -> start -> deliver -> approve (create)', async () => {
       const ctx = setup()
       const { service } = ctx
       const created = await service.create(landlord, createDto)
@@ -240,12 +242,12 @@ describe('DesignRequestsService', () => {
       })
       const id = created.id
 
-      expect((await service.escalate(id, staff, {})).status).toBe('escalated')
-      const started = await service.start(id, admin)
+      const started = await service.start(id, staff)
       expect(started.status).toBe('in_progress')
-      expect(started.assignedAdminId).toBe(ADMIN_ID)
+      expect(started.assignedAdminId).toBe(STAFF_ID)
+      expect(started.assignee).toEqual({ id: STAFF_ID, name: 'Nhân Viên A' })
 
-      const delivered = await service.deliver(id, admin, {
+      const delivered = await service.deliver(id, staff, {
         designId: 'd-new',
         note: 'Xong',
       })
@@ -263,14 +265,13 @@ describe('DesignRequestsService', () => {
       expect(ctx.designs.find(d => d.id === 'd-old')?.visible).toBe(true)
       expect(approved.events.map(e => e.type)).toEqual([
         'submitted',
-        'escalated',
         'started',
         'delivered',
         'approved',
       ])
-      expect(approved.events[1]?.actorName).toBeNull()
-      expect(approved.events[2]?.actorName).toBe('Admin A')
-      expect(approved.events[3]?.revision).toBe(1)
+      expect(approved.events[1]?.actorName).toBe('Nhân Viên A')
+      expect(approved.events[1]?.actorRole).toBe('staff')
+      expect(approved.events[2]?.revision).toBe(1)
     })
 
     it('edit: approving hides the replaced old design', async () => {
@@ -282,9 +283,8 @@ describe('DesignRequestsService', () => {
         targetDesignId: 'd-old',
         brief: 'Sửa',
       })
-      await service.escalate(id, staff, {})
-      await service.start(id, admin)
-      await service.deliver(id, admin, { designId: 'd-new' })
+      await service.start(id, staff)
+      await service.deliver(id, staff, { designId: 'd-new' })
       await service.approve(id, landlord)
       expect(ctx.designs.find(d => d.id === 'd-new')?.visible).toBe(true)
       expect(ctx.designs.find(d => d.id === 'd-old')?.visible).toBe(false)
@@ -299,9 +299,8 @@ describe('DesignRequestsService', () => {
         targetDesignId: 'd-old',
         brief: 'Sửa',
       })
-      await service.escalate(id, staff, {})
-      await service.start(id, admin)
-      await service.deliver(id, admin, { designId: 'd-old' })
+      await service.start(id, staff)
+      await service.deliver(id, staff, { designId: 'd-old' })
       await service.approve(id, landlord)
       expect(ctx.designs.find(d => d.id === 'd-old')?.visible).toBe(true)
     })
@@ -310,15 +309,14 @@ describe('DesignRequestsService', () => {
   it('revision loop counts 1 then 2', async () => {
     const { service } = setup()
     const { id } = await service.create(landlord, createDto)
-    await service.escalate(id, staff, {})
-    await service.start(id, admin)
-    const first = await service.deliver(id, admin, { designId: 'd-new' })
+    await service.start(id, staff)
+    const first = await service.deliver(id, staff, { designId: 'd-new' })
     expect(first.revision).toBe(1)
     const fb = await service.feedback(id, landlord, { note: 'Sửa màu' })
     expect(fb.status).toBe('changes_requested')
     expect(fb.events.at(-1)).toMatchObject({ type: 'feedback', revision: 1 })
-    await service.start(id, admin)
-    const second = await service.deliver(id, admin, { designId: 'd-old' })
+    await service.start(id, staff)
+    const second = await service.deliver(id, staff, { designId: 'd-old' })
     expect(second.revision).toBe(2)
     expect(second.deliveredDesignId).toBe('d-old')
     expect((await service.approve(id, landlord)).status).toBe('approved')
@@ -343,13 +341,22 @@ describe('DesignRequestsService', () => {
     expect(rejected.events.at(-1)?.note).toBe('Không phù hợp')
   })
 
-  it('reject is allowed from escalated', async () => {
-    const { service } = setup()
+  it('reject is allowed from legacy escalated', async () => {
+    const { service, docs } = setup()
     const { id } = await service.create(landlord, createDto)
-    await service.escalate(id, staff, { note: 'Lên admin' })
+    docs[0]!.status = 'escalated'
     expect((await service.reject(id, admin, { note: 'Từ chối' })).status).toBe(
       'rejected'
     )
+  })
+
+  it('start is allowed straight from submitted and from legacy escalated', async () => {
+    const { service, docs } = setup()
+    const a = await service.create(landlord, createDto)
+    expect((await service.start(a.id, staff)).status).toBe('in_progress')
+    docs[0]!.status = 'escalated'
+    docs[0]!.assignedAdminId = null
+    expect((await service.start(a.id, staff)).status).toBe('in_progress')
   })
 
   describe('cancel', () => {
@@ -359,20 +366,16 @@ describe('DesignRequestsService', () => {
     > = {
       submitted: () => Promise.resolve(),
       needs_info: (s, id) => s.requestInfo(id, staff, { note: 'n' }),
-      escalated: (s, id) => s.escalate(id, staff, {}),
       in_progress: async (s, id) => {
-        await s.escalate(id, staff, {})
-        await s.start(id, admin)
+        await s.start(id, staff)
       },
       delivered: async (s, id) => {
-        await s.escalate(id, staff, {})
-        await s.start(id, admin)
-        await s.deliver(id, admin, { designId: 'd-new' })
+        await s.start(id, staff)
+        await s.deliver(id, staff, { designId: 'd-new' })
       },
       changes_requested: async (s, id) => {
-        await s.escalate(id, staff, {})
-        await s.start(id, admin)
-        await s.deliver(id, admin, { designId: 'd-new' })
+        await s.start(id, staff)
+        await s.deliver(id, staff, { designId: 'd-new' })
         await s.feedback(id, landlord, { note: 'n' })
       },
     }
@@ -406,8 +409,7 @@ describe('DesignRequestsService', () => {
         service.reply(id, landlord, { note: 'n' }),
         service.approve(id, landlord),
         service.feedback(id, landlord, { note: 'n' }),
-        service.start(id, admin),
-        service.deliver(id, admin, { designId: 'd-new' }),
+        service.deliver(id, staff, { designId: 'd-new' }),
       ]
       for (const p of bad) {
         await expect(p).rejects.toMatchObject({
@@ -415,8 +417,8 @@ describe('DesignRequestsService', () => {
         })
         await expect(p).rejects.toBeInstanceOf(ConflictException)
       }
-      await service.escalate(id, staff, {})
-      await expect(service.escalate(id, staff, {})).rejects.toBeInstanceOf(
+      await service.start(id, staff)
+      await expect(service.start(id, staff_2)).rejects.toBeInstanceOf(
         ConflictException
       )
       await expect(
@@ -428,7 +430,7 @@ describe('DesignRequestsService', () => {
       const { service, requestRepo } = setup()
       const { id } = await service.create(landlord, createDto)
       requestRepo.updateOne.mockResolvedValueOnce({ matchedCount: 0 })
-      await expect(service.escalate(id, staff, {})).rejects.toThrow(
+      await expect(service.start(id, staff)).rejects.toThrow(
         new ConflictException('DESIGN_REQUEST_INVALID_STATE')
       )
     })
@@ -436,9 +438,8 @@ describe('DesignRequestsService', () => {
     it('guards the update with status $in and the revision on deliver', async () => {
       const { service, requestRepo } = setup()
       const { id } = await service.create(landlord, createDto)
-      await service.escalate(id, staff, {})
-      await service.start(id, admin)
-      await service.deliver(id, admin, { designId: 'd-new' })
+      await service.start(id, staff)
+      await service.deliver(id, staff, { designId: 'd-new' })
       const [filter, update] = requestRepo.updateOne.mock.calls.at(-1) as [
         Record<string, unknown>,
         Record<string, unknown>,
@@ -538,26 +539,45 @@ describe('DesignRequestsService', () => {
       await expect(service.getById(id, admin)).resolves.toMatchObject({ id })
     })
 
-    it('staff cannot start or deliver (service guard)', async () => {
+    it('a landlord actor cannot start or deliver (service guard)', async () => {
       const { service } = setup()
       const { id } = await service.create(landlord, createDto)
-      await service.escalate(id, staff, {})
-      await expect(service.start(id, staff)).rejects.toBeInstanceOf(
-        ForbiddenException
+      await expect(service.start(id, landlord)).rejects.toThrow(
+        new ForbiddenException('DESIGN_REQUEST_STAFF_ONLY')
       )
       await expect(
-        service.deliver(id, staff, { designId: 'd-new' })
+        service.deliver(id, landlord, { designId: 'd-new' })
       ).rejects.toBeInstanceOf(ForbiddenException)
+    })
+
+    it('only the assignee may deliver; an admin can override', async () => {
+      const { service } = setup()
+      const { id } = await service.create(landlord, createDto)
+      await service.start(id, staff)
+      await expect(
+        service.deliver(id, staff_2, { designId: 'd-new' })
+      ).rejects.toThrow(new ForbiddenException('DESIGN_REQUEST_NOT_ASSIGNEE'))
+      await expect(
+        service.deliver(id, admin, { designId: 'd-new' })
+      ).resolves.toMatchObject({ status: 'delivered' })
+    })
+
+    it('two staff claiming the same request: the second gets 409', async () => {
+      const { service } = setup()
+      const { id } = await service.create(landlord, createDto)
+      await service.start(id, staff)
+      await expect(service.start(id, staff_2)).rejects.toThrow(
+        new ConflictException('DESIGN_REQUEST_INVALID_STATE')
+      )
     })
   })
 
   it('deliver with an unknown designId is 400 DESIGN_NOT_FOUND', async () => {
     const { service } = setup()
     const { id } = await service.create(landlord, createDto)
-    await service.escalate(id, staff, {})
-    await service.start(id, admin)
+    await service.start(id, staff)
     await expect(
-      service.deliver(id, admin, { designId: 'ghost' })
+      service.deliver(id, staff, { designId: 'ghost' })
     ).rejects.toThrow(new BadRequestException('DESIGN_NOT_FOUND'))
   })
 
@@ -569,9 +589,8 @@ describe('DesignRequestsService', () => {
         targetDesignId: 'd-old',
         brief: 'Sửa',
       })
-      await ctx.service.escalate(id, staff, {})
-      await ctx.service.start(id, admin)
-      await ctx.service.deliver(id, admin, { designId: 'd-new' })
+      await ctx.service.start(id, staff)
+      await ctx.service.deliver(id, staff, { designId: 'd-new' })
       return id
     }
 
@@ -713,21 +732,15 @@ describe('DesignRequestsService', () => {
       )
     })
 
-    it('escalated notifies all admins and the landlord', async () => {
+    it('admins are never notified in the staff-only flow', async () => {
       const { service, notifications } = setup()
       const { id } = await service.create(landlord, createDto)
-      notifications.createNotificationOnce.mockClear()
-      await service.escalate(id, staff, {})
-      expect(recipientsOf(notifications).sort()).toEqual(
-        [ADMIN_ID, ADMIN_2, LANDLORD_ID].sort()
-      )
-      const landlordCall = notifications.createNotificationOnce.mock.calls.find(
-        c => c[0] === LANDLORD_ID
-      )!
-      expect(landlordCall[2]).toBe('Yêu cầu đã chuyển cho quản trị viên')
-      expect((landlordCall[5] as { link: string }).link).toBe(
-        '/profile?tab=listings'
-      )
+      await service.start(id, staff)
+      await service.deliver(id, staff, { designId: 'd-new' })
+      await service.feedback(id, landlord, { note: 'a' })
+      const all = recipientsOf(notifications)
+      expect(all).not.toContain(ADMIN_ID)
+      expect(all).not.toContain(ADMIN_2)
     })
 
     it('started, info_requested, rejected, delivered go to the landlord', async () => {
@@ -742,48 +755,46 @@ describe('DesignRequestsService', () => {
       expect(recipientsOf(notifications)).toEqual([LANDLORD_ID])
 
       const b = await service.create(landlord, createDto)
-      await service.escalate(b.id, staff, {})
       notifications.createNotificationOnce.mockClear()
-      await service.start(b.id, admin)
+      await service.start(b.id, staff)
       expect(recipientsOf(notifications)).toEqual([LANDLORD_ID])
       expect(notifications.createNotificationOnce.mock.calls[0]![2]).toBe(
-        'Quản trị viên đã bắt đầu thiết kế'
+        'Nhân viên đã bắt đầu thiết kế'
       )
       notifications.createNotificationOnce.mockClear()
-      await service.deliver(b.id, admin, { designId: 'd-new' })
+      await service.deliver(b.id, staff, { designId: 'd-new' })
       expect(recipientsOf(notifications)).toEqual([LANDLORD_ID])
       expect(notifications.createNotificationOnce.mock.calls[0]![2]).toBe(
         'Thiết kế 3D đã sẵn sàng để duyệt'
       )
     })
 
-    it('feedback goes to the assigned admin, each round with a fresh dedupe key; approved to the assigned admin only', async () => {
+    it('feedback goes to the assignee, each round with a fresh dedupe key; approved to the assignee only', async () => {
       const { service, notifications } = setup()
       const { id } = await service.create(landlord, createDto)
-      await service.escalate(id, staff, {})
-      await service.start(id, admin)
-      await service.deliver(id, admin, { designId: 'd-new' })
+      await service.start(id, staff)
+      await service.deliver(id, staff, { designId: 'd-new' })
       notifications.createNotificationOnce.mockClear()
       await service.feedback(id, landlord, { note: 'a' })
-      expect(recipientsOf(notifications)).toEqual([ADMIN_ID])
+      expect(recipientsOf(notifications)).toEqual([STAFF_ID])
       const key1 = notifications.createNotificationOnce.mock
         .calls[0]![1] as string
-      await service.start(id, admin)
-      await service.deliver(id, admin, { designId: 'd-new' })
+      await service.start(id, staff)
+      await service.deliver(id, staff, { designId: 'd-new' })
       notifications.createNotificationOnce.mockClear()
       await service.feedback(id, landlord, { note: 'b' })
       const key2 = notifications.createNotificationOnce.mock
         .calls[0]![1] as string
       expect(key2).not.toBe(key1)
       notifications.createNotificationOnce.mockClear()
-      await service.start(id, admin)
-      await service.deliver(id, admin, { designId: 'd-new' })
+      await service.start(id, staff)
+      await service.deliver(id, staff, { designId: 'd-new' })
       notifications.createNotificationOnce.mockClear()
       await service.approve(id, landlord)
-      expect(recipientsOf(notifications)).toEqual([ADMIN_ID])
+      expect(recipientsOf(notifications)).toEqual([STAFF_ID])
     })
 
-    it('feedback with no assigned admin falls back to all admins', async () => {
+    it('feedback with no assignee falls back to all staff', async () => {
       const { service, docs, notifications } = setup()
       const { id } = await service.create(landlord, createDto)
       docs[0]!.status = 'delivered'
@@ -792,7 +803,7 @@ describe('DesignRequestsService', () => {
       notifications.createNotificationOnce.mockClear()
       await service.feedback(id, landlord, { note: 'a' })
       expect(recipientsOf(notifications).sort()).toEqual(
-        [ADMIN_ID, ADMIN_2].sort()
+        [STAFF_ID, STAFF_2].sort()
       )
     })
 
@@ -809,8 +820,8 @@ describe('DesignRequestsService', () => {
       const { service } = setup({ notifyFails: true })
       const out = await service.create(landlord, createDto)
       expect(out.status).toBe('submitted')
-      await expect(service.escalate(out.id, staff, {})).resolves.toMatchObject({
-        status: 'escalated',
+      await expect(service.start(out.id, staff)).resolves.toMatchObject({
+        status: 'in_progress',
       })
     })
 

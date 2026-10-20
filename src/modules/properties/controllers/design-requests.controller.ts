@@ -20,7 +20,6 @@ import {
   CreateDesignRequestDto,
   DeliverDesignRequestDto,
   DesignRequestNoteDto,
-  DesignRequestOptionalNoteDto,
   DesignRequestQueueQueryDto,
   MyDesignRequestsQueryDto,
 } from '../dto/design-request.dto'
@@ -30,6 +29,7 @@ import {
   type DesignRequestDetail,
   type DesignRequestListResult,
 } from '../services/design-requests.service'
+import { RequirePermission } from '../../rbac/decorators/require-permission.decorator'
 
 function actorOf(user: UserPayload): DesignRequestActor {
   if (!user._id) throw new UnauthorizedException()
@@ -48,7 +48,7 @@ function landlordOf(user: UserPayload): DesignRequestActor {
   return { id: user._id, role: 'landlord' }
 }
 
-/** Yêu cầu thiết kế / chỉnh sửa 3D: chủ nhà gửi, staff phân loại, admin thiết kế & bàn giao. */
+/** Yêu cầu thiết kế / chỉnh sửa 3D: chủ nhà gửi, nhân viên nhận, thiết kế & bàn giao, chủ nhà duyệt. */
 @ApiTags('design-requests')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -57,6 +57,7 @@ export class DesignRequestsController {
   constructor(private readonly service: DesignRequestsService) {}
 
   @Post()
+  @RequirePermission('create', 'DesignRequest')
   @Roles('landlord')
   @ApiOperation({ summary: 'Chủ nhà gửi yêu cầu thiết kế 3D' })
   create(
@@ -67,6 +68,7 @@ export class DesignRequestsController {
   }
 
   @Get('my')
+  @RequirePermission('read', 'DesignRequest')
   @Roles('landlord')
   @ApiOperation({ summary: 'Yêu cầu của tôi' })
   listMine(
@@ -77,6 +79,7 @@ export class DesignRequestsController {
   }
 
   @Get('queue')
+  @RequirePermission('read', 'DesignRequest')
   @Roles('staff', 'admin')
   @ApiOperation({ summary: 'Hàng đợi yêu cầu (cũ nhất trước)' })
   queue(
@@ -86,6 +89,7 @@ export class DesignRequestsController {
   }
 
   @Get(':id')
+  @RequirePermission('read', 'DesignRequest')
   @Roles('landlord', 'staff', 'admin')
   @ApiOperation({ summary: 'Chi tiết yêu cầu kèm lịch sử' })
   getOne(
@@ -96,6 +100,7 @@ export class DesignRequestsController {
   }
 
   @Post(':id/reply')
+  @RequirePermission('update', 'DesignRequest')
   @HttpCode(HttpStatus.OK)
   @Roles('landlord')
   @ApiOperation({ summary: 'Chủ nhà bổ sung thông tin' })
@@ -108,6 +113,7 @@ export class DesignRequestsController {
   }
 
   @Post(':id/approve')
+  @RequirePermission('approve', 'DesignRequest')
   @HttpCode(HttpStatus.OK)
   @Roles('landlord')
   @ApiOperation({ summary: 'Chủ nhà duyệt thiết kế' })
@@ -119,6 +125,7 @@ export class DesignRequestsController {
   }
 
   @Post(':id/feedback')
+  @RequirePermission('update', 'DesignRequest')
   @HttpCode(HttpStatus.OK)
   @Roles('landlord')
   @ApiOperation({ summary: 'Chủ nhà gửi phản hồi, yêu cầu chỉnh sửa' })
@@ -131,6 +138,7 @@ export class DesignRequestsController {
   }
 
   @Post(':id/cancel')
+  @RequirePermission('update', 'DesignRequest')
   @HttpCode(HttpStatus.OK)
   @Roles('landlord')
   @ApiOperation({ summary: 'Chủ nhà huỷ yêu cầu' })
@@ -142,9 +150,10 @@ export class DesignRequestsController {
   }
 
   @Post(':id/request-info')
+  @RequirePermission('update', 'DesignRequest')
   @HttpCode(HttpStatus.OK)
   @Roles('staff', 'admin')
-  @ApiOperation({ summary: 'Staff/admin hỏi thêm thông tin' })
+  @ApiOperation({ summary: 'Nhân viên hỏi thêm thông tin' })
   requestInfo(
     @Param('id') id: string,
     @Body() dto: DesignRequestNoteDto,
@@ -153,19 +162,8 @@ export class DesignRequestsController {
     return this.service.requestInfo(id, actorOf(user), dto)
   }
 
-  @Post(':id/escalate')
-  @HttpCode(HttpStatus.OK)
-  @Roles('staff', 'admin')
-  @ApiOperation({ summary: 'Chuyển yêu cầu cho quản trị viên' })
-  escalate(
-    @Param('id') id: string,
-    @Body() dto: DesignRequestOptionalNoteDto,
-    @CurrentUser() user: UserPayload
-  ): Promise<DesignRequestDetail> {
-    return this.service.escalate(id, actorOf(user), dto)
-  }
-
   @Post(':id/reject')
+  @RequirePermission('update', 'DesignRequest')
   @HttpCode(HttpStatus.OK)
   @Roles('staff', 'admin')
   @ApiOperation({ summary: 'Từ chối yêu cầu' })
@@ -178,9 +176,10 @@ export class DesignRequestsController {
   }
 
   @Post(':id/start')
+  @RequirePermission('update', 'DesignRequest')
   @HttpCode(HttpStatus.OK)
-  @Roles('admin')
-  @ApiOperation({ summary: 'Admin bắt đầu thiết kế' })
+  @Roles('staff', 'admin')
+  @ApiOperation({ summary: 'Nhân viên nhận và bắt đầu thiết kế' })
   start(
     @Param('id') id: string,
     @CurrentUser() user: UserPayload
@@ -189,9 +188,10 @@ export class DesignRequestsController {
   }
 
   @Post(':id/deliver')
+  @RequirePermission('update', 'DesignRequest')
   @HttpCode(HttpStatus.OK)
-  @Roles('admin')
-  @ApiOperation({ summary: 'Admin bàn giao thiết kế cho chủ nhà duyệt' })
+  @Roles('staff', 'admin')
+  @ApiOperation({ summary: 'Nhân viên bàn giao thiết kế cho chủ nhà duyệt' })
   deliver(
     @Param('id') id: string,
     @Body() dto: DeliverDesignRequestDto,
