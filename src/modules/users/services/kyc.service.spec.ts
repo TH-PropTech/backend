@@ -3,11 +3,9 @@ import {
   BadRequestException,
   ForbiddenException,
   NotFoundException,
-  UnprocessableEntityException,
 } from '@nestjs/common'
 import { ObjectId } from 'mongodb'
 
-import type { BiometricGrantService } from '../../ekyc/services/biometric-grant.service'
 import type { KycMediaService } from './kyc-media.service'
 import { KycService } from './kyc.service'
 
@@ -62,7 +60,7 @@ function aggregateReturns(rows: unknown[]): jest.Mock {
     .mockReturnValue({ toArray: jest.fn().mockResolvedValue(rows) })
 }
 
-function createService(options?: { grantError?: Error }): {
+function createService(): {
   service: KycService
   userRepository: {
     aggregate: jest.Mock
@@ -70,9 +68,7 @@ function createService(options?: { grantError?: Error }): {
     updateOne: jest.Mock
   }
   media: jest.Mocked<Pick<KycMediaService, 'store' | 'read' | 'remove'>>
-  grants: { consume: jest.Mock }
 } {
-  const grantError = options?.grantError
   const userRepository = {
     aggregate: aggregateReturns([]),
     findOne: jest.fn().mockResolvedValue({
@@ -93,29 +89,12 @@ function createService(options?: { grantError?: Error }): {
       mimetype: 'image/jpeg' as const,
     }),
   }
-  const grants = {
-    consume: grantError
-      ? jest.fn(() => {
-          throw grantError
-        })
-      : jest.fn().mockReturnValue({
-          verified: true,
-          faceMatch: true,
-          liveness: true,
-          realConfidence: 0.93,
-        }),
-  }
   const service = Object.create(KycService.prototype) as KycService
   Reflect.set(service, 'logger', { log: jest.fn(), warn: jest.fn() })
   Reflect.set(service, 'userRepository', userRepository)
   Reflect.set(service, 'kycMediaService', media as unknown as KycMediaService)
-  Reflect.set(
-    service,
-    'biometricGrantService',
-    grants as unknown as BiometricGrantService
-  )
 
-  return { service, userRepository, media, grants }
+  return { service, userRepository, media }
 }
 
 function setOf(call: unknown[]): Record<string, unknown> {
@@ -130,7 +109,6 @@ describe('KycService.submitKyc', () => {
   const files = {
     frontCard: createImage('frontCard'),
     backCard: createImage('backCard'),
-    selfie: createImage('selfie'),
   }
 
   it('nhúng hồ sơ vào user bằng updateOne nguyên tử, không save toàn User', async () => {
@@ -148,12 +126,16 @@ describe('KycService.submitKyc', () => {
     expect(update.$set['kyc.frontCardUrl']).toBe(
       `kyc-media:${USER_ID}:front-card`
     )
-    expect(update.$set['kyc.faceMatchResult']).toBe(true)
-    expect(update.$set['kyc.livenessResult']).toBe(true)
-    expect(update.$set['kyc.spoofScore']).toBe(0.93)
+    expect(update.$set['kyc.selfieUrl']).toBe('')
+    expect(update.$set).not.toHaveProperty('kyc.faceMatchResult')
     expect(update.$set['kyc.status']).toBe('pending')
     expect(update.$set['kycStatus']).toBe('pending')
-    expect(update.$unset).toEqual({ 'kyc.ocrMatchRate': '' })
+    expect(update.$unset).toEqual({
+      'kyc.ocrMatchRate': '',
+      'kyc.faceMatchResult': '',
+      'kyc.livenessResult': '',
+      'kyc.spoofScore': '',
+    })
     expect(userRepository.updateOne.mock.calls[0]?.[0]).not.toHaveProperty(
       'save'
     )
@@ -181,100 +163,6 @@ describe('KycService.submitKyc', () => {
     expect(set).not.toHaveProperty('kyc.dateOfBirth')
   })
 
-  it('bỏ spoofScore khi realConfidence là null', async () => {
-    const { service, userRepository, grants } = createService()
-    grants.consume.mockReturnValue({
-      verified: true,
-      faceMatch: true,
-      liveness: true,
-      realConfidence: null,
-    })
-
-    await service.submitKyc(USER_ID, dto, files)
-
-    const update = userRepository.updateOne.mock.calls[0]?.[1] as {
-      $unset: Record<string, unknown>
-    }
-    expect(update.$unset).toEqual({
-      'kyc.ocrMatchRate': '',
-      'kyc.spoofScore': '',
-    })
-  })
-
-  describe('bỏ bước selfie (KYC_SKIP_SELFIE, chỉ ngoài production)', () => {
-    const cccdOnly = {
-      frontCard: files.frontCard,
-      backCard: files.backCard,
-    }
-    const original = {
-      node: process.env['NODE_ENV'],
-      skip: process.env['KYC_SKIP_SELFIE'],
-    }
-    const restore = (key: string, value: string | undefined): void => {
-      if (value === undefined) delete process.env[key]
-      else process.env[key] = value
-    }
-    afterEach(() => {
-      restore('NODE_ENV', original.node)
-      restore('KYC_SKIP_SELFIE', original.skip)
-    })
-
-    it('nộp chỉ với ảnh CCCD: không đòi biometric grant, không lưu selfie, xóa kết quả sinh trắc cũ', async () => {
-      process.env['NODE_ENV'] = 'development'
-      process.env['KYC_SKIP_SELFIE'] = 'true'
-      const { service, userRepository, grants } = createService()
-      userRepository.aggregate = aggregateReturns([])
-
-      await service.submitKyc(USER_ID, dto, cccdOnly)
-
-      expect(grants.consume).not.toHaveBeenCalled()
-      const [, update] = userRepository.updateOne.mock.calls[0] as [
-        unknown,
-        { $set: Record<string, unknown>; $unset: Record<string, unknown> },
-      ]
-      expect(update.$set['kyc.selfieUrl']).toBe('')
-      expect(update.$set).not.toHaveProperty('kyc.faceMatchResult')
-      expect(update.$set['kyc.status']).toBe('pending')
-      expect(update.$unset).toMatchObject({
-        'kyc.faceMatchResult': '',
-        'kyc.livenessResult': '',
-        'kyc.spoofScore': '',
-      })
-    })
-
-    it('production luôn bắt buộc selfie dù cờ bật', async () => {
-      process.env['NODE_ENV'] = 'production'
-      process.env['KYC_SKIP_SELFIE'] = 'true'
-      const { service, userRepository } = createService()
-
-      await expect(
-        service.submitKyc(USER_ID, dto, cccdOnly)
-      ).rejects.toBeInstanceOf(BadRequestException)
-      expect(userRepository.updateOne).not.toHaveBeenCalled()
-    })
-
-    it('cờ tắt thì không selfie vẫn bị từ chối', async () => {
-      delete process.env['KYC_SKIP_SELFIE']
-      const { service, userRepository } = createService()
-
-      await expect(
-        service.submitKyc(USER_ID, dto, cccdOnly)
-      ).rejects.toBeInstanceOf(BadRequestException)
-      expect(userRepository.updateOne).not.toHaveBeenCalled()
-    })
-  })
-
-  it('không ghi gì khi thiếu biometric grant', async () => {
-    const { service, userRepository } = createService({
-      grantError: new UnprocessableEntityException('expired'),
-    })
-
-    await expect(service.submitKyc(USER_ID, dto, files)).rejects.toBeInstanceOf(
-      UnprocessableEntityException
-    )
-    expect(userRepository.updateOne).not.toHaveBeenCalled()
-  })
-
   it('xóa media vừa lưu nếu ghi DB thất bại', async () => {
     const { service, userRepository, media } = createService()
     userRepository.updateOne.mockRejectedValue(
@@ -284,7 +172,7 @@ describe('KycService.submitKyc', () => {
     await expect(service.submitKyc(USER_ID, dto, files)).rejects.toThrow(
       'database unavailable'
     )
-    expect(media.remove).toHaveBeenCalledTimes(3)
+    expect(media.remove).toHaveBeenCalledTimes(2)
   })
 
   it('từ chối khi tài khoản đã xác minh KYC', async () => {

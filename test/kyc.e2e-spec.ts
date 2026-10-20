@@ -9,7 +9,6 @@ import type { ApiResponse } from '../src/common/interfaces/api-response.interfac
 import { ResponseEnvelopeInterceptor } from '../src/common/interceptors/response-envelope.interceptor'
 import { RolesGuard } from '../src/common/guards/roles.guard'
 import { JwtAuthGuard } from '../src/modules/auth/guards/jwt-auth.guard'
-import { BiometricGrantService } from '../src/modules/ekyc/services/biometric-grant.service'
 import { EkycProxyService } from '../src/modules/ekyc/services/ekyc-proxy.service'
 import { GroqCccdOcrService } from '../src/modules/ekyc/services/groq-cccd-ocr.service'
 import { KycController } from '../src/modules/users/controllers/kyc.controller'
@@ -22,7 +21,6 @@ type AuthenticatedRequest = ExpressRequest & {
 describe('KYC HTTP flow', () => {
   let app: INestApplication
   let status: 'pending' | 'verified' | null = null
-  const grants = new BiometricGrantService()
   const ocr = {
     ocrFront: jest.fn().mockResolvedValue({
       idNumber: '079123456789',
@@ -33,17 +31,9 @@ describe('KYC HTTP flow', () => {
     }),
     ocrBack: jest.fn().mockResolvedValue({ success: true }),
   }
-  const proxy = {
-    verifyFace: jest.fn().mockResolvedValue({
-      verified: true,
-      faceMatch: true,
-      liveness: true,
-      realConfidence: 0.91,
-    }),
-  }
+  const proxy = {}
   const service = {
-    submitKyc: jest.fn().mockImplementation((userId: string) => {
-      grants.consume(userId)
+    submitKyc: jest.fn().mockImplementation(() => {
       status = 'pending'
       return Promise.resolve({ status })
     }),
@@ -71,7 +61,6 @@ describe('KYC HTTP flow', () => {
         { provide: KycService, useValue: service },
         { provide: EkycProxyService, useValue: proxy },
         { provide: GroqCccdOcrService, useValue: ocr },
-        { provide: BiometricGrantService, useValue: grants },
       ],
     })
       .overrideGuard(JwtAuthGuard)
@@ -94,7 +83,7 @@ describe('KYC HTTP flow', () => {
 
   afterAll(async () => app.close())
 
-  it('runs biometric grant, multipart submit, owner status, and staff review', async () => {
+  it('runs OCR, multipart submit, owner status, and staff review', async () => {
     const server = app.getHttpServer() as SupertestApp
     const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xdb])
 
@@ -111,22 +100,6 @@ describe('KYC HTTP flow', () => {
       })
 
     await request(server)
-      .post('/kyc/verify-face')
-      .attach('portraitImages', jpeg, {
-        filename: 'selfie.jpg',
-        contentType: 'image/jpeg',
-      })
-      .attach('frontID', jpeg, {
-        filename: 'front.jpg',
-        contentType: 'image/jpeg',
-      })
-      .expect(201)
-      .expect((response: SupertestResponse) => {
-        const body = response.body as ApiResponse<Record<string, unknown>>
-        expect(body.data?.verified).toBe(true)
-      })
-
-    await request(server)
       .post('/kyc/submit')
       .field('idCardNumber', '079123456789')
       .attach('frontCard', jpeg, {
@@ -135,10 +108,6 @@ describe('KYC HTTP flow', () => {
       })
       .attach('backCard', jpeg, {
         filename: 'back.jpg',
-        contentType: 'image/jpeg',
-      })
-      .attach('selfie', jpeg, {
-        filename: 'selfie.jpg',
         contentType: 'image/jpeg',
       })
       .expect(201)

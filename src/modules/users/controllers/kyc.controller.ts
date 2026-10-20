@@ -26,7 +26,6 @@ import {
 } from '../services/kyc.service'
 import {
   EkycProxyService,
-  EkycBiometricResult,
   EkycFaceMatchResult,
   EkycFaceOrientationResult,
   EkycOcrBackResult,
@@ -41,9 +40,7 @@ import { SubmitKycDto } from '../dto/submit-kyc.dto'
 import { KycRecord } from '../schemas/kyc-record.schema'
 import { CurrentUser } from '../../../common/decorators/current-user.decorator'
 import type { Response } from 'express'
-import { BiometricGrantService } from '../../ekyc/services/biometric-grant.service'
 import { KYC_IMAGE_MAX_BYTES, validateKycImage } from '../utils/kyc-image.util'
-import { isKycSelfieOptional } from '../utils/kyc-selfie-policy'
 import { RequirePermission } from '../../rbac/decorators/require-permission.decorator'
 
 @ApiTags('kyc')
@@ -54,7 +51,6 @@ export class KycController {
   constructor(
     private readonly kycService: KycService,
     private readonly ekycProxyService: EkycProxyService,
-    private readonly biometricGrantService: BiometricGrantService,
     private readonly groqCccdOcr: GroqCccdOcrService
   ) {}
 
@@ -140,44 +136,6 @@ export class KycController {
   }
 
   /**
-   * POST /api/v1/kyc/verify-face
-   * Nhận ảnh selfie + mặt trước CCCD, proxy sang eKYC Python Liveness + Face Matching
-   */
-  @Post('verify-face')
-  @ApiConsumes('multipart/form-data')
-  @UseInterceptors(
-    FileFieldsInterceptor(
-      [
-        { name: 'portraitImages', maxCount: 1 },
-        { name: 'frontID', maxCount: 1 },
-      ],
-      { limits: { fileSize: KYC_IMAGE_MAX_BYTES, files: 2 } }
-    )
-  )
-  async verifyFace(
-    @CurrentUser('id') userId: string,
-    @UploadedFiles()
-    files: {
-      portraitImages?: Express.Multer.File[]
-      frontID?: Express.Multer.File[]
-    }
-  ): Promise<EkycBiometricResult> {
-    const selfie = files.portraitImages?.[0]
-    const portraits = selfie ? [selfie] : []
-    const frontCard = files.frontID?.[0]
-    if (!selfie)
-      throw new BadRequestException('Thiếu file selfie (portraitImages)')
-    if (!frontCard) throw new BadRequestException('Thiếu file frontID')
-    if (portraits.length > 7)
-      throw new BadRequestException('Tối đa 7 ảnh selfie (portraitImages)')
-    portraits.forEach(validateKycImage)
-    validateKycImage(frontCard)
-    const result = await this.ekycProxyService.verifyFace(selfie, frontCard)
-    this.biometricGrantService.issue(userId, result)
-    return result
-  }
-
-  /**
    * POST /api/v1/kyc/submit
    * Người dùng nộp hồ sơ KYC (lưu DB)
    */
@@ -188,9 +146,8 @@ export class KycController {
       [
         { name: 'frontCard', maxCount: 1 },
         { name: 'backCard', maxCount: 1 },
-        { name: 'selfie', maxCount: 1 },
       ],
-      { limits: { fileSize: KYC_IMAGE_MAX_BYTES, files: 3 } }
+      { limits: { fileSize: KYC_IMAGE_MAX_BYTES, files: 2 } }
     )
   )
   async submitKyc(
@@ -199,24 +156,13 @@ export class KycController {
     files: {
       frontCard?: Express.Multer.File[]
       backCard?: Express.Multer.File[]
-      selfie?: Express.Multer.File[]
     },
     @CurrentUser('id') userId: string
   ): Promise<KycRecord> {
     if (!userId) throw new BadRequestException('Không thể xác thực người dùng')
     const frontCard = requireImage(files.frontCard?.[0], 'frontCard')
     const backCard = requireImage(files.backCard?.[0], 'backCard')
-    const selfieFile = files.selfie?.[0]
-    // Bỏ selfie chỉ khi cờ dev bật và client không gửi file; có gửi thì vẫn kiểm tra như thường.
-    const selfie =
-      !selfieFile && isKycSelfieOptional()
-        ? undefined
-        : requireImage(selfieFile, 'selfie')
-    return this.kycService.submitKyc(userId, dto, {
-      frontCard,
-      backCard,
-      ...(selfie ? { selfie } : {}),
-    })
+    return this.kycService.submitKyc(userId, dto, { frontCard, backCard })
   }
 
   /**

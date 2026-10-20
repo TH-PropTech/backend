@@ -11,8 +11,6 @@ import { ObjectId } from 'mongodb'
 import { KycRecord } from '../schemas/kyc-record.schema'
 import { User, type KycInfo } from '../schemas/user.schema'
 import { SubmitKycDto } from '../dto/submit-kyc.dto'
-import { BiometricGrantService } from '../../ekyc/services/biometric-grant.service'
-import { isKycSelfieOptional } from '../utils/kyc-selfie-policy'
 import {
   KycMediaContent,
   KycMediaKind,
@@ -62,8 +60,6 @@ export interface KycSelfResult {
 export interface KycSubmissionFiles {
   frontCard: Express.Multer.File
   backCard: Express.Multer.File
-  /** Vắng mặt chỉ khi isKycSelfieOptional() (dev); production luôn có. */
-  selfie?: Express.Multer.File
 }
 
 export type KycMediaField = 'front-card' | 'back-card' | 'selfie'
@@ -99,8 +95,7 @@ export class KycService {
   constructor(
     @InjectRepository(User)
     private readonly userRepository: MongoRepository<User>,
-    private readonly kycMediaService: KycMediaService,
-    private readonly biometricGrantService: BiometricGrantService
+    private readonly kycMediaService: KycMediaService
   ) {}
 
   /**
@@ -346,15 +341,6 @@ export class KycService {
     files: KycSubmissionFiles
   ): Promise<KycRecord> {
     this.logger.log(`Submitting KYC record for user: ${userId}`)
-    const withSelfie = Boolean(files.selfie)
-    if (!withSelfie && !isKycSelfieOptional()) {
-      throw new BadRequestException('Thiếu file selfie')
-    }
-    // Có selfie thì bắt buộc đã qua xác minh sinh trắc học; không selfie (dev) thì không có kết quả sinh trắc.
-    const biometric = withSelfie
-      ? this.biometricGrantService.consume(userId)
-      : null
-
     // 1. Kiểm tra user có tồn tại không
     const oid = new ObjectId(userId)
     const user = await this.userRepository.findOne({
@@ -382,7 +368,7 @@ export class KycService {
     const storedReferences: string[] = []
     let frontCardUrl: string
     let backCardUrl: string
-    let selfieUrl = ''
+    const selfieUrl = ''
     try {
       frontCardUrl = await this.storeMedia(
         userId,
@@ -396,14 +382,6 @@ export class KycService {
         files.backCard,
         storedReferences
       )
-      if (files.selfie) {
-        selfieUrl = await this.storeMedia(
-          userId,
-          'selfie',
-          files.selfie,
-          storedReferences
-        )
-      }
     } catch (error) {
       await this.cleanupMedia(storedReferences)
       throw error
@@ -421,20 +399,10 @@ export class KycService {
       if (dto[key] !== undefined) fields[key] = dto[key]
     }
     const unset: Record<string, ''> = { 'kyc.ocrMatchRate': '' }
-    if (biometric) {
-      fields.faceMatchResult = biometric.faceMatch
-      fields.livenessResult = biometric.liveness
-      if (biometric.realConfidence === null) {
-        unset['kyc.spoofScore'] = ''
-      } else if (biometric.realConfidence !== undefined) {
-        fields.spoofScore = biometric.realConfidence
-      }
-    } else {
-      // Không có bước sinh trắc: xóa kết quả cũ để màn duyệt không hiện sinh trắc đã lỗi thời.
-      unset['kyc.faceMatchResult'] = ''
-      unset['kyc.livenessResult'] = ''
-      unset['kyc.spoofScore'] = ''
-    }
+    // Hồ sơ không còn bước sinh trắc: xóa kết quả sinh trắc cũ (nếu có).
+    unset['kyc.faceMatchResult'] = ''
+    unset['kyc.livenessResult'] = ''
+    unset['kyc.spoofScore'] = ''
 
     // Cập nhật trạng thái
     fields.status = 'pending'

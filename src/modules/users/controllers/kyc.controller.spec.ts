@@ -1,6 +1,5 @@
 import { BadRequestException } from '@nestjs/common'
 
-import { BiometricGrantService } from '../../ekyc/services/biometric-grant.service'
 import { KycController } from './kyc.controller'
 import type { EkycProxyService } from '../../ekyc/services/ekyc-proxy.service'
 import type { GroqCccdOcrService } from '../../ekyc/services/groq-cccd-ocr.service'
@@ -32,20 +31,16 @@ describe('KycController eKYC boundaries', () => {
     ocrBack: jest.fn(),
   }
   const proxy = {
-    verifyFace: jest.fn(),
     verifyFaceMatch: jest.fn(),
     detectOrientation: jest.fn(),
   }
-  let grants: BiometricGrantService
   let controller: KycController
 
   beforeEach(() => {
     jest.clearAllMocks()
-    grants = new BiometricGrantService()
     controller = new KycController(
       kycService as unknown as KycService,
       proxy as unknown as EkycProxyService,
-      grants,
       groqOcr as unknown as GroqCccdOcrService
     )
   })
@@ -66,24 +61,6 @@ describe('KycController eKYC boundaries', () => {
       BadRequestException
     )
     expect(groqOcr.ocrFront).not.toHaveBeenCalled()
-  })
-
-  it('creates a user-scoped grant after successful verification', async () => {
-    const result = {
-      verified: true,
-      faceMatch: true,
-      liveness: true,
-      realConfidence: 0.91,
-    }
-    proxy.verifyFace.mockResolvedValue(result)
-
-    await expect(
-      controller.verifyFace('user-1', {
-        portraitImages: [createImage('portraitImages')],
-        frontID: [createImage('frontID')],
-      })
-    ).resolves.toEqual(result)
-    expect(grants.consume('user-1')).toEqual(result)
   })
 
   it('proxies a valid face orientation request', async () => {
