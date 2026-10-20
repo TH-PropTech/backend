@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common'
 import { ObjectId } from 'mongodb'
 import type { MongoRepository } from 'typeorm'
+import type { User } from '../../users/schemas/user.schema'
 import { DEFAULT_ROLES, RBAC_ACTIONS, RBAC_SUBJECTS } from '../rbac.constants'
 import {
   MAX_ROLE_PERMISSIONS,
@@ -36,6 +37,23 @@ function mockRepo(): MockRepo {
     updateOne: jest
       .fn()
       .mockResolvedValue({ matchedCount: 1, modifiedCount: 1 }),
+  }
+}
+
+interface MockUsers {
+  countBy: jest.Mock
+  updateMany: jest.Mock
+  aggregate: jest.Mock
+}
+
+function mockUsers(profile: string | null = null): MockUsers {
+  return {
+    countBy: jest.fn().mockResolvedValue(0),
+    updateMany: jest.fn().mockResolvedValue({ modifiedCount: 0 }),
+    aggregate: jest.fn(() => ({
+      toArray: (): Promise<unknown[]> =>
+        Promise.resolve([{ permissionProfile: profile }]),
+    })),
   }
 }
 
@@ -72,11 +90,20 @@ function role(overrides: Partial<Role> = {}): Role {
 
 describe('RbacService', () => {
   let roles: MockRepo
+  let users: MockUsers
   let service: RbacService
+
+  const build = (profile: string | null = null): void => {
+    users = mockUsers(profile)
+    service = new RbacService(
+      roles as unknown as MongoRepository<Role>,
+      users as unknown as MongoRepository<User>
+    )
+  }
 
   beforeEach(() => {
     roles = mockRepo()
-    service = new RbacService(roles as unknown as MongoRepository<Role>)
+    build()
   })
 
   describe('default roles', () => {
@@ -414,6 +441,371 @@ describe('RbacService', () => {
           { action: 'read', subject: 'User', allowed: true },
         ])
       ).rejects.toThrow(NotFoundException)
+    })
+  })
+
+  describe('effective permissions by role', () => {
+    const withRoles = (...list: Role[]): void => {
+      roles.find.mockResolvedValue(list)
+    }
+
+    it('allows everything when the role has no matching entry (legacy behaviour)', async () => {
+      withRoles(role({ name: 'staff', permissions: [] }))
+      await expect(
+        service.roleCan(['staff'], 'update', 'Apartment')
+      ).resolves.toBe(true)
+    })
+
+    it('blocks what the admin switched off, and nothing else', async () => {
+      withRoles(
+        role({
+          name: 'staff',
+          permissions: [embedded('approve', 'Kyc', false)],
+        })
+      )
+      await expect(service.roleCan(['staff'], 'approve', 'Kyc')).resolves.toBe(
+        false
+      )
+      await expect(service.roleCan(['staff'], 'read', 'Kyc')).resolves.toBe(
+        true
+      )
+    })
+
+    it('keeps each role independent: tenant, landlord and staff have their own switches', async () => {
+      withRoles(
+        role({
+          name: 'tenant',
+          permissions: [embedded('create', 'Booking', false)],
+        }),
+        role({
+          name: 'landlord',
+          permissions: [embedded('create', 'Apartment', false)],
+        }),
+        role({ name: 'staff', permissions: [] })
+      )
+      await expect(
+        service.roleCan(['tenant'], 'create', 'Booking')
+      ).resolves.toBe(false)
+      await expect(
+        service.roleCan(['landlord'], 'create', 'Booking')
+      ).resolves.toBe(true)
+      await expect(
+        service.roleCan(['landlord'], 'create', 'Apartment')
+      ).resolves.toBe(false)
+      await expect(
+        service.roleCan(['staff'], 'create', 'Apartment')
+      ).resolves.toBe(true)
+    })
+
+    it('a user holding several roles is allowed when any of them allows', async () => {
+      withRoles(
+        role({
+          name: 'tenant',
+          permissions: [embedded('create', 'Booking', false)],
+        }),
+        role({ name: 'landlord', permissions: [] })
+      )
+      await expect(
+        service.roleCan(['tenant', 'landlord'], 'create', 'Booking')
+      ).resolves.toBe(true)
+    })
+
+    it('roles the matrix does not manage are not restricted', async () => {
+      withRoles(
+        role({ name: 'staff', permissions: [embedded('read', 'Kyc', false)] })
+      )
+      await expect(
+        service.roleCan(['somebody-else'], 'read', 'Kyc')
+      ).resolves.toBe(true)
+      await expect(service.roleCan([], 'read', 'Kyc')).resolves.toBe(true)
+    })
+
+    it('matches role names case-insensitively', async () => {
+      withRoles(
+        role({ name: 'staff', permissions: [embedded('read', 'Kyc', false)] })
+      )
+      await expect(service.roleCan(['STAFF'], 'read', 'Kyc')).resolves.toBe(
+        false
+      )
+    })
+
+    it('reads the database once within the cache window, for all managed roles', async () => {
+      withRoles(role({ name: 'staff', permissions: [] }))
+      await service.roleCan(['staff'], 'read', 'Kyc')
+      await service.roleCan(['tenant'], 'read', 'Apartment')
+      expect(roles.find).toHaveBeenCalledTimes(1)
+    })
+
+    it('applies a saved change immediately on this instance (cache dropped)', async () => {
+      const staff = role({ name: 'staff', permissions: [] })
+      withRoles(staff)
+      roles.findOne.mockResolvedValue(staff)
+      await expect(
+        service.roleCan(['staff'], 'delete', 'CommunityPost')
+      ).resolves.toBe(true)
+      await service.setPermissions(staff._id.toString(), [
+        { action: 'delete', subject: 'CommunityPost', allowed: false },
+      ])
+      withRoles(
+        role({
+          name: 'staff',
+          permissions: [embedded('delete', 'CommunityPost', false)],
+        })
+      )
+      await expect(
+        service.roleCan(['staff'], 'delete', 'CommunityPost')
+      ).resolves.toBe(false)
+    })
+
+    it('keeps serving the last known policy when the database fails', async () => {
+      withRoles(
+        role({
+          name: 'staff',
+          permissions: [embedded('approve', 'Kyc', false)],
+        })
+      )
+      await service.roleCan(['staff'], 'read', 'Kyc')
+      jest.useFakeTimers()
+      jest.setSystemTime(Date.now() + 60_000)
+      roles.find.mockRejectedValue(new Error('db down'))
+      await expect(service.roleCan(['staff'], 'approve', 'Kyc')).resolves.toBe(
+        false
+      )
+      jest.useRealTimers()
+    })
+
+    it('effectivePermissions: admin gets everything, others see what is switched off', async () => {
+      withRoles(
+        role({
+          name: 'staff',
+          permissions: [embedded('approve', 'Kyc', false)],
+        })
+      )
+      const admin = await service.effectivePermissions(['admin'], true)
+      const staff = await service.effectivePermissions(['staff'], false)
+      expect(Object.values(admin).every(Boolean)).toBe(true)
+      expect(staff['approve:Kyc']).toBe(false)
+      expect(staff['read:Kyc']).toBe(true)
+      expect(staff['read:CommunityPost']).toBe(true)
+      expect(Object.keys(staff).some(k => k.endsWith(':all'))).toBe(false)
+    })
+  })
+
+  describe('custom roles', () => {
+    const staffBase = (): Role =>
+      role({
+        name: 'staff',
+        isSystem: true,
+        permissions: [embedded('approve', 'Kyc', false)],
+      })
+
+    it('creates a custom role by copying the base role permissions', async () => {
+      roles.findOne.mockResolvedValue(staffBase())
+      roles.countBy.mockResolvedValue(0)
+
+      const out = await service.createRole({
+        name: 'kyc-reviewer',
+        label: 'Nhân viên KYC',
+        baseRole: 'staff',
+      })
+
+      const [created] = roles.create.mock.calls[0] as [
+        Partial<Role> & { permissions: RolePermission[] },
+      ]
+      expect(created).toMatchObject({
+        name: 'kyc-reviewer',
+        label: 'Nhân viên KYC',
+        baseRole: 'staff',
+        isSystem: false,
+        isActive: true,
+      })
+      expect(created.permissions).toHaveLength(1)
+      expect(created.permissions[0]).toMatchObject({
+        action: 'approve',
+        subject: 'Kyc',
+        allowed: false,
+      })
+      expect(out.name).toBe('kyc-reviewer')
+      expect(out).not.toHaveProperty('permissions')
+    })
+
+    it.each(['Admin', 'ab', 'staff', 'admin', '9abc', 'has space', 'me'])(
+      'rejects the role code %s',
+      async name => {
+        await expect(
+          service.createRole({ name, baseRole: 'staff' })
+        ).rejects.toThrow(BadRequestException)
+      }
+    )
+
+    it('rejects a duplicate code', async () => {
+      roles.countBy.mockResolvedValue(1)
+      await expect(
+        service.createRole({ name: 'kyc-reviewer', baseRole: 'staff' })
+      ).rejects.toThrow(ConflictException)
+    })
+
+    it('keeps the plain role creation unchanged when there is no base role', async () => {
+      roles.countBy.mockResolvedValue(0)
+      await service.createRole({ name: 'Auditor' })
+      expect(roles.create).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'Auditor', permissions: [] })
+      )
+    })
+
+    it('does not allow renaming a custom role (users reference its code)', async () => {
+      const custom = role({ name: 'kyc-reviewer', baseRole: 'staff' })
+      roles.findOne.mockResolvedValue(custom)
+      await expect(
+        service.updateRole(custom._id.toString(), { name: 'other-name' })
+      ).rejects.toThrow(BadRequestException)
+      await expect(
+        service.updateRole(custom._id.toString(), { label: 'Tên mới' })
+      ).resolves.toMatchObject({ label: 'Tên mới' })
+    })
+
+    it('deleting a custom role sends its users back to the base role permissions', async () => {
+      const custom = role({ name: 'kyc-reviewer', baseRole: 'staff' })
+      roles.findOne.mockResolvedValue(custom)
+      await service.deleteRole(custom._id.toString())
+      expect(users.updateMany).toHaveBeenCalledWith(
+        { permissionProfile: 'kyc-reviewer' },
+        { $set: { permissionProfile: null } }
+      )
+    })
+
+    it('assigns users, un-assigns the rest, and requires the matching base role', async () => {
+      const custom = role({ name: 'kyc-reviewer', baseRole: 'staff' })
+      roles.findOne.mockResolvedValue(custom)
+      const a = new ObjectId()
+      users.countBy.mockResolvedValue(1)
+      users.updateMany
+        .mockResolvedValueOnce({ modifiedCount: 2 })
+        .mockResolvedValueOnce({ modifiedCount: 1 })
+
+      const out = await service.setRoleUsers(custom._id.toString(), [
+        a.toString(),
+        a.toString(),
+      ])
+
+      expect(users.countBy).toHaveBeenCalledWith({
+        _id: { $in: [a] },
+        role: 'staff',
+      })
+      expect(users.updateMany).toHaveBeenNthCalledWith(
+        1,
+        { permissionProfile: 'kyc-reviewer', _id: { $nin: [a] } },
+        { $set: { permissionProfile: null } }
+      )
+      expect(users.updateMany).toHaveBeenNthCalledWith(
+        2,
+        { _id: { $in: [a] } },
+        { $set: { permissionProfile: 'kyc-reviewer' } }
+      )
+      expect(out).toEqual({ assigned: 1, removed: 2 })
+    })
+
+    it('rejects users whose base role does not match, bad ids, and non-custom roles', async () => {
+      const custom = role({ name: 'kyc-reviewer', baseRole: 'staff' })
+      roles.findOne.mockResolvedValue(custom)
+      users.countBy.mockResolvedValue(0)
+      await expect(
+        service.setRoleUsers(custom._id.toString(), [new ObjectId().toString()])
+      ).rejects.toThrow(BadRequestException)
+      await expect(
+        service.setRoleUsers(custom._id.toString(), ['not-an-id'])
+      ).rejects.toThrow(BadRequestException)
+      expect(users.updateMany).not.toHaveBeenCalled()
+
+      roles.findOne.mockResolvedValue(role({ name: 'staff', isSystem: true }))
+      await expect(
+        service.setRoleUsers(new ObjectId().toString(), [])
+      ).rejects.toThrow(BadRequestException)
+    })
+
+    it('clearing the list un-assigns everyone without a write for assignment', async () => {
+      const custom = role({ name: 'kyc-reviewer', baseRole: 'staff' })
+      roles.findOne.mockResolvedValue(custom)
+      users.updateMany.mockResolvedValue({ modifiedCount: 3 })
+      const out = await service.setRoleUsers(custom._id.toString(), [])
+      expect(users.updateMany).toHaveBeenCalledTimes(1)
+      expect(out).toEqual({ assigned: 0, removed: 3 })
+    })
+
+    describe('permissions of a user holding a custom role', () => {
+      const UID1 = new ObjectId().toString()
+      const UID2 = new ObjectId().toString()
+      const UID3 = new ObjectId().toString()
+      const UID4 = new ObjectId().toString()
+      const UID5 = new ObjectId().toString()
+
+      const setup = (profile: string | null): void => {
+        build(profile)
+        roles.find.mockResolvedValue([
+          role({
+            name: 'staff',
+            isSystem: true,
+            permissions: [embedded('approve', 'Kyc', true)],
+          }),
+          role({
+            name: 'kyc-reviewer',
+            baseRole: 'staff',
+            permissions: [embedded('approve', 'Apartment', false)],
+          }),
+        ])
+      }
+
+      it('uses the custom role table instead of the base role', async () => {
+        setup('kyc-reviewer')
+        await expect(
+          service.roleCan(['staff'], 'approve', 'Apartment', UID1)
+        ).resolves.toBe(false)
+        await expect(
+          service.roleCan(['staff'], 'read', 'Apartment', UID1)
+        ).resolves.toBe(true)
+      })
+
+      it('uses the base role table for a user without a custom role', async () => {
+        setup(null)
+        await expect(
+          service.roleCan(['staff'], 'approve', 'Apartment', UID2)
+        ).resolves.toBe(true)
+      })
+
+      it('ignores a custom role whose base role does not match the user, or that is switched off', async () => {
+        setup('kyc-reviewer')
+        await expect(
+          service.roleCan(['tenant'], 'approve', 'Apartment', UID3)
+        ).resolves.toBe(true)
+
+        build('kyc-reviewer')
+        roles.find.mockResolvedValue([
+          role({ name: 'staff', isSystem: true, permissions: [] }),
+          role({
+            name: 'kyc-reviewer',
+            baseRole: 'staff',
+            isActive: false,
+            permissions: [embedded('approve', 'Apartment', false)],
+          }),
+        ])
+        await expect(
+          service.roleCan(['staff'], 'approve', 'Apartment', UID4)
+        ).resolves.toBe(true)
+      })
+
+      it('does not look the profile up when there is no user id', async () => {
+        setup('kyc-reviewer')
+        await service.roleCan(['staff'], 'read', 'Kyc')
+        expect(users.aggregate).not.toHaveBeenCalled()
+      })
+
+      it('caches the profile per user within the window', async () => {
+        setup('kyc-reviewer')
+        const id = UID5
+        await service.roleCan(['staff'], 'read', 'Kyc', id)
+        await service.roleCan(['staff'], 'read', 'Apartment', id)
+        expect(users.aggregate).toHaveBeenCalledTimes(1)
+      })
     })
   })
 })

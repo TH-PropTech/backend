@@ -1,2 +1,7 @@
 export * from './rbac.module'
 export * from './services/rbac.service'
+export * from './decorators/require-permission.decorator'
+export * from './guards/permissions.guard'
+export * from './permission-policy'
+export * from './rbac.constants'
+export * from './permission-schema'

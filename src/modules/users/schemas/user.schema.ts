@@ -159,6 +159,14 @@ export class User {
   @Column({ type: 'string' })
   role!: 'tenant' | 'landlord' | 'staff' | 'admin'
 
+  /**
+   * Tên vai trò tùy chỉnh (`Role.name`, có `baseRole`) gán cho người dùng. Vai trò gốc `role`
+   * vẫn quyết định route nào dùng được; hồ sơ này chỉ thay bảng bật/tắt thao tác (RBAC).
+   * Chỉ ghi bằng `updateOne`/`update`, không `save(User)` toàn document.
+   */
+  @Column({ type: 'string', nullable: true })
+  permissionProfile?: string | null
+
   @Column({
     type: 'string',
     enum: UserStatus,
