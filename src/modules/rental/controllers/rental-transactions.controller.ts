@@ -40,7 +40,7 @@ export class RentalTransactionsController {
   }
 
   @Get('admin/stuck')
-  @Roles('staff', 'admin')
+  @Roles('admin')
   getStuck(
     @Query('reason') reason?: string,
     @Query('page') page?: string,
@@ -54,7 +54,7 @@ export class RentalTransactionsController {
   }
 
   @Post(':contractId/recover')
-  @Roles('staff', 'admin')
+  @Roles('admin')
   recover(
     @Param('contractId') contractId: string,
     @Body() dto: RecoverRentalTransactionDto,

@@ -30,6 +30,7 @@ import {
 } from '../../properties/services/listing-freshness.service'
 import type { ListingReviewCase } from '../../properties/schemas/listing-review-case.schema'
 import { Public } from '../../../common/decorators/public.decorator'
+import { RequirePermission } from '../../rbac/decorators/require-permission.decorator'
 
 @ApiTags('listing-freshness')
 @Controller('listing-freshness')
@@ -40,6 +41,7 @@ export class ListingFreshnessController {
 
   /** GET /api/v1/listing-freshness/queue — Hàng đợi review [uc_staff_apartment] */
   @Get('queue')
+  @RequirePermission('read', 'Apartment')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('staff', 'admin')
   @ApiBearerAuth()
@@ -76,6 +78,7 @@ export class ListingFreshnessController {
 
   /** POST /api/v1/listing-freshness/:id/detect — Tạo tín hiệu review [uc_staff_apartment] */
   @Post(':id/detect')
+  @RequirePermission('update', 'Apartment')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('staff', 'admin')
   @ApiBearerAuth()
@@ -89,6 +92,7 @@ export class ListingFreshnessController {
 
   /** PATCH /api/v1/listing-freshness/cases/:id — Review tín hiệu [uc_staff_apartment] */
   @Patch('cases/:id')
+  @RequirePermission('update', 'Apartment')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('staff', 'admin')
   @ApiBearerAuth()

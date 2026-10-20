@@ -28,6 +28,7 @@ import {
   RentalApplicationListResult,
   RentalApplicationsService,
 } from '../services/rental-applications.service'
+import { RequirePermission } from '../../rbac/decorators/require-permission.decorator'
 
 @ApiTags('rental-applications')
 @ApiBearerAuth()
@@ -49,6 +50,7 @@ export class RentalApplicationsController {
 
   /** POST /api/v1/rental-applications — Tenant submits an application [uc_customer_contract] */
   @Post()
+  @RequirePermission('create', 'RentalApplication')
   @Roles('tenant')
   @ApiOperation({ summary: 'Submit a pre-contract rental application' })
   @ApiCreatedResponse({ type: RentalApplication })
@@ -61,6 +63,7 @@ export class RentalApplicationsController {
 
   /** GET /api/v1/rental-applications/mine — Tenant applications [uc_customer_contract] */
   @Get('mine')
+  @RequirePermission('read', 'RentalApplication')
   @Roles('tenant')
   @ApiOkResponse()
   mine(
@@ -72,6 +75,7 @@ export class RentalApplicationsController {
 
   /** GET /api/v1/rental-applications/received — Landlord applications [uc_staff_contract] */
   @Get('received')
+  @RequirePermission('read', 'RentalApplication')
   @Roles('landlord')
   @ApiOkResponse()
   received(
@@ -107,6 +111,7 @@ export class RentalApplicationsController {
 
   /** PATCH /api/v1/rental-applications/:id/respond — Landlord decision [uc_staff_contract] */
   @Patch(':id/respond')
+  @RequirePermission('approve', 'RentalApplication')
   @Roles('landlord')
   @ApiOkResponse({ type: RentalApplication })
   respond(

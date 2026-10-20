@@ -22,6 +22,7 @@ import { UserPayload } from '../../auth/interfaces/auth.interface'
 import { CommunityPost } from '../schemas/community-post.schema'
 import { CommunityComment } from '../schemas/community-comment.schema'
 import { Public } from '../../../common/decorators/public.decorator'
+import { RequirePermission } from '../../rbac/decorators/require-permission.decorator'
 
 @ApiTags('community')
 @Controller('community')
@@ -48,6 +49,7 @@ export class CommunityController {
   }
 
   @Get('posts/pending')
+  @RequirePermission('read', 'CommunityPost')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('staff')
   async getPendingPosts(): Promise<CommunityPost[]> {
@@ -61,6 +63,7 @@ export class CommunityController {
   }
 
   @Post('posts')
+  @RequirePermission('create', 'CommunityPost', ['tenant', 'landlord', 'staff'])
   @UseGuards(JwtAuthGuard)
   async createPost(
     @Request() req: { user: UserPayload },
@@ -81,6 +84,7 @@ export class CommunityController {
   }
 
   @Patch('posts/:id/status')
+  @RequirePermission('approve', 'CommunityPost')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('staff')
   async updatePostStatus(
@@ -108,6 +112,7 @@ export class CommunityController {
   }
 
   @Post('posts/:id/comments')
+  @RequirePermission('create', 'CommunityPost', ['tenant', 'landlord', 'staff'])
   @UseGuards(JwtAuthGuard)
   async addComment(
     @Param('id') id: string,
@@ -130,6 +135,7 @@ export class CommunityController {
   }
 
   @Delete('posts/:id')
+  @RequirePermission('delete', 'CommunityPost')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('staff', 'admin')
   async deletePost(@Param('id') id: string): Promise<{ success: boolean }> {
@@ -138,6 +144,7 @@ export class CommunityController {
   }
 
   @Delete('comments/:id')
+  @RequirePermission('delete', 'CommunityPost')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('staff', 'admin')
   async deleteComment(@Param('id') id: string): Promise<{ success: boolean }> {

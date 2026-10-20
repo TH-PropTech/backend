@@ -30,6 +30,7 @@ import {
 } from '../dto/saved-search.dto'
 import { AlertQueryDto } from '../dto/alert-query.dto'
 import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto'
+import { RequirePermission } from '../../rbac/decorators/require-permission.decorator'
 
 @ApiTags('saved-searches')
 @Controller('saved-searches')
@@ -43,6 +44,7 @@ export class SavedSearchesController {
    * [uc_saved_search_create]
    */
   @Post()
+  @RequirePermission('create', 'SavedSearch', ['tenant'])
   @HttpCode(HttpStatus.CREATED)
   async create(
     @Body() dto: CreateSavedSearchDto,
@@ -56,6 +58,7 @@ export class SavedSearchesController {
    * Danh sách bộ lọc đã lưu
    */
   @Get()
+  @RequirePermission('read', 'SavedSearch', ['tenant'])
   async findAll(
     @CurrentUser('id') userId: string,
     @Query() query: PaginationQueryDto
@@ -68,6 +71,7 @@ export class SavedSearchesController {
    * Cập nhật bộ lọc
    */
   @Patch(':id')
+  @RequirePermission('update', 'SavedSearch', ['tenant'])
   async update(
     @Param('id') id: string,
     @Body() dto: UpdateSavedSearchDto,
@@ -81,6 +85,7 @@ export class SavedSearchesController {
    * Xóa bộ lọc (giữ alerts)
    */
   @Delete(':id')
+  @RequirePermission('delete', 'SavedSearch', ['tenant'])
   @HttpCode(HttpStatus.NO_CONTENT)
   async remove(
     @Param('id') id: string,
@@ -94,6 +99,7 @@ export class SavedSearchesController {
    * Bật/tắt cảnh báo
    */
   @Patch(':id/toggle-alert')
+  @RequirePermission('update', 'SavedSearch', ['tenant'])
   async toggleAlert(
     @Param('id') id: string,
     @Body() dto: ToggleAlertDto,
@@ -107,6 +113,7 @@ export class SavedSearchesController {
    * Danh sách cảnh báo
    */
   @Get('alerts')
+  @RequirePermission('read', 'SavedSearch', ['tenant'])
   async getAlerts(
     @CurrentUser('id') userId: string,
     @Query() query: AlertQueryDto
@@ -119,6 +126,7 @@ export class SavedSearchesController {
    * Đánh dấu cảnh báo đã đọc
    */
   @Patch('alerts/:id/read')
+  @RequirePermission('update', 'SavedSearch', ['tenant'])
   async markAlertRead(
     @Param('id') id: string,
     @CurrentUser('id') userId: string
@@ -131,6 +139,7 @@ export class SavedSearchesController {
    * Đánh dấu tất cả cảnh báo đã đọc
    */
   @Patch('alerts/read-all')
+  @RequirePermission('update', 'SavedSearch', ['tenant'])
   @HttpCode(HttpStatus.OK)
   async markAllRead(
     @CurrentUser('id') userId: string

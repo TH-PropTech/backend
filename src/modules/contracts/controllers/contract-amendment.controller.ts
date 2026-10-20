@@ -27,6 +27,7 @@ import {
 } from '../dto/contract-amendment.dto'
 import type { ContractAmendment } from '../schemas/contract-amendment.schema'
 import type { Response } from 'express'
+import { RequirePermission } from '../../rbac/decorators/require-permission.decorator'
 
 @ApiTags('contract-amendments')
 @ApiBearerAuth()
@@ -45,6 +46,7 @@ export class ContractAmendmentController {
   }
 
   @Post()
+  @RequirePermission('create', 'Contract')
   @Roles('admin', 'staff')
   create(
     @Param('contractId') contractId: string,
@@ -98,6 +100,7 @@ export class ContractAmendmentController {
   }
 
   @Put(':amendmentId')
+  @RequirePermission('update', 'Contract')
   @Roles('admin', 'staff')
   update(
     @Param('contractId') contractId: string,
@@ -114,6 +117,7 @@ export class ContractAmendmentController {
   }
 
   @Post(':amendmentId/lock')
+  @RequirePermission('update', 'Contract')
   @Roles('admin', 'staff')
   lock(
     @Param('contractId') contractId: string,
@@ -130,6 +134,7 @@ export class ContractAmendmentController {
   }
 
   @Post(':amendmentId/artifact')
+  @RequirePermission('update', 'Contract')
   @Roles('admin', 'staff')
   @ApiConsumes('multipart/form-data')
   @UseInterceptors(FileInterceptor('artifact'))
@@ -190,6 +195,7 @@ export class ContractAmendmentController {
   }
 
   @Post(':amendmentId/cancel')
+  @RequirePermission('update', 'Contract')
   @Roles('admin', 'staff')
   cancel(
     @Param('contractId') contractId: string,

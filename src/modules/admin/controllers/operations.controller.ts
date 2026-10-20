@@ -8,6 +8,7 @@ import {
   OperationsStats,
   OperationsChartData,
 } from '../services/operations.service'
+import { RequirePermission } from '../../rbac/decorators/require-permission.decorator'
 
 @ApiTags('operations')
 @Controller('operations')
@@ -21,6 +22,7 @@ export class OperationsController {
    * Tổng hợp số liệu vận hành: bookings, KYC, apartments, tickets.
    */
   @Get('stats')
+  @RequirePermission('read', 'Report')
   @ApiOperation({ summary: 'Lấy thống kê vận hành tổng quan cho staff/admin' })
   async getStats(): Promise<OperationsStats> {
     return this.operationsService.getStats()
@@ -31,6 +33,7 @@ export class OperationsController {
    * Dữ liệu biểu đồ: xu hướng lịch hẹn theo ngày + phân bổ trạng thái.
    */
   @Get('chart-data')
+  @RequirePermission('read', 'Report')
   @ApiOperation({ summary: 'Lấy dữ liệu biểu đồ vận hành' })
   @ApiQuery({
     name: 'days',

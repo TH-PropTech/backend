@@ -30,6 +30,7 @@ import {
   type PayoutSettlement,
 } from '../schemas/payout.schema'
 import type { ContractPayoutSummaryDto } from '../dto/contract-payout-summary.dto'
+import { RequirePermission } from '../../rbac/decorators/require-permission.decorator'
 
 export class ReportPayoutIssueBody {
   @ApiPropertyOptional({ maxLength: 500 })
@@ -61,6 +62,7 @@ export class PayoutsController {
   constructor(private readonly payoutsService: PayoutsService) {}
 
   @Get('me')
+  @RequirePermission('read', 'Payout')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('landlord')
   @ApiOperation({ summary: 'List payouts received by the current landlord' })
@@ -91,6 +93,7 @@ export class PayoutsController {
   }
 
   @Get(':id')
+  @RequirePermission('read', 'Payout')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('landlord')
   @ApiOperation({ summary: 'Get one of my payouts' })
@@ -134,6 +137,7 @@ export class PayoutsController {
   }
 
   @Post(':id/report-issue')
+  @RequirePermission('update', 'Payout')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('landlord')
   @ApiOperation({

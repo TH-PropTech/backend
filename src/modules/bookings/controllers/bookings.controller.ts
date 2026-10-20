@@ -24,6 +24,7 @@ import { BookingQueryDto } from '../dto/booking-query.dto'
 import { UserPayload } from '../../auth/interfaces/auth.interface'
 import { Booking } from '../schemas/booking.schema'
 import { Public } from '../../../common/decorators/public.decorator'
+import { RequirePermission } from '../../rbac/decorators/require-permission.decorator'
 
 @ApiTags('bookings')
 @Controller('bookings')
@@ -39,6 +40,7 @@ export class BookingsController {
    */
   @Public()
   @Post()
+  @RequirePermission('create', 'Booking', ['tenant'])
   async create(
     @Request() req: { user?: UserPayload },
     @Body() dto: CreateBookingDto
@@ -52,6 +54,7 @@ export class BookingsController {
    * Tenant: Xem các lịch hẹn mình đã đặt
    */
   @Get('my')
+  @RequirePermission('read', 'Booking', ['tenant'])
   async getMyBookings(
     @Request() req: { user: UserPayload },
     @Query() query: BookingQueryDto
@@ -70,6 +73,7 @@ export class BookingsController {
    * Tenant: Hủy lịch hẹn
    */
   @Patch(':id/cancel')
+  @RequirePermission('update', 'Booking', ['tenant'])
   async cancel(
     @Param('id') id: string,
     @Request() req: { user: UserPayload }
@@ -86,6 +90,7 @@ export class BookingsController {
    * Landlord: Xem các yêu cầu xem nhà gửi đến căn hộ của mình
    */
   @Get('landlord')
+  @RequirePermission('read', 'Booking', ['landlord'])
   async getLandlordBookings(
     @Request() req: { user: UserPayload },
     @Query() query: BookingQueryDto
@@ -105,6 +110,7 @@ export class BookingsController {
    * Landlord: Xác nhận hoặc từ chối lịch hẹn
    */
   @Patch(':id/status')
+  @RequirePermission('approve', 'Booking', ['landlord'])
   async updateStatus(
     @Param('id') id: string,
     @Body() dto: UpdateBookingStatusDto,
@@ -127,6 +133,7 @@ export class BookingsController {
    * Staff/Admin: Giám sát toàn bộ lịch hẹn
    */
   @Get()
+  @RequirePermission('read', 'Booking')
   @UseGuards(RolesGuard)
   @Roles('staff', 'admin')
   async findAll(@Query() query: BookingQueryDto): Promise<BookingListResult> {

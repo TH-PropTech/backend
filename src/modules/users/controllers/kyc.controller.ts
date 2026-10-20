@@ -44,6 +44,7 @@ import type { Response } from 'express'
 import { BiometricGrantService } from '../../ekyc/services/biometric-grant.service'
 import { KYC_IMAGE_MAX_BYTES, validateKycImage } from '../utils/kyc-image.util'
 import { isKycSelfieOptional } from '../utils/kyc-selfie-policy'
+import { RequirePermission } from '../../rbac/decorators/require-permission.decorator'
 
 @ApiTags('kyc')
 @ApiBearerAuth()
@@ -223,6 +224,7 @@ export class KycController {
    * Staff/Admin: Lấy danh sách hồ sơ KYC (hỗ trợ lọc, tìm kiếm, phân trang)
    */
   @Get()
+  @RequirePermission('read', 'Kyc')
   @Roles('staff', 'admin')
   async findAll(@Query() query: KycQueryDto): Promise<KycListResult> {
     return this.kycService.findAll({
@@ -238,6 +240,7 @@ export class KycController {
    * Staff/Admin: Đếm hồ sơ KYC theo trạng thái (dashboard metrics)
    */
   @Get('stats')
+  @RequirePermission('read', 'Kyc')
   @Roles('staff', 'admin')
   async getStats(): Promise<
     Record<'pending' | 'verified' | 'rejected' | 'total', number>
@@ -253,6 +256,7 @@ export class KycController {
   }
 
   @Get(':id/media/:field')
+  @RequirePermission('read', 'Kyc')
   async getMedia(
     @Param('id') id: string,
     @Param('field') rawField: string,
@@ -272,6 +276,7 @@ export class KycController {
    * Staff/Admin: Xem chi tiết 1 hồ sơ KYC
    */
   @Get(':id')
+  @RequirePermission('read', 'Kyc')
   @Roles('staff', 'admin')
   async findOne(@Param('id') id: string): Promise<KycRecord> {
     return this.kycService.findOne(id)
@@ -282,6 +287,7 @@ export class KycController {
    * Staff/Admin: Duyệt hoặc từ chối hồ sơ KYC
    */
   @Patch(':id/review')
+  @RequirePermission('approve', 'Kyc')
   @Roles('staff', 'admin')
   async review(
     @Param('id') id: string,
