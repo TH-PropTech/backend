@@ -21,6 +21,7 @@ import { FeedbackDto } from '../dto/feedback.dto'
 import { UpdateEngineConfigDto } from '../dto/update-engine-config.dto'
 import { JwtAuthGuard } from '../../../auth/guards/jwt-auth.guard'
 import { RolesGuard } from '../../../../common/guards/roles.guard'
+import { Public } from '../../../../common/decorators/public.decorator'
 import { Roles } from '../../../../common/decorators/roles.decorator'
 import { CurrentUser } from '../../../../common/decorators/current-user.decorator'
 import {
@@ -39,8 +40,7 @@ export class RecommendationsController {
   ) {}
 
   @Post('recommend')
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
+  @Public()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Lấy danh sách gợi ý căn hộ dựa trên khảo sát' })
   @ApiResponse({
