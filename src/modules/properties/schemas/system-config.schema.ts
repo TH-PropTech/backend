@@ -13,13 +13,15 @@ import type { EngineStrategy } from '../recommendations/engine/naive-bayes.types
 
 /**
  * Loại cấu hình hệ thống (G-CFG): `job` = bật/tắt job nền, `recommendation` = engine gợi ý,
- * `platform-fee` = phiên bản biểu phí nền tảng, `groq-key` = khóa Groq đã mã hóa.
+ * `platform-fee` = phiên bản biểu phí nền tảng, `groq-key` = khóa Groq đã mã hóa,
+ * `admin-nav` = mục menu bảng điều khiển bị ẩn với nhân viên.
  */
 export type SystemConfigScope =
   | 'job'
   | 'recommendation'
   | 'platform-fee'
   | 'groq-key'
+  | 'admin-nav'
 
 /** Trạng thái dùng chung: biểu phí (`draft|published|archived`) và khóa Groq (`active|invalid|disabled`). */
 export type SystemConfigStatus =
@@ -77,6 +79,10 @@ export class SystemConfig {
   /** Email admin cập nhật gần nhất (scope `recommendation`). */
   @Column({ nullable: true })
   updatedBy?: string
+
+  /** scope `admin-nav`: id các mục menu ẩn với nhân viên. */
+  @Column('json', { nullable: true })
+  hiddenTabs?: string[]
 
   /** scope `platform-fee`: định danh biểu phí, phiên bản, trạng thái và nội dung. */
   @Column({ nullable: true })
