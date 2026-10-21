@@ -188,6 +188,24 @@ describe('expandLegalQuery', () => {
     )
   })
 
+  it('maps everyday phrasings of deposit, tax, notary and sublet questions to statute terms', () => {
+    expect(expandLegalQuery('Chủ nhà có được phạt cọc không?')).toContain(
+      'trả lại tiền đặt cọc'
+    )
+    expect(expandLegalQuery('Tôi có phải nộp thuế khi cho thuê?')).toContain(
+      'thuế thu nhập cá nhân'
+    )
+    expect(expandLegalQuery('Có cần công chứng hợp đồng không?')).toContain(
+      'công chứng chứng thực'
+    )
+    expect(expandLegalQuery('Tôi thuê lại cho bạn được không?')).toContain(
+      'cho thuê lại nhà ở'
+    )
+    expect(expandLegalQuery('Người nước ngoài thuê nhà được không?')).toContain(
+      'nước ngoài thuê nhà ở'
+    )
+  })
+
   it('returns the question unchanged when there is nothing to translate', () => {
     const q = 'Điều kiện của nhà ở tham gia giao dịch'
     expect(expandLegalQuery(q)).toBe(q)

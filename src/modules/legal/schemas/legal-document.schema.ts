@@ -149,6 +149,10 @@ export class LegalDocument {
   @Column({ nullable: true })
   effectiveDate?: Date | undefined
 
+  /** From this moment the text no longer applies (repealed / replaced): it leaves the search index. */
+  @Column({ nullable: true })
+  expiryDate?: Date | undefined
+
   @Column({ type: 'string', default: 'draft' })
   status!: LegalDocStatus
 
@@ -306,6 +310,7 @@ export type KnowledgeLegalDocument = LegalDocument &
     | 'contentSource'
     | 'fetchedAt'
     | 'effectiveDate'
+    | 'expiryDate'
     | 'status'
     | 'chunkCount'
     | 'createdBy'

@@ -59,6 +59,8 @@ const HIT_TEXT_MAX = 1000
 const MAX_HITS_PER_DOC = 2
 /** Candidates fetched before the per-doc cap is applied. */
 const CANDIDATE_FACTOR = 4
+/** Reciprocal rank fusion constant (the usual 60). */
+const RRF_K = 60
 /** The index is rebuilt in the background when older than this, so docs added by scripts show up without a restart. */
 const INDEX_MAX_AGE_MS = 60_000
 /** Below this many extracted characters the page is assumed to be JS-rendered or blocking bots. */
@@ -162,6 +164,7 @@ export class LegalKnowledgeService
       contentSource,
       fetchedAt: contentSource === 'link' ? new Date() : undefined,
       effectiveDate: toDate(dto.effectiveDate),
+      expiryDate: toDate(dto.expiryDate),
       status: dto.status ?? 'draft',
       chunkCount: chunks.length,
       createdBy: actorId,
@@ -191,6 +194,9 @@ export class LegalKnowledgeService
     if (dto.summary !== undefined) doc.summary = emptyToUndefined(dto.summary)
     if (dto.effectiveDate !== undefined) {
       doc.effectiveDate = toDate(dto.effectiveDate)
+    }
+    if (dto.expiryDate !== undefined) {
+      doc.expiryDate = toDate(dto.expiryDate)
     }
     if (dto.contentSource !== undefined) doc.contentSource = dto.contentSource
     if (dto.status !== undefined) doc.status = dto.status
@@ -227,44 +233,89 @@ export class LegalKnowledgeService
     return { ok: true }
   }
 
-  /** Searches PUBLISHED chunks only (same engine as the chat bot). */
+  /**
+   * Searches PUBLISHED chunks only (same engine as the chat bot).
+   *
+   * Several phrasings of the same question can be given (for example the customer's own words and the
+   * keywords the model rewrote them to): each is searched alone and the ranked lists are merged with
+   * reciprocal rank fusion, so a passage that either phrasing finds survives. With one query the result
+   * is exactly that query's ranking.
+   */
   search(
-    query: string,
+    query: string | readonly string[],
     limit: number = DEFAULT_SEARCH_LIMIT
   ): Promise<LegalSearchHit[]> {
     this.refreshIndexIfStale()
-    const expanded = expandLegalQuery(query)
+    const queries = [...new Set([query].flat().map(q => q.trim()))].filter(
+      q => q.length > 0
+    )
+
+    interface Fused {
+      hit: ReturnType<Bm25Index<IndexedChunkMeta>['search']>[number]
+      rrf: number
+      score: number
+      coverage: number
+      /** The expanded query that scored this passage best: the excerpt is cut around it. */
+      bestQuery: string
+    }
+    const fused = new Map<string, Fused>()
+    for (const raw of queries) {
+      const expanded = expandLegalQuery(raw)
+      this.index
+        .search(
+          expanded,
+          limit * CANDIDATE_FACTOR,
+          SEARCH_MIN_SCORE,
+          SEARCH_MIN_COVERAGE
+        )
+        .filter(
+          (hit, _index, all) =>
+            hit.score >= (all[0]?.score ?? 0) * SEARCH_RELATIVE_FLOOR
+        )
+        .forEach((hit, rank) => {
+          const gain = 1 / (RRF_K + rank + 1)
+          const seen = fused.get(hit.id)
+          if (!seen) {
+            fused.set(hit.id, {
+              hit,
+              rrf: gain,
+              score: hit.score,
+              coverage: hit.coverage,
+              bestQuery: expanded,
+            })
+            return
+          }
+          seen.rrf += gain
+          seen.coverage = Math.max(seen.coverage, hit.coverage)
+          if (hit.score > seen.score) {
+            seen.score = hit.score
+            seen.bestQuery = expanded
+          }
+        })
+    }
+
     const perDoc = new Map<string, number>()
-    const candidates = this.index
-      .search(
-        expanded,
-        limit * CANDIDATE_FACTOR,
-        SEARCH_MIN_SCORE,
-        SEARCH_MIN_COVERAGE
-      )
-      .filter(
-        (hit, _index, all) =>
-          hit.score >= (all[0]?.score ?? 0) * SEARCH_RELATIVE_FLOOR
-      )
-      .filter(hit => {
+    const hits = [...fused.values()]
+      .sort((a, b) => b.rrf - a.rrf || b.score - a.score)
+      .filter(({ hit }) => {
         const used = perDoc.get(hit.meta.docId) ?? 0
         if (used >= MAX_HITS_PER_DOC) return false
         perDoc.set(hit.meta.docId, used + 1)
         return true
       })
       .slice(0, limit)
-    const hits = candidates.map(hit => ({
-      docId: hit.meta.docId,
-      title: hit.meta.title,
-      docNumber: hit.meta.docNumber,
-      issuer: hit.meta.issuer,
-      heading: hit.meta.heading,
-      text: pickMainExcerpt(hit.meta.text, expanded, HIT_TEXT_MAX),
-      score: hit.score,
-      coverage: hit.coverage,
-      sourceUrl: hit.meta.sourceUrl,
-      fetchedAt: hit.meta.fetchedAt,
-    }))
+      .map(({ hit, score, coverage, bestQuery }) => ({
+        docId: hit.meta.docId,
+        title: hit.meta.title,
+        docNumber: hit.meta.docNumber,
+        issuer: hit.meta.issuer,
+        heading: hit.meta.heading,
+        text: pickMainExcerpt(hit.meta.text, bestQuery, HIT_TEXT_MAX),
+        score,
+        coverage,
+        sourceUrl: hit.meta.sourceUrl,
+        fetchedAt: hit.meta.fetchedAt,
+      }))
     return Promise.resolve(hits)
   }
 
@@ -326,9 +377,13 @@ export class LegalKnowledgeService
   }
 
   private async rebuildIndex(): Promise<void> {
-    const published = await this.docRepo.find({
-      where: { status: 'published' },
-    })
+    const now = Date.now()
+    // A repealed / replaced text must not be quoted as current law.
+    const published = (
+      await this.docRepo.find({
+        where: { status: 'published' },
+      })
+    ).filter(doc => !doc.expiryDate || new Date(doc.expiryDate).getTime() > now)
     if (published.length === 0) {
       this.index.build([])
       this.indexBuiltAt = Date.now()
@@ -432,6 +487,9 @@ function toItem(doc: KnowledgeLegalDocument): LegalDocItem {
     ...(doc.summary ? { summary: doc.summary } : {}),
     ...(doc.effectiveDate
       ? { effectiveDate: new Date(doc.effectiveDate).toISOString() }
+      : {}),
+    ...(doc.expiryDate
+      ? { expiryDate: new Date(doc.expiryDate).toISOString() }
       : {}),
     ...(doc.fetchedAt
       ? { fetchedAt: new Date(doc.fetchedAt).toISOString() }

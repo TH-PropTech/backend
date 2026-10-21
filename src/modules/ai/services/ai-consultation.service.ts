@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto'
 import { ConflictException, Injectable, Logger } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
@@ -42,8 +43,15 @@ export class AiConsultationService {
     )
   }
 
+  /** A voice socket may only join a session that was started and is not finished. */
+  async isSessionOpen(logId: string): Promise<boolean> {
+    const log = await this.logRepository.findOne({ where: { logId } })
+    return log !== null && log.status !== 'completed'
+  }
+
   async startSession(userId?: string): Promise<AiConsultationLog> {
-    const logId = `call_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`
+    // The id doubles as the capability to join the voice socket, so it must not be guessable.
+    const logId = `call_${Date.now()}_${randomBytes(12).toString('hex')}`
     const log = new AiConsultationLog()
     log.logId = logId
     log.userId = userId ?? null
