@@ -27,6 +27,7 @@ import {
 } from '../utils/rental-package.util'
 import { UpdateApartmentMediaDto } from '../dto/update-apartment-media.dto'
 import { NotificationsService } from '../../notifications/services/notifications.service'
+import { recordPriceChange } from '../utils/price-history.util'
 import { ProjectsService } from './projects.service'
 import { SavedSearchesService } from './saved-searches.service'
 import { RentalExecutionPoliciesService } from '../../rental/services/rental-execution-policies.service'
@@ -925,7 +926,7 @@ export class ApartmentsService {
     }
 
     const previousPrice = apartment.priceMonthly
-    apartment.priceMonthly = priceMonthly
+    recordPriceChange(apartment, priceMonthly)
     const saved = await this.apartmentRepository.save(apartment)
     await this.publishSearchAlerts(saved, 'price_change', {
       previousValue: String(previousPrice),
@@ -961,7 +962,7 @@ export class ApartmentsService {
     apartment.pricingRevision = (apartment.pricingRevision ?? 0) + 1
     apartment.rentalPackages = packages
     if (pricing.representativeMonthlyRent !== null) {
-      apartment.priceMonthly = pricing.representativeMonthlyRent
+      recordPriceChange(apartment, pricing.representativeMonthlyRent)
     }
     if (!isStaff) {
       apartment.status = 'updating'
@@ -1043,6 +1044,12 @@ export class ApartmentsService {
       street: dto.street,
       address: dto.address,
       priceMonthly: pricing.representativeMonthlyRent ?? dto.priceMonthly,
+      priceHistory: [
+        {
+          price: pricing.representativeMonthlyRent ?? dto.priceMonthly,
+          at: new Date(),
+        },
+      ],
       pricingMode: pricing.pricingMode,
       pricingRevision: pricing.pricingMode === 'packages' ? 1 : 0,
       rentalPackages: packages,
@@ -1186,6 +1193,10 @@ export class ApartmentsService {
     )
     const packages = await this.resolveExecutionPolicies(pricing.packages)
 
+    recordPriceChange(
+      apartment,
+      pricing.representativeMonthlyRent ?? dto.priceMonthly
+    )
     // Cập nhật thông tin mới
     Object.assign(apartment, {
       title: dto.title,
@@ -1315,8 +1326,10 @@ export class ApartmentsService {
       )
       apartment.pricingMode = pricing.pricingMode
       apartment.pricingRevision = (apartment.pricingRevision ?? 0) + 1
-      apartment.priceMonthly =
+      recordPriceChange(
+        apartment,
         pricing.representativeMonthlyRent ?? apartment.priceMonthly
+      )
     }
 
     return this.apartmentRepository.save(apartment)

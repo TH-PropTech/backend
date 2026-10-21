@@ -8,6 +8,7 @@ import {
   AfterLoad,
 } from 'typeorm'
 import type { RentalPackageRecord } from '../utils/rental-package.util'
+import type { PriceHistoryPoint } from '../utils/price-history.util'
 import {
   LAYOUT_FURNITURE_KINDS,
   LAYOUT_LIMITS,
@@ -157,6 +158,10 @@ export class Apartment {
 
   @Column()
   priceMonthly!: number
+
+  /** Lịch sử giá thuê đại diện theo thời gian (tăng dần), nguồn cho biểu đồ biến động giá. */
+  @Column('array')
+  priceHistory?: PriceHistoryPoint[]
 
   @Column({ type: 'string', default: 'legacy' })
   pricingMode?: 'packages' | 'legacy'

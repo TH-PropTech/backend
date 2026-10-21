@@ -21,6 +21,9 @@ import { ProjectsService } from './services/projects.service'
 import { ListingFreshnessService } from './services/listing-freshness.service'
 import { SavedSearchesService } from './services/saved-searches.service'
 import { PriceBenchmarkService } from './insights/services/price-benchmark.service'
+import { ApartmentInsightsService } from './insights/services/apartment-insights.service'
+import { ApartmentInsightsController } from './insights/controllers/apartment-insights.controller'
+import { Contract } from '../contracts/schemas/contract.schema'
 import { SafetyReportsService } from './insights/services/safety-reports.service'
 import { RecommendationsService } from './recommendations/services/recommendations.service'
 import { RecommendationConfigService } from './recommendations/services/recommendation-config.service'
@@ -37,6 +40,7 @@ import { NotificationsModule } from '../notifications/notifications.module'
   imports: [
     TypeOrmModule.forFeature([
       Apartment,
+      Contract,
       User,
       Project,
       ReviewCase,
@@ -59,6 +63,7 @@ import { NotificationsModule } from '../notifications/notifications.module'
     ListingFreshnessService,
     SavedSearchesService,
     PriceBenchmarkService,
+    ApartmentInsightsService,
     SafetyReportsService,
     RecommendationsService,
     NaiveBayesEngine,
@@ -71,6 +76,7 @@ import { NotificationsModule } from '../notifications/notifications.module'
     ProjectsController,
     SavedSearchesController,
     PriceBenchmarkController,
+    ApartmentInsightsController,
     SafetyReportsController,
     RecommendationsController,
   ],
@@ -83,6 +89,7 @@ import { NotificationsModule } from '../notifications/notifications.module'
     ListingFreshnessService,
     SavedSearchesService,
     PriceBenchmarkService,
+    ApartmentInsightsService,
     SafetyReportsService,
     RecommendationsService,
     NaiveBayesEngine,
