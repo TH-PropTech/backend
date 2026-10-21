@@ -61,6 +61,9 @@ export class LegalKnowledgeDoc {
   @Column({ nullable: true })
   effectiveDate?: Date | undefined
 
+  @Column({ nullable: true })
+  expiryDate?: Date | undefined
+
   @Column({ type: 'string', default: 'draft' })
   status!: LegalDocStatus
 

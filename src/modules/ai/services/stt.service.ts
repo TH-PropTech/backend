@@ -56,8 +56,14 @@ export class SttService {
 
   private async callGoogleSpeechApi(wavFile: Buffer): Promise<string> {
     try {
-      const url =
-        'https://www.google.com/speech-api/v2/recognize?client=chromium&lang=vi-VN&key=AIzaSyBOti4mM-6x9WDnZIjIeyEU21OpBXqWBgw&pFilter=0'
+      const apiKey = process.env.GOOGLE_SPEECH_API_KEY
+      if (!apiKey) {
+        this.logger.warn(
+          'GOOGLE_SPEECH_API_KEY is not set: speech-to-text is disabled.'
+        )
+        return ''
+      }
+      const url = `https://www.google.com/speech-api/v2/recognize?client=chromium&lang=vi-VN&key=${encodeURIComponent(apiKey)}&pFilter=0`
       const response = await fetch(url, {
         method: 'POST',
         headers: {

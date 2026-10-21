@@ -2,7 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { GroqKeyPool } from './groq-key-pool.service'
 import {
   GROQ_CONNECTION_ERROR_REPLY,
+  GROQ_ERROR_REPLIES,
   GroqAgentService,
+  classifyGroqFailure,
   type ChatMessage,
   GroqRequestError,
   isRetryableGroqError,
@@ -53,7 +55,7 @@ describe('GroqAgentService retries', () => {
   const ask = async (
     service: GroqAgentService,
     disableTools = false
-  ): Promise<{ content: string | null }> => {
+  ): Promise<{ content: string | null; errorCode?: string }> => {
     const pending = service.chat(
       [{ role: 'user', content: 'Xin chào' }],
       disableTools
@@ -114,9 +116,9 @@ describe('GroqAgentService retries', () => {
 
   it('does not retry a rejected key or a bad request', async () => {
     const unauthorized = build([fail(401, 'invalid key')])
-    expect((await ask(unauthorized.service)).content).toBe(
-      GROQ_CONNECTION_ERROR_REPLY
-    )
+    const rejected = await ask(unauthorized.service)
+    expect(rejected.content).toBe(GROQ_ERROR_REPLIES.config)
+    expect(rejected.errorCode).toBe('config')
     expect(unauthorized.fetchMock).toHaveBeenCalledTimes(1)
 
     const badRequest = build([fail(400, 'invalid request body')])
@@ -210,5 +212,146 @@ describe('isRetryableGroqError', () => {
       false
     )
     expect(isRetryableGroqError(new TypeError('fetch failed'))).toBe(true)
+  })
+})
+
+describe('GroqAgentService failure codes and timeout', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+  })
+
+  const ask = async (
+    service: GroqAgentService
+  ): Promise<{ content: string | null; errorCode?: string }> => {
+    const pending = service.chat([{ role: 'user', content: 'Xin chào' }])
+    await vi.runAllTimersAsync()
+    return pending
+  }
+
+  it('reports quota when Groq keeps answering 429', async () => {
+    const { service } = build([
+      fail(429, 'rate'),
+      fail(429, 'rate'),
+      fail(429, 'rate'),
+    ])
+    const result = await ask(service)
+    expect(result.errorCode).toBe('quota')
+    expect(result.content).toBe(GROQ_ERROR_REPLIES.quota)
+  })
+
+  it('reports upstream for server errors', async () => {
+    const { service } = build([fail(500, 'x'), fail(500, 'x'), fail(500, 'x')])
+    const result = await ask(service)
+    expect(result.errorCode).toBe('upstream')
+    expect(result.content).toBe(GROQ_CONNECTION_ERROR_REPLY)
+  })
+
+  it('classifies an aborted request as a timeout', () => {
+    const timeout = new Error('The operation timed out')
+    timeout.name = 'TimeoutError'
+    expect(classifyGroqFailure(timeout)).toBe('timeout')
+    expect(classifyGroqFailure(new GroqRequestError(429, ''))).toBe('quota')
+    expect(classifyGroqFailure(new GroqRequestError(403, ''))).toBe('config')
+    expect(classifyGroqFailure(new Error('fetch failed'))).toBe('upstream')
+  })
+
+  it('gives every Groq request a timeout signal', async () => {
+    const { service, fetchMock } = build([ok('Chào')])
+    await ask(service)
+    const init = fetchMock.mock.calls[0]?.[1] as { signal?: AbortSignal }
+    expect(init.signal).toBeInstanceOf(AbortSignal)
+  })
+})
+
+describe('GroqAgentService prompt cache and conversation state', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  const cachedOk = (cached: number): Response =>
+    new Response(
+      JSON.stringify({
+        usage: {
+          prompt_tokens: 6000,
+          prompt_tokens_details: { cached_tokens: cached },
+        },
+        choices: [{ message: { content: 'ok' } }],
+      }),
+      { status: 200 }
+    )
+  const history = (turns: number): ChatMessage[] =>
+    Array.from({ length: turns }, (_, i) => [
+      { role: 'user' as const, content: `Câu hỏi số ${i} ${'x'.repeat(300)}` },
+      {
+        role: 'assistant' as const,
+        content: `Trả lời số ${i} ${'y'.repeat(300)}`,
+      },
+    ])
+      .flat()
+      .concat([{ role: 'user', content: 'Câu cuối' }])
+
+  const userTexts = (
+    fetchMock: ReturnType<typeof vi.fn>,
+    call: number
+  ): string[] => {
+    const init = fetchMock.mock.calls[call]?.[1] as { body: string }
+    const body = JSON.parse(init.body) as {
+      messages: Array<{ role: string; content: string }>
+    }
+    return body.messages.filter(m => m.role === 'user').map(m => m.content)
+  }
+
+  it('keeps earlier turns once Groq reports the static prefix as cached', async () => {
+    const { service, fetchMock } = build([cachedOk(5000), cachedOk(5000)])
+    await service.chat(history(3)) // cold: prefix is charged, history is cut down
+    const cold = userTexts(fetchMock, 0).length
+    await service.chat(history(3)) // warm: prefix is free, history fits
+    const warm = userTexts(fetchMock, 1).length
+    expect(cold).toBe(1)
+    expect(warm).toBeGreaterThan(cold)
+  })
+
+  it('forgets a warm prefix when a later response shows no cache hit', async () => {
+    const { service, fetchMock } = build([
+      cachedOk(5000),
+      cachedOk(0),
+      cachedOk(0),
+    ])
+    await service.chat(history(3))
+    await service.chat(history(3)) // served cold, flag cleared
+    await service.chat(history(3))
+    expect(userTexts(fetchMock, 2).length).toBe(1)
+  })
+
+  it('inserts the state note after the static system prompt, right before the last user message', async () => {
+    const { service, fetchMock } = build([ok('ok'), ok('ok')])
+    const note = 'NGỮ CẢNH HỘI THOẠI: căn "A"'
+    await service.chat(
+      [{ role: 'user', content: 'Căn này giá bao nhiêu?' }],
+      false,
+      { stateNote: note }
+    )
+    const init = fetchMock.mock.calls[0]?.[1] as { body: string }
+    const messages = (
+      JSON.parse(init.body) as {
+        messages: Array<{ role: string; content: string }>
+      }
+    ).messages
+    expect(messages[0]?.role).toBe('system')
+    expect(messages[0]?.content).not.toContain('NGỮ CẢNH HỘI THOẠI')
+    expect(messages.at(-2)).toEqual({ role: 'system', content: note })
+    expect(messages.at(-1)?.role).toBe('user')
+
+    await service.chat([{ role: 'user', content: 'Câu khác' }], false, {
+      stateNote: 'ghi chú khác',
+    })
+    const second = JSON.parse(
+      (fetchMock.mock.calls[1]?.[1] as { body: string }).body
+    ) as { messages: Array<{ content: string }> }
+    expect(second.messages[0]?.content).toBe(messages[0]?.content) // prefix stays byte-identical
   })
 })

@@ -641,8 +641,12 @@ describe('AiChatsService', () => {
         jest.fn()
       )
 
+      // both the model's keyword rewrite and the customer's own words are searched
       expect(legalSearch.search).toHaveBeenCalledWith(
-        'đặt cọc thuê nhà tối đa bao nhiêu',
+        [
+          'đặt cọc thuê nhà tối đa bao nhiêu',
+          'Tiền đặt cọc thuê nhà tối đa bao nhiêu?',
+        ],
         4
       )
       const secondCallMessages = getSecondCallMessages()

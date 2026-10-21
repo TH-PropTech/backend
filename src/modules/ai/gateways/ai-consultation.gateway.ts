@@ -24,7 +24,6 @@ import { GroqLlmService } from '../services/groq-llm.service'
 
 interface ClientSession {
   logId: string
-  groqKey: string | undefined
   startTime: number
   hasGreeted: boolean
   messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>
@@ -63,7 +62,6 @@ export class AiConsultationGateway
     const query = url.split('?')[1] || ''
     const params = new URLSearchParams(query)
     const logId = params.get('logId') || ''
-    const groqKey = params.get('groqKey') || undefined
 
     if (!logId) {
       client.close(4001, 'logId is required')
@@ -72,7 +70,6 @@ export class AiConsultationGateway
 
     const session: ClientSession = {
       logId,
-      groqKey,
       startTime: Date.now(),
       hasGreeted: false,
       messages: [],
@@ -80,7 +77,28 @@ export class AiConsultationGateway
 
     this.sessions.set(client, session)
 
-    void this.sendGreeting(client, session)
+    void this.greetIfSessionOpen(client, session)
+  }
+
+  /** Unknown or finished sessions are closed instead of greeted, so a random logId cannot start a call. */
+  private async greetIfSessionOpen(
+    client: WebSocket,
+    session: ClientSession
+  ): Promise<void> {
+    let open = false
+    try {
+      open = await this.consultationService.isSessionOpen(session.logId)
+    } catch (err) {
+      this.logger.error(
+        `Could not verify session ${session.logId}: ${err instanceof Error ? err.message : String(err)}`
+      )
+    }
+    if (!open) {
+      this.sessions.delete(client)
+      client.close(4003, 'session is not available')
+      return
+    }
+    await this.sendGreeting(client, session)
   }
 
   handleDisconnect(client: WebSocket): void {
@@ -245,7 +263,7 @@ export class AiConsultationGateway
       }
 
       const history = this.getChatHistory(messages)
-      let reply = await this.groqLlmService.chat(history, session.groqKey)
+      let reply = await this.groqLlmService.chat(history)
 
       // Check if reply indicates session end
       let isEnd = false

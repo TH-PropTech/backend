@@ -35,7 +35,10 @@ export interface LegalSearchHit {
 
 export interface LegalKnowledgeSearcher {
   /** Only PUBLISHED documents are searched. Returns at most `limit` (default 4) hits, best first. */
-  search(query: string, limit?: number): Promise<LegalSearchHit[]>
+  search(
+    query: string | readonly string[],
+    limit?: number
+  ): Promise<LegalSearchHit[]>
 }
 
 /** Citation shown under a chat bot answer (chat message metadata `legalCitations`). */

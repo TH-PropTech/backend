@@ -13,6 +13,7 @@ export interface LegalDocItem {
   sourceUrl?: string
   keywords: string[]
   effectiveDate?: string
+  expiryDate?: string
   status: LegalDocStatus
   chunkCount: number
   contentLength: number

@@ -7,7 +7,8 @@ import { foldVietnamese } from '../../legal/utils/legal-text'
  * housing) and must not reach the user.
  */
 
-const QUANTITY_UNITS = 'tháng|ngày|%|phần trăm|triệu|nghìn|ngàn|đồng|lần|giờ'
+const QUANTITY_UNITS =
+  'tháng|ngày|%|phần trăm|triệu|nghìn|ngàn|đồng|lần|giờ|năm|tuần|tuổi'
 // "2 tháng", "02 tháng", "hai (2) tháng", "10%", "1.500.000 đồng" -> number + unit
 const QUANTITY_RE = new RegExp(
   `(\\d+(?:[.,]\\d+)*)\\)?\\s*(${QUANTITY_UNITS})(?![\\p{L}])`,

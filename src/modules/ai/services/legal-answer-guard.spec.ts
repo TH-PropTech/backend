@@ -9,6 +9,24 @@ const evidence = [
 ].join('\n')
 
 describe('findUngroundedFigures', () => {
+  it('catches an invented duration in years or weeks and accepts the one in the passage', () => {
+    expect(
+      findUngroundedFigures(
+        'Hợp đồng phải có thời hạn tối thiểu 5 năm.',
+        evidence
+      )
+    ).toContain('5 năm')
+    expect(
+      findUngroundedFigures('Báo trước 2 tuần là đủ.', evidence)
+    ).toContain('2 tuần')
+    expect(
+      findUngroundedFigures(
+        'Hợp đồng thuê tối đa 50 năm.',
+        evidence + ' Thời hạn thuê tối đa là 50 năm.'
+      )
+    ).toEqual([])
+  })
+
   it('accepts an answer whose figures and references all come from the passages', () => {
     const answer =
       'Theo Luật Nhà ở 2023 (Điều 89), đặt cọc tối đa bằng 12 tháng tiền thuê; ứng trước không quá 30%. Theo Điều 328 Bộ luật Dân sự, đặt cọc là biện pháp bảo đảm.'

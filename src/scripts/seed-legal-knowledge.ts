@@ -19,6 +19,10 @@ import { LegalKnowledgeService } from '../modules/legal/services/legal-knowledge
 import { LEGAL_SEED_ENTRIES } from '../modules/legal/utils/legal-knowledge.seed-data'
 import { extractMainText } from '../modules/legal/utils/html-extract'
 import {
+  PLATFORM_FAQ_ENTRIES,
+  PLATFORM_FAQ_ISSUER,
+} from '../modules/legal/utils/platform-faq.seed-data'
+import {
   cleanPortalProcedure,
   cleanSourceText,
 } from '../modules/legal/utils/legal-seed-clean'
@@ -96,19 +100,81 @@ function loadPortalEntries(): LegalSeedEntry[] {
 }
 
 /**
+ * Tài liệu FAQ/quy định nội bộ của TH-PropTech (không cần mạng). Mặc định tạo ở trạng thái nháp để
+ * quản trị viên đọc lại rồi xuất bản; `--publish` xuất bản luôn. Khớp tài liệu đã có theo tiêu đề;
+ * `--refresh` cập nhật nội dung của tài liệu đã có.
+ */
+async function seedPlatformFaq(
+  service: LegalKnowledgeService,
+  options: { dry: boolean; refresh: boolean; publish: boolean }
+): Promise<void> {
+  const existing = new Map(
+    (await service.list()).map(doc => [doc.title, doc._id] as const)
+  )
+  let created = 0
+  let refreshed = 0
+  for (const entry of PLATFORM_FAQ_ENTRIES) {
+    const existingId = existing.get(entry.title)
+    if (existingId && !options.refresh) {
+      console.log(`= bỏ qua (đã có): ${entry.title}`)
+      continue
+    }
+    if (options.dry) {
+      console.log(`✓ [dry] ${entry.title} (${entry.content.length} ký tự)`)
+      continue
+    }
+    if (existingId) {
+      await service.update(existingId, {
+        category: entry.category,
+        issuer: PLATFORM_FAQ_ISSUER,
+        keywords: entry.keywords,
+        content: entry.content,
+      })
+      refreshed += 1
+      console.log(`~ ${entry.title}`)
+      continue
+    }
+    await service.create({
+      title: entry.title,
+      category: entry.category,
+      issuer: PLATFORM_FAQ_ISSUER,
+      keywords: entry.keywords,
+      content: entry.content,
+      contentSource: 'manual',
+      status: options.publish ? 'published' : 'draft',
+    })
+    created += 1
+    console.log(
+      `+ ${entry.title} (${options.publish ? 'đã xuất bản' : 'nháp'})`
+    )
+  }
+  console.log(`
+Xong: thêm ${created}, làm mới ${refreshed}`)
+}
+
+/**
  * Nạp sẵn kho tri thức luật từ các nguồn công khai (xuất bản ngay).
  * Mặc định bỏ qua tài liệu đã có cùng sourceUrl.
  * `--dry`: chỉ kiểm tra tải được hay không, không ghi DB.
  * `--refresh`: tải lại và cập nhật nội dung, đơn vị, từ khoá của tài liệu đã có
  * (ngày giờ tải được ghi lại).
  */
-async function bootstrap(dry: boolean, refresh: boolean): Promise<void> {
+async function bootstrap(
+  dry: boolean,
+  refresh: boolean,
+  faq: boolean,
+  publish: boolean
+): Promise<void> {
   const app = await NestFactory.createApplicationContext(AppModule, {
     logger: ['error', 'warn'],
   })
 
   try {
     const service = app.get(LegalKnowledgeService)
+    if (faq) {
+      await seedPlatformFaq(service, { dry, refresh, publish })
+      return
+    }
     const existing = new Map(
       (await service.list()).flatMap(doc =>
         doc.sourceUrl ? [[doc.sourceUrl, doc._id] as const] : []
@@ -186,7 +252,9 @@ async function bootstrap(dry: boolean, refresh: boolean): Promise<void> {
 
 bootstrap(
   process.argv.includes('--dry'),
-  process.argv.includes('--refresh')
+  process.argv.includes('--refresh'),
+  process.argv.includes('--faq'),
+  process.argv.includes('--publish')
 ).catch((error: unknown) => {
   console.error(error)
   process.exit(1)

@@ -2,9 +2,30 @@ import { SttService } from './stt.service'
 
 describe('SttService', () => {
   const originalFetch = global.fetch
+  const originalKey = process.env.GOOGLE_SPEECH_API_KEY
+
+  beforeEach(() => {
+    process.env.GOOGLE_SPEECH_API_KEY = 'test-speech-key'
+  })
 
   afterEach(() => {
     global.fetch = originalFetch
+    if (originalKey === undefined) delete process.env.GOOGLE_SPEECH_API_KEY
+    else process.env.GOOGLE_SPEECH_API_KEY = originalKey
+  })
+
+  it('does not call Google when no speech API key is configured', async () => {
+    delete process.env.GOOGLE_SPEECH_API_KEY
+    const fetchMock = jest.fn<
+      ReturnType<typeof fetch>,
+      Parameters<typeof fetch>
+    >()
+    global.fetch = fetchMock
+    const stt = new SttService()
+    stt.appendAudio('no-key', Buffer.alloc(3200, 1))
+
+    await expect(stt.transcribe('no-key')).resolves.toBe('')
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it('returns an empty transcript without calling Google for an empty buffer', async () => {

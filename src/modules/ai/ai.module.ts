@@ -1,6 +1,10 @@
 import { Global, Module } from '@nestjs/common'
 import { TypeOrmModule } from '@nestjs/typeorm'
 import { User } from '../users/schemas/user.schema'
+import { Booking } from '../bookings/schemas/booking.schema'
+import { Contract } from '../contracts/schemas/contract.schema'
+import { Payment } from '../payments/schemas/payment.schema'
+import { PersonalDataService } from './services/personal-data.service'
 import { PropertiesModule } from '../properties/properties.module'
 import { BookingsModule } from '../bookings/bookings.module'
 import { HealthModule } from '../health/health.module'
@@ -31,7 +35,14 @@ import { GROQ_KEY_STORE } from './utils/groq-key-store'
 @Global()
 @Module({
   imports: [
-    TypeOrmModule.forFeature([User, ActivityLog, SystemConfig]),
+    TypeOrmModule.forFeature([
+      User,
+      ActivityLog,
+      SystemConfig,
+      Booking,
+      Contract,
+      Payment,
+    ]),
     PropertiesModule,
     BookingsModule,
     HealthModule,
@@ -40,6 +51,7 @@ import { GROQ_KEY_STORE } from './utils/groq-key-store'
   controllers: [AiChatsController, AiConsultationController],
   providers: [
     AiChatsService,
+    PersonalDataService,
     GroqAgentService,
     AiConsultationService,
     SttService,

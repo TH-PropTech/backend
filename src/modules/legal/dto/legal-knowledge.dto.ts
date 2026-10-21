@@ -127,6 +127,15 @@ class LegalDocOptionalFieldsDto {
   @IsDateString()
   effectiveDate?: string
 
+  @ApiPropertyOptional({
+    description:
+      'ISO date the text stops applying; it is then no longer searched',
+  })
+  @IsOptional()
+  @Transform(trimString)
+  @IsDateString()
+  expiryDate?: string
+
   @ApiPropertyOptional()
   @IsOptional()
   @Transform(trimString)

@@ -16,6 +16,7 @@ function createGateway(): {
     addMessage: jest.Mock
     completeSession: jest.Mock
     checkTransferRules: jest.Mock
+    isSessionOpen: jest.Mock
   }
   tts: { textToSpeech: jest.Mock }
 } {
@@ -30,6 +31,7 @@ function createGateway(): {
     addMessage: jest.fn().mockResolvedValue(undefined),
     completeSession: jest.fn().mockResolvedValue(undefined),
     checkTransferRules: jest.fn().mockReturnValue(false),
+    isSessionOpen: jest.fn().mockResolvedValue(true),
   }
   const tts = { textToSpeech: jest.fn().mockResolvedValue('audio') }
   const gateway = new AiConsultationGateway(
@@ -79,6 +81,31 @@ describe('AiConsultationGateway', () => {
     expect(tts.textToSpeech).toHaveBeenCalled()
     expect(sendMock).toHaveBeenCalledWith(
       expect.stringContaining('"event":"chunk"')
+    )
+  })
+
+  it('closes a connection whose session is unknown or already finished', async () => {
+    const { gateway, client, closeMock, sendMock, service } = createGateway()
+    service.isSessionOpen.mockResolvedValue(false)
+
+    gateway.handleConnection(client, {
+      url: '/ws/ai-consultation?logId=call-unknown',
+    } as IncomingMessage)
+    await new Promise(resolve => setImmediate(resolve))
+
+    expect(closeMock).toHaveBeenCalledWith(4003, 'session is not available')
+    expect(sendMock).not.toHaveBeenCalled()
+    expect(service.addMessage).not.toHaveBeenCalled()
+  })
+
+  it('ignores a groqKey passed in the URL', async () => {
+    const { gateway, client, service } = createGateway()
+    gateway.handleConnection(client, {
+      url: '/ws/ai-consultation?logId=call-1&groqKey=gsk_leak',
+    } as IncomingMessage)
+    await new Promise(resolve => setImmediate(resolve))
+    expect(JSON.stringify(service.addMessage.mock.calls)).not.toContain(
+      'gsk_leak'
     )
   })
 

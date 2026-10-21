@@ -64,6 +64,33 @@ const LEGAL_TERM_ALIASES: ReadonlyArray<readonly [RegExp, string]> = [
   ],
   [/\b(moi gioi)\b/, 'chứng chỉ hành nghề môi giới bất động sản'],
   [/\b(tam tru)\b/, 'đăng ký tạm trú cư trú'],
+  [/\b(thuong tru|ho khau)\b/, 'đăng ký thường trú cư trú'],
+  [
+    /\b(hoan coc|tra coc|mat coc|phat coc|boi thuong coc)\b/,
+    'đặt cọc trả lại tiền đặt cọc phạt cọc',
+  ],
+  [
+    /\b(thue lai|cho thue lai|sublet)\b/,
+    'cho thuê lại nhà ở bên thuê cho thuê lại',
+  ],
+  [
+    /\b(phi quan ly|phi dich vu|phi chung cu)\b/,
+    'kinh phí quản lý vận hành nhà chung cư',
+  ],
+  [
+    /\b(dong thue|nop thue|khai thue|thue cho thue)\b/,
+    'thuế thu nhập cá nhân thuế giá trị gia tăng cho thuê tài sản',
+  ],
+  [/\b(cong chung|chung thuc)\b/, 'công chứng chứng thực hợp đồng thuê nhà ở'],
+  [
+    /\b(vi pham hop dong|phat vi pham|bo hop dong)\b/,
+    'phạt vi phạm hợp đồng bồi thường thiệt hại đơn phương chấm dứt',
+  ],
+  [
+    /\b(nguoi nuoc ngoai|viet kieu)\b/,
+    'tổ chức cá nhân nước ngoài thuê nhà ở tại Việt Nam',
+  ],
+  [/\b(the chap|ngan hang giu so)\b/, 'thế chấp nhà ở đang cho thuê'],
 ]
 
 /** The question followed by the statute terms for the everyday words it uses (unchanged if none). */

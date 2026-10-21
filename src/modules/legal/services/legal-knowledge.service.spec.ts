@@ -10,6 +10,11 @@ import type { GroqKeyPool } from '../../ai/services/groq-key-pool.service'
 import { fetchPageHtml, SafeFetchError } from '../utils/safe-fetch'
 import { distillLegalPage } from '../utils/legal-distill'
 import { LegalKnowledgeService } from './legal-knowledge.service'
+import {
+  PLATFORM_FAQ_ENTRIES,
+  PLATFORM_FAQ_ISSUER,
+} from '../utils/platform-faq.seed-data'
+import { LEGAL_CONTENT_MIN } from '../dto/legal-knowledge.dto'
 import type { LegalKnowledgeChunk } from '../schemas/legal-knowledge-chunk.schema'
 import type { LegalDocument } from '../schemas/legal-document.schema'
 
@@ -250,6 +255,135 @@ describe('LegalKnowledgeService', () => {
     }
     expect(Math.max(...perDoc.values())).toBeLessThanOrEqual(2)
     expect(hits.some(hit => hit.title === 'Văn bản ngắn')).toBe(true)
+  })
+
+  it('finds a passage through either phrasing and merges the two rankings', async () => {
+    const { service } = createService()
+    await service.create({
+      ...baseDoc,
+      title: 'Nghị định về cho thuê lại',
+      content:
+        'Điều 5. Cho thuê lại nhà ở. Bên thuê chỉ được cho thuê lại khi bên cho thuê đồng ý bằng văn bản.',
+      status: 'published',
+    })
+    await service.create({
+      ...baseDoc,
+      title: 'Quy định về điện nước',
+      content:
+        'Điều 9. Tiền điện nước. Bên thuê tự thanh toán tiền điện nước theo công tơ riêng hàng tháng.',
+      status: 'published',
+    })
+
+    // the model's rewrite misses the second topic, the customer's own words cover it
+    const hits = await service.search(
+      ['cho thuê lại nhà ở', 'tiền điện nước thanh toán công tơ hàng tháng'],
+      4
+    )
+
+    expect(hits.map(hit => hit.title).sort()).toEqual([
+      'Nghị định về cho thuê lại',
+      'Quy định về điện nước',
+    ])
+  })
+
+  it('ranks a single query exactly as before and ignores blank or repeated queries', async () => {
+    const { service } = createService()
+    await service.create({ ...baseDoc, status: 'published' })
+
+    const one = await service.search('đặt cọc thuê nhà', 4)
+    const same = await service.search(
+      ['đặt cọc thuê nhà', '  đặt cọc thuê nhà ', ''],
+      4
+    )
+
+    expect(same).toEqual(one)
+    expect(await service.search([], 4)).toEqual([])
+  })
+
+  it('drops a document from search once its expiry date has passed', async () => {
+    const { service } = createService()
+    const doc = await service.create({ ...baseDoc, status: 'published' })
+    expect((await service.search('đặt cọc thuê nhà')).length).toBeGreaterThan(0)
+
+    await service.update(doc._id, { expiryDate: '2020-01-01' })
+    expect(await service.search('đặt cọc thuê nhà')).toEqual([])
+
+    await service.update(doc._id, { expiryDate: '2999-01-01' })
+    expect((await service.search('đặt cọc thuê nhà')).length).toBeGreaterThan(0)
+  })
+
+  describe('platform FAQ seed', () => {
+    const askFaq = async (question: string): Promise<string[]> => {
+      const { service } = createService()
+      for (const entry of PLATFORM_FAQ_ENTRIES) {
+        await service.create({
+          title: entry.title,
+          category: entry.category,
+          issuer: PLATFORM_FAQ_ISSUER,
+          keywords: entry.keywords,
+          content: entry.content,
+          contentSource: 'manual',
+          status: 'published',
+        })
+      }
+      return (await service.search(question, 4)).map(hit => hit.title)
+    }
+
+    it.each([
+      [
+        'Đặt cọc giữ chỗ trên TH-PropTech hoạt động thế nào?',
+        'Đặt cọc trên TH-PropTech',
+      ],
+      ['Khi nào tôi được hoàn lại tiền đặt cọc?', 'Đặt cọc trên TH-PropTech'],
+      [
+        'eKYC là gì, tại sao tôi phải xác thực?',
+        'Xác thực danh tính eKYC trên TH-PropTech',
+      ],
+      [
+        'Xác thực danh tính cần chuẩn bị giấy tờ gì CCCD',
+        'Xác thực danh tính eKYC trên TH-PropTech',
+      ],
+      [
+        'Blockchain được dùng để làm gì trong hợp đồng thuê?',
+        'Blockchain và mã băm hợp đồng trên TH-PropTech',
+      ],
+      [
+        'Hash hợp đồng trên blockchain là gì, kiểm tra thế nào?',
+        'Blockchain và mã băm hợp đồng trên TH-PropTech',
+      ],
+      ['Quên mật khẩu thì làm sao?', 'Tài khoản và bảo mật trên TH-PropTech'],
+      [
+        'Tôi đăng ký tài khoản như thế nào?',
+        'Tài khoản và bảo mật trên TH-PropTech',
+      ],
+      [
+        'Huỷ lịch xem nhà có bị mất phí không?',
+        'Đặt lịch xem căn hộ trên TH-PropTech',
+      ],
+      [
+        'Tiền thuê hàng tháng thanh toán bằng cách nào, hạn đóng khi nào?',
+        'Thanh toán tiền thuê và hóa đơn trên TH-PropTech',
+      ],
+      [
+        'Ký hợp đồng thuê điện tử trên nền tảng thế nào?',
+        'Hợp đồng thuê và ký điện tử trên TH-PropTech',
+      ],
+      [
+        'Quy trình thuê căn hộ gồm những bước nào?',
+        'Quy trình thuê căn hộ trên TH-PropTech',
+      ],
+      ['Phí dịch vụ nền tảng là bao nhiêu?', 'Phí dịch vụ của TH-PropTech'],
+    ])('answers %s from %s', async (question, expectedTitle) => {
+      const titles = await askFaq(question)
+      expect(titles[0]).toBe(expectedTitle)
+    })
+
+    it('has no passage longer than one chunk can hold and every doc is long enough to seed', () => {
+      for (const entry of PLATFORM_FAQ_ENTRIES) {
+        expect(entry.content.length).toBeGreaterThanOrEqual(LEGAL_CONTENT_MIN)
+        expect(entry.content).toContain('## ')
+      }
+    })
   })
 
   it('re-chunks and reindexes when content is updated', async () => {
