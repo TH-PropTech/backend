@@ -183,6 +183,71 @@ describe('LegalKnowledgeService', () => {
     expect(await service.search('đặt cọc thuê nhà')).toEqual([])
   })
 
+  describe('publishMany', () => {
+    it('publishes every draft in one call and makes them searchable', async () => {
+      const { service } = createService()
+      const first = await service.create(baseDoc)
+      const second = await service.create({ ...baseDoc, title: 'Nghị định 95' })
+
+      const result = await service.publishMany([first._id, second._id])
+
+      expect(result.failed).toEqual([])
+      expect(result.published.map(doc => doc._id).sort()).toEqual(
+        [first._id, second._id].sort()
+      )
+      expect(result.published.every(doc => doc.status === 'published')).toBe(
+        true
+      )
+      expect(
+        (await service.search('đặt cọc thuê nhà', 4)).length
+      ).toBeGreaterThan(0)
+    })
+
+    it('rebuilds the search index once for the whole batch', async () => {
+      const { service } = createService()
+      const first = await service.create(baseDoc)
+      const second = await service.create({ ...baseDoc, title: 'Nghị định 95' })
+      const rebuild = jest.spyOn(service, 'refreshIndexSafely')
+
+      await service.publishMany([first._id, second._id])
+
+      expect(rebuild).toHaveBeenCalledTimes(1)
+    })
+
+    it('reports bad, unknown and archived ids without blocking the others', async () => {
+      const { service } = createService()
+      const good = await service.create(baseDoc)
+      const archived = await service.create({ ...baseDoc, title: 'Cũ' })
+      await service.archive(archived._id)
+      const unknown = new ObjectId().toHexString()
+
+      const result = await service.publishMany([
+        good._id,
+        'khong-hop-le',
+        unknown,
+        archived._id,
+      ])
+
+      expect(result.published.map(doc => doc._id)).toEqual([good._id])
+      expect(result.failed.map(item => item.id).sort()).toEqual(
+        ['khong-hop-le', unknown, archived._id].sort()
+      )
+      expect(result.failed.every(item => item.message.length > 0)).toBe(true)
+    })
+
+    it('treats an already published doc as done and ignores repeated ids', async () => {
+      const { service } = createService()
+      const doc = await service.create({ ...baseDoc, status: 'published' })
+      const rebuild = jest.spyOn(service, 'refreshIndexSafely')
+
+      const result = await service.publishMany([doc._id, doc._id])
+
+      expect(result.published).toHaveLength(1)
+      expect(result.failed).toEqual([])
+      expect(rebuild).not.toHaveBeenCalled()
+    })
+  })
+
   it('searches only published docs', async () => {
     const { service } = createService()
     await service.create({

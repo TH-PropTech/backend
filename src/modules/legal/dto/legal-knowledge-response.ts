@@ -49,3 +49,15 @@ export interface FetchLegalLinkResult {
   distilled: boolean
   suggestion: LegalSuggestion
 }
+
+/** One document the batch publish could not handle, with the reason shown to the admin. */
+export interface PublishLegalDocFailure {
+  id: string
+  message: string
+}
+
+/** Result of publishing several documents at once: the ones now live and the ones that failed. */
+export interface PublishLegalDocsResult {
+  published: LegalDocItem[]
+  failed: PublishLegalDocFailure[]
+}

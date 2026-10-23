@@ -1,7 +1,8 @@
-import { ApiPropertyOptional, PartialType } from '@nestjs/swagger'
+import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger'
 import { Transform, Type } from 'class-transformer'
 import {
   ArrayMaxSize,
+  ArrayMinSize,
   IsArray,
   IsDateString,
   IsIn,
@@ -186,4 +187,19 @@ export class SearchLegalDto {
   @Min(1)
   @Max(10)
   limit?: number
+}
+
+export const LEGAL_PUBLISH_BATCH_MAX = 100
+
+export class PublishLegalDocsDto {
+  @ApiProperty({
+    type: [String],
+    description: 'Ids of the documents to publish together',
+  })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(LEGAL_PUBLISH_BATCH_MAX)
+  @IsString({ each: true })
+  @MaxLength(64, { each: true })
+  ids!: string[]
 }

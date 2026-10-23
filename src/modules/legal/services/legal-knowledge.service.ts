@@ -1,6 +1,7 @@
 import {
   BadGatewayException,
   BadRequestException,
+  HttpException,
   Injectable,
   Logger,
   NotFoundException,
@@ -19,6 +20,8 @@ import type {
   FetchLegalLinkResult,
   LegalDocDetail,
   LegalDocItem,
+  PublishLegalDocFailure,
+  PublishLegalDocsResult,
 } from '../dto/legal-knowledge-response'
 import { Bm25Index, type Bm25Doc } from '../utils/legal-bm25'
 import { chunkLegalText } from '../utils/legal-chunker'
@@ -225,6 +228,42 @@ export class LegalKnowledgeService
 
   async unpublish(id: string): Promise<LegalDocDetail> {
     return this.setStatus(id, 'draft')
+  }
+
+  /**
+   * Publishes several drafts at once. One bad id never blocks the rest: it is reported in `failed`.
+   * The search index is rebuilt a single time at the end instead of once per document.
+   */
+  async publishMany(ids: readonly string[]): Promise<PublishLegalDocsResult> {
+    const published: LegalDocItem[] = []
+    const failed: PublishLegalDocFailure[] = []
+    let changed = false
+    for (const id of new Set(ids)) {
+      try {
+        const doc = await this.findById(id)
+        if (doc.status === 'archived') {
+          failed.push({
+            id,
+            message: 'Tài liệu đã lưu trữ, hãy khôi phục trước',
+          })
+          continue
+        }
+        if (doc.status !== 'published') {
+          doc.status = 'published'
+          await this.docRepo.save(doc)
+          changed = true
+        }
+        published.push(toItem(doc))
+      } catch (error) {
+        const message =
+          error instanceof HttpException
+            ? error.message
+            : 'Không nạp được tài liệu'
+        failed.push({ id, message })
+      }
+    }
+    if (changed) await this.refreshIndexSafely()
+    return { published, failed }
   }
 
   /** Soft delete: the doc stays in the DB but leaves the search index. */

@@ -42,6 +42,7 @@ describe('LegalKnowledgeController', () => {
         '0:admin/:id',
         '1:admin/fetch',
         '1:admin/search',
+        '1:admin/publish-batch',
         '1:admin',
         '3:admin/:id',
         '1:admin/:id/publish',
