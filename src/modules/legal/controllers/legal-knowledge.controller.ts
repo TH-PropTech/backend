@@ -21,6 +21,7 @@ import {
   CreateLegalDocDto,
   FetchLegalLinkDto,
   ListLegalDocsQueryDto,
+  PublishLegalDocsDto,
   SearchLegalDto,
   UpdateLegalDocDto,
 } from '../dto/legal-knowledge.dto'
@@ -28,6 +29,7 @@ import type {
   FetchLegalLinkResult,
   LegalDocDetail,
   LegalDocItem,
+  PublishLegalDocsResult,
 } from '../dto/legal-knowledge-response'
 import type { LegalSearchHit } from '../utils/legal-knowledge.types'
 import { LegalKnowledgeService } from '../services/legal-knowledge.service'
@@ -90,6 +92,17 @@ export class LegalKnowledgeController {
     @Body() dto: UpdateLegalDocDto
   ): Promise<LegalDocDetail> {
     return this.service.update(id, dto)
+  }
+
+  @Post('admin/publish-batch')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Admin: nạp nhiều tài liệu cùng lúc (xuất bản hàng loạt)',
+  })
+  async publishMany(
+    @Body() dto: PublishLegalDocsDto
+  ): Promise<PublishLegalDocsResult> {
+    return this.service.publishMany(dto.ids)
   }
 
   @Post('admin/:id/publish')
