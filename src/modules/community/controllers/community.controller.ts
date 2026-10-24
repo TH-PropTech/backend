@@ -11,7 +11,7 @@ import {
   Request,
 } from '@nestjs/common'
 import { ApiTags } from '@nestjs/swagger'
-import { CommunityService } from '../services/community.service'
+import { CommunityService, CommunityStats } from '../services/community.service'
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard'
 import { RolesGuard } from '../../../common/guards/roles.guard'
 import { Roles } from '../../../common/decorators/roles.decorator'
@@ -33,9 +33,24 @@ export class CommunityController {
   @Get('posts')
   async getPosts(
     @Query('topic') topic?: 'qa' | 'review' | 'roommate',
-    @Query('search') search?: string
+    @Query('search') search?: string,
+    @Query('project') project?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string
   ): Promise<CommunityPost[]> {
-    return this.communityService.findAllApproved(topic, search)
+    return this.communityService.findAllApproved({
+      topic,
+      search,
+      project,
+      page: page ? Number(page) : undefined,
+      limit: limit ? Number(limit) : undefined,
+    })
+  }
+
+  @Public()
+  @Get('stats')
+  async getStats(): Promise<CommunityStats> {
+    return this.communityService.getStats()
   }
 
   @Get('posts/my')
@@ -140,6 +155,30 @@ export class CommunityController {
   @Roles('staff', 'admin')
   async deletePost(@Param('id') id: string): Promise<{ success: boolean }> {
     await this.communityService.deletePost(id)
+    return { success: true }
+  }
+
+  @Delete('posts/:id/mine')
+  @UseGuards(JwtAuthGuard)
+  async deleteOwnPost(
+    @Param('id') id: string,
+    @Request() req: { user: UserPayload }
+  ): Promise<{ success: boolean }> {
+    const userId = req.user._id
+    if (!userId) throw new Error('Không thể xác thực người dùng')
+    await this.communityService.deleteOwnPost(id, userId)
+    return { success: true }
+  }
+
+  @Delete('comments/:id/mine')
+  @UseGuards(JwtAuthGuard)
+  async deleteOwnComment(
+    @Param('id') id: string,
+    @Request() req: { user: UserPayload }
+  ): Promise<{ success: boolean }> {
+    const userId = req.user._id
+    if (!userId) throw new Error('Không thể xác thực người dùng')
+    await this.communityService.deleteComment(id, userId)
     return { success: true }
   }
 

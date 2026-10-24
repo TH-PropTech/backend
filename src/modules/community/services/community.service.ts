@@ -1,4 +1,9 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common'
+import {
+  ForbiddenException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository, FindOptionsWhere } from 'typeorm'
 import { ObjectId } from 'mongodb'
@@ -24,6 +29,40 @@ function toComment(entry: CommentEntry): CommunityComment {
   const copy: Partial<CommentEntry> = { ...entry }
   delete copy.kind
   return copy as unknown as CommunityComment
+}
+
+export interface ListPostsParams {
+  topic?: 'qa' | 'review' | 'roommate' | undefined
+  search?: string | undefined
+  project?: string | undefined
+  page?: number | undefined
+  limit?: number | undefined
+}
+
+export interface CommunityStats {
+  contributorCount: number
+  projectCount: number
+  projects: { name: string; posts: number }[]
+}
+
+const DEFAULT_PAGE_SIZE = 20
+const MAX_PAGE_SIZE = 50
+const SEARCH_FIELDS = ['title', 'content', 'projectName', 'authorName']
+
+/** Thoát ký tự đặc biệt để chuỗi người dùng nhập chỉ được khớp theo nghĩa đen. */
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/** Ảnh chỉ nhận URL https; `blob:`/`file:` chỉ có nghĩa trên máy người đăng. */
+function keepHttpsImages(images: string[] | undefined): string[] {
+  return (images ?? []).filter(url => /^https:\/\/\S+$/i.test(url)).slice(0, 5)
+}
+
+function toPositiveInt(value: number | undefined, fallback: number): number {
+  return Number.isInteger(value) && (value as number) > 0
+    ? (value as number)
+    : fallback
 }
 
 @Injectable()
@@ -53,7 +92,7 @@ export class CommunityService {
     post.content = dto.content
     post.projectName = dto.projectName
     post.topic = dto.topic
-    post.images = dto.images || []
+    post.images = keepHttpsImages(dto.images)
     post.tags = dto.tags || []
     post.upvotes = []
     post.commentsCount = 0
@@ -63,11 +102,11 @@ export class CommunityService {
   }
 
   async findAllApproved(
-    topic?: 'qa' | 'review' | 'roommate',
-    search?: string
+    params: ListPostsParams = {}
   ): Promise<CommunityPost[]> {
+    const { topic, search, project } = params
     this.logger.log(
-      `Fetching approved community posts. Topic: ${topic}, search: ${search}`
+      `Fetching approved community posts. Topic: ${topic}, search: ${search}, project: ${project}`
     )
     const query: Record<string, unknown> = { kind: 'post', status: 'approved' }
 
@@ -75,15 +114,62 @@ export class CommunityService {
       query.topic = topic
     }
 
-    if (search) {
-      query.projectName = { $regex: search, $options: 'i' }
+    const keyword = search?.trim()
+    if (keyword) {
+      const pattern = { $regex: escapeRegex(keyword), $options: 'i' }
+      query.$or = SEARCH_FIELDS.map(field => ({ [field]: pattern }))
     }
+
+    const projectName = project?.trim()
+    if (projectName) {
+      query.projectName = {
+        $regex: `^${escapeRegex(projectName)}$`,
+        $options: 'i',
+      }
+    }
+
+    const take = Math.min(
+      toPositiveInt(params.limit, DEFAULT_PAGE_SIZE),
+      MAX_PAGE_SIZE
+    )
+    const page = toPositiveInt(params.page, 1)
 
     const entries = await this.entryRepository.find({
       where: query as FindOptionsWhere<CommunityEntry>,
       order: { createdAt: 'DESC' },
+      skip: (page - 1) * take,
+      take,
     })
     return (entries as PostEntry[]).map(toPost)
+  }
+
+  /**
+   * Số liệu tổng quan trên toàn bộ bài đã duyệt (không phụ thuộc phân trang).
+   * ponytail: tính trong bộ nhớ; chuyển sang aggregate khi số bài lên hàng chục nghìn.
+   */
+  async getStats(): Promise<CommunityStats> {
+    const entries = (await this.entryRepository.find({
+      where: { kind: 'post', status: 'approved' },
+      select: ['authorId', 'projectName'],
+    })) as PostEntry[]
+
+    const authors = new Set<string>()
+    const counts = new Map<string, number>()
+    for (const entry of entries) {
+      if (entry.authorId) authors.add(entry.authorId)
+      if (entry.projectName) {
+        counts.set(entry.projectName, (counts.get(entry.projectName) ?? 0) + 1)
+      }
+    }
+    const projects = [...counts.entries()]
+      .map(([name, posts]) => ({ name, posts }))
+      .sort((a, b) => b.posts - a.posts)
+
+    return {
+      contributorCount: authors.size,
+      projectCount: projects.length,
+      projects,
+    }
   }
 
   async findPending(): Promise<CommunityPost[]> {
@@ -104,8 +190,21 @@ export class CommunityService {
     return (entries as PostEntry[]).map(toPost)
   }
 
+  /** Endpoint công khai: bài chưa duyệt hoặc bị từ chối coi như không tồn tại. */
   async findOne(id: string): Promise<CommunityPost> {
-    return toPost(await this.findPostEntry(id))
+    const post = await this.findPostEntry(id)
+    if (post.status !== 'approved') {
+      throw new NotFoundException(`Không tìm thấy bài viết với ID: ${id}`)
+    }
+    return toPost(post)
+  }
+
+  private async findApprovedPostEntry(id: string): Promise<PostEntry> {
+    const post = await this.findPostEntry(id)
+    if (post.status !== 'approved') {
+      throw new NotFoundException(`Không tìm thấy bài viết với ID: ${id}`)
+    }
+    return post
   }
 
   /** Tra bài viết theo `_id` VÀ `kind: 'post'` (id bình luận => 404). */
@@ -135,7 +234,7 @@ export class CommunityService {
 
   async upvote(id: string, userId: string): Promise<CommunityPost> {
     this.logger.log(`User ${userId} toggling upvote on post ${id}`)
-    const post = await this.findPostEntry(id)
+    const post = await this.findApprovedPostEntry(id)
 
     if (!post.upvotes) {
       post.upvotes = []
@@ -168,7 +267,7 @@ export class CommunityService {
     dto: CreateCommentDto
   ): Promise<CommunityComment> {
     this.logger.log(`Adding comment to post ${postId} by user ${authorId}`)
-    const post = await this.findPostEntry(postId)
+    const post = await this.findApprovedPostEntry(postId)
 
     const comment = new CommunityEntry() as CommentEntry
     comment.kind = 'comment'
@@ -189,6 +288,7 @@ export class CommunityService {
     return toComment(savedComment)
   }
 
+  /** Staff gỡ bài vi phạm: báo cho tác giả rồi xóa bài cùng bình luận. */
   async deletePost(id: string): Promise<void> {
     this.logger.log(`Deleting community post: ${id}`)
     const post = await this.findPostEntry(id)
@@ -213,18 +313,51 @@ export class CommunityService {
       }
     }
 
-    // Delete post comments
+    await this.purgePost(id)
+  }
+
+  /** Tác giả tự xóa bài của mình (không gửi thông báo vi phạm). */
+  async deleteOwnPost(id: string, userId: string): Promise<void> {
+    this.logger.log(`User ${userId} deleting own community post: ${id}`)
+    const post = await this.findPostEntry(id)
+    if (post.authorId !== userId) {
+      throw new ForbiddenException('Bạn chỉ có thể xóa bài viết của chính mình')
+    }
+    await this.purgePost(id)
+  }
+
+  private async purgePost(id: string): Promise<void> {
     try {
       await this.entryRepository.delete({ kind: 'comment', postId: id })
     } catch (err) {
       this.logger.warn(`Không thể xóa bình luận của bài viết ${id}:`, err)
     }
-
-    // Delete the post
     await this.entryRepository.delete({ _id: new ObjectId(id), kind: 'post' })
   }
 
-  async deleteComment(id: string): Promise<void> {
+  /** Mọi bình luận con cháu của `rootId` (duyệt theo từng tầng `parentId`). */
+  private async collectDescendantIds(rootId: string): Promise<string[]> {
+    const found: string[] = []
+    let frontier = [rootId]
+    while (frontier.length > 0) {
+      const query: Record<string, unknown> = {
+        kind: 'comment',
+        parentId: { $in: frontier },
+      }
+      const level = (await this.entryRepository.find({
+        where: query as FindOptionsWhere<CommunityEntry>,
+      })) as CommentEntry[]
+      frontier = level.map(c => String(c._id))
+      found.push(...frontier)
+    }
+    return found
+  }
+
+  /**
+   * Xóa bình luận cùng toàn bộ trả lời của nó. `ownerId` (nếu có) buộc người
+   * gọi phải là tác giả; staff gọi không truyền `ownerId`.
+   */
+  async deleteComment(id: string, ownerId?: string): Promise<void> {
     this.logger.log(`Deleting community comment: ${id}`)
     let comment: CommentEntry | null = null
     try {
@@ -238,24 +371,40 @@ export class CommunityService {
     if (!comment) {
       throw new NotFoundException(`Không tìm thấy bình luận với ID: ${id}`)
     }
+    if (ownerId !== undefined && comment.authorId !== ownerId) {
+      throw new ForbiddenException(
+        'Bạn chỉ có thể xóa bình luận của chính mình'
+      )
+    }
 
-    // Delete comment
+    const descendantIds = await this.collectDescendantIds(id)
+
     await this.entryRepository.delete({
       _id: new ObjectId(id),
       kind: 'comment',
     })
-
-    // Also delete any child/nested comments (where parentId === id)
-    try {
-      await this.entryRepository.delete({ kind: 'comment', parentId: id })
-    } catch (err) {
-      this.logger.warn(`Không thể xóa bình luận con của bình luận ${id}:`, err)
+    if (descendantIds.length > 0) {
+      try {
+        const query: Record<string, unknown> = {
+          kind: 'comment',
+          _id: { $in: descendantIds.map(d => new ObjectId(d)) },
+        }
+        await this.entryRepository.delete(query)
+      } catch (err) {
+        this.logger.warn(
+          `Không thể xóa bình luận con của bình luận ${id}:`,
+          err
+        )
+      }
     }
 
-    // Decrement commentsCount of the post
+    // Số bình luận của bài giảm đúng bằng số bình luận đã xóa (gốc + con cháu)
     try {
       const post = await this.findPostEntry(comment.postId)
-      post.commentsCount = Math.max(0, (post.commentsCount || 0) - 1)
+      post.commentsCount = Math.max(
+        0,
+        (post.commentsCount || 0) - (1 + descendantIds.length)
+      )
       await this.entryRepository.save(post)
     } catch (err) {
       this.logger.warn(
