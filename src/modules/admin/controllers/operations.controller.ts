@@ -8,7 +8,7 @@ import {
   OperationsStats,
   OperationsChartData,
 } from '../services/operations.service'
-import { RequirePermission } from '../../rbac/decorators/require-permission.decorator'
+import { RequirePermission } from '../../rbac/guards/require-permission.decorator'
 
 @ApiTags('operations')
 @Controller('operations')

@@ -30,7 +30,7 @@ import {
 } from '../dto/saved-search.dto'
 import { AlertQueryDto } from '../dto/alert-query.dto'
 import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto'
-import { RequirePermission } from '../../rbac/decorators/require-permission.decorator'
+import { RequirePermission } from '../../rbac/guards/require-permission.decorator'
 
 @ApiTags('saved-searches')
 @Controller('saved-searches')

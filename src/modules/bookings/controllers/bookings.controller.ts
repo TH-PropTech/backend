@@ -24,7 +24,7 @@ import { BookingQueryDto } from '../dto/booking-query.dto'
 import { UserPayload } from '../../auth/interfaces/auth.interface'
 import { Booking } from '../schemas/booking.schema'
 import { Public } from '../../../common/decorators/public.decorator'
-import { RequirePermission } from '../../rbac/decorators/require-permission.decorator'
+import { RequirePermission } from '../../rbac/guards/require-permission.decorator'
 
 @ApiTags('bookings')
 @Controller('bookings')

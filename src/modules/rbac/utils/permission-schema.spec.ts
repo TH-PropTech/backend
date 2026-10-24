@@ -1,11 +1,11 @@
 import 'reflect-metadata'
 import { Controller, Get, Post } from '@nestjs/common'
-import { Roles } from '../../common/decorators/roles.decorator'
-import { BookingsController } from '../bookings/controllers/bookings.controller'
-import { KycController } from '../users/controllers/kyc.controller'
-import { WalletController } from '../wallets/controllers/wallet.controller'
+import { Roles } from '../../../common/decorators/roles.decorator'
+import { BookingsController } from '../../bookings/controllers/bookings.controller'
+import { KycController } from '../../users/controllers/kyc.controller'
+import { WalletController } from '../../wallets/controllers/wallet.controller'
 import { buildPermissionSchema } from './permission-schema'
-import { RequirePermission } from './decorators/require-permission.decorator'
+import { RequirePermission } from '../guards/require-permission.decorator'
 
 @Controller('a')
 class RolesFromMethod {

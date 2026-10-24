@@ -22,7 +22,7 @@ import { UserPayload } from '../../auth/interfaces/auth.interface'
 import { CommunityPost } from '../schemas/community-post.schema'
 import { CommunityComment } from '../schemas/community-comment.schema'
 import { Public } from '../../../common/decorators/public.decorator'
-import { RequirePermission } from '../../rbac/decorators/require-permission.decorator'
+import { RequirePermission } from '../../rbac/guards/require-permission.decorator'
 
 @ApiTags('community')
 @Controller('community')

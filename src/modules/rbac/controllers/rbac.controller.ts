@@ -25,7 +25,7 @@ import {
 import {
   buildPermissionSchema,
   type PermissionSchema,
-} from '../permission-schema'
+} from '../utils/permission-schema'
 import type { RolePermissionView, RoleView } from '../schemas/role.schema'
 import { RbacService } from '../services/rbac.service'
 

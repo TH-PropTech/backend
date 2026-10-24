@@ -26,7 +26,7 @@ import {
   type WalletView,
 } from '../services/wallets.service'
 import { PayoutsService } from '../services/payouts.service'
-import { RequirePermission } from '../../rbac/decorators/require-permission.decorator'
+import { RequirePermission } from '../../rbac/guards/require-permission.decorator'
 
 @ApiTags('wallet')
 @ApiBearerAuth()

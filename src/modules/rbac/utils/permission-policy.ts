@@ -1,4 +1,4 @@
-import type { PermissionAction, PermissionSubject } from './rbac.constants'
+import type { PermissionAction, PermissionSubject } from '../rbac.constants'
 
 export interface PolicyEntry {
   action: string

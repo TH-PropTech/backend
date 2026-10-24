@@ -29,7 +29,7 @@ import {
   type DesignRequestDetail,
   type DesignRequestListResult,
 } from '../services/design-requests.service'
-import { RequirePermission } from '../../rbac/decorators/require-permission.decorator'
+import { RequirePermission } from '../../rbac/guards/require-permission.decorator'
 
 function actorOf(user: UserPayload): DesignRequestActor {
   if (!user._id) throw new UnauthorizedException()

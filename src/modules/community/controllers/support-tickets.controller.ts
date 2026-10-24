@@ -32,7 +32,7 @@ import {
 import { SupportTicket } from '../schemas/support-ticket.schema'
 import { TicketMessage } from '../schemas/ticket-message.schema'
 import { UserPayload } from '../../auth/interfaces/auth.interface'
-import { RequirePermission } from '../../rbac/decorators/require-permission.decorator'
+import { RequirePermission } from '../../rbac/guards/require-permission.decorator'
 
 @ApiTags('support-tickets')
 @Controller('support-tickets')

@@ -1,6 +1,6 @@
 import 'reflect-metadata'
 import { METHOD_METADATA } from '@nestjs/common/constants'
-import { ROLES_KEY } from '../../common/decorators/roles.decorator'
+import { ROLES_KEY } from '../../../common/decorators/roles.decorator'
 import {
   MANAGED_ROLES,
   RBAC_SUBJECTS,
@@ -9,7 +9,7 @@ import {
   type PermissionAction,
   type PermissionSubject,
   type RequiredPermission,
-} from './rbac.constants'
+} from '../rbac.constants'
 
 export interface PermissionSchemaRow {
   subject: PermissionSubject

@@ -17,7 +17,7 @@ import {
   type PermissionInputDto,
   type UpdateRoleDto,
 } from '../dto/rbac.dto'
-import { isAllowed, type PolicyEntry } from '../permission-policy'
+import { isAllowed, type PolicyEntry } from '../utils/permission-policy'
 import {
   DEFAULT_ROLES,
   RBAC_ACTIONS,

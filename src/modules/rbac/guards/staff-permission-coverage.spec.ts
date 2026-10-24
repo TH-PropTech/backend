@@ -4,31 +4,31 @@ import {
   METHOD_METADATA,
   PATH_METADATA,
 } from '@nestjs/common/constants'
-import { BookingsController } from '../bookings/controllers/bookings.controller'
-import { CommunityController } from '../community/controllers/community.controller'
-import { SupportTicketsController } from '../community/controllers/support-tickets.controller'
-import { ContractAmendmentController } from '../contracts/controllers/contract-amendment.controller'
-import { ContractsController } from '../contracts/controllers/contracts.controller'
-import { DepositAgreementsController } from '../contracts/controllers/deposit-agreements.controller'
-import { ListingFreshnessController } from '../admin/controllers/listing-freshness.controller'
-import { PaymentsController } from '../payments/controllers/payments.controller'
-import { ApartmentsController } from '../properties/controllers/apartments.controller'
-import { DesignRequestsController } from '../properties/controllers/design-requests.controller'
-import { SafetyReportsController } from '../properties/insights/controllers/safety-reports.controller'
-import { KycController } from '../users/controllers/kyc.controller'
-import { OperationsController } from '../admin/controllers/operations.controller'
-import { FabricController } from '../fabric/controllers/fabric.controller'
-import { ViewingNotesController } from '../bookings/controllers/viewing-notes.controller'
-import { SavedSearchesController } from '../properties/controllers/saved-searches.controller'
-import { RentalApplicationsController } from '../rental/controllers/rental-applications.controller'
-import { PayoutsController } from '../wallets/controllers/payouts.controller'
-import { WalletController } from '../wallets/controllers/wallet.controller'
-import { PermissionsGuard } from './guards/permissions.guard'
+import { BookingsController } from '../../bookings/controllers/bookings.controller'
+import { CommunityController } from '../../community/controllers/community.controller'
+import { SupportTicketsController } from '../../community/controllers/support-tickets.controller'
+import { ContractAmendmentController } from '../../contracts/controllers/contract-amendment.controller'
+import { ContractsController } from '../../contracts/controllers/contracts.controller'
+import { DepositAgreementsController } from '../../contracts/controllers/deposit-agreements.controller'
+import { ListingFreshnessController } from '../../admin/controllers/listing-freshness.controller'
+import { PaymentsController } from '../../payments/controllers/payments.controller'
+import { ApartmentsController } from '../../properties/controllers/apartments.controller'
+import { DesignRequestsController } from '../../properties/controllers/design-requests.controller'
+import { SafetyReportsController } from '../../properties/insights/controllers/safety-reports.controller'
+import { KycController } from '../../users/controllers/kyc.controller'
+import { OperationsController } from '../../admin/controllers/operations.controller'
+import { FabricController } from '../../fabric/controllers/fabric.controller'
+import { ViewingNotesController } from '../../bookings/controllers/viewing-notes.controller'
+import { SavedSearchesController } from '../../properties/controllers/saved-searches.controller'
+import { RentalApplicationsController } from '../../rental/controllers/rental-applications.controller'
+import { PayoutsController } from '../../wallets/controllers/payouts.controller'
+import { WalletController } from '../../wallets/controllers/wallet.controller'
+import { PermissionsGuard } from './permissions.guard'
 import {
   REQUIRE_PERMISSION_KEY,
   type PermissionAction,
   type PermissionSubject,
-} from './rbac.constants'
+} from '../rbac.constants'
 
 /**
  * Mọi route nhân viên dùng phải được gắn `@RequirePermission` đúng action/subject: nếu thiếu thì
