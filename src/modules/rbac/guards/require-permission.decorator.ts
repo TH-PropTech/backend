@@ -5,7 +5,7 @@ import {
   type PermissionAction,
   type PermissionSubject,
 } from '../rbac.constants'
-import { PermissionsGuard } from '../guards/permissions.guard'
+import { PermissionsGuard } from './permissions.guard'
 
 /**
  * Yêu cầu quyền chi tiết (action trên subject) cho khách thuê, chủ nhà và nhân viên theo ma trận

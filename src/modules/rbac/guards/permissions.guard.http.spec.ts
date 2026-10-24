@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common'
 import { Test } from '@nestjs/testing'
 import request from 'supertest'
-import { RequirePermission } from '../decorators/require-permission.decorator'
+import { RequirePermission } from './require-permission.decorator'
 import { RbacService } from '../services/rbac.service'
 
 /**

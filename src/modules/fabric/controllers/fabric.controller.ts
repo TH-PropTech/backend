@@ -75,7 +75,7 @@ import {
   RepairFindingResponseDto,
   StartReconciliationRunDto,
 } from '../dto/ledger-reconciliation.dto'
-import { RequirePermission } from '../../rbac/decorators/require-permission.decorator'
+import { RequirePermission } from '../../rbac/guards/require-permission.decorator'
 
 // ── DTOs ──
 

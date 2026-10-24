@@ -41,7 +41,7 @@ import { KycRecord } from '../schemas/kyc-record.schema'
 import { CurrentUser } from '../../../common/decorators/current-user.decorator'
 import type { Response } from 'express'
 import { KYC_IMAGE_MAX_BYTES, validateKycImage } from '../utils/kyc-image.util'
-import { RequirePermission } from '../../rbac/decorators/require-permission.decorator'
+import { RequirePermission } from '../../rbac/guards/require-permission.decorator'
 
 @ApiTags('kyc')
 @ApiBearerAuth()

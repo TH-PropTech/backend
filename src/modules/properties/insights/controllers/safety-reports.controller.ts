@@ -28,7 +28,7 @@ import {
 import { SafetyReportQueryDto } from '../dto/safety-report-query.dto'
 import { SafetyReport } from '../schemas/safety-report.schema'
 import { UserPayload } from '../../../auth/interfaces/auth.interface'
-import { RequirePermission } from '../../../rbac/decorators/require-permission.decorator'
+import { RequirePermission } from '../../../rbac/guards/require-permission.decorator'
 
 @ApiTags('safety-reports')
 @Controller('safety-reports')

@@ -16,7 +16,7 @@ import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard'
 import type { UserPayload } from '../../auth/interfaces/auth.interface'
 import { Payment } from '../schemas/payment.schema'
 import { PaymentsService } from '../services/payments.service'
-import { RequirePermission } from '../../rbac/decorators/require-permission.decorator'
+import { RequirePermission } from '../../rbac/guards/require-permission.decorator'
 
 @ApiTags('payments')
 @ApiBearerAuth()

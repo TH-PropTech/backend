@@ -30,7 +30,7 @@ import {
   type PayoutSettlement,
 } from '../schemas/payout.schema'
 import type { ContractPayoutSummaryDto } from '../dto/contract-payout-summary.dto'
-import { RequirePermission } from '../../rbac/decorators/require-permission.decorator'
+import { RequirePermission } from '../../rbac/guards/require-permission.decorator'
 
 export class ReportPayoutIssueBody {
   @ApiPropertyOptional({ maxLength: 500 })

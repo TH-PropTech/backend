@@ -11,7 +11,7 @@ import {
 } from '../dto/deposit-agreement.dto'
 import { DepositAgreementsService } from '../services/deposit-agreements.service'
 import { DepositAgreement } from '../schemas/deposit-agreement.schema'
-import { RequirePermission } from '../../rbac/decorators/require-permission.decorator'
+import { RequirePermission } from '../../rbac/guards/require-permission.decorator'
 
 @ApiTags('deposit-agreements')
 @ApiBearerAuth()

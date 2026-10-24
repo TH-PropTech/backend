@@ -27,7 +27,7 @@ import {
 } from '../dto/contract-amendment.dto'
 import type { ContractAmendment } from '../schemas/contract-amendment.schema'
 import type { Response } from 'express'
-import { RequirePermission } from '../../rbac/decorators/require-permission.decorator'
+import { RequirePermission } from '../../rbac/guards/require-permission.decorator'
 
 @ApiTags('contract-amendments')
 @ApiBearerAuth()

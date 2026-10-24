@@ -47,7 +47,7 @@ import {
   apartmentImageFilter,
 } from '../utils/apartment-upload.options'
 import { Public } from '../../../common/decorators/public.decorator'
-import { RequirePermission } from '../../rbac/decorators/require-permission.decorator'
+import { RequirePermission } from '../../rbac/guards/require-permission.decorator'
 
 function isStaffOrAdmin(user: UserPayload): boolean {
   return user.roles?.some(role => ['staff', 'admin'].includes(role)) ?? false
