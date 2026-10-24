@@ -161,7 +161,10 @@ describe('Landlord payout simulated flow (e2e)', () => {
     )
     expect(failed.payout.status).toBe('failed')
     expect(failed.payout.failureReason).toBe('TRANSFER_FAILED')
-    expect(notifications.map(n => n.type)).toEqual(['PAYOUT_PENDING'])
+    expect(notifications.map(n => n.type)).toEqual([
+      'PAYOUT_PENDING',
+      'PAYOUT_FAILED',
+    ])
 
     const retried = await service.retry(payout._id.toHexString())
     expect(retried.status).toBe('pending')
@@ -169,6 +172,7 @@ describe('Landlord payout simulated flow (e2e)', () => {
     expect(retried.txRef).not.toBe(firstTxRef)
     expect(notifications.map(n => n.type)).toEqual([
       'PAYOUT_PENDING',
+      'PAYOUT_FAILED',
       'PAYOUT_PENDING',
     ])
 

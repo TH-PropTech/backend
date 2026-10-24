@@ -13,6 +13,7 @@ import { EkycProxyService } from '../src/modules/ekyc/services/ekyc-proxy.servic
 import { GroqCccdOcrService } from '../src/modules/ekyc/services/groq-cccd-ocr.service'
 import { KycController } from '../src/modules/users/controllers/kyc.controller'
 import { KycService } from '../src/modules/users/services/kyc.service'
+import { PermissionsGuard } from '../src/modules/rbac/guards/permissions.guard'
 
 type AuthenticatedRequest = ExpressRequest & {
   user?: { _id: string; roles: string[] }
@@ -66,6 +67,8 @@ describe('KYC HTTP flow', () => {
       .overrideGuard(JwtAuthGuard)
       .useValue({ canActivate: () => true })
       .overrideGuard(RolesGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(PermissionsGuard)
       .useValue({ canActivate: () => true })
       .compile()
 
