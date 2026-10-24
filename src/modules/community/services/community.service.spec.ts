@@ -1,4 +1,4 @@
-import { NotFoundException } from '@nestjs/common'
+import { ForbiddenException, NotFoundException } from '@nestjs/common'
 import { ObjectId } from 'mongodb'
 import { CommunityService } from './community.service'
 import type {
@@ -48,6 +48,7 @@ const post = (extra: Partial<PostEntry> = {}): PostEntry =>
     kind: 'post',
     authorId: 'author-1',
     title: 'Bài viết cần kiểm duyệt',
+    status: 'approved',
     commentsCount: 2,
     ...extra,
   }) as PostEntry
@@ -116,13 +117,96 @@ describe('CommunityService moderation', () => {
       _id: new ObjectId(commentId),
       kind: 'comment',
     })
-    expect(entryRepository.delete).toHaveBeenNthCalledWith(2, {
-      kind: 'comment',
-      parentId: commentId,
-    })
+    expect(entryRepository.delete).toHaveBeenCalledTimes(1)
     expect(entryRepository.save).toHaveBeenCalledWith(
       expect.objectContaining({ commentsCount: 0 })
     )
+  })
+
+  it('deletes every nested reply and lowers commentsCount by the full amount removed', async () => {
+    const { service, entryRepository } = createService()
+    const childId = new ObjectId('507f1f77bcf86cd799439021')
+    const grandChildId = new ObjectId('507f1f77bcf86cd799439022')
+    entryRepository.findOne
+      .mockResolvedValueOnce({
+        _id: new ObjectId(commentId),
+        kind: 'comment',
+        postId,
+        authorId: 'u1',
+      })
+      .mockResolvedValueOnce(post({ commentsCount: 5 }))
+    entryRepository.find
+      .mockResolvedValueOnce([{ _id: childId }])
+      .mockResolvedValueOnce([{ _id: grandChildId }])
+      .mockResolvedValueOnce([])
+
+    await service.deleteComment(commentId)
+
+    expect(entryRepository.delete).toHaveBeenCalledWith({
+      kind: 'comment',
+      _id: { $in: [childId, grandChildId] },
+    })
+    expect(entryRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({ commentsCount: 2 })
+    )
+  })
+
+  it('refuses to delete a comment owned by someone else when an owner is required', async () => {
+    const { service, entryRepository } = createService()
+    entryRepository.findOne.mockResolvedValue({
+      _id: new ObjectId(commentId),
+      kind: 'comment',
+      postId,
+      authorId: 'u1',
+    })
+
+    await expect(service.deleteComment(commentId, 'u2')).rejects.toBeInstanceOf(
+      ForbiddenException
+    )
+    expect(entryRepository.delete).not.toHaveBeenCalled()
+  })
+
+  it('lets the author delete their own comment', async () => {
+    const { service, entryRepository } = createService()
+    entryRepository.findOne
+      .mockResolvedValueOnce({
+        _id: new ObjectId(commentId),
+        kind: 'comment',
+        postId,
+        authorId: 'u1',
+      })
+      .mockResolvedValueOnce(post({ commentsCount: 1 }))
+
+    await expect(
+      service.deleteComment(commentId, 'u1')
+    ).resolves.toBeUndefined()
+    expect(entryRepository.delete).toHaveBeenCalledWith({
+      _id: new ObjectId(commentId),
+      kind: 'comment',
+    })
+  })
+
+  it('lets the author delete their own post without a violation notification', async () => {
+    const { service, entryRepository, notificationRepository } = createService()
+    entryRepository.findOne.mockResolvedValue(post({ authorId: 'u1' }))
+
+    await service.deleteOwnPost(postId, 'u1')
+
+    expect(notificationRepository.save).not.toHaveBeenCalled()
+    expect(entryRepository.delete).toHaveBeenCalledWith({
+      _id: new ObjectId(postId),
+      kind: 'post',
+    })
+  })
+
+  it('refuses to delete a post owned by someone else', async () => {
+    const { service, entryRepository } = createService()
+    entryRepository.findOne.mockResolvedValue(post({ authorId: 'u1' }))
+
+    await expect(service.deleteOwnPost(postId, 'u2')).rejects.toBeInstanceOf(
+      ForbiddenException
+    )
+    expect(entryRepository.delete).not.toHaveBeenCalled()
   })
 
   it('rejects deletion of an unknown comment', async () => {
@@ -163,27 +247,129 @@ describe('CommunityService behaviour (G-CMT, kind-scoped)', () => {
     expect(result).not.toHaveProperty('kind')
   })
 
-  it('findAllApproved filters kind, approved, topic and project regex, newest first', async () => {
+  it('findAllApproved filters kind, approved, topic, project and keyword, newest first, paginated', async () => {
     const { service, entryRepository } = createService()
-    await service.findAllApproved('review', 'abc')
+    await service.findAllApproved({
+      topic: 'review',
+      search: 'abc',
+      project: 'Landmark 81',
+      page: 3,
+      limit: 10,
+    })
     expect(entryRepository.find).toHaveBeenCalledWith({
       where: {
         kind: 'post',
         status: 'approved',
         topic: 'review',
-        projectName: { $regex: 'abc', $options: 'i' },
+        $or: [
+          { title: { $regex: 'abc', $options: 'i' } },
+          { content: { $regex: 'abc', $options: 'i' } },
+          { projectName: { $regex: 'abc', $options: 'i' } },
+          { authorName: { $regex: 'abc', $options: 'i' } },
+        ],
+        projectName: { $regex: '^Landmark 81$', $options: 'i' },
       },
       order: { createdAt: 'DESC' },
+      skip: 20,
+      take: 10,
     })
   })
 
-  it('findAllApproved without filters still scopes to posts', async () => {
+  it('findAllApproved escapes regex metacharacters in user input', async () => {
+    const { service, entryRepository } = createService()
+    await service.findAllApproved({ search: '(a+)+$', project: 'A.B' })
+    const [query] = entryRepository.find.mock.calls[0] as [
+      {
+        where: {
+          $or: { title: { $regex: string } }[]
+          projectName: { $regex: string }
+        }
+      },
+    ]
+    expect(query.where.$or[0]?.title.$regex).toBe('\\(a\\+\\)\\+\\$')
+    expect(query.where.projectName.$regex).toBe('^A\\.B$')
+  })
+
+  it('findAllApproved defaults to the first page of 20 and caps the page size at 50', async () => {
     const { service, entryRepository } = createService()
     await service.findAllApproved()
-    expect(entryRepository.find).toHaveBeenCalledWith({
+    expect(entryRepository.find).toHaveBeenLastCalledWith({
       where: { kind: 'post', status: 'approved' },
       order: { createdAt: 'DESC' },
+      skip: 0,
+      take: 20,
     })
+
+    await service.findAllApproved({ limit: 9999, page: -4 })
+    expect(entryRepository.find).toHaveBeenLastCalledWith(
+      expect.objectContaining({ skip: 0, take: 50 })
+    )
+  })
+
+  it('getStats counts distinct contributors and posts per project over approved posts', async () => {
+    const { service, entryRepository } = createService()
+    entryRepository.find.mockResolvedValue([
+      { authorId: 'u1', projectName: 'A' },
+      { authorId: 'u1', projectName: 'B' },
+      { authorId: 'u2', projectName: 'A' },
+      { authorId: 'u3', projectName: '' },
+    ])
+
+    await expect(service.getStats()).resolves.toEqual({
+      contributorCount: 3,
+      projectCount: 2,
+      projects: [
+        { name: 'A', posts: 2 },
+        { name: 'B', posts: 1 },
+      ],
+    })
+    expect(entryRepository.find).toHaveBeenCalledWith({
+      where: { kind: 'post', status: 'approved' },
+      select: ['authorId', 'projectName'],
+    })
+  })
+
+  it('getStats returns zeros when there are no approved posts', async () => {
+    const { service } = createService()
+    await expect(service.getStats()).resolves.toEqual({
+      contributorCount: 0,
+      projectCount: 0,
+      projects: [],
+    })
+  })
+
+  it('createPost keeps only https images and at most five', async () => {
+    const { service } = createService()
+    const result = await service.createPost('u1', 'U', 'tenant', {
+      title: 't',
+      content: 'c',
+      projectName: 'p',
+      topic: 'qa',
+      images: [
+        'blob:http://localhost/abc',
+        'file:///tmp/a.jpg',
+        'http://insecure/a.jpg',
+        ...Array.from({ length: 7 }, (_, i) => `https://cdn.example/${i}.jpg`),
+      ],
+    } as never)
+    expect(result.images).toHaveLength(5)
+    expect(result.images.every(url => url.startsWith('https://'))).toBe(true)
+  })
+
+  it('hides unapproved posts from the public findOne and blocks upvote/comment on them', async () => {
+    const { service, entryRepository } = createService()
+    entryRepository.findOne.mockResolvedValue(post({ status: 'pending' }))
+
+    await expect(service.findOne(postId)).rejects.toBeInstanceOf(
+      NotFoundException
+    )
+    await expect(service.upvote(postId, 'u1')).rejects.toBeInstanceOf(
+      NotFoundException
+    )
+    await expect(
+      service.addComment(postId, 'u1', 'U', 'tenant', { content: 'x' })
+    ).rejects.toBeInstanceOf(NotFoundException)
+    expect(entryRepository.save).not.toHaveBeenCalled()
   })
 
   it('findPending and findMyPosts are scoped to kind=post, newest first, without kind in results', async () => {
