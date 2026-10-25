@@ -91,6 +91,16 @@ describe('ApartmentResponseMapper rental pricing', () => {
     } as never)
     expect(rented.tag).toBe('rented')
     expect(rented.rentalAvailabilityStatus).toBe('rented')
+    const rentedWithoutReservation = ApartmentResponseMapper.toWebJson({
+      ...apartment,
+      status: 'rented',
+      rentalReservation: null,
+    } as never)
+    expect(rentedWithoutReservation.tag).toBe('rented')
+    expect(rentedWithoutReservation.rentalAvailabilityStatus).toBe('rented')
+    expect(rentedWithoutReservation.rentalAvailabilityLabel).toBe(
+      'Đang cho thuê'
+    )
   })
 
   it('defaults legacy listings to an empty package list', () => {

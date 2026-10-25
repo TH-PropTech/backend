@@ -541,9 +541,9 @@ export class ApartmentsService {
       }
     }
 
-    // Mặc định chỉ hiển thị bài đăng đã duyệt cho public
+    // Mặc định hiển thị bài đăng đã duyệt cho public (gồm cả căn đang trống và căn đang cho thuê)
     if (!query.status && !query.landlordId) {
-      query.status = 'available'
+      query.status = { $in: ['available', 'rented'] }
     }
 
     const apartments = await this.apartmentRepository.find({
