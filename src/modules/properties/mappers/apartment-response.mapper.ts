@@ -303,6 +303,9 @@ export class ApartmentResponseMapper {
     status: 'available' | 'reserved' | 'deposit-paid' | 'rented'
     label: string
   } {
+    if (apartment.status === 'rented') {
+      return { status: 'rented', label: 'Đang cho thuê' }
+    }
     const reservation = apartment.rentalReservation
     if (reservation?.contractId) {
       return { status: 'rented', label: 'Đang cho thuê' }
