@@ -178,11 +178,12 @@ describe('rental package rules', () => {
     }
   )
 
-  it('keeps the legacy package snapshot unchanged when settlement policy is absent', () => {
+  it('keeps the legacy package snapshot unchanged (except the default move-out policy) when settlement policy is absent', () => {
     const result = validateRentalPackages([validPackages[0]!])
 
     expect(result.packages[0]).toEqual({
       ...validPackages[0],
+      moveOutPolicy: { responseDays: 3 },
       resolvedDepositAmount: 24_000_000,
       status: 'active',
     })
@@ -245,5 +246,33 @@ describe('prepaid rent policy', () => {
     const snapshot = first(pkg({ type: 'MONTHS', months: 3 }))
     expect(snapshot.resolvedDepositAmount).toBe(10_000_000)
     expect(snapshot.resolvedPrepaidRentAmount).toBe(30_000_000)
+  })
+  describe('move-out response days', () => {
+    const base: RentalPackageInput = {
+      packageId: 'pkg-mo',
+      version: 1,
+      durationMonths: 12,
+      monthlyRent: 12_000_000,
+      depositPolicy: { type: 'MONTHS_OF_RENT', months: 2 },
+      status: 'active',
+    }
+    const withDays = (responseDays: unknown): RentalPackageInput =>
+      ({ ...base, moveOutPolicy: { responseDays } }) as RentalPackageInput
+
+    it.each([1, 7, 15])('accepts %i days and keeps it in the record', days => {
+      const result = validateRentalPackages([withDays(days)])
+      expect(result.packages[0]?.moveOutPolicy).toEqual({ responseDays: days })
+    })
+
+    it.each([0, 16, -1, 1.5, Number.NaN, '3'])('rejects %p', days => {
+      expect(() => validateRentalPackages([withDays(days)])).toThrow(
+        'INVALID_RENTAL_PACKAGE: invalid move-out response days'
+      )
+    })
+
+    it('defaults legacy packages without the field to 3 days', () => {
+      const result = validateRentalPackages([base])
+      expect(result.packages[0]?.moveOutPolicy).toEqual({ responseDays: 3 })
+    })
   })
 })

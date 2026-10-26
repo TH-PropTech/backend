@@ -109,6 +109,19 @@ class SettlementPolicyDto {
   firstPaymentDueOffsetDays!: number
 }
 
+class MoveOutPolicyDto {
+  @ApiProperty({
+    minimum: 1,
+    maximum: 15,
+    description:
+      'Số ngày (theo lịch) khách có để phản hồi biên bản trả nhà và bảng khấu trừ cọc',
+  })
+  @IsInt()
+  @Min(1)
+  @Max(15)
+  responseDays!: number
+}
+
 export class RentalPackageDto {
   @IsString()
   @IsNotEmpty()
@@ -148,6 +161,16 @@ export class RentalPackageDto {
   @ValidateNested()
   @Type(() => PrepaidRentDto)
   prepaidRent?: PrepaidRentDto
+
+  @ApiPropertyOptional({
+    type: MoveOutPolicyDto,
+    description: 'Vắng mặt = mặc định 3 ngày',
+  })
+  @IsOptional()
+  @IsObject()
+  @ValidateNested()
+  @Type(() => MoveOutPolicyDto)
+  moveOutPolicy?: MoveOutPolicyDto
 
   @ApiPropertyOptional({ description: 'Số tháng trả trước đã quy đổi' })
   @IsOptional()

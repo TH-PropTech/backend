@@ -1,5 +1,7 @@
 import { ContractDocumentProjector } from './contract-document.projector'
 import { Contract } from '../schemas/contract.schema'
+import { buildReviewedLeaseTemplateSeed } from './lease-template.seed'
+import type { RentalPackageSnapshot } from '../../properties/utils/rental-package.util'
 
 describe('ContractDocumentProjector', () => {
   const mockContract: Partial<Contract> = {
@@ -126,5 +128,96 @@ describe('ContractDocumentProjector', () => {
       { id: 'extra', title: 'Extra', content: 'Visible', enabled: true },
     ])
     expect(result.sections).toHaveLength(12)
+  })
+  describe('move-out and deposit refund clauses', () => {
+    const seed = buildReviewedLeaseTemplateSeed('PRIVATE_CIVIL_APARTMENT_LEASE')
+    const template = {
+      legalProfile: seed.legalProfile,
+      version: 3,
+      templateKey: 'VN_INDIVIDUAL_RESIDENTIAL_LEASE',
+      schemaVersion: seed.schemaVersion,
+      contentHash: 'hash',
+      clauses: seed.clauses,
+      annexDefinitions: seed.annexDefinitions,
+      citationIds: seed.citationIds,
+    }
+    const snapshotWith = (moveOutPolicy?: {
+      responseDays: number
+    }): RentalPackageSnapshot => ({
+      packageId: 'pkg-12',
+      version: 1,
+      durationMonths: 12,
+      monthlyRent: 18000000,
+      depositPolicy: { type: 'MONTHS_OF_RENT', months: 2 },
+      resolvedDepositAmount: 36000000,
+      ...(moveOutPolicy ? { moveOutPolicy } : {}),
+    })
+    const project = (
+      packageSnapshot?: RentalPackageSnapshot
+    ): ReturnType<typeof ContractDocumentProjector.projectDocument> =>
+      ContractDocumentProjector.projectDocument(
+        { ...mockContract, packageSnapshot } as Contract,
+        template
+      )
+
+    it('prints the response days from the frozen package snapshot', () => {
+      const article9 = project(snapshotWith({ responseDays: 7 })).sections[8]!
+      expect(article9.content).toContain(
+        'Bên B có 7 ngày kể từ ngày nhận được biên bản'
+      )
+      expect(article9.content).toContain(
+        'có 7 ngày kể từ ngày nhận được bảng khấu trừ'
+      )
+      expect(article9.content).not.toContain('{{')
+    })
+
+    it.each([
+      ['legacy snapshot without the field', snapshotWith()],
+      ['contract without any snapshot', undefined],
+    ])('falls back to 3 days for a %s', (_name, packageSnapshot) => {
+      expect(project(packageSnapshot).sections[8]!.content).toContain(
+        'Bên B có 3 ngày kể từ ngày nhận được biên bản'
+      )
+    })
+
+    it('states direct refund by the landlord within 07 calendar days', () => {
+      const article5 = project(snapshotWith()).sections[4]!.content
+      const article9 = project(snapshotWith()).sections[8]!.content
+      expect(article5).toContain('Bên A giữ')
+      expect(article5).toContain('07 (bảy) ngày')
+      expect(article5).not.toContain('ngày làm việc')
+      expect(article5).toContain('không nhận, không giữ và không chuyển tiền')
+      expect(article9).toContain('biên bản trả nhà')
+      expect(article9).toContain('bảng khấu trừ')
+      expect(article9).toContain('lời khai của Bên A')
+      expect(article9).toContain('nền tảng không bảo đảm')
+      expect(article9).toContain('được xem là Bên B chấp nhận')
+      expect(article9).toContain('tranh chấp')
+    })
+
+    it('keeps the structured fallback consistent with the template', () => {
+      const withSnapshot = ContractDocumentProjector.projectDocument({
+        ...mockContract,
+        packageSnapshot: snapshotWith({ responseDays: 10 }),
+      } as Contract)
+      const clause = withSnapshot.sections[7]!.content
+      expect(clause).toContain('07 (bảy) ngày')
+      expect(clause).not.toContain('ngày làm việc')
+      expect(clause).toContain('Bên Thuê có 10 ngày')
+      expect(clause).toContain('biên bản trả nhà')
+      expect(clause).toContain('bảng khấu trừ')
+
+      const legacy = ContractDocumentProjector.projectDocument(
+        mockContract as Contract
+      )
+      expect(legacy.sections[7]!.content).toContain('Bên Thuê có 3 ngày')
+    })
+
+    it('contains no mojibake in the new clauses', () => {
+      const text = project(snapshotWith())
+        .sections.map(s => s.content)
+        .join(' ')
+      expect(text).not.toMatch(/Ã|Â|â€|Ä/)
+    })
   })
 })

@@ -43,6 +43,7 @@ export const CONTRACT_TEMPLATE_VARIABLE_ALLOWLIST = Object.freeze([
   'paymentDay',
   'latePenaltyRate',
   'terminationNoticeDays',
+  'moveOutResponseDays',
 ])
 
 export const CONTRACT_TEMPLATE_ADDENDUM_ALLOWLIST = Object.freeze([

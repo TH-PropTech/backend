@@ -102,6 +102,42 @@ describe('CreateApartmentDto validation (design §8)', () => {
     })
   })
 
+  describe('move-out policy in a rental package', () => {
+    const withMoveOut = (moveOutPolicy: unknown): Record<string, unknown> => ({
+      ...validPayload,
+      rentalPackages: [
+        {
+          packageId: 'pkg-12m',
+          version: 1,
+          durationMonths: 12,
+          monthlyRent: 12_000_000,
+          depositPolicy: { type: 'MONTHS_OF_RENT', months: 2 },
+          status: 'active',
+          moveOutPolicy,
+        },
+      ],
+    })
+
+    it.each([[undefined], [{ responseDays: 1 }], [{ responseDays: 15 }]])(
+      'accepts %j',
+      async moveOutPolicy => {
+        expect(await invalidFields(withMoveOut(moveOutPolicy))).toEqual([])
+      }
+    )
+
+    it.each([
+      [{ responseDays: 0 }],
+      [{ responseDays: 16 }],
+      [{ responseDays: 2.5 }],
+      [{ responseDays: '3' }],
+      [{}],
+    ])('rejects %j', async moveOutPolicy => {
+      expect(await invalidFields(withMoveOut(moveOutPolicy))).toContain(
+        'rentalPackages'
+      )
+    })
+  })
+
   it('rejects invalid settlement policy fields in a rental package', async () => {
     expect(
       await invalidFields({

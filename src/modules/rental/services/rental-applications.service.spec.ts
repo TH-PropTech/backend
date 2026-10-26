@@ -469,6 +469,33 @@ describe('RentalApplicationsService', () => {
     expect(result.reviewSnapshot?.reviewHash).toBeDefined()
   })
 
+  it.each([
+    ['freezes the response days chosen in the listing', { responseDays: 7 }, 7],
+    ['falls back to 3 days for a legacy package', undefined, 3],
+  ])('%s in the package snapshot', async (_name, moveOutPolicy, expected) => {
+    apartments.findOne.mockResolvedValue({
+      ...apartment,
+      rentalPackages: [
+        {
+          ...apartment.rentalPackages[0],
+          ...(moveOutPolicy ? { moveOutPolicy } : {}),
+        },
+      ],
+    })
+    repository.findOne.mockResolvedValue(null)
+    repository.create.mockImplementation(
+      (value: unknown) =>
+        ({ _id: new ObjectId(), ...(value as object) }) as RentalApplication
+    )
+    repository.save.mockImplementation(value => Promise.resolve(value))
+
+    const result = await service.create('tenant-1', input())
+
+    expect(result.packageSnapshot?.moveOutPolicy).toEqual({
+      responseDays: expected,
+    })
+  })
+
   it('requires a selection when a package exposes multiple execution policies', async () => {
     const depositFirst = getDefaultRentalExecutionPolicyRef()
     const signFirstInput = DEFAULT_RENTAL_EXECUTION_POLICY_INPUTS[0]

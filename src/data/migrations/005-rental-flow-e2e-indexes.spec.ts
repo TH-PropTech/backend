@@ -40,6 +40,14 @@ describe('rental flow e2e indexes migration', () => {
           collection: 'move_in_settlements',
           name: 'move_in_settlements_contract_unique',
         }),
+        expect.objectContaining({
+          collection: 'move_out_handovers',
+          name: 'move_out_handovers_contract_unique',
+        }),
+        expect.objectContaining({
+          collection: 'deposit_settlement_statements',
+          name: 'deposit_settlement_statements_contract_unique',
+        }),
       ])
     )
   })

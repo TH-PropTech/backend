@@ -1,3 +1,4 @@
+import { DEPOSIT_REFUND_DUE_TEXT } from '../../rental/utils/deposit-refund.constants'
 import type { LegalDocCategory } from './legal-knowledge.types'
 
 export interface PlatformFaqEntry {
@@ -104,7 +105,7 @@ Khách phải đồng ý với đúng phiên bản thỏa thuận đặt cọc t
 Theo điều khoản dịch vụ, nền tảng không giữ hộ tiền cọc. Tiền cọc được chuyển trực tiếp đến tài khoản ngân hàng đã liên kết của chủ nhà. Khách nhận biên nhận điện tử có mã biên nhận và mã băm để đối chiếu.
 
 ## Khi nào được hoàn lại cọc
-Theo mẫu hợp đồng thuê hiện hành, tiền cọc được trả lại đủ trong vòng 07 ngày làm việc sau khi bên thuê trả lại nhà và hai bên lập biên bản thanh lý, sau khi trừ tiền thuê, chi phí dịch vụ còn nợ và thiệt hại có chứng từ hợp lệ. Tiền cọc không tự động bù vào tiền thuê hàng tháng, trừ khi hai bên có thỏa thuận bằng văn bản. Hiện hệ thống chưa tự động hoàn cọc, việc hoàn cọc do hai bên thực hiện theo hợp đồng, khi có tranh chấp hãy liên hệ nhân viên hỗ trợ.
+Theo mẫu hợp đồng thuê hiện hành, tiền cọc do chủ nhà giữ và được hoàn trả trực tiếp cho bên thuê, nền tảng không nhận, không giữ và không chuyển tiền cọc. Khi bên thuê trả nhà, chủ nhà lập biên bản trả nhà rồi bảng khấu trừ cọc (lý do, số tiền và chứng từ từng khoản). Bên thuê có số ngày phản hồi đã ghi trong hợp đồng để chấp nhận hoặc phản đối; quá hạn mà không phản hồi thì được xem là chấp nhận. Sau đó chủ nhà hoàn cọc trong ${DEPOSIT_REFUND_DUE_TEXT} theo lịch, sau khi trừ tiền thuê, chi phí dịch vụ còn nợ và thiệt hại có chứng từ hợp lệ, rồi ghi nhận "đã hoàn" trên hệ thống để bên thuê xác nhận đã nhận. Bản ghi "đã hoàn" là lời khai của chủ nhà được bên thuê xác nhận, nền tảng không bảo đảm khoản tiền. Tiền cọc không tự động bù vào tiền thuê hàng tháng, trừ khi hai bên có thỏa thuận bằng văn bản. Nếu hai bên không thống nhất, mỗi bên có thể yêu cầu ghi nhận tranh chấp trên hệ thống; nền tảng không phân xử, hãy liên hệ nhân viên hỗ trợ.
 
 ## Khi nào mất cọc
 Theo hợp đồng thuê và Điều 328 Bộ luật Dân sự 2015: bên thuê từ chối ký hợp đồng hoặc chấm dứt trái quy định thì mất tiền cọc. Bên cho thuê từ chối ký hoặc chấm dứt trái quy định thì phải trả lại tiền cọc và bồi thường một khoản tương đương tiền cọc.

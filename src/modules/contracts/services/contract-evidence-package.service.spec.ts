@@ -329,6 +329,9 @@ describe('ContractEvidencePackageService manifest builder (PROP-399 tasks 9.2/9.
         termination: { present: false, entry: null },
         settlement: { present: false, entry: null },
         handover: { present: false, entry: null },
+        moveOutHandover: { present: false, entry: null },
+        depositStatement: { present: false, entry: null },
+        depositRefunds: { present: false, entry: null },
       })
       expect(plan.entries.map(e => e.path)).toEqual([
         'verification-report.json',
@@ -336,6 +339,69 @@ describe('ContractEvidencePackageService manifest builder (PROP-399 tasks 9.2/9.
         'evidence/ledger-events.json',
       ])
       expect(plan.manifest.governanceSnapshot).toBeNull()
+    })
+
+    it('adds move-out entries, keeps party content, strips secrets, and flags refunds as declarations', () => {
+      const plan = service.buildPlan(
+        baseInput({
+          governance: null,
+          moveOut: {
+            moveOutPolicy: { responseDays: 3 },
+            handover: {
+              revision: 1,
+              notes: 'ghi chú',
+              apiKey: 'SECRET',
+              status: 'completed',
+            },
+            statement: {
+              status: 'closed',
+              lines: [{ id: 'a', reason: 'x', amount: 1 }],
+              refunds: [
+                { id: 'r', amount: 1, recordedAt: new Date('2026-01-01') },
+              ],
+            },
+          },
+        })
+      )
+      const paths = plan.entries.map(e => e.path)
+      expect(paths).toEqual(
+        expect.arrayContaining([
+          'evidence/move-out-handover.json',
+          'evidence/deposit-statement.json',
+          'evidence/deposit-refunds.json',
+        ])
+      )
+      const content = plan.entries
+        .filter(e => e.path.includes('move-out-handover'))
+        .map(e => (e.source as { content: string }).content)
+        .join()
+      expect(content).toContain('ghi chú')
+      expect(content).toContain('responseDays')
+      expect(content).not.toContain('SECRET')
+      expect(plan.verification.notices).toEqual([
+        'REFUND_RECORDS_ARE_LANDLORD_DECLARATIONS_ACKNOWLEDGED_BY_TENANT',
+      ])
+    })
+
+    it('treats moveOut null or with no refunds as absent and adds no notice', () => {
+      const plan = service.buildPlan(
+        baseInput({
+          governance: null,
+          moveOut: {
+            moveOutPolicy: null,
+            handover: null,
+            statement: { status: 'draft', lines: [], refunds: [] },
+          },
+        })
+      )
+      expect(plan.manifest.categories.moveOutHandover.present).toBe(false)
+      expect(plan.manifest.categories.depositStatement.present).toBe(true)
+      expect(plan.manifest.categories.depositRefunds.present).toBe(false)
+      expect(plan.verification.notices).toBeUndefined()
+      expect(
+        service.buildPlan(baseInput({ governance: null, moveOut: null }))
+          .manifest.categories.depositStatement.present
+      ).toBe(false)
     })
 
     it('treats empty arrays like absent categories and still succeeds with no ledger events', () => {

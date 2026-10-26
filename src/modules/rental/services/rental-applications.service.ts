@@ -33,6 +33,7 @@ import { CreateRentalApplicationDto } from '../dto/create-rental-application.dto
 import type { RentalApplicationContext } from '../dto/rental-application-context.dto'
 import { RentalApplicationQueryDto } from '../dto/rental-application-query.dto'
 import { RespondRentalApplicationDto } from '../dto/respond-rental-application.dto'
+import { DEFAULT_MOVE_OUT_RESPONSE_DAYS } from '../utils/deposit-refund.constants'
 import {
   buildRentalDisclosureHash,
   buildRentalReviewHash,
@@ -304,6 +305,9 @@ export class RentalApplicationsService {
     const listingSnapshot = this.toListingSnapshot(apartment)
     const packageSnapshot: RentalPackageRecord = {
       ...selectedPackage,
+      moveOutPolicy: selectedPackage.moveOutPolicy ?? {
+        responseDays: DEFAULT_MOVE_OUT_RESPONSE_DAYS,
+      },
       defaultExecutionPolicy: executionPolicySnapshot,
       currency: 'VND',
       capturedAt,

@@ -51,6 +51,8 @@ function setup(
     payments?: Row[]
     amendments?: Row[]
     settlement?: Row | null
+    moveOutHandover?: Row | null
+    depositStatement?: Row | null
     governance?: Row | null
     events?: Row[]
     recordFails?: boolean
@@ -139,6 +141,8 @@ function setup(
     repo(options.payments ?? []) as never,
     repo(options.amendments ?? []) as never,
     repo(options.settlement ?? null) as never,
+    repo(options.moveOutHandover ?? null) as never,
+    repo(options.depositStatement ?? null) as never,
     {
       getById: jest.fn().mockResolvedValue(options.governance ?? undefined),
     } as never,
@@ -575,6 +579,184 @@ describe('ContractEvidencePackageExportService (PROP-399 tasks 9.5/9.6)', () => 
       ]) {
         expect(all).not.toContain(forbidden)
       }
+    })
+
+    describe('move-out documents', () => {
+      const admin = { id: 'admin-1', roles: ['admin'] }
+      const moveOutRows = (): Pick<
+        NonNullable<Parameters<typeof setup>[0]>,
+        'contract' | 'moveOutHandover' | 'depositStatement'
+      > => ({
+        contract: contract({
+          packageSnapshot: { moveOutPolicy: { responseDays: 5 } },
+        }),
+        moveOutHandover: {
+          _id: new ObjectId(),
+          contractId: CONTRACT_ID.toHexString(),
+          tenantId: 'tenant-1',
+          revision: 2,
+          handedBackAt: new Date('2026-12-01T00:00:00.000Z'),
+          meterReadings: { electricity: 120, water: 8 },
+          keyCount: 2,
+          inventoryItems: [{ name: 'Sofa', quantity: 1, condition: 'damaged' }],
+          notes: 'Trầy xước',
+          discrepancies: [
+            { revision: 1, note: 'Khách phản đối', at: new Date('2026-12-02') },
+          ],
+          revisionHistory: [
+            { revision: 1, handoverHash: '1'.repeat(64), keyCount: 1 },
+          ],
+          responseDays: 5,
+          status: 'completed',
+          handoverHash: '2'.repeat(64),
+          completionReason: 'both-confirmed',
+          evidence: { manifestHash: '3'.repeat(64), txHash: 'tx-mo' },
+        },
+        depositStatement: {
+          _id: new ObjectId(),
+          depositAmount: 5000000,
+          lines: [
+            {
+              id: 'l1',
+              reason: 'Sửa sofa',
+              amount: 300000,
+              evidenceUrls: ['https://cdn.example/a.jpg'],
+              tenantResponse: {
+                decision: 'reject',
+                note: 'Không đồng ý',
+                at: new Date('2026-12-04'),
+              },
+            },
+          ],
+          status: 'refund-recorded',
+          statementHash: '4'.repeat(64),
+          refundDueAt: new Date('2026-12-11'),
+          refundOverdueAt: new Date('2026-12-12'),
+          auditLog: [{ at: new Date('2026-12-05'), action: 'submitted' }],
+          refunds: [
+            {
+              id: 'r2',
+              amount: 100,
+              transactionRef: 'FT2',
+              recordedAt: new Date('2026-12-09'),
+              recordedBy: 'landlord-1',
+              tenantAcknowledgedAt: null,
+            },
+            {
+              id: 'r1',
+              amount: 4700000,
+              transactionRef: 'FT1',
+              recordedAt: new Date('2026-12-08'),
+              recordedBy: 'landlord-1',
+              tenantAcknowledgedAt: new Date('2026-12-09'),
+            },
+          ],
+        },
+      })
+
+      it('includes handover revisions, responses, statement lines, refunds and the package policy', async () => {
+        const { entries } = await exportZip(setup(moveOutRows()), admin)
+        const handover = json(entries, 'evidence/move-out-handover.json') as Row
+        expect(handover).toMatchObject({
+          revision: 2,
+          meterReadings: { electricity: 120, water: 8 },
+          keyCount: 2,
+          notes: 'Trầy xước',
+          moveOutPolicy: { responseDays: 5 },
+        })
+        expect(handover.revisionHistory).toHaveLength(1)
+        expect(handover.discrepancies).toHaveLength(1)
+        const statement = json(
+          entries,
+          'evidence/deposit-statement.json'
+        ) as Row
+        expect(statement).toMatchObject({
+          refundOverdueAt: '2026-12-12T00:00:00.000Z',
+          moveOutPolicy: { responseDays: 5 },
+        })
+        expect(JSON.stringify(statement.lines)).toContain('a.jpg')
+        expect(JSON.stringify(statement.lines)).toContain('Không đồng ý')
+        expect(statement.auditLog).toHaveLength(1)
+        const refunds = json(entries, 'evidence/deposit-refunds.json') as Row[]
+        expect(refunds.map(r => r.id)).toEqual(['r1', 'r2'])
+        expect(JSON.stringify(refunds)).not.toContain('recordedBy')
+        const report = json(entries, 'verification-report.json') as Row
+        expect(report.notices).toEqual([
+          'REFUND_RECORDS_ARE_LANDLORD_DECLARATIONS_ACKNOWLEDGED_BY_TENANT',
+        ])
+      })
+
+      it('produces a deterministic package hash and manifest categories', async () => {
+        const rows = moveOutRows()
+        const first = await exportZip(setup(rows), admin)
+        const second = await exportZip(setup(rows), admin)
+        expect(first.prepared.packageHash).toBe(second.prepared.packageHash)
+        const manifest = json(first.entries, 'manifest.json') as {
+          categories: Record<string, { present: boolean }>
+        }
+        expect(manifest.categories.moveOutHandover?.present).toBe(true)
+        expect(manifest.categories.depositStatement?.present).toBe(true)
+        expect(manifest.categories.depositRefunds?.present).toBe(true)
+      })
+
+      it('omits refunds and the notice when the statement has none', async () => {
+        const rows = moveOutRows()
+        const { entries } = await exportZip(
+          setup({
+            ...rows,
+            depositStatement: { ...rows.depositStatement, refunds: [] },
+          }),
+          admin
+        )
+        const names = entries.map(e => e.name)
+        expect(names).toContain('evidence/deposit-statement.json')
+        expect(names).not.toContain('evidence/deposit-refunds.json')
+        const report = json(entries, 'verification-report.json') as Row
+        expect(report.notices).toBeUndefined()
+      })
+
+      it('works with only a handover (no statement)', async () => {
+        const rows = moveOutRows()
+        const { entries } = await exportZip(
+          setup({ ...rows, depositStatement: null }),
+          admin
+        )
+        const names = entries.map(e => e.name)
+        expect(names).toContain('evidence/move-out-handover.json')
+        expect(names).not.toContain('evidence/deposit-statement.json')
+      })
+
+      it('omits move-out entries when the contract has no move-out records', async () => {
+        const { entries } = await exportZip(setup(), admin)
+        expect(entries.map(e => e.name).join()).not.toMatch(/move-out|deposit-/)
+      })
+
+      it('keeps the access rules: strangers are rejected', async () => {
+        const ctx = setup(moveOutRows())
+        await expect(
+          ctx.service.prepare(CONTRACT_ID.toHexString(), {
+            id: 'stranger',
+            roles: ['tenant'],
+          })
+        ).rejects.toBeInstanceOf(ForbiddenException)
+      })
+
+      it('lets a tenant participant export it and never leaks secret-like keys', async () => {
+        const rows = moveOutRows()
+        const { entries } = await exportZip(
+          setup({
+            ...rows,
+            moveOutHandover: {
+              ...rows.moveOutHandover,
+              tenantCccd: '079123456789',
+            },
+          }),
+          { id: 'tenant-1', roles: ['tenant'] }
+        )
+        const all = entries.map(e => e.data.toString('utf8')).join('\n')
+        expect(all).toContain('Sofa')
+        expect(all).not.toContain('079123456789')
+      })
     })
 
     it('marks absent categories as not present and still succeeds', async () => {

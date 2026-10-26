@@ -1,5 +1,9 @@
 import { createHash } from 'crypto'
 import { vndInWords } from './vnd-in-words'
+import {
+  DEFAULT_MOVE_OUT_RESPONSE_DAYS,
+  DEPOSIT_REFUND_DUE_TEXT,
+} from '../../rental/utils/deposit-refund.constants'
 import type { Contract } from '../schemas/contract.schema'
 import {
   validateDocumentManifest,
@@ -164,6 +168,14 @@ export class ContractDocumentProjector {
     }
   }
 
+  /** Lấy số ngày phản hồi từ snapshot gói của hợp đồng (không đọc lại tin đăng); gói cũ dùng mặc định. */
+  private static resolveMoveOutResponseDays(contract: Contract): number {
+    return (
+      contract.packageSnapshot?.moveOutPolicy?.responseDays ??
+      DEFAULT_MOVE_OUT_RESPONSE_DAYS
+    )
+  }
+
   private static buildTemplateSections(
     contract: Contract,
     template: Pick<ContractTemplate, 'clauses'>
@@ -194,6 +206,7 @@ export class ContractDocumentProjector {
       terminationNoticeDays: String(
         commercial?.terminationNoticeDays ?? contract.terminationNoticeDays
       ),
+      moveOutResponseDays: String(this.resolveMoveOutResponseDays(contract)),
       landlord: contract.landlordName || 'Bên cho thuê',
       tenant: contract.tenantName || 'Bên thuê',
     }
@@ -364,7 +377,8 @@ export class ContractDocumentProjector {
         title: 'Bàn giao, hoàn trả căn hộ và thủ tục cọc',
         content: `1. Bàn giao căn hộ: Việc bàn giao nhà ở được lập thành Biên bản bàn giao đính kèm Phụ lục 1 của Hợp đồng này, ghi nhận rõ chỉ số công tơ điện, nước và tình trạng thực tế của trang thiết bị tại thời điểm nhận nhà.
 2. Tiền đặt cọc bảo đảm: Bên Thuê đặt cọc số tiền ${formatVND(contract.deposit || 0)} nhằm bảo đảm thực hiện nghĩa vụ hợp đồng theo Thỏa thuận đặt cọc số ${contract.depositAgreementCode || 'DA-PENDING'}. Tiền đặt cọc không được dùng để cấn trừ vào tiền thuê hàng tháng.
-3. Hoàn trả tiền cọc: Khi hợp đồng chấm dứt hoặc thanh lý, Bên Cho Thuê có nghĩa vụ hoàn trả 100% tiền đặt cọc cho Bên Thuê trong vòng 07 (bảy) ngày làm việc kể từ ngày nhận lại căn hộ và ký Biên bản thanh lý, sau khi đã khấu trừ các khoản công nợ dịch vụ hoặc chi phí bồi thường hư hại hợp lý (nếu có).`,
+3. Hoàn trả tiền cọc: Tiền đặt cọc do Bên Cho Thuê giữ và được hoàn trả trực tiếp cho Bên Thuê; nền tảng không nhận, không giữ và không chuyển tiền cọc. Khi hợp đồng chấm dứt hoặc thanh lý, Bên Cho Thuê hoàn trả tiền đặt cọc trong vòng ${DEPOSIT_REFUND_DUE_TEXT} kể từ ngày bảng khấu trừ tiền cọc được Bên Thuê chấp nhận hoặc được xem là đã chấp nhận, sau khi đã khấu trừ các khoản công nợ dịch vụ hoặc chi phí bồi thường hư hại hợp lý (nếu có) có chứng từ.
+4. Biên bản trả nhà và bảng khấu trừ cọc: Bên Cho Thuê lập biên bản trả nhà và bảng khấu trừ cọc. Bên Thuê có ${this.resolveMoveOutResponseDays(contract)} ngày kể từ ngày nhận được mỗi văn bản để xác nhận hoặc phản đối; quá thời hạn mà không phản hồi được xem là đồng ý. Mỗi bên có quyền yêu cầu ghi nhận tranh chấp trên hệ thống; nền tảng không phân xử và không bảo đảm khoản tiền hoàn trả. Số ngày tính theo ngày dương lịch.`,
         protected: true,
       },
       {

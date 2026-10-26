@@ -139,6 +139,13 @@ function toRentalPackageInputs(
         ? { settlementPolicy: normalizedSettlementPolicy }
         : {}),
       ...(prepaidRent ? { prepaidRent } : {}),
+      ...(packageItem.moveOutPolicy
+        ? {
+            moveOutPolicy: {
+              responseDays: packageItem.moveOutPolicy.responseDays,
+            },
+          }
+        : {}),
       ...(packageItem.allowedExecutionPolicies
         ? { allowedExecutionPolicies: packageItem.allowedExecutionPolicies }
         : {}),

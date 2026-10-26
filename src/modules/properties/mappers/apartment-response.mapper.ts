@@ -1,6 +1,10 @@
 import { Apartment } from '../schemas/apartment.schema'
 import { User } from '../../users/schemas/user.schema'
-import type { RentalPackageSnapshot } from '../utils/rental-package.util'
+import type {
+  MoveOutPolicy,
+  RentalPackageSnapshot,
+} from '../utils/rental-package.util'
+import { DEFAULT_MOVE_OUT_RESPONSE_DAYS } from '../../rental/utils/deposit-refund.constants'
 import type { RentalExecutionPolicyRef } from '../../rental/utils/rental-execution-policy.util'
 
 const VND_PER_MILLION = 1_000_000
@@ -30,6 +34,7 @@ export interface RentalPackageResponse {
   prepaidRent?: RentalPackageSnapshot['prepaidRent']
   resolvedPrepaidRentMonths?: number
   resolvedPrepaidRentAmount?: number
+  moveOutPolicy: MoveOutPolicy
   status: 'active' | 'inactive'
   allowedExecutionPolicies?: RentalExecutionPolicyRef[]
   defaultExecutionPolicy?: RentalExecutionPolicyRef
@@ -257,6 +262,9 @@ export class ApartmentResponseMapper {
       monthlyRent: rentalPackage.monthlyRent,
       depositPolicy: rentalPackage.depositPolicy,
       resolvedDepositAmount: rentalPackage.resolvedDepositAmount,
+      moveOutPolicy: rentalPackage.moveOutPolicy ?? {
+        responseDays: DEFAULT_MOVE_OUT_RESPONSE_DAYS,
+      },
       ...(rentalPackage.settlementPolicy
         ? { settlementPolicy: rentalPackage.settlementPolicy }
         : {}),

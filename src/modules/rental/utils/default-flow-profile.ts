@@ -1,3 +1,4 @@
+import { DEPOSIT_REFUND_DUE_TEXT } from './deposit-refund.constants'
 import type { FlowProfileSteps } from '../schemas/rental-flow-profile.schema'
 
 export const SAFE_DEFAULT_FLOW_PROFILE_ID = 'safe-default-profile'
@@ -49,8 +50,7 @@ export const DEFAULT_FLOW_PROFILE_STEPS: FlowProfileSteps = {
       'Giá thuê được niêm yết minh bạch, cố định trong suốt kỳ hạn cam kết. Tiền cọc được bảo đảm theo khung pháp lý quy định.',
     depositNoticeTitle:
       'Bảo vệ quyền lợi tiền cọc theo Điều 12 Nghị định 96/2024/NĐ-CP',
-    depositNoticeBody:
-      'Tiền đặt cọc được giữ an toàn để bảo đảm nghĩa vụ hợp đồng. Bên cho thuê có trách nhiệm hoàn trả 100% tiền cọc cho Bên thuê trong vòng 15 ngày làm việc kể từ thời điểm chấm dứt hợp đồng hợp lệ.',
+    depositNoticeBody: `Tiền đặt cọc do Bên cho thuê giữ và hoàn trả trực tiếp cho Bên thuê; nền tảng không giữ tiền. Bên cho thuê hoàn trả tiền cọc trong vòng ${DEPOSIT_REFUND_DUE_TEXT} kể từ ngày bảng khấu trừ cọc được Bên thuê chấp nhận hoặc được xem là đã chấp nhận, sau khi trừ các khoản có chứng từ hợp lệ (nếu có).`,
     highlightLongTermPackages: true,
     showSubtotalEstimate: true,
     paymentScheduleHelpText:

@@ -1,3 +1,5 @@
+import { DEPOSIT_REFUND_DUE_TEXT } from '../../rental/utils/deposit-refund.constants'
+
 /**
  * 12 điều của hợp đồng thuê căn hộ (mẫu v2). Nội dung dùng biến {{...}} do
  * ContractDocumentProjector điền; số tiền đã kèm "bằng chữ". Bên A là Bên cho thuê,
@@ -60,7 +62,7 @@ export const LEASE_ARTICLE_DEFINITIONS: readonly LeaseArticleDefinition[] = [
     [
       '1. Để bảo đảm thực hiện hợp đồng này, Bên B đặt cọc cho Bên A số tiền {{deposit}}, theo quy định về đặt cọc tại Điều 328 Bộ luật Dân sự 2015 và theo Thỏa thuận đặt cọc tại Phụ lục 4.',
       '2. Tiền đặt cọc không được dùng để trừ vào tiền thuê hằng tháng, trừ khi hai Bên có thỏa thuận khác bằng văn bản.',
-      '3. Khi hợp đồng được thực hiện đúng, Bên A hoàn trả toàn bộ tiền đặt cọc cho Bên B trong thời hạn 07 (bảy) ngày làm việc kể từ ngày Bên B bàn giao lại nhà ở thuê và hai Bên ký biên bản thanh lý, sau khi khấu trừ các khoản Bên B còn nợ (tiền thuê, chi phí dịch vụ) và chi phí khắc phục hư hỏng do lỗi của Bên B (nếu có) có chứng từ hợp lệ.',
+      `3. Tiền đặt cọc do Bên A giữ và được hoàn trả trực tiếp cho Bên B; nền tảng không nhận, không giữ và không chuyển tiền đặt cọc. Khi hợp đồng được thực hiện đúng, Bên A hoàn trả tiền đặt cọc cho Bên B trong thời hạn ${DEPOSIT_REFUND_DUE_TEXT} kể từ ngày bảng khấu trừ tiền cọc được Bên B chấp nhận hoặc được xem là đã chấp nhận theo khoản 4 Điều 9, sau khi khấu trừ các khoản Bên B còn nợ (tiền thuê, chi phí dịch vụ) và chi phí khắc phục hư hỏng do lỗi của Bên B (nếu có) có chứng từ hợp lệ. Số ngày trong hợp đồng này tính theo ngày dương lịch.`,
       '4. Nếu Bên B từ chối giao kết hoặc đơn phương chấm dứt hợp đồng trái quy định thì mất khoản tiền đặt cọc; nếu Bên A từ chối giao kết hoặc đơn phương chấm dứt hợp đồng trái quy định thì phải hoàn trả khoản tiền đặt cọc và bồi thường cho Bên B một khoản tiền tương đương khoản đặt cọc, trừ khi hai Bên có thỏa thuận khác.',
     ].join('\n'),
     ['deposit'],
@@ -124,10 +126,13 @@ export const LEASE_ARTICLE_DEFINITIONS: readonly LeaseArticleDefinition[] = [
     [
       '1. Khi bàn giao, hai Bên cùng kiểm tra và ghi nhận tình trạng nhà ở, chỉ số công tơ điện, nước và danh mục tài sản vào Biên bản bàn giao (Phụ lục 1, Phụ lục 2). Bên B có quyền phản hồi sai lệch bằng văn bản trong thời hạn 03 (ba) ngày kể từ ngày nhận bàn giao.',
       '2. Khi hợp đồng hết hạn hoặc chấm dứt, Bên B bàn giao lại nhà ở thuê và tài sản kèm theo trong tình trạng như khi nhận bàn giao, trừ hao mòn tự nhiên, đồng thời thanh toán đầy đủ các khoản còn nợ.',
-      '3. Việc hoàn trả được lập thành biên bản có chữ ký của hai Bên; làm căn cứ để Bên A hoàn trả tiền đặt cọc theo khoản 3 Điều 5.',
-      '4. Nếu Bên B không bàn giao lại nhà ở thuê đúng hạn, Bên B phải trả tiền thuê cho thời gian chậm trả theo mức giá thuê quy định tại Điều 3, và chịu trách nhiệm đối với các thiệt hại phát sinh (nếu có).',
+      '3. Khi Bên B trả nhà, Bên A lập biên bản trả nhà ghi chỉ số công tơ điện, nước, số chìa khóa và tình trạng tài sản, đối chiếu với biên bản nhận nhà. Bên B có {{moveOutResponseDays}} ngày kể từ ngày nhận được biên bản để xác nhận hoặc phản đối. Quá thời hạn này mà Bên B không phản hồi thì được xem là Bên B đồng ý với biên bản.',
+      '4. Sau khi biên bản trả nhà hoàn tất, Bên A lập bảng khấu trừ tiền cọc, nêu rõ lý do, số tiền và chứng từ của từng khoản; tổng các khoản khấu trừ không vượt quá tiền đặt cọc. Bên B có {{moveOutResponseDays}} ngày kể từ ngày nhận được bảng khấu trừ để chấp nhận hoặc phản đối từng khoản. Quá thời hạn này mà Bên B không phản hồi thì được xem là Bên B chấp nhận bảng khấu trừ.',
+      '5. Bên A hoàn trả tiền đặt cọc trực tiếp cho Bên B trong thời hạn nêu tại khoản 3 Điều 5 và ghi nhận việc đã hoàn trên hệ thống. Bản ghi "đã hoàn" là lời khai của Bên A và được Bên B xác nhận đã nhận; nền tảng không bảo đảm khoản tiền được hoàn trả.',
+      '6. Khi hai Bên không thống nhất về biên bản trả nhà hoặc bảng khấu trừ, mỗi Bên có quyền yêu cầu ghi nhận tranh chấp trên hệ thống. Nền tảng không phân xử; hai Bên giải quyết theo Điều 12.',
+      '7. Nếu Bên B không bàn giao lại nhà ở thuê đúng hạn, Bên B phải trả tiền thuê cho thời gian chậm trả theo mức giá thuê quy định tại Điều 3, và chịu trách nhiệm đối với các thiệt hại phát sinh (nếu có).',
     ].join('\n'),
-    [],
+    ['moveOutResponseDays'],
   ],
   [
     'Vi phạm hợp đồng, lãi chậm trả và bồi thường thiệt hại',
