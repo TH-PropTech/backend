@@ -6,6 +6,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common'
+import { ConfigService } from '@nestjs/config'
 import { InjectRepository } from '@nestjs/typeorm'
 import { randomUUID } from 'node:crypto'
 import { Repository } from 'typeorm'
@@ -78,7 +79,8 @@ export class DepositSettlementStatementsService {
     private readonly contractRepo: Repository<Contract>,
     @InjectRepository(MoveOutHandover)
     private readonly handoverRepo: Repository<MoveOutHandover>,
-    private readonly support: MoveOutSupportService
+    private readonly support: MoveOutSupportService,
+    private readonly config: ConfigService
   ) {}
 
   async findByContract(
@@ -109,6 +111,7 @@ export class DepositSettlementStatementsService {
       throw new ConflictException('STATEMENT_NOT_DRAFT')
     if (!existing) await this.assertHandoverCompleted(contractId)
     const depositAmount = existing?.depositAmount ?? contract.deposit
+    this.assertEvidenceHosted(lines)
     const built = this.buildLines(lines)
     if (sum(built.map(line => line.amount)) > depositAmount)
       throw new BadRequestException('STATEMENT_DEDUCTION_EXCEEDS_DEPOSIT')
@@ -515,6 +518,16 @@ export class DepositSettlementStatementsService {
     statement.status = 'closed'
     statement.closedAt = now
     statement.closeReason = reason
+  }
+
+  /** Ảnh chứng từ chỉ được lấy từ kho ảnh của hệ thống (đường tải lên của căn hộ). */
+  private assertEvidenceHosted(lines: StatementLineInput[]): void {
+    const urls = lines.flatMap(line => line.evidenceUrls ?? [])
+    if (urls.length === 0) return
+    const cloudName = this.config.get<string>('cloudinary.cloudName')
+    const prefix = cloudName ? `https://res.cloudinary.com/${cloudName}/` : null
+    if (!prefix || urls.some(url => !url.startsWith(prefix)))
+      throw new BadRequestException('STATEMENT_EVIDENCE_URL_NOT_ALLOWED')
   }
 
   private buildLines(lines: StatementLineInput[]): DepositStatementLine[] {

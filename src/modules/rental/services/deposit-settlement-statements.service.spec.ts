@@ -22,7 +22,7 @@ const DEPOSIT = 10_000_000
 const LINE = {
   reason: 'Sơn lại tường',
   amount: 2_000_000,
-  evidenceUrls: ['https://res.cloudinary.com/x/a.jpg'],
+  evidenceUrls: ['https://res.cloudinary.com/demo/a.jpg'],
 }
 const REFUND = {
   amount: 8_000_000,
@@ -37,7 +37,11 @@ type Ctx = {
 }
 
 function setup(
-  options: { handover?: 'completed' | 'recorded' | null; anchor?: boolean } = {}
+  options: {
+    handover?: 'completed' | 'recorded' | null
+    anchor?: boolean
+    cloudName?: string
+  } = {}
 ): Ctx {
   const contract = {
     _id: CONTRACT_ID,
@@ -60,7 +64,8 @@ function setup(
     repo as never,
     contractRepo as never,
     handoverRepo as never,
-    support as never
+    support as never,
+    { get: jest.fn().mockReturnValue(options.cloudName ?? 'demo') } as never
   )
   return { service, repo, support }
 }
@@ -172,6 +177,33 @@ describe('DepositSettlementStatementsService', () => {
         )
       ).rejects.toBeInstanceOf(BadRequestException)
       expect(repo.save).not.toHaveBeenCalled()
+    })
+
+    it.each([
+      ['another host', 'https://evil.example/demo/a.jpg'],
+      ['another cloud', 'https://res.cloudinary.com/other/a.jpg'],
+      ['a look-alike prefix', 'https://res.cloudinary.com/demo.evil.com/a.jpg'],
+    ])('rejects evidence from %s with 400', async (_label, url) => {
+      const { service, repo } = setup()
+      await expect(
+        service.saveDraft(
+          CID,
+          'landlord',
+          [{ ...LINE, evidenceUrls: [url] }],
+          NOW
+        )
+      ).rejects.toMatchObject({ message: 'STATEMENT_EVIDENCE_URL_NOT_ALLOWED' })
+      expect(repo.rows).toHaveLength(0)
+    })
+
+    it('rejects any evidence when no image host is configured', async () => {
+      const { service } = setup({ cloudName: '' })
+      await expect(
+        service.saveDraft(CID, 'landlord', [LINE], NOW)
+      ).rejects.toMatchObject({ message: 'STATEMENT_EVIDENCE_URL_NOT_ALLOWED' })
+      await expect(
+        service.saveDraft(CID, 'landlord', [{ ...LINE, evidenceUrls: [] }], NOW)
+      ).resolves.toBeDefined()
     })
 
     it('rejects a non-landlord with 403', async () => {

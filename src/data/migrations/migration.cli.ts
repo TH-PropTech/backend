@@ -126,6 +126,11 @@ import {
   type LegalTermsIndexDatabase,
 } from './032-legal-terms-version-unique'
 import {
+  ensureMoveOutIndexes,
+  rollbackMoveOutIndexes,
+  type MoveOutIndexDatabase,
+} from './033-move-out-indexes'
+import {
   MigrationRunner,
   type MigrationCheckpointStore,
   type MigrationStep,
@@ -176,6 +181,7 @@ export type CliMigrationId =
   | '030'
   | '031'
   | '032'
+  | '033'
 
 export type CliArgs = {
   apply: boolean
@@ -209,6 +215,7 @@ const ALL: CliMigrationId[] = [
   '030',
   '031',
   '032',
+  '033',
 ]
 
 /**
@@ -526,12 +533,20 @@ function steps(db: CliDb, only: readonly CliMigrationId[]): MigrationStep[] {
           ),
       },
     ],
+    [
+      '033',
+      {
+        id: '033-move-out-indexes',
+        run: o =>
+          ensureMoveOutIndexes(db as unknown as MoveOutIndexDatabase, o),
+      },
+    ],
   ]
   return all.filter(([id]) => only.includes(id)).map(([, step]) => step)
 }
 
 /**
- * Chạy migration 007–032 (trừ 029). Mặc định dry-run (không ghi, không checkpoint).
+ * Chạy migration 007–033 (trừ 029). Mặc định dry-run (không ghi, không checkpoint).
  * `--apply`: chạy qua `MigrationRunner` (bỏ qua bước đã checkpoint; chỉ
  * checkpoint khi báo cáo `dryRun === false` và không lỗi). `--rollback`:
  * chạy hàm hoàn tác theo thứ tự ngược (dry-run nếu không có `--apply`).
@@ -650,6 +665,10 @@ export async function runMigrationCli(
           db as unknown as LegalTermsIndexDatabase,
           { dryRun }
         ),
+      '033': () =>
+        rollbackMoveOutIndexes(db as unknown as MoveOutIndexDatabase, {
+          dryRun,
+        }),
     }
     const reports: MigrationReport[] = []
     const checkpoints = createCheckpointStore(db)
