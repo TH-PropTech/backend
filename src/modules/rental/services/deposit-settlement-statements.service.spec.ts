@@ -110,6 +110,23 @@ describe('DepositSettlementStatementsService', () => {
       expect(draft.auditLog.map(entry => entry.action)).toEqual(['draft-saved'])
     })
 
+    it('returns 409 when a concurrent request creates the statement first', async () => {
+      const { service, repo } = setup()
+      jest.spyOn(repo, 'save').mockRejectedValueOnce({ code: 11000 })
+      await expect(
+        service.saveDraft(CID, 'landlord', [LINE], NOW)
+      ).rejects.toMatchObject({ message: 'STATEMENT_EXISTS' })
+    })
+
+    it('rethrows other save errors untouched', async () => {
+      const { service, repo } = setup()
+      const failure = new Error('disk full')
+      jest.spyOn(repo, 'save').mockRejectedValueOnce(failure)
+      await expect(
+        service.saveDraft(CID, 'landlord', [LINE], NOW)
+      ).rejects.toBe(failure)
+    })
+
     it('replaces lines of an existing draft and defaults evidence to empty', async () => {
       const { service } = setup()
       await service.saveDraft(CID, 'landlord', [LINE], NOW)

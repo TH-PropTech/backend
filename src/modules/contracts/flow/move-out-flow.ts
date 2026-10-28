@@ -65,12 +65,36 @@ export function projectMoveOut(
   }
 }
 
+/**
+ * Hợp đồng đang thuê, đã xong biên bản nhận nhà, chưa có biên bản trả nhà:
+ * chủ nhà phải có chỗ bắt đầu dù chưa có giai đoạn suy ra. Khớp điều kiện
+ * của endpoint ghi biên bản (hợp đồng active hoặc terminated, đã có biên bản
+ * nhận nhà hoàn tất).
+ */
+function canStartMoveOut(
+  contractStatus: string,
+  facts: MoveOutFacts | undefined,
+  moveInHandoverCompleted: boolean
+): boolean {
+  return (
+    facts !== undefined &&
+    contractStatus === 'active' &&
+    facts.handoverStatus === null &&
+    moveInHandoverCompleted
+  )
+}
+
 export function moveOutStage(
   contractStatus: string,
-  facts: MoveOutFacts | undefined
+  facts: MoveOutFacts | undefined,
+  moveInHandoverCompleted = false
 ): ContractFlowStageDto | null {
   const phase = deriveMoveOutPhase(contractStatus, facts)
-  if (!phase) return null
+  if (!phase) {
+    return canStartMoveOut(contractStatus, facts, moveInHandoverCompleted)
+      ? { key: 'move-out', status: 'upcoming', blockers: [], completedAt: null }
+      : null
+  }
   return {
     key: 'move-out',
     status: phase === 'settled' ? 'done' : 'active',
@@ -95,10 +119,23 @@ const toAction = (
 export function moveOutActions(
   contractStatus: string,
   facts: MoveOutFacts | undefined,
-  role: MoveOutActor
+  role: MoveOutActor,
+  moveInHandoverCompleted = false
 ): ContractFlowActionDto[] {
   const phase = deriveMoveOutPhase(contractStatus, facts)
-  if (!phase || phase === 'settled' || role === 'staff') return []
+  if (!phase) {
+    return role === 'landlord' &&
+      canStartMoveOut(contractStatus, facts, moveInHandoverCompleted)
+      ? [
+          toAction(
+            'RECORD_MOVE_OUT_HANDOVER',
+            role,
+            evaluateRecordMoveOutHandover(null)
+          ),
+        ]
+      : []
+  }
+  if (phase === 'settled' || role === 'staff') return []
   const handover = facts?.handoverStatus ?? null
   const statement = facts?.statementStatus ?? null
   if (role === 'landlord') {

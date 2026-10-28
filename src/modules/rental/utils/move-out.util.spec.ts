@@ -7,6 +7,7 @@ import { renderMoveOutHandoverPdf } from './move-out-handover-pdf.renderer'
 import {
   addDays,
   assertPartyOrStaff,
+  isDuplicateKeyError,
   loadContract,
   pendingEvidence,
   resolveMoveOutResponseDays,
@@ -29,6 +30,16 @@ describe('resolveMoveOutResponseDays', () => {
     ['x', 3],
   ])('%j -> %i', (snapshot, expected) => {
     expect(resolveMoveOutResponseDays(snapshot)).toBe(expected)
+  })
+})
+
+describe('isDuplicateKeyError', () => {
+  it('recognises the Mongo duplicate key code only', () => {
+    expect(isDuplicateKeyError({ code: 11000 })).toBe(true)
+    expect(isDuplicateKeyError({ code: 11001 })).toBe(false)
+    expect(isDuplicateKeyError(new Error('boom'))).toBe(false)
+    expect(isDuplicateKeyError(null)).toBe(false)
+    expect(isDuplicateKeyError('11000')).toBe(false)
   })
 })
 

@@ -25,6 +25,7 @@ import { renderMoveOutHandoverPdf } from '../utils/move-out-handover-pdf.rendere
 import {
   addDays,
   assertPartyOrStaff,
+  isDuplicateKeyError,
   loadContract,
   pendingEvidence,
   resolveMoveOutResponseDays,
@@ -115,7 +116,11 @@ export class MoveOutHandoversService {
       dispute: null,
       evidence: null,
     })
-    const saved = await this.repo.save(entity)
+    const saved = await this.repo.save(entity).catch((error: unknown) => {
+      if (isDuplicateKeyError(error))
+        throw new ConflictException('MOVE_OUT_HANDOVER_EXISTS')
+      throw error
+    })
     await this.afterRecorded(saved, actorId)
     return saved
   }

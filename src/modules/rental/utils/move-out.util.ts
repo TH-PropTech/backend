@@ -13,6 +13,17 @@ export const DAY_MS = 24 * 60 * 60 * 1000
 /** Nhắc chủ nhà và khách khi còn không quá khoảng này trước hạn hoàn cọc. */
 export const REFUND_REMINDER_LEAD_MS = DAY_MS
 
+const DUPLICATE_KEY_CODE = 11000
+
+/** Vi phạm unique index của Mongo (hai yêu cầu cùng tạo một bản ghi một lúc). */
+export function isDuplicateKeyError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    (error as { code?: unknown }).code === DUPLICATE_KEY_CODE
+  )
+}
+
 export const addDays = (date: Date, days: number): Date =>
   new Date(date.getTime() + days * DAY_MS)
 

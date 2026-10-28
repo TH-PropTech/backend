@@ -73,10 +73,73 @@ describe('projectContractFlow — move-out phases (derived, no new contract.stat
     expect(flowOf('terminated').moveOut).toBeUndefined()
   })
 
-  it('active contract without records has no move-out phase or stage', () => {
-    const flow = flowOf('active', mo(null))
+  it('active contract without records and without a completed move-in handover has no move-out phase, stage or action', () => {
+    const flow = flowOf('active', mo(null), asLandlord)
     expect(flow.moveOut).toBeUndefined()
     expect(flow.stages.map(s => s.key)).not.toContain('move-out')
+    expect(moveOutActionsOf(flow)).toEqual([])
+  })
+
+  describe('active contract with a completed move-in handover and no move-out record', () => {
+    const withMoveIn = (
+      viewer: typeof asTenant,
+      moveOut: MoveOut | null = mo(null)
+    ): ReturnType<typeof projectContractFlow> =>
+      projectContractFlow({
+        ...facts('active', moveOut ?? undefined, viewer),
+        settlement: {
+          required: true,
+          status: 'paid',
+          handoverRecorded: true,
+          handoverCompleted: true,
+          completedAt: at('2026-09-25T01:00:00Z'),
+        },
+      })
+
+    it('exposes an upcoming move-out stage but no derived phase', () => {
+      const flow = withMoveIn(asLandlord)
+      expect(flow.moveOut).toBeUndefined()
+      expect(flow.stages.find(s => s.key === 'move-out')?.status).toBe(
+        'upcoming'
+      )
+    })
+
+    it('lets the landlord start the handover', () => {
+      const flow = withMoveIn(asLandlord)
+      expect(moveOutActionsOf(flow)).toEqual([
+        expect.objectContaining({
+          action: 'RECORD_MOVE_OUT_HANDOVER',
+          actorRole: 'landlord',
+          enabled: true,
+          reasonCode: null,
+        }),
+      ])
+    })
+
+    it('gives the tenant and staff no move-out action', () => {
+      expect(moveOutActionsOf(withMoveIn(asTenant))).toEqual([])
+      expect(moveOutActionsOf(withMoveIn(asStaff))).toEqual([])
+    })
+
+    it('adds nothing when the move-out data was not loaded', () => {
+      const flow = withMoveIn(asLandlord, null)
+      expect(flow.stages.map(s => s.key)).not.toContain('move-out')
+      expect(moveOutActionsOf(flow)).toEqual([])
+    })
+
+    it('does not offer the start action on a cancelled contract', () => {
+      const flow = projectContractFlow({
+        ...facts('cancelled', mo(null), asLandlord),
+        settlement: {
+          required: true,
+          status: 'paid',
+          handoverRecorded: true,
+          handoverCompleted: true,
+          completedAt: at('2026-09-25T01:00:00Z'),
+        },
+      })
+      expect(moveOutActionsOf(flow)).toEqual([])
+    })
   })
 
   it('terminated contract without records is awaiting-move-out; landlord may record', () => {

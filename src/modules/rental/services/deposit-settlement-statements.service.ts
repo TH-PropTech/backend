@@ -24,6 +24,7 @@ import {
   REFUND_REMINDER_LEAD_MS,
   addDays,
   assertPartyOrStaff,
+  isDuplicateKeyError,
   loadContract,
   pendingEvidence,
   resolveMoveOutResponseDays,
@@ -134,7 +135,11 @@ export class DepositSettlementStatementsService {
       })
     statement.lines = built
     this.audit(statement, now, actorId, 'landlord', 'draft-saved')
-    return this.repo.save(statement)
+    return this.repo.save(statement).catch((error: unknown) => {
+      if (isDuplicateKeyError(error))
+        throw new ConflictException('STATEMENT_EXISTS')
+      throw error
+    })
   }
 
   /** Chốt bảng: gửi cho khách, bắt đầu hạn phản hồi. Bảng không dòng thì coi như đã chấp nhận. */

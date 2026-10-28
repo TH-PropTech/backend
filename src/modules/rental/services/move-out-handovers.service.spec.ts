@@ -191,6 +191,21 @@ describe('MoveOutHandoversService', () => {
       ).rejects.toMatchObject({ message: 'MOVE_IN_HANDOVER_NOT_COMPLETED' })
     })
 
+    it('returns 409 when a concurrent request wins the unique index', async () => {
+      const { service, repo } = setup()
+      jest.spyOn(repo, 'save').mockRejectedValueOnce({ code: 11000 })
+      await expect(
+        service.record(CID, 'landlord', INPUT)
+      ).rejects.toMatchObject({ message: 'MOVE_OUT_HANDOVER_EXISTS' })
+    })
+
+    it('rethrows other save errors untouched', async () => {
+      const { service, repo } = setup()
+      const failure = new Error('disk full')
+      jest.spyOn(repo, 'save').mockRejectedValueOnce(failure)
+      await expect(service.record(CID, 'landlord', INPUT)).rejects.toBe(failure)
+    })
+
     it('returns 409 when a handover already exists', async () => {
       const { service } = setup({
         existing: [{ contractId: CID } as MoveOutHandover],

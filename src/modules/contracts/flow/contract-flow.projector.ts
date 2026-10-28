@@ -345,7 +345,12 @@ function projectActions(facts: ContractFlowFacts): ContractFlowActionDto[] {
       actions.push(toAction('PAY_FEE', role, 'move-in', ALWAYS_ENABLED))
     return [
       ...actions,
-      ...moveOutActions(facts.contractStatus, facts.moveOut, role),
+      ...moveOutActions(
+        facts.contractStatus,
+        facts.moveOut,
+        role,
+        facts.settlement?.handoverCompleted === true
+      ),
     ]
   }
   if (role === 'staff') return documentActions(facts, role)
@@ -375,7 +380,11 @@ export function projectContractFlow(facts: ContractFlowFacts): ContractFlowDto {
         : null,
     })
   }
-  const moveOut = moveOutStage(facts.contractStatus, facts.moveOut)
+  const moveOut = moveOutStage(
+    facts.contractStatus,
+    facts.moveOut,
+    facts.settlement?.handoverCompleted === true
+  )
   if (moveOut) stages.push(moveOut)
   const firstOpen = stages.find(
     stage => stage.status !== 'done' && stage.status !== 'skipped'
