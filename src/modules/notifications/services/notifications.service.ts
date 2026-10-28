@@ -1,9 +1,20 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common'
+import {
+  Inject,
+  Injectable,
+  Logger,
+  NotFoundException,
+  Optional,
+} from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
-import { Repository, FindOptionsWhere } from 'typeorm'
+import { MongoRepository } from 'typeorm'
 import { ObjectId } from 'mongodb'
 import { Notification } from '../schemas/notification.schema'
 import { NotificationQueryDto } from '../dto/notification-query.dto'
+import {
+  NOTIFICATIONS_PUBLISHER,
+  NotificationsPublisher,
+} from '../gateways/notifications.publisher'
+import { PushService } from './push.service'
 
 export interface NotificationListResult {
   items: Notification[]
@@ -13,14 +24,84 @@ export interface NotificationListResult {
   totalPages: number
 }
 
+const DEFAULT_PAGE = 1
+const DEFAULT_LIMIT = 20
+
 @Injectable()
 export class NotificationsService {
   private readonly logger = new Logger(NotificationsService.name)
 
   constructor(
     @InjectRepository(Notification)
-    private readonly notificationRepository: Repository<Notification>
+    private readonly notificationRepository: MongoRepository<Notification>,
+    @Optional()
+    @Inject(NOTIFICATIONS_PUBLISHER)
+    private readonly publisher?: NotificationsPublisher,
+    @Optional()
+    private readonly pushService?: PushService
   ) {}
+
+  /**
+   * Đưa thông báo vừa lưu tới người nhận qua realtime và push. Hai kênh chạy
+   * độc lập: kênh này lỗi không chặn kênh kia, và không làm thất bại việc tạo.
+   */
+  private async deliver(saved: Notification): Promise<void> {
+    await Promise.all([this.publishCreated(saved), this.pushCreated(saved)])
+  }
+
+  private async pushCreated(saved: Notification): Promise<void> {
+    if (!this.pushService) return
+    try {
+      await this.pushService.sendToUser(saved.userId, {
+        title: saved.title,
+        body: saved.body,
+        data: saved.data,
+      })
+    } catch (error) {
+      this.logger.warn(
+        `Failed to push notification: ${
+          error instanceof Error ? error.message : 'unknown error'
+        }`
+      )
+    }
+  }
+
+  /**
+   * Phát thông báo mới qua realtime. Lỗi ở đây không được làm thất bại việc
+   * tạo thông báo (đã lưu xong), nên chỉ ghi log.
+   */
+  private async publishCreated(saved: Notification): Promise<void> {
+    if (!this.publisher) return
+    try {
+      const { count } = await this.getUnreadCount(saved.userId)
+      await this.publisher.publish({
+        userId: saved.userId,
+        unreadCount: count,
+        notification: {
+          _id: String(saved._id),
+          title: saved.title,
+          body: saved.body,
+          type: saved.type,
+          isRead: saved.isRead,
+          data: saved.data,
+          createdAt: saved.createdAt.toISOString(),
+        },
+      })
+    } catch (error) {
+      this.logger.warn(
+        `Failed to publish notification in realtime: ${
+          error instanceof Error ? error.message : 'unknown error'
+        }`
+      )
+    }
+  }
+
+  private toObjectId(id: string): ObjectId {
+    if (!ObjectId.isValid(id)) {
+      throw new NotFoundException(`ID thông báo không hợp lệ: ${id}`)
+    }
+    return new ObjectId(id)
+  }
 
   /**
    * Tạo và lưu thông báo mới vào database
@@ -41,7 +122,9 @@ export class NotificationsService {
       data,
       isRead: false,
     })
-    return this.notificationRepository.save(notification)
+    const saved = await this.notificationRepository.save(notification)
+    await this.deliver(saved)
+    return saved
   }
 
   /**
@@ -70,7 +153,9 @@ export class NotificationsService {
       dedupeKey,
       isRead: false,
     })
-    return this.notificationRepository.save(notification)
+    const saved = await this.notificationRepository.save(notification)
+    await this.deliver(saved)
+    return saved
   }
 
   /**
@@ -87,19 +172,27 @@ export class NotificationsService {
       where.isRead = query.isRead === 'true'
     }
 
-    const allRecords = await this.notificationRepository.find({
-      where: where as FindOptionsWhere<Notification>,
+    const page = query.page ?? DEFAULT_PAGE
+    const limit = query.limit ?? DEFAULT_LIMIT
+    const [items, total] = await this.notificationRepository.findAndCount({
+      where,
       order: { createdAt: 'DESC' },
+      skip: (page - 1) * limit,
+      take: limit,
     })
 
-    const total = allRecords.length
-    const page = query.page ?? 1
-    const limit = query.limit ?? 20
-    const totalPages = Math.ceil(total / limit)
-    const skip = (page - 1) * limit
-    const items = allRecords.slice(skip, skip + limit)
+    return { items, total, page, limit, totalPages: Math.ceil(total / limit) }
+  }
 
-    return { items, total, page, limit, totalPages }
+  /**
+   * Tổng số thông báo chưa đọc của user (không phụ thuộc phân trang)
+   */
+  async getUnreadCount(userId: string): Promise<{ count: number }> {
+    const count = await this.notificationRepository.countDocuments({
+      userId,
+      isRead: false,
+    })
+    return { count }
   }
 
   /**
@@ -107,14 +200,9 @@ export class NotificationsService {
    */
   async markAsRead(id: string, userId: string): Promise<Notification> {
     this.logger.log(`Marking notification ${id} as read for user ${userId}`)
-    let notification: Notification | null = null
-    try {
-      notification = await this.notificationRepository.findOne({
-        where: { _id: new ObjectId(id) },
-      })
-    } catch {
-      throw new NotFoundException(`ID thông báo không hợp lệ: ${id}`)
-    }
+    const notification = await this.notificationRepository.findOne({
+      where: { _id: this.toObjectId(id) },
+    })
 
     if (!notification) {
       throw new NotFoundException(`Không tìm thấy thông báo: ${id}`)
@@ -133,15 +221,23 @@ export class NotificationsService {
    */
   async markAllAsRead(userId: string): Promise<void> {
     this.logger.log(`Marking all notifications as read for user ${userId}`)
-    const unread = await this.notificationRepository.find({
-      where: { userId, isRead: false } as FindOptionsWhere<Notification>,
-    })
+    await this.notificationRepository.updateMany(
+      { userId, isRead: false },
+      { $set: { isRead: true } }
+    )
+  }
 
-    if (unread.length > 0) {
-      for (const notif of unread) {
-        notif.isRead = true
-      }
-      await this.notificationRepository.save(unread)
+  /**
+   * Xóa 1 thông báo của chính user; 404 khi không có hoặc thuộc user khác
+   */
+  async deleteNotification(id: string, userId: string): Promise<void> {
+    this.logger.log(`Deleting notification ${id} for user ${userId}`)
+    const result = await this.notificationRepository.deleteOne({
+      _id: this.toObjectId(id),
+      userId,
+    })
+    if (!result.deletedCount) {
+      throw new NotFoundException(`Không tìm thấy thông báo: ${id}`)
     }
   }
 
@@ -155,19 +251,10 @@ export class NotificationsService {
     this.logger.log(
       `Updating notifications for booking ${bookingId} to status ${status}`
     )
-    const notifications = await this.notificationRepository.find({
-      where: { type: 'BOOKING' } as FindOptionsWhere<Notification>,
-    })
-
-    for (const notif of notifications) {
-      if (notif.data && String(notif.data.bookingId) === bookingId) {
-        notif.isRead = true
-        notif.data = {
-          ...notif.data,
-          status,
-        }
-        await this.notificationRepository.save(notif)
-      }
-    }
+    // bookingId luôn lưu dạng chuỗi (bookings.service: String(saved._id)).
+    await this.notificationRepository.updateMany(
+      { type: 'BOOKING', 'data.bookingId': bookingId },
+      { $set: { isRead: true, 'data.status': status } }
+    )
   }
 }

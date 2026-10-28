@@ -67,6 +67,7 @@
     "cron": "4.4.0",
     "dejavu-fonts-ttf": "^2.37.3",
     "dotenv": "^16.6.1",
+    "expo-server-sdk": "^8.0.0",
     "express": "^5.2.1",
     "ioredis": "^5.11.1",
     "joi": "^17.13.3",
