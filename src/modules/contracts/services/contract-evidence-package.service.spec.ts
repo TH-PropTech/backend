@@ -383,7 +383,7 @@ describe('ContractEvidencePackageService manifest builder (PROP-399 tasks 9.2/9.
       ])
     })
 
-    it('treats moveOut null or with no refunds as absent and adds no notice', () => {
+    it('treats moveOut null, an unsent draft statement or no refunds as absent and adds no notice', () => {
       const plan = service.buildPlan(
         baseInput({
           governance: null,
@@ -395,7 +395,7 @@ describe('ContractEvidencePackageService manifest builder (PROP-399 tasks 9.2/9.
         })
       )
       expect(plan.manifest.categories.moveOutHandover.present).toBe(false)
-      expect(plan.manifest.categories.depositStatement.present).toBe(true)
+      expect(plan.manifest.categories.depositStatement.present).toBe(false)
       expect(plan.manifest.categories.depositRefunds.present).toBe(false)
       expect(plan.verification.notices).toBeUndefined()
       expect(

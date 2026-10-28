@@ -645,6 +645,20 @@ describe('DepositSettlementStatementsService', () => {
   })
 
   describe('findByContract', () => {
+    it('hides an unsent draft from the tenant but not from the landlord or staff', async () => {
+      const { service } = setup()
+      await service.saveDraft(CID, 'landlord', [LINE], NOW)
+      await expect(
+        service.findByContract(CID, 'tenant', false)
+      ).rejects.toMatchObject({ message: 'STATEMENT_NOT_FOUND' })
+      await expect(
+        service.findByContract(CID, 'landlord', false)
+      ).resolves.toMatchObject({ status: 'draft' })
+      await expect(
+        service.findByContract(CID, 'x', true)
+      ).resolves.toMatchObject({ status: 'draft' })
+    })
+
     it('returns for parties and staff, 403 for outsiders, 404 when missing', async () => {
       const { service } = await submitted()
       await expect(

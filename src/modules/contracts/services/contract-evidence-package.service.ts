@@ -700,12 +700,14 @@ export class ContractEvidencePackageService {
           ...policy,
         }
       : null
-    const statement = moveOut?.statement
-      ? {
-          ...pick(moveOut.statement, DEPOSIT_STATEMENT_FIELDS, SENSITIVE_KEY),
-          ...policy,
-        }
-      : null
+    // Bản nháp chưa gửi không phải sự kiện giữa hai bên nên không vào bộ chứng cứ.
+    const statement =
+      moveOut?.statement && moveOut.statement.status !== 'draft'
+        ? {
+            ...pick(moveOut.statement, DEPOSIT_STATEMENT_FIELDS, SENSITIVE_KEY),
+            ...policy,
+          }
+        : null
     const rawRefunds = moveOut?.statement?.refunds
     const refunds =
       Array.isArray(rawRefunds) && rawRefunds.length > 0

@@ -88,6 +88,9 @@ export class DepositSettlementStatementsService {
   ): Promise<Statement> {
     const statement = await this.findOrFail(contractId)
     assertPartyOrStaff(statement, actorId, isStaff, 'STATEMENT_ACCESS_DENIED')
+    // Bản nháp chưa gửi là việc riêng của chủ nhà; khách chỉ thấy bảng đã gửi.
+    if (statement.status === 'draft' && actorId === statement.tenantId)
+      throw new NotFoundException('STATEMENT_NOT_FOUND')
     return statement
   }
 
