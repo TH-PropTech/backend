@@ -45,6 +45,8 @@ import { DepositConfirmationResolver } from './services/deposit-confirmation.res
 import { FlowNotificationService } from './flow/flow-notification.service'
 import { NotificationsModule } from '../notifications/notifications.module'
 import { MoveInSettlement } from '../rental/schemas/move-in-settlement.schema'
+import { MoveOutHandover } from '../rental/schemas/move-out-handover.schema'
+import { DepositSettlementStatement } from '../rental/schemas/deposit-settlement-statement.schema'
 import { ActivityLogModule } from '../activity-log/activity-log.module'
 import { ContractLayoutService } from './layout/contract-layout.service'
 import { ContractLayoutsController } from './layout/contract-layouts.controller'
@@ -71,6 +73,8 @@ import { WalletsModule } from '../wallets/wallets.module'
       ContractDocument,
       Payment,
       MoveInSettlement,
+      MoveOutHandover,
+      DepositSettlementStatement,
       User,
       Booking,
       Dispute,

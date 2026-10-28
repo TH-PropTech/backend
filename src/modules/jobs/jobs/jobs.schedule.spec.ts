@@ -13,6 +13,7 @@ import {
   RentalOpsExpireAttemptsJob,
   RentalOpsExpireDepositAgreementsJob,
   RentalOpsMarkSettlementsOverdueJob,
+  RentalOpsProcessMoveOutDeadlinesJob,
   RentalOpsProcessPaymentRemindersJob,
 } from './rental-ops.job'
 
@@ -27,6 +28,8 @@ describe('job schedules (unchanged from the former @Cron decorators)', () => {
     processPaymentReminders: jest.fn().mockResolvedValue(1),
     markSettlementsOverdue: jest.fn().mockResolvedValue(1),
     applyDueAmendments: jest.fn().mockResolvedValue(1),
+    processMoveOutHandoverDeadlines: jest.fn().mockResolvedValue(2),
+    processDepositStatementDeadlines: jest.fn().mockResolvedValue(3),
   }
   const cases: Array<[BaseJob, string, string | undefined, keyof typeof svc]> =
     [
@@ -84,6 +87,12 @@ describe('job schedules (unchanged from the former @Cron decorators)', () => {
         undefined,
         'applyDueAmendments',
       ],
+      [
+        new RentalOpsProcessMoveOutDeadlinesJob(svc as never),
+        CronExpression.EVERY_HOUR,
+        undefined,
+        'processMoveOutHandoverDeadlines',
+      ],
     ]
 
   it.each(cases)(
@@ -96,7 +105,14 @@ describe('job schedules (unchanged from the former @Cron decorators)', () => {
     }
   )
 
-  it('keeps the five rental-ops cron names', () => {
+  it('move-out deadline job sums both scheduler tasks', async () => {
+    const job = new RentalOpsProcessMoveOutDeadlinesJob(svc as never)
+    await expect(job.run()).resolves.toBe(5)
+    expect(svc.processDepositStatementDeadlines).toHaveBeenCalled()
+    expect(job.name).toBe('rental-ops-process-move-out-deadlines')
+  })
+
+  it('keeps the rental-ops cron names', () => {
     expect(
       cases.map(([job]) => job.name).filter(n => n.startsWith('rental-ops-'))
     ).toEqual([
@@ -105,6 +121,7 @@ describe('job schedules (unchanged from the former @Cron decorators)', () => {
       'rental-ops-process-payment-reminders',
       'rental-ops-mark-settlements-overdue',
       'rental-ops-apply-due-amendments',
+      'rental-ops-process-move-out-deadlines',
     ])
   })
 })

@@ -1,4 +1,6 @@
 import type { DepositAgreementStatus } from '../schemas/deposit-agreement.schema'
+import type { DepositStatementStatus } from '../../rental/schemas/deposit-settlement-statement.schema'
+import type { MoveOutHandoverStatus } from '../../rental/schemas/move-out-handover.schema'
 
 /**
  * Điều kiện dùng chung giữa khối `flow` của Contract View và các endpoint
@@ -165,4 +167,65 @@ export function evaluateSigning(input: SigningGuardInput): SigningGuardResult {
     )
   }
   return { eligible: true, reasonCode: null, message: null }
+}
+
+// ── Kết thúc thuê (move-out): mã lý do trùng mã lỗi của endpoint tương ứng ──
+
+const REFUNDABLE_STATEMENT_STATUSES: ReadonlySet<DepositStatementStatus> =
+  new Set(['accepted', 'disputed', 'refund-recorded'])
+
+/** Chủ nhà ghi biên bản lần đầu hoặc sửa (revision mới) khi biên bản còn mở. */
+export function evaluateRecordMoveOutHandover(
+  handover: MoveOutHandoverStatus | null
+): GuardResult {
+  if (handover === 'completed') {
+    return deny('MOVE_OUT_HANDOVER_COMPLETED_IMMUTABLE')
+  }
+  if (handover === 'disputed') return deny('MOVE_OUT_HANDOVER_DISPUTED')
+  return ALLOWED
+}
+
+/** Khách xác nhận hoặc nêu sai lệch: cần biên bản đang `recorded`. */
+export function evaluateRespondMoveOutHandover(
+  handover: MoveOutHandoverStatus | null
+): GuardResult {
+  if (handover === null) return deny('MOVE_OUT_HANDOVER_NOT_FOUND')
+  return evaluateRecordMoveOutHandover(handover)
+}
+
+export function evaluateCreateDepositStatement(
+  handover: MoveOutHandoverStatus | null,
+  statement: DepositStatementStatus | null
+): GuardResult {
+  if (handover !== 'completed') {
+    return deny('MOVE_OUT_HANDOVER_NOT_COMPLETED')
+  }
+  if (statement !== null && statement !== 'draft') {
+    return deny('STATEMENT_NOT_DRAFT')
+  }
+  return ALLOWED
+}
+
+export function evaluateRespondDepositStatement(
+  statement: DepositStatementStatus | null
+): GuardResult {
+  return statement === 'awaiting-tenant'
+    ? ALLOWED
+    : deny('STATEMENT_NOT_AWAITING_TENANT')
+}
+
+export function evaluateRecordDepositRefund(
+  statement: DepositStatementStatus | null
+): GuardResult {
+  return statement !== null && REFUNDABLE_STATEMENT_STATUSES.has(statement)
+    ? ALLOWED
+    : deny('STATEMENT_REFUND_NOT_ALLOWED')
+}
+
+export function evaluateAcknowledgeDepositRefund(
+  hasUnacknowledgedRefund: boolean
+): GuardResult {
+  return hasUnacknowledgedRefund
+    ? ALLOWED
+    : deny('STATEMENT_NO_REFUND_TO_ACKNOWLEDGE')
 }

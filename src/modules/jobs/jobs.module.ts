@@ -17,6 +17,7 @@ import {
   RentalOpsExpireAttemptsJob,
   RentalOpsExpireDepositAgreementsJob,
   RentalOpsMarkSettlementsOverdueJob,
+  RentalOpsProcessMoveOutDeadlinesJob,
   RentalOpsProcessPaymentRemindersJob,
 } from './jobs/rental-ops.job'
 import { SystemConfig } from '../properties/schemas/system-config.schema'
@@ -33,6 +34,7 @@ const JOB_CLASSES = [
   RentalOpsProcessPaymentRemindersJob,
   RentalOpsMarkSettlementsOverdueJob,
   RentalOpsApplyDueAmendmentsJob,
+  RentalOpsProcessMoveOutDeadlinesJob,
 ]
 
 /**

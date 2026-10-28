@@ -52,6 +52,24 @@ const INDEXES: Array<{
     options: { name: 'move_in_settlements_contract_unique', unique: true },
   },
   {
+    collection: 'move_out_handovers',
+    keys: { contractId: 1 },
+    options: { name: 'move_out_handovers_contract_unique', unique: true },
+  },
+  {
+    collection: 'deposit_settlement_statements',
+    keys: { contractId: 1 },
+    options: {
+      name: 'deposit_settlement_statements_contract_unique',
+      unique: true,
+    },
+  },
+  {
+    collection: 'deposit_settlement_statements',
+    keys: { status: 1, responseDueAt: 1 },
+    options: { name: 'deposit_settlement_statements_status_response_due' },
+  },
+  {
     collection: 'contract_layout_profiles',
     keys: { profileKey: 1, version: 1 },
     options: {

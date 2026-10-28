@@ -6,6 +6,8 @@ import { PaymentsService } from '../../payments/services/payments.service'
 import { MoveInSettlementsService } from './move-in-settlements.service'
 import { MockBankService } from '../../mock-bank/services/mock-bank.service'
 import { DepositAgreementsService } from '../../contracts/services/deposit-agreements.service'
+import { MoveOutHandoversService } from './move-out-handovers.service'
+import { DepositSettlementStatementsService } from './deposit-settlement-statements.service'
 import { ContractAmendmentService } from '../../contracts/services/contract-amendment.service'
 
 /**
@@ -78,6 +80,34 @@ export class RentalOpsScheduler {
       )
       return (await service?.applyAllDueAmendments()) ?? 0
     })
+  }
+
+  /** Hạn phản hồi biên bản trả nhà (khách quá hạn thì tự hoàn tất). */
+  async processMoveOutHandoverDeadlines(): Promise<number> {
+    return this.runIfEnabled(
+      'process-move-out-handover-deadlines',
+      async () => {
+        const service = this.moduleRef.get<MoveOutHandoversService>(
+          MoveOutHandoversService,
+          { strict: false }
+        )
+        return (await service?.processResponseDeadlines()) ?? 0
+      }
+    )
+  }
+
+  /** Hạn phản hồi bảng khấu trừ, nhắc và đánh dấu quá hạn hoàn cọc 07 ngày. */
+  async processDepositStatementDeadlines(): Promise<number> {
+    return this.runIfEnabled(
+      'process-deposit-statement-deadlines',
+      async () => {
+        const service = this.moduleRef.get<DepositSettlementStatementsService>(
+          DepositSettlementStatementsService,
+          { strict: false }
+        )
+        return (await service?.processDeadlines()) ?? 0
+      }
+    )
   }
 
   private isEnabled(): boolean {

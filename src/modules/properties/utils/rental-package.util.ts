@@ -38,7 +38,15 @@ export type SettlementPolicyInput = {
   firstPaymentDueOffsetDays: number
 }
 
+import {
+  DEFAULT_MOVE_OUT_RESPONSE_DAYS,
+  MAX_MOVE_OUT_RESPONSE_DAYS,
+  MIN_MOVE_OUT_RESPONSE_DAYS,
+} from '../../rental/utils/deposit-refund.constants'
 import type { RentalExecutionPolicyRef } from '../../rental/utils/rental-execution-policy.util'
+
+/** Số ngày theo lịch khách có để phản hồi biên bản trả nhà và bảng khấu trừ cọc. */
+export type MoveOutPolicy = { responseDays: number }
 
 export type RentalPackageInput = {
   packageId: string
@@ -49,6 +57,7 @@ export type RentalPackageInput = {
   status: 'active' | 'inactive'
   settlementPolicy?: SettlementPolicyInput
   prepaidRent?: PrepaidRentInput
+  moveOutPolicy?: MoveOutPolicy
   allowedExecutionPolicies?: RentalExecutionPolicyRef[]
   defaultExecutionPolicy?: RentalExecutionPolicyRef
 }
@@ -67,6 +76,8 @@ export type RentalPackageSnapshot = {
   /** Số tháng tiền thuê trả trước đã quy đổi (0 = chỉ cọc). Vắng mặt = gói cũ. */
   resolvedPrepaidRentMonths?: number
   resolvedPrepaidRentAmount?: number
+  /** Vắng mặt = gói cũ, đọc là mặc định 3 ngày. Được chốt vào snapshot khi khách nộp đơn. */
+  moveOutPolicy?: MoveOutPolicy
   currency?: 'VND'
   capturedAt?: Date
   allowedExecutionPolicies?: RentalExecutionPolicyRef[]
@@ -141,6 +152,20 @@ export function resolvePrepaidRent(
     resolvedPrepaidRentMonths: months,
     resolvedPrepaidRentAmount: monthlyRent * months,
   }
+}
+
+/** Kiểm tra số ngày phản hồi (số nguyên 1..15); gói cũ không có trường thì dùng mặc định. */
+export function resolveMoveOutPolicy(policy?: MoveOutPolicy): MoveOutPolicy {
+  if (!policy) return { responseDays: DEFAULT_MOVE_OUT_RESPONSE_DAYS }
+  const days = policy.responseDays
+  if (
+    !Number.isInteger(days) ||
+    days < MIN_MOVE_OUT_RESPONSE_DAYS ||
+    days > MAX_MOVE_OUT_RESPONSE_DAYS
+  ) {
+    throw new Error('INVALID_RENTAL_PACKAGE: invalid move-out response days')
+  }
+  return { responseDays: days }
 }
 
 export function validateSettlementPolicy(
@@ -278,6 +303,7 @@ export function validateRentalPackages(
       status: packageItem.status,
       ...settlementSnapshot,
       ...prepaidSnapshot,
+      moveOutPolicy: resolveMoveOutPolicy(packageItem.moveOutPolicy),
       ...(packageItem.allowedExecutionPolicies
         ? { allowedExecutionPolicies: packageItem.allowedExecutionPolicies }
         : {}),

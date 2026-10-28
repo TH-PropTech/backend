@@ -474,6 +474,7 @@ export const CONTRACT_FLOW_STAGE_KEYS = [
   'signing',
   'ledger',
   'move-in',
+  'move-out',
 ] as const
 export type ContractFlowStageKey = (typeof CONTRACT_FLOW_STAGE_KEYS)[number]
 
@@ -500,6 +501,13 @@ export const CONTRACT_FLOW_ACTIONS = [
   'RECORD_HANDOVER',
   'CONFIRM_HANDOVER',
   'VERIFY_LEDGER',
+  'RECORD_MOVE_OUT_HANDOVER',
+  'CONFIRM_MOVE_OUT_HANDOVER',
+  'REPORT_MOVE_OUT_DISCREPANCY',
+  'CREATE_DEPOSIT_STATEMENT',
+  'RESPOND_DEPOSIT_STATEMENT',
+  'RECORD_DEPOSIT_REFUND',
+  'ACKNOWLEDGE_DEPOSIT_REFUND',
 ] as const
 export type ContractFlowActionKey = (typeof CONTRACT_FLOW_ACTIONS)[number]
 
@@ -545,6 +553,48 @@ export class ContractFlowActionDto {
   stage!: ContractFlowStageKey
 }
 
+/** Giai đoạn kết thúc thuê, suy ra từ hai collection mới; không phải `contract.status`. */
+export const MOVE_OUT_PHASES = [
+  'awaiting-move-out',
+  'awaiting-deposit-settlement',
+  'settled',
+] as const
+export type MoveOutPhase = (typeof MOVE_OUT_PHASES)[number]
+
+export class ContractFlowMoveOutDto {
+  @ApiProperty({ enum: MOVE_OUT_PHASES })
+  phase!: MoveOutPhase
+
+  @ApiProperty({
+    description:
+      'Biên bản trả nhà hoặc bảng khấu trừ đang ở trạng thái disputed',
+  })
+  disputed!: boolean
+
+  @ApiProperty({ enum: ['recorded', 'completed', 'disputed'], nullable: true })
+  handoverStatus!: 'recorded' | 'completed' | 'disputed' | null
+
+  @ApiProperty({
+    enum: [
+      'draft',
+      'awaiting-tenant',
+      'accepted',
+      'disputed',
+      'refund-recorded',
+      'closed',
+    ],
+    nullable: true,
+  })
+  statementStatus!:
+    | 'draft'
+    | 'awaiting-tenant'
+    | 'accepted'
+    | 'disputed'
+    | 'refund-recorded'
+    | 'closed'
+    | null
+}
+
 export class ContractFlowDto {
   @ApiProperty({ example: 1 })
   version!: 1
@@ -563,6 +613,13 @@ export class ContractFlowDto {
     description: 'Chỉ gồm hành động của danh tính JWT hiện tại',
   })
   nextActions!: ContractFlowActionDto[]
+
+  @ApiProperty({
+    type: ContractFlowMoveOutDto,
+    required: false,
+    description: 'Chỉ có khi hợp đồng đã vào giai đoạn kết thúc thuê',
+  })
+  moveOut?: ContractFlowMoveOutDto
 }
 
 export class ContractViewDto {

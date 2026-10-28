@@ -17,6 +17,7 @@ const DONE_TITLES: Record<ContractFlowStageDto['key'], string> = {
   signing: 'Hai bên đã ký hợp đồng',
   ledger: 'Hợp đồng đã được ghi sổ cái',
   'move-in': 'Đã hoàn tất nhận nhà',
+  'move-out': 'Đã quyết toán tiền cọc',
 }
 
 /** Chủ thể nội bộ đọc view ở chế độ staff; không phải participant. */

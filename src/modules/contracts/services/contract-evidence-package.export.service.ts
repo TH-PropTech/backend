@@ -26,6 +26,8 @@ import { DepositAgreement } from '../schemas/deposit-agreement.schema'
 import { ContractAmendmentStore } from './contract-amendment.store'
 import { Payment } from '../../payments/schemas/payment.schema'
 import { MoveInSettlement } from '../../rental/schemas/move-in-settlement.schema'
+import { MoveOutHandover } from '../../rental/schemas/move-out-handover.schema'
+import { DepositSettlementStatement } from '../../rental/schemas/deposit-settlement-statement.schema'
 import { FabricService } from '../../fabric/services/fabric.service'
 import { FabricGovernanceService } from '../../fabric/services/fabric-governance.service'
 import { LedgerEvidenceQueryService } from '../../fabric/services/ledger-evidence-query.service'
@@ -64,6 +66,10 @@ export class ContractEvidencePackageExportService {
     private readonly amendmentRepository: ContractAmendmentStore,
     @InjectRepository(MoveInSettlement)
     private readonly settlementRepository: Repository<MoveInSettlement>,
+    @InjectRepository(MoveOutHandover)
+    private readonly moveOutHandoverRepository: Repository<MoveOutHandover>,
+    @InjectRepository(DepositSettlementStatement)
+    private readonly depositStatementRepository: Repository<DepositSettlementStatement>,
     @Optional()
     private readonly governanceService?: FabricGovernanceService,
     @Optional()
@@ -259,17 +265,27 @@ export class ContractEvidencePackageExportService {
     artifact: NonNullable<EvidencePackageInput['artifact']>
   ): Promise<EvidencePackageInput> {
     const contractId = contract._id.toHexString()
-    const [evidence, deposit, payments, amendments, settlement, governance] =
-      await Promise.all([
-        this.ledgerEvidenceQueryService
-          .getContractLedgerEvidence(contractId, contract)
-          .catch(() => null),
-        this.loadDeposit(contract),
-        this.paymentRepository.find({ where: { contractId } }),
-        this.amendmentRepository.find({ where: { contractId } }),
-        this.settlementRepository.findOne({ where: { contractId } }),
-        this.loadGovernance(contract),
-      ])
+    const [
+      evidence,
+      deposit,
+      payments,
+      amendments,
+      settlement,
+      governance,
+      moveOutHandover,
+      depositStatement,
+    ] = await Promise.all([
+      this.ledgerEvidenceQueryService
+        .getContractLedgerEvidence(contractId, contract)
+        .catch(() => null),
+      this.loadDeposit(contract),
+      this.paymentRepository.find({ where: { contractId } }),
+      this.amendmentRepository.find({ where: { contractId } }),
+      this.settlementRepository.findOne({ where: { contractId } }),
+      this.loadGovernance(contract),
+      this.moveOutHandoverRepository.findOne({ where: { contractId } }),
+      this.depositStatementRepository.findOne({ where: { contractId } }),
+    ])
 
     const mode = this.fabricService.getStatus().mode
     return {
@@ -360,6 +376,20 @@ export class ContractEvidencePackageExportService {
             ledgerTxHash: settlement.handoverEvidence?.txHash ?? null,
           }
         : null,
+      moveOut:
+        moveOutHandover || depositStatement
+          ? {
+              moveOutPolicy:
+                (contract.packageSnapshot?.moveOutPolicy as Dict | undefined) ??
+                null,
+              handover: moveOutHandover
+                ? (moveOutHandover as unknown as Dict)
+                : null,
+              statement: depositStatement
+                ? (depositStatement as unknown as Dict)
+                : null,
+            }
+          : null,
       projection: {
         expectedHash: artifact.recordedHash,
         projectedHash: contract.contractHash ?? null,

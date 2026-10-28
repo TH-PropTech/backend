@@ -1,3 +1,4 @@
+import { DEPOSIT_REFUND_DUE_TEXT } from '../../rental/utils/deposit-refund.constants'
 import type {
   LegalSourceContent,
   PlatformRegulationContent,
@@ -929,9 +930,8 @@ export const SEED_PLATFORM_REGULATIONS: Array<
   {
     id: 'reg-deposit-06',
     code: 'REG-DEPOSIT-06',
-    title: 'Quy chuẩn tiền Đặt cọc & Thời hạn hoàn cọc tối đa 03 ngày',
-    summary:
-      'Tiền đặt cọc được giữ an toàn trên hợp đồng thông minh hoặc tài khoản bảo chứng. Khi thanh lý hợp đồng và bàn giao hiện trạng, Chủ nhà có nghĩa vụ hoàn trả tiền cọc trong tối đa 03 ngày làm việc.',
+    title: 'Quy chuẩn tiền Đặt cọc & Thời hạn hoàn cọc 07 ngày',
+    summary: `Tiền đặt cọc do Chủ nhà giữ và hoàn trả trực tiếp cho Khách thuê; nền tảng không nhận, không giữ và không chuyển tiền cọc. Sau khi lập biên bản trả nhà và bảng khấu trừ cọc được Khách thuê chấp nhận (hoặc được xem là chấp nhận khi quá hạn phản hồi), Chủ nhà có nghĩa vụ hoàn trả tiền cọc trong ${DEPOSIT_REFUND_DUE_TEXT}.`,
     category: 'deposit-handover',
     severity: 'mandatory',
     scope: ['all'],
@@ -946,8 +946,7 @@ export const SEED_PLATFORM_REGULATIONS: Array<
       },
       {
         id: 'chk-deposit-refund-term',
-        label:
-          'Cam kết hoàn cọc trong 03 ngày làm việc sau khi thanh lý hợp đồng',
+        label: `Cam kết hoàn cọc trong ${DEPOSIT_REFUND_DUE_TEXT} sau khi bảng khấu trừ cọc được chấp nhận`,
       },
     ],
     updatedAt: '2026-09-23T20:00:00Z',

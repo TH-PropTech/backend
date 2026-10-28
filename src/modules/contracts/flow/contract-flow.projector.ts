@@ -16,10 +16,16 @@ import {
   evaluateSigning,
   type GuardResult,
 } from './flow-guards'
+import {
+  moveOutActions,
+  moveOutStage,
+  projectMoveOut,
+  type MoveOutFacts,
+} from './move-out-flow'
 
 type PartyRole = 'tenant' | 'landlord'
 type ActorRole = PartyRole | 'staff'
-type ProjectedStageKey = Exclude<ContractFlowStageKey, 'move-in'>
+type ProjectedStageKey = Exclude<ContractFlowStageKey, 'move-in' | 'move-out'>
 
 /** Dữ kiện đã lưu mà Contract View thu thập; projector không truy vấn DB. */
 export interface ContractFlowFacts {
@@ -52,6 +58,8 @@ export interface ContractFlowFacts {
     completedAt: Date | null
   }
   fees?: { tenantDue: boolean; landlordDue: boolean }
+  /** Biên bản trả nhà và bảng khấu trừ cọc; vắng mặt = chưa có bản ghi nào. */
+  moveOut?: MoveOutFacts
 }
 
 type StageEvaluation = {
@@ -335,7 +343,15 @@ function projectActions(facts: ContractFlowFacts): ContractFlowActionDto[] {
       actions.push(toAction('PAY_FEE', role, 'move-in', ALWAYS_ENABLED))
     if (role === 'landlord' && facts.fees?.landlordDue)
       actions.push(toAction('PAY_FEE', role, 'move-in', ALWAYS_ENABLED))
-    return actions
+    return [
+      ...actions,
+      ...moveOutActions(
+        facts.contractStatus,
+        facts.moveOut,
+        role,
+        facts.settlement?.handoverCompleted === true
+      ),
+    ]
   }
   if (role === 'staff') return documentActions(facts, role)
   if (role === 'landlord') {
@@ -351,6 +367,7 @@ function projectActions(facts: ContractFlowFacts): ContractFlowActionDto[] {
  */
 export function projectContractFlow(facts: ContractFlowFacts): ContractFlowDto {
   const stages = projectStages(facts)
+  const moveOutView = projectMoveOut(facts.contractStatus, facts.moveOut)
   if (facts.settlement?.required) {
     const completed =
       facts.settlement.status === 'paid' && facts.settlement.handoverCompleted
@@ -363,6 +380,12 @@ export function projectContractFlow(facts: ContractFlowFacts): ContractFlowDto {
         : null,
     })
   }
+  const moveOut = moveOutStage(
+    facts.contractStatus,
+    facts.moveOut,
+    facts.settlement?.handoverCompleted === true
+  )
+  if (moveOut) stages.push(moveOut)
   const firstOpen = stages.find(
     stage => stage.status !== 'done' && stage.status !== 'skipped'
   )
@@ -372,5 +395,6 @@ export function projectContractFlow(facts: ContractFlowFacts): ContractFlowDto {
     stages,
     activeStage: firstOpen?.key ?? 'completed',
     nextActions: projectActions(facts),
+    ...(moveOutView ? { moveOut: moveOutView } : {}),
   }
 }

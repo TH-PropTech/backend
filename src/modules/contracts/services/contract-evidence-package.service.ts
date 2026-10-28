@@ -60,6 +60,12 @@ export type EvidencePackageInput = {
   termination?: Dict | null
   settlement?: Dict | null
   handover?: Dict | null
+  /** Kết thúc thuê: biên bản trả nhà, bảng khấu trừ cọc (kèm hoàn cọc) và chính sách trong snapshot gói. */
+  moveOut?: {
+    moveOutPolicy: Dict | null
+    handover: Dict | null
+    statement: Dict | null
+  } | null
   projection: { expectedHash: string | null; projectedHash: string | null }
   ledger: {
     status: EvidenceVerificationStatus
@@ -91,6 +97,8 @@ export type EvidenceVerificationReport = {
   projection: EvidenceVerificationLayer
   ledger: EvidenceVerificationLayer
   endToEnd: boolean
+  /** Mã ghi chú ổn định; chỉ có khi gói chứa bản ghi hoàn cọc. */
+  notices?: string[]
 }
 
 type CategoryName =
@@ -102,6 +110,9 @@ type CategoryName =
   | 'termination'
   | 'settlement'
   | 'handover'
+  | 'moveOutHandover'
+  | 'depositStatement'
+  | 'depositRefunds'
 
 export type EvidencePackageManifest = {
   manifestVersion: typeof EVIDENCE_PACKAGE_MANIFEST_VERSION
@@ -144,31 +155,93 @@ export type EvidencePackagePlan = {
 
 // ── Allowlist & khử nhạy cảm ───────────────────────────────────────────────
 
-const FORBIDDEN_KEY =
-  /cccd|national.?id|id.?number|passport|password|passwd|secret|token|private.?key|credential|signature.?(value|bytes)|certificate.?pem|api.?key|attachment|(tenant|landlord)(name|address)|meter|key.?count|inventory|notes?$|discrepancy|override.?reason/i
+/** Khóa bí mật/định danh luôn bị loại, kể cả ở mục kết thúc thuê. */
+const SENSITIVE_KEY =
+  /cccd|national.?id|id.?number|passport|password|passwd|secret|token|private.?key|credential|signature.?(value|bytes)|certificate.?pem|api.?key|attachment|(tenant|landlord)(name|address)/i
+const FORBIDDEN_KEY = new RegExp(
+  `${SENSITIVE_KEY.source}|meter|key.?count|inventory|notes?$|discrepancy|override.?reason`,
+  'i'
+)
 
-function scrub(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(scrub)
+function scrub(value: unknown, forbidden: RegExp = FORBIDDEN_KEY): unknown {
+  if (Array.isArray(value)) return value.map(item => scrub(item, forbidden))
   if (value instanceof Date) return value.toISOString()
   if (value && typeof value === 'object') {
     const out: Dict = {}
     for (const [key, item] of Object.entries(value as Dict)) {
-      if (FORBIDDEN_KEY.test(key) || item === undefined) continue
-      out[key] = scrub(item)
+      if (forbidden.test(key) || item === undefined) continue
+      out[key] = scrub(item, forbidden)
     }
     return out
   }
   return value
 }
 
-function pick(source: Dict | null | undefined, keys: readonly string[]): Dict {
+function pick(
+  source: Dict | null | undefined,
+  keys: readonly string[],
+  forbidden: RegExp = FORBIDDEN_KEY
+): Dict {
   const out: Dict = {}
   for (const key of keys) {
     const value = source?.[key]
     if (value !== undefined) out[key] = value
   }
-  return scrub(out) as Dict
+  return scrub(out, forbidden) as Dict
 }
+
+const MOVE_OUT_HANDOVER_FIELDS = [
+  'revision',
+  'handedBackAt',
+  'meterReadings',
+  'keyCount',
+  'inventoryItems',
+  'notes',
+  'discrepancies',
+  'revisionHistory',
+  'responseDays',
+  'responseDueAt',
+  'status',
+  'handoverHash',
+  'tenantConfirmation',
+  'landlordConfirmation',
+  'completedAt',
+  'completionReason',
+  'dispute',
+  'evidence',
+] as const
+const DEPOSIT_STATEMENT_FIELDS = [
+  'depositAmount',
+  'lines',
+  'status',
+  'responseDays',
+  'statementHash',
+  'submittedAt',
+  'responseDueAt',
+  'acceptedAt',
+  'acceptedReason',
+  'refundDueAt',
+  'refundReminderSentAt',
+  'refundOverdueAt',
+  'closedAt',
+  'closeReason',
+  'dispute',
+  'auditLog',
+  'evidence',
+] as const
+const DEPOSIT_REFUND_FIELDS = [
+  'id',
+  'amount',
+  'transactionRef',
+  'paidAt',
+  'note',
+  'recordedAt',
+  'tenantAcknowledgedAt',
+  'evidence',
+] as const
+/** Khoản hoàn cọc là khai báo của chủ nhà được khách xác nhận, không phải giao dịch hệ thống đã kiểm chứng. */
+const REFUND_DECLARATION_NOTICE =
+  'REFUND_RECORDS_ARE_LANDLORD_DECLARATIONS_ACKNOWLEDGED_BY_TENANT'
 
 const PARTICIPANT_EVENT_FIELDS = [
   'eventType',
@@ -200,9 +273,10 @@ function textOf(value: unknown): string {
 function jsonEntry(
   path: string,
   category: string,
-  value: unknown
+  value: unknown,
+  forbidden: RegExp = FORBIDDEN_KEY
 ): EvidencePackageEntry {
-  const content = stableStringify(scrub(value))
+  const content = stableStringify(scrub(value, forbidden))
   return {
     path,
     category,
@@ -240,6 +314,8 @@ export class ContractEvidencePackageService {
     const operator =
       input.viewer.role === 'staff' || input.viewer.role === 'admin'
     const verification = this.verify(input, artifact)
+    const moveOut = this.moveOutEntries(input.moveOut)
+    if (moveOut.refunds) verification.notices = [REFUND_DECLARATION_NOTICE]
 
     const entries: EvidencePackageEntry[] = []
     const categories = {} as EvidencePackageManifest['categories']
@@ -381,6 +457,39 @@ export class ContractEvidencePackageService {
         : null
     )
 
+    record(
+      'moveOutHandover',
+      moveOut.handover
+        ? jsonEntry(
+            'evidence/move-out-handover.json',
+            'moveOutHandover',
+            moveOut.handover,
+            SENSITIVE_KEY
+          )
+        : null
+    )
+    record(
+      'depositStatement',
+      moveOut.statement
+        ? jsonEntry(
+            'evidence/deposit-statement.json',
+            'depositStatement',
+            moveOut.statement,
+            SENSITIVE_KEY
+          )
+        : null
+    )
+    record(
+      'depositRefunds',
+      moveOut.refunds
+        ? jsonEntry(
+            'evidence/deposit-refunds.json',
+            'depositRefunds',
+            moveOut.refunds,
+            SENSITIVE_KEY
+          )
+        : null
+    )
     // Hash logic: chỉ metadata entry đã sắp xếp + định danh hợp đồng/artifact.
     const packageHash = sha256Hex({
       manifestVersion: EVIDENCE_PACKAGE_MANIFEST_VERSION,
@@ -571,6 +680,45 @@ export class ContractEvidencePackageService {
         ),
       payment => textOf(payment.paymentId)
     )
+  }
+
+  /**
+   * Mục kết thúc thuê. Nội dung của chính hai bên (chỉ số, đồ đạc, ghi chú, phản hồi) được giữ
+   * nguyên vì đây là bằng chứng tranh chấp; vẫn loại khóa bí mật/định danh (SENSITIVE_KEY).
+   */
+  private moveOutEntries(moveOut: EvidencePackageInput['moveOut']): {
+    handover: Dict | null
+    statement: Dict | null
+    refunds: Dict[] | null
+  } {
+    const policy = moveOut?.moveOutPolicy
+      ? { moveOutPolicy: moveOut.moveOutPolicy }
+      : {}
+    const handover = moveOut?.handover
+      ? {
+          ...pick(moveOut.handover, MOVE_OUT_HANDOVER_FIELDS, SENSITIVE_KEY),
+          ...policy,
+        }
+      : null
+    // Bản nháp chưa gửi không phải sự kiện giữa hai bên nên không vào bộ chứng cứ.
+    const statement =
+      moveOut?.statement && moveOut.statement.status !== 'draft'
+        ? {
+            ...pick(moveOut.statement, DEPOSIT_STATEMENT_FIELDS, SENSITIVE_KEY),
+            ...policy,
+          }
+        : null
+    const rawRefunds = moveOut?.statement?.refunds
+    const refunds =
+      Array.isArray(rawRefunds) && rawRefunds.length > 0
+        ? sortBy(
+            (rawRefunds as Dict[]).map(refund =>
+              pick(refund, DEPOSIT_REFUND_FIELDS, SENSITIVE_KEY)
+            ),
+            refund => `${textOf(refund.recordedAt)}:${textOf(refund.id)}`
+          )
+        : null
+    return { handover, statement, refunds }
   }
 
   private settlementEntry(settlement: Dict): Dict {

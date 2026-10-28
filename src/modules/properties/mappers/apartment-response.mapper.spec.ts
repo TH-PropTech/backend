@@ -103,6 +103,20 @@ describe('ApartmentResponseMapper rental pricing', () => {
     )
   })
 
+  it('exposes the stored move-out response days and defaults legacy packages to 3', () => {
+    const stored = ApartmentResponseMapper.toWebJson(
+      buildApartment([
+        { ...defaultPackages[0]!, moveOutPolicy: { responseDays: 9 } },
+      ]) as never
+    )
+    const legacy = ApartmentResponseMapper.toMobileJson(
+      buildApartment(defaultPackages) as never
+    )
+
+    expect(stored.rentalPackages[0]?.moveOutPolicy).toEqual({ responseDays: 9 })
+    expect(legacy.rentalPackages[0]?.moveOutPolicy).toEqual({ responseDays: 3 })
+  })
+
   it('defaults legacy listings to an empty package list', () => {
     const apartment = {
       _id: new ObjectId('507f1f77bcf86cd799439012'),

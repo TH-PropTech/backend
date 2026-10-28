@@ -89,3 +89,21 @@ export class RentalOpsApplyDueAmendmentsJob extends BaseJob {
     return this.ops.applyDueAmendments()
   }
 }
+
+@Injectable()
+export class RentalOpsProcessMoveOutDeadlinesJob extends BaseJob {
+  readonly name = 'rental-ops-process-move-out-deadlines'
+  readonly description =
+    'Xử lý hạn phản hồi biên bản trả nhà, bảng khấu trừ cọc và hạn hoàn cọc (mỗi giờ)'
+  readonly cron = CronExpression.EVERY_HOUR
+
+  constructor(private readonly ops: RentalOpsScheduler) {
+    super()
+  }
+
+  async run(): Promise<number> {
+    const handovers = await this.ops.processMoveOutHandoverDeadlines()
+    const statements = await this.ops.processDepositStatementDeadlines()
+    return handovers + statements
+  }
+}

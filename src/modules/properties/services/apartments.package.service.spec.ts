@@ -161,6 +161,63 @@ describe('ApartmentsService.updateRentalPackages', () => {
     })
   })
 
+  describe('move-out response days', () => {
+    const daysDto = (moveOutPolicy?: unknown): UpdateRentalPackagesDto =>
+      ({
+        expectedRevision: 1,
+        rentalPackages: [
+          {
+            packageId: 'pkg-m',
+            version: 1,
+            durationMonths: 12,
+            monthlyRent: 10_000_000,
+            depositPolicy: { type: 'MONTHS_OF_RENT', months: 1 },
+            status: 'active',
+            ...(moveOutPolicy ? { moveOutPolicy } : {}),
+          },
+        ],
+      }) as UpdateRentalPackagesDto
+
+    it('stores the landlord-chosen response days', async () => {
+      const context = createContext()
+      const result = await context.service.updateRentalPackages(
+        context.apartment._id.toHexString(),
+        daysDto({ responseDays: 7 }),
+        'landlord-1',
+        false
+      )
+      expect(result.rentalPackages?.[0]?.moveOutPolicy).toEqual({
+        responseDays: 7,
+      })
+    })
+
+    it('defaults to 3 days when the field is missing', async () => {
+      const context = createContext()
+      const result = await context.service.updateRentalPackages(
+        context.apartment._id.toHexString(),
+        daysDto(),
+        'landlord-1',
+        false
+      )
+      expect(result.rentalPackages?.[0]?.moveOutPolicy).toEqual({
+        responseDays: 3,
+      })
+    })
+
+    it('rejects out-of-range days without saving', async () => {
+      const context = createContext()
+      await expect(
+        context.service.updateRentalPackages(
+          context.apartment._id.toHexString(),
+          daysDto({ responseDays: 16 }),
+          'landlord-1',
+          false
+        )
+      ).rejects.toThrow('invalid move-out response days')
+      expect(context.repository.save).not.toHaveBeenCalled()
+    })
+  })
+
   it('rejects non-owners and stale revisions before mutating packages', async () => {
     const context = createContext()
     await expect(

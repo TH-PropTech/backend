@@ -19,6 +19,8 @@ import { ContractArtifactService } from './contract-artifact.service'
 import { ContractTemplateGovernanceService } from '../legal/contract-template-governance.service'
 import { ContractAmendmentStore } from './contract-amendment.store'
 import { MoveInSettlement } from '../../rental/schemas/move-in-settlement.schema'
+import { MoveOutHandover } from '../../rental/schemas/move-out-handover.schema'
+import { DepositSettlementStatement } from '../../rental/schemas/deposit-settlement-statement.schema'
 import { resolveEffectiveCommercial } from '../commercial/resolve-effective-commercial'
 import {
   resolveDepositConfirmation,
@@ -70,7 +72,13 @@ export class ContractViewService {
     private readonly amendmentRepository?: ContractAmendmentStore,
     @Optional()
     @InjectRepository(MoveInSettlement)
-    private readonly settlementRepository?: Repository<MoveInSettlement>
+    private readonly settlementRepository?: Repository<MoveInSettlement>,
+    @Optional()
+    @InjectRepository(MoveOutHandover)
+    private readonly moveOutHandoverRepository?: Repository<MoveOutHandover>,
+    @Optional()
+    @InjectRepository(DepositSettlementStatement)
+    private readonly depositStatementRepository?: Repository<DepositSettlementStatement>
   ) {}
 
   /**
@@ -465,6 +473,7 @@ export class ContractViewService {
     const settlement = this.settlementRepository
       ? await this.settlementRepository.findOne({ where: { contractId } })
       : null
+    const moveOut = await this.loadMoveOutFacts(contractId)
     const feeLines = contract.feeSnapshot?.quote ?? []
     const tenantServiceFee =
       feeLines.find(line => line.payerRole === 'tenant')?.amount ?? 0
@@ -600,6 +609,7 @@ export class ContractViewService {
                 completedAt: settlement.handover?.completedAt ?? null,
               }
             : undefined,
+          moveOut,
           fees: {
             tenantDue: Boolean(
               feeLines.find(line => line.payerRole === 'tenant')?.amount
@@ -636,6 +646,25 @@ export class ContractViewService {
     }
   }
 
+  private async loadMoveOutFacts(
+    contractId: string
+  ): Promise<ContractFlowFacts['moveOut']> {
+    if (!this.moveOutHandoverRepository || !this.depositStatementRepository) {
+      return undefined
+    }
+    const [handover, statement] = await Promise.all([
+      this.moveOutHandoverRepository.findOne({ where: { contractId } }),
+      this.depositStatementRepository.findOne({ where: { contractId } }),
+    ])
+    return {
+      handoverStatus: handover?.status ?? null,
+      statementStatus: statement?.status ?? null,
+      hasUnacknowledgedRefund: (statement?.refunds ?? []).some(
+        refund => !refund.tenantAcknowledgedAt
+      ),
+    }
+  }
+
   private buildFlowFacts(
     contract: Contract,
     context: Pick<ContractFlowFacts, 'kycVerified' | 'viewer'> & {
@@ -644,6 +673,7 @@ export class ContractViewService {
       ledgerStatus: ContractLedgerSummaryDto['status']
       settlement?: ContractFlowFacts['settlement']
       fees?: ContractFlowFacts['fees']
+      moveOut?: ContractFlowFacts['moveOut']
     }
   ): ContractFlowFacts {
     const { depositAgreement: agreement, depositConfirmation } = context
@@ -690,6 +720,7 @@ export class ContractViewService {
       viewer: context.viewer,
       ...(context.settlement ? { settlement: context.settlement } : {}),
       ...(context.fees ? { fees: context.fees } : {}),
+      ...(context.moveOut ? { moveOut: context.moveOut } : {}),
     }
   }
 }

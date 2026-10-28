@@ -26,6 +26,14 @@ const TASKS: Task[] = [
     name: 'applyDueAmendments',
     run: scheduler => scheduler.applyDueAmendments(),
   },
+  {
+    name: 'processMoveOutHandoverDeadlines',
+    run: scheduler => scheduler.processMoveOutHandoverDeadlines(),
+  },
+  {
+    name: 'processDepositStatementDeadlines',
+    run: scheduler => scheduler.processDepositStatementDeadlines(),
+  },
 ]
 
 describe('RentalOpsScheduler', () => {
@@ -42,6 +50,8 @@ describe('RentalOpsScheduler', () => {
             processReminders: task,
             processOverdue: task,
             applyAllDueAmendments: task,
+            processResponseDeadlines: task,
+            processDeadlines: task,
           }),
         } as never
       )
@@ -68,6 +78,8 @@ describe('RentalOpsScheduler', () => {
           .mockResolvedValue({ overdue: 1, reminders: 0 }),
         processOverdue: jest.fn().mockResolvedValue(1),
         applyAllDueAmendments: jest.fn().mockResolvedValue(1),
+        processResponseDeadlines: jest.fn().mockResolvedValue(1),
+        processDeadlines: jest.fn().mockResolvedValue(1),
       }
       const scheduler = new RentalOpsScheduler(
         {
@@ -101,5 +113,28 @@ describe('RentalOpsScheduler', () => {
       expect.any(String),
       expect.any(Number)
     )
+  })
+
+  it('returns 0 when the target service is not registered', async () => {
+    const scheduler = new RentalOpsScheduler(
+      { get: jest.fn().mockReturnValue(true) } as never,
+      { setIfAbsent: jest.fn().mockResolvedValue(true) } as never,
+      { get: jest.fn().mockReturnValue(undefined) } as never
+    )
+    await expect(scheduler.processMoveOutHandoverDeadlines()).resolves.toBe(0)
+    await expect(scheduler.processDepositStatementDeadlines()).resolves.toBe(0)
+  })
+
+  it('swallows a failing deadline task and returns 0', async () => {
+    const scheduler = new RentalOpsScheduler(
+      { get: jest.fn().mockReturnValue(true) } as never,
+      { setIfAbsent: jest.fn().mockResolvedValue(true) } as never,
+      {
+        get: jest.fn().mockReturnValue({
+          processDeadlines: jest.fn().mockRejectedValue(new Error('db down')),
+        }),
+      } as never
+    )
+    await expect(scheduler.processDepositStatementDeadlines()).resolves.toBe(0)
   })
 })
