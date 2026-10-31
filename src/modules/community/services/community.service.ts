@@ -181,6 +181,15 @@ export class CommunityService {
     return (entries as PostEntry[]).map(toPost)
   }
 
+  async findRejected(): Promise<CommunityPost[]> {
+    this.logger.log('Fetching rejected community posts for moderation')
+    const entries = await this.entryRepository.find({
+      where: { kind: 'post', status: 'rejected' },
+      order: { createdAt: 'DESC' },
+    })
+    return (entries as PostEntry[]).map(toPost)
+  }
+
   async findMyPosts(authorId: string): Promise<CommunityPost[]> {
     this.logger.log(`Fetching posts for author: ${authorId}`)
     const entries = await this.entryRepository.find({
@@ -224,11 +233,15 @@ export class CommunityService {
 
   async updateStatus(
     id: string,
-    status: 'approved' | 'rejected'
+    status: 'approved' | 'rejected',
+    rejectReason?: string
   ): Promise<CommunityPost> {
     this.logger.log(`Updating status of post ${id} to ${status}`)
     const post = await this.findPostEntry(id)
     post.status = status
+    if (status === 'rejected' && rejectReason !== undefined) {
+      post.rejectReason = rejectReason
+    }
     return toPost(await this.entryRepository.save(post))
   }
 

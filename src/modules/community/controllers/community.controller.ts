@@ -71,6 +71,14 @@ export class CommunityController {
     return this.communityService.findPending()
   }
 
+  @Get('posts/rejected')
+  @RequirePermission('read', 'CommunityPost')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('staff')
+  async getRejectedPosts(): Promise<CommunityPost[]> {
+    return this.communityService.findRejected()
+  }
+
   @Public()
   @Get('posts/:id')
   async getPost(@Param('id') id: string): Promise<CommunityPost> {
@@ -106,7 +114,7 @@ export class CommunityController {
     @Param('id') id: string,
     @Body() dto: UpdatePostStatusDto
   ): Promise<CommunityPost> {
-    return this.communityService.updateStatus(id, dto.status)
+    return this.communityService.updateStatus(id, dto.status, dto.rejectReason)
   }
 
   @Patch('posts/:id/upvote')
