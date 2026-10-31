@@ -42,6 +42,10 @@ import {
 import type { DepositAgreementsService } from '../../contracts/services/deposit-agreements.service'
 import { resolveDepositConfirmation } from '../../contracts/services/deposit-confirmation.resolver'
 import { renderMoveInHandoverPdf } from '../utils/move-in-handover-pdf.renderer'
+import {
+  MOVE_IN_SETTLEMENT_OVERDUE_BODY,
+  MOVE_IN_SETTLEMENT_OVERDUE_TITLE,
+} from '../utils/move-in-settlement-overdue.message'
 
 /** Điều 9.1: khách thuê có 3 ngày để xác nhận hoặc báo sai lệch kể từ khi bản sửa đổi được ghi. */
 export const HANDOVER_RESPONSE_WINDOW_MS = 3 * 24 * 60 * 60 * 1000
@@ -785,8 +789,8 @@ export class MoveInSettlementsService {
         [row.tenantId, row.landlordId].map(id =>
           this.notifications.createNotification(
             id,
-            'Move-in settlement overdue',
-            `Settlement ${row.contractId} is overdue.`,
+            MOVE_IN_SETTLEMENT_OVERDUE_TITLE,
+            MOVE_IN_SETTLEMENT_OVERDUE_BODY,
             'PAYMENT_REMINDER',
             { contractId: row.contractId }
           )

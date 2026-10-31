@@ -216,6 +216,25 @@ describe('LegalSourcesService', () => {
       expect(result.map(r => r.key)).toEqual(['early', 'late'])
     })
 
+    it('returns each key once, keeping the first by order, when duplicates exist', async () => {
+      store.seed([
+        sourceRow({ key: 'dup', order: 2, title: 'second' }),
+        sourceRow({ key: 'dup', order: 1, title: 'first' }),
+        sourceRow({ key: 'solo', order: 3 }),
+      ])
+
+      const result = await service.findPublic()
+
+      expect(result.map(r => r.key)).toEqual(['dup', 'solo'])
+      expect(result[0]?.title).toBe('first')
+    })
+
+    it('returns an empty list when there are no sources', async () => {
+      store.seed([])
+
+      await expect(service.findPublic('contract')).resolves.toEqual([])
+    })
+
     it('throws 404 for missing or inactive source', async () => {
       store.seed([sourceRow({ key: 'off', isActive: false })])
 

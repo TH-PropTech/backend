@@ -127,7 +127,7 @@ Thỏa thuận đặt cọc có thể bị hủy khi chưa thanh toán. Sau khi 
       'phụ lục',
     ],
     content: `## Hợp đồng được tạo như thế nào
-Khi chủ nhà chấp nhận hồ sơ thuê, hệ thống tạo bản nháp hợp đồng theo mẫu của nền tảng, lấy thời hạn, giá thuê và tiền cọc từ gói thuê đã chọn. Nhân viên hoặc chủ nhà chỉnh các điều khoản thương mại khi hợp đồng còn là bản nháp. Sau đó nội dung được khóa bằng mã băm SHA-256 rồi mới đến bước ký.
+Khi chủ nhà chấp nhận hồ sơ thuê, hệ thống tạo bản nháp hợp đồng theo mẫu của nền tảng, lấy thời hạn, giá thuê và tiền cọc từ gói thuê đã chọn. Nhân viên hoặc chủ nhà chỉnh các điều khoản thương mại khi hợp đồng còn là bản nháp. Sau đó nội dung được khóa bằng mã xác thực nội dung rồi mới đến bước ký.
 
 ## Cách ký điện tử
 Mỗi bên tự ký phần của mình, nhân viên không ký thay. Người ký phải đã xác thực danh tính (eKYC) thành công. Các cách ký đang bật mặc định: ký bằng SmartCA của VNPT (duyệt trên ứng dụng SmartCA, nền tảng không lưu mật khẩu hay mã OTP của SmartCA) và ký bằng xác thực khuôn mặt cùng Smart OTP của TH-PropTech. Mã Smart OTP có hiệu lực 5 phút và được nhập sai tối đa 3 lần.

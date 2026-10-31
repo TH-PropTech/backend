@@ -85,7 +85,11 @@ export class LegalSourcesService implements OnApplicationBootstrap {
         ? { isActive: true, showInContractPanel: true }
         : { isActive: true }
     const sources = await this.sourceRepository.find({ where, order: BY_ORDER })
-    return sources.map(s => toPublicLegalSourceResponse(toLegacyLegalSource(s)))
+    // Lưới an toàn khi DB còn bản trùng key (chưa chạy migration 034): giữ bản đầu theo `order`.
+    const seen = new Set<string>()
+    return sources
+      .filter(s => !seen.has(s.key) && Boolean(seen.add(s.key)))
+      .map(s => toPublicLegalSourceResponse(toLegacyLegalSource(s)))
   }
 
   async findPublicByKey(key: string): Promise<PublicLegalSourceResponse> {
