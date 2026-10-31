@@ -401,6 +401,55 @@ describe('MoveInSettlementsService', () => {
     expect(notifications.createNotification).toHaveBeenCalledTimes(2)
     expect(row.status).toBe('overdue')
   })
+
+  it('sends Vietnamese overdue notices without ids in text and contractId in data', async () => {
+    const { service, settlementRepo, notifications } = setup()
+    const contractId = new ObjectId().toHexString()
+    settlementRepo.find.mockResolvedValue([
+      {
+        _id: new ObjectId(),
+        contractId,
+        tenantId: 'tenant',
+        landlordId: 'landlord',
+        status: 'pending',
+        dueAt: new Date('2030-01-01'),
+        overdueNotifiedAt: null,
+      },
+    ])
+
+    await service.processOverdue(new Date('2030-01-02'))
+
+    expect(notifications.createNotification).toHaveBeenCalledTimes(2)
+    for (const call of notifications.createNotification.mock.calls) {
+      const [, title, body, type, data] = call as unknown[]
+      const text = `${String(title)} ${String(body)}`
+      expect(title).toBe('Quyết toán dọn nhà đã quá hạn')
+      expect(text).not.toMatch(/Settlement/)
+      expect(text).not.toMatch(/[0-9a-f]{24}/i)
+      expect(type).toBe('PAYMENT_REMINDER')
+      expect(data).toEqual({ contractId })
+    }
+  })
+
+  it('does not notify rows that are not yet due', async () => {
+    const { service, settlementRepo, notifications } = setup()
+    settlementRepo.find.mockResolvedValue([
+      {
+        _id: new ObjectId(),
+        contractId: 'c',
+        tenantId: 't',
+        landlordId: 'l',
+        status: 'pending',
+        dueAt: new Date('2030-01-03'),
+        overdueNotifiedAt: null,
+      },
+    ])
+
+    await expect(service.processOverdue(new Date('2030-01-02'))).resolves.toBe(
+      0
+    )
+    expect(notifications.createNotification).not.toHaveBeenCalled()
+  })
 })
 
 describe('MoveInSettlementsService handover (phương án A)', () => {

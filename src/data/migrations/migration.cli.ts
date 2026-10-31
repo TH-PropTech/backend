@@ -131,6 +131,16 @@ import {
   type MoveOutIndexDatabase,
 } from './033-move-out-indexes'
 import {
+  dedupeLegalSourceKeys,
+  rollbackLegalSourceKeyDedupe,
+  type LegalSourceDedupeDatabase,
+} from './034-legal-source-key-dedupe'
+import {
+  localizeMoveInOverdueNotifications,
+  rollbackMoveInOverdueNotificationsVi,
+  type NotificationsMongoDatabase,
+} from './035-move-in-overdue-notifications-vi'
+import {
   MigrationRunner,
   type MigrationCheckpointStore,
   type MigrationStep,
@@ -182,6 +192,8 @@ export type CliMigrationId =
   | '031'
   | '032'
   | '033'
+  | '034'
+  | '035'
 
 export type CliArgs = {
   apply: boolean
@@ -216,6 +228,8 @@ const ALL: CliMigrationId[] = [
   '031',
   '032',
   '033',
+  '034',
+  '035',
 ]
 
 /**
@@ -541,12 +555,31 @@ function steps(db: CliDb, only: readonly CliMigrationId[]): MigrationStep[] {
           ensureMoveOutIndexes(db as unknown as MoveOutIndexDatabase, o),
       },
     ],
+    [
+      '034',
+      {
+        id: '034-legal-source-key-dedupe',
+        run: o =>
+          dedupeLegalSourceKeys(db as unknown as LegalSourceDedupeDatabase, o),
+      },
+    ],
+    [
+      '035',
+      {
+        id: '035-move-in-overdue-notifications-vi',
+        run: o =>
+          localizeMoveInOverdueNotifications(
+            db as unknown as NotificationsMongoDatabase,
+            o
+          ),
+      },
+    ],
   ]
   return all.filter(([id]) => only.includes(id)).map(([, step]) => step)
 }
 
 /**
- * Chạy migration 007–033 (trừ 029). Mặc định dry-run (không ghi, không checkpoint).
+ * Chạy migration 007–035 (trừ 029). Mặc định dry-run (không ghi, không checkpoint).
  * `--apply`: chạy qua `MigrationRunner` (bỏ qua bước đã checkpoint; chỉ
  * checkpoint khi báo cáo `dryRun === false` và không lỗi). `--rollback`:
  * chạy hàm hoàn tác theo thứ tự ngược (dry-run nếu không có `--apply`).
@@ -669,6 +702,12 @@ export async function runMigrationCli(
         rollbackMoveOutIndexes(db as unknown as MoveOutIndexDatabase, {
           dryRun,
         }),
+      '034': () =>
+        rollbackLegalSourceKeyDedupe(
+          db as unknown as LegalSourceDedupeDatabase,
+          { dryRun }
+        ),
+      '035': () => rollbackMoveInOverdueNotificationsVi({ dryRun }),
     }
     const reports: MigrationReport[] = []
     const checkpoints = createCheckpointStore(db)
