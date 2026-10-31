@@ -396,11 +396,11 @@ export class ApartmentResponseMapper {
       amenities: apartment.amenities,
       isVerified: apartment.isVerified,
       hasMedia:
-        apartment.gallery.length > 0 ||
-        (apartment.images360 && apartment.images360.length > 0) ||
-        !!apartment.vrUrl,
+        Boolean(apartment.gallery?.length) ||
+        Boolean(apartment.images360?.length) ||
+        Boolean(apartment.vrUrl),
       images360: apartment.images360 || [],
-      image: apartment.gallery[0] || '',
+      image: apartment.gallery?.[0] || '',
       gallery: apartment.gallery || [],
       status: apartment.status,
       submittedAt: apartment.submittedAt ?? null,
