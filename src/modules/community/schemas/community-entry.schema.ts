@@ -73,6 +73,9 @@ export class CommunityEntry {
   @Column({ nullable: true })
   status?: 'pending' | 'approved' | 'rejected'
 
+  @Column({ nullable: true })
+  rejectReason?: string
+
   @Column('array', { nullable: true })
   tags?: string[]
 
@@ -95,6 +98,7 @@ export type PostEntry = CommunityEntry & {
   commentsCount: number
   images: string[]
   status: 'pending' | 'approved' | 'rejected'
+  rejectReason?: string
   tags: string[]
 }
 

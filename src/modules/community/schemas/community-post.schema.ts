@@ -49,6 +49,9 @@ export class CommunityPost {
   @Column({ default: 'pending' })
   status!: 'pending' | 'approved' | 'rejected'
 
+  @Column({ nullable: true })
+  rejectReason?: string
+
   @Column('array', { default: [] })
   tags!: string[]
 

@@ -90,4 +90,35 @@ describe('CommunityController moderation endpoints', () => {
     await expect(controller.deleteOwnPost('p1', req)).rejects.toThrow()
     await expect(controller.deleteOwnComment('c1', req)).rejects.toThrow()
   })
+
+  it('updates post status with rejectReason when provided', async () => {
+    const service = {
+      updateStatus: jest.fn().mockResolvedValue({
+        id: 'p1',
+        status: 'rejected',
+        rejectReason: 'Spam',
+      }),
+    }
+    const controller = new CommunityController(service as never)
+
+    await controller.updatePostStatus('p1', {
+      status: 'rejected',
+      rejectReason: 'Spam',
+    })
+
+    expect(service.updateStatus).toHaveBeenCalledWith('p1', 'rejected', 'Spam')
+  })
+
+  it('delegates finding rejected posts to the service', async () => {
+    const service = {
+      findRejected: jest
+        .fn()
+        .mockResolvedValue([{ id: 'p1', status: 'rejected' }]),
+    }
+    const controller = new CommunityController(service as never)
+
+    const result = await controller.getRejectedPosts()
+    expect(result).toEqual([{ id: 'p1', status: 'rejected' }])
+    expect(service.findRejected).toHaveBeenCalled()
+  })
 })
