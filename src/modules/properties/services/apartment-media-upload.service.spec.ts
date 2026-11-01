@@ -1,131 +1,143 @@
 import { vi } from 'vitest'
 import { ServiceUnavailableException } from '@nestjs/common'
-import { ConfigService } from '@nestjs/config'
-import { v2 as cloudinary } from 'cloudinary'
+
+import type { StorageService } from '../../../common/storage/storage.service'
 import { ApartmentMediaUploadService } from './apartment-media-upload.service'
 
-vi.mock('cloudinary', () => ({
-  v2: {
-    config: jest.fn(),
-    uploader: { upload_stream: jest.fn() },
-  },
-}))
+const PUBLIC_BASE = 'https://thproptech-bucket.s3.ap-southeast-1.amazonaws.com'
+const KEY_PATTERN =
+  /^apartments\/[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}\.(jpg|png|webp|gif)$/
 
-type UploadCallback = (
-  error: Error | undefined,
-  result: { secure_url: string } | undefined
-) => void
+interface StorageMock {
+  isConfigured: boolean
+  putObject: ReturnType<typeof vi.fn>
+  publicUrl: ReturnType<typeof vi.fn>
+}
 
-const uploadStream = cloudinary.uploader.upload_stream as unknown as jest.Mock
+function buildStorage(isConfigured = true): StorageMock {
+  return {
+    isConfigured,
+    putObject: vi.fn().mockResolvedValue(undefined),
+    publicUrl: vi.fn((key: string) => `${PUBLIC_BASE}/${key}`),
+  }
+}
 
-function buildFile(name: string): Express.Multer.File {
+function buildService(storage: StorageMock): ApartmentMediaUploadService {
+  return new ApartmentMediaUploadService(storage as unknown as StorageService)
+}
+
+function buildFile(name: string, mimetype: string): Express.Multer.File {
   return {
     originalname: name,
+    mimetype,
     buffer: Buffer.from(name),
   } as Express.Multer.File
 }
 
-function buildService(
-  values: Record<string, string | undefined>
-): ApartmentMediaUploadService {
-  const configService = {
-    get: (key: string): string | undefined => values[key],
-  } as unknown as ConfigService
-  return new ApartmentMediaUploadService(configService)
-}
-
-const configured = {
-  'cloudinary.cloudName': 'demo',
-  'cloudinary.apiKey': 'key',
-  'cloudinary.apiSecret': 'secret',
-}
-
 describe('ApartmentMediaUploadService', () => {
-  beforeEach(() => {
-    jest.clearAllMocks()
+  afterEach(() => {
+    vi.clearAllMocks()
   })
 
-  it('uploads each file to the apartments folder and returns secure urls', async () => {
-    uploadStream.mockImplementation(
-      (_options: unknown, callback: UploadCallback) => ({
-        end: (buffer: Buffer): void =>
-          callback(undefined, {
-            secure_url: `https://res.cloudinary.com/demo/${buffer.toString()}`,
-          }),
-      })
-    )
-    const service = buildService(configured)
+  it('uploads each file under apartments/ and returns public urls in order', async () => {
+    const storage = buildStorage()
+    const service = buildService(storage)
 
     const urls = await service.uploadImages([
-      buildFile('a.jpg'),
-      buildFile('b.png'),
+      buildFile('a.jpg', 'image/jpeg'),
+      buildFile('b.png', 'image/png'),
     ])
 
+    expect(urls).toHaveLength(2)
+    expect(storage.putObject).toHaveBeenCalledTimes(2)
+    const [first, second] = storage.putObject.mock.calls.map(
+      call => call[0] as { key: string; body: Buffer; contentType: string }
+    )
+    expect(first?.key).toMatch(KEY_PATTERN)
+    expect(first?.key.endsWith('.jpg')).toBe(true)
+    expect(first?.contentType).toBe('image/jpeg')
+    expect(first?.body).toEqual(Buffer.from('a.jpg'))
+    expect(second?.key.endsWith('.png')).toBe(true)
+    expect(second?.contentType).toBe('image/png')
     expect(urls).toEqual([
-      'https://res.cloudinary.com/demo/a.jpg',
-      'https://res.cloudinary.com/demo/b.png',
+      `${PUBLIC_BASE}/${first?.key}`,
+      `${PUBLIC_BASE}/${second?.key}`,
     ])
-    expect(cloudinary.config).toHaveBeenCalledWith(
-      expect.objectContaining({
-        cloud_name: 'demo',
-        api_key: 'key',
-        api_secret: 'secret',
-        secure: true,
-      })
-    )
-    expect(uploadStream).toHaveBeenCalledWith(
-      expect.objectContaining({ folder: 'apartments', resource_type: 'image' }),
-      expect.any(Function)
-    )
-  })
-
-  it('returns an empty list without calling Cloudinary when no files are given', async () => {
-    const service = buildService(configured)
-
-    await expect(service.uploadImages([])).resolves.toEqual([])
-    expect(uploadStream).not.toHaveBeenCalled()
   })
 
   it.each([
-    'cloudinary.cloudName',
-    'cloudinary.apiKey',
-    'cloudinary.apiSecret',
-  ])('fails with 503 when %s is not configured', async missingKey => {
-    const service = buildService({ ...configured, [missingKey]: '' })
+    ['image/webp', 'webp'],
+    ['image/gif', 'gif'],
+    ['application/octet-stream', 'jpg'],
+  ])('maps %s to the .%s extension', async (mimetype, extension) => {
+    const storage = buildStorage()
+    const service = buildService(storage)
 
-    await expect(
-      service.uploadImages([buildFile('a.jpg')])
-    ).rejects.toBeInstanceOf(ServiceUnavailableException)
-    expect(uploadStream).not.toHaveBeenCalled()
+    await service.uploadImages([buildFile('x', mimetype)])
+
+    const { key } = storage.putObject.mock.calls[0]?.[0] as { key: string }
+    expect(key.endsWith(`.${extension}`)).toBe(true)
   })
 
-  it('turns a Cloudinary failure into a 503 without leaking details', async () => {
-    uploadStream.mockImplementation(
-      (_options: unknown, callback: UploadCallback) => ({
-        end: (): void =>
-          callback(new Error('invalid api_secret abc'), undefined),
-      })
+  it('uses a distinct key for every file', async () => {
+    const storage = buildStorage()
+    const service = buildService(storage)
+
+    const urls = await service.uploadImages([
+      buildFile('a.jpg', 'image/jpeg'),
+      buildFile('a.jpg', 'image/jpeg'),
+    ])
+
+    expect(new Set(urls).size).toBe(2)
+  })
+
+  it('returns an empty list without touching storage when no files are given', async () => {
+    const storage = buildStorage(false)
+    const service = buildService(storage)
+
+    await expect(service.uploadImages([])).resolves.toEqual([])
+    expect(storage.putObject).not.toHaveBeenCalled()
+  })
+
+  it('fails with 503 and never calls S3 when storage is not configured', async () => {
+    const storage = buildStorage(false)
+    const service = buildService(storage)
+
+    await expect(
+      service.uploadImages([buildFile('a.jpg', 'image/jpeg')])
+    ).rejects.toBeInstanceOf(ServiceUnavailableException)
+    expect(storage.putObject).not.toHaveBeenCalled()
+  })
+
+  it('turns an S3 failure into a 503 without leaking details', async () => {
+    const storage = buildStorage()
+    storage.putObject.mockRejectedValue(
+      new Error('AccessDenied on thproptech-bucket for AKIA-SECRET')
     )
-    const service = buildService(configured)
+    const service = buildService(storage)
 
     const error: unknown = await service
-      .uploadImages([buildFile('a.jpg')])
+      .uploadImages([buildFile('a.jpg', 'image/jpeg')])
       .catch((caught: unknown) => caught)
 
     expect(error).toBeInstanceOf(ServiceUnavailableException)
-    expect((error as Error).message).not.toContain('api_secret')
+    const message = (error as Error).message
+    expect(message).not.toContain('thproptech-bucket')
+    expect(message).not.toContain('AKIA')
   })
 
-  it('fails when Cloudinary returns neither an error nor a result', async () => {
-    uploadStream.mockImplementation(
-      (_options: unknown, callback: UploadCallback) => ({
-        end: (): void => callback(undefined, undefined),
-      })
-    )
-    const service = buildService(configured)
+  it('fails the whole request when one of several uploads fails', async () => {
+    const storage = buildStorage()
+    storage.putObject
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('network down'))
+    const service = buildService(storage)
 
     await expect(
-      service.uploadImages([buildFile('a.jpg')])
+      service.uploadImages([
+        buildFile('a.jpg', 'image/jpeg'),
+        buildFile('b.jpg', 'image/jpeg'),
+      ])
     ).rejects.toBeInstanceOf(ServiceUnavailableException)
   })
 })

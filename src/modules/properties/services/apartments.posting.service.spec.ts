@@ -341,7 +341,9 @@ describe('ApartmentsService listing posting', () => {
       const { service } = createContext(
         buildApartment({
           status: 'rejected',
-          images360: ['https://res.cloudinary.com/x/360.jpg'],
+          images360: [
+            'https://thproptech-bucket.s3.ap-southeast-1.amazonaws.com/seed/360.jpg',
+          ],
           vrUrl: 'https://my.matterport.com/show/?m=abc',
         })
       )
@@ -351,7 +353,9 @@ describe('ApartmentsService listing posting', () => {
         'landlord-1'
       )
 
-      expect(result.images360).toEqual(['https://res.cloudinary.com/x/360.jpg'])
+      expect(result.images360).toEqual([
+        'https://thproptech-bucket.s3.ap-southeast-1.amazonaws.com/seed/360.jpg',
+      ])
       expect(result.vrUrl).toBe('https://my.matterport.com/show/?m=abc')
     })
 
@@ -359,7 +363,9 @@ describe('ApartmentsService listing posting', () => {
       const { service } = createContext(
         buildApartment({
           status: 'rejected',
-          images360: ['https://res.cloudinary.com/x/360.jpg'],
+          images360: [
+            'https://thproptech-bucket.s3.ap-southeast-1.amazonaws.com/seed/360.jpg',
+          ],
           vrUrl: 'https://my.matterport.com/show/?m=abc',
         })
       )
@@ -369,7 +375,9 @@ describe('ApartmentsService listing posting', () => {
         'landlord-1'
       )
 
-      expect(result.images360).toEqual(['https://res.cloudinary.com/x/360.jpg'])
+      expect(result.images360).toEqual([
+        'https://thproptech-bucket.s3.ap-southeast-1.amazonaws.com/seed/360.jpg',
+      ])
       expect(result.vrUrl).toBe('https://my.matterport.com/show/?m=abc')
     })
 

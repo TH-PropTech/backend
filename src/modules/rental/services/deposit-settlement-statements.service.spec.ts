@@ -13,7 +13,12 @@ import {
   DepositSettlementStatementsService,
   refundableAmount,
 } from './deposit-settlement-statements.service'
-import { createMemoryRepo, createSupportMock } from './move-out.fixtures'
+import {
+  STORAGE_BASE,
+  createMemoryRepo,
+  createStorage,
+  createSupportMock,
+} from './move-out.fixtures'
 
 const NOW = new Date('2030-03-01T00:00:00.000Z')
 const CONTRACT_ID = new ObjectId()
@@ -22,7 +27,7 @@ const DEPOSIT = 10_000_000
 const LINE = {
   reason: 'Sơn lại tường',
   amount: 2_000_000,
-  evidenceUrls: ['https://res.cloudinary.com/demo/a.jpg'],
+  evidenceUrls: [`${STORAGE_BASE}/apartments/a.jpg`],
 }
 const REFUND = {
   amount: 8_000_000,
@@ -40,7 +45,7 @@ function setup(
   options: {
     handover?: 'completed' | 'recorded' | null
     anchor?: boolean
-    cloudName?: string
+    storageConfigured?: boolean
   } = {}
 ): Ctx {
   const contract = {
@@ -65,7 +70,7 @@ function setup(
     contractRepo as never,
     handoverRepo as never,
     support as never,
-    { get: jest.fn().mockReturnValue(options.cloudName ?? 'demo') } as never
+    createStorage(options.storageConfigured ?? true)
   )
   return { service, repo, support }
 }
@@ -181,8 +186,12 @@ describe('DepositSettlementStatementsService', () => {
 
     it.each([
       ['another host', 'https://evil.example/demo/a.jpg'],
-      ['another cloud', 'https://res.cloudinary.com/other/a.jpg'],
-      ['a look-alike prefix', 'https://res.cloudinary.com/demo.evil.com/a.jpg'],
+      [
+        'another bucket',
+        'https://other-bucket.s3.ap-southeast-1.amazonaws.com/a.jpg',
+      ],
+      ['a look-alike prefix', `${STORAGE_BASE}.evil.com/a.jpg`],
+      ['the legacy cloudinary host', 'https://res.cloudinary.com/demo/a.jpg'],
     ])('rejects evidence from %s with 400', async (_label, url) => {
       const { service, repo } = setup()
       await expect(
@@ -196,8 +205,8 @@ describe('DepositSettlementStatementsService', () => {
       expect(repo.rows).toHaveLength(0)
     })
 
-    it('rejects any evidence when no image host is configured', async () => {
-      const { service } = setup({ cloudName: '' })
+    it('rejects any evidence when storage is not configured', async () => {
+      const { service } = setup({ storageConfigured: false })
       await expect(
         service.saveDraft(CID, 'landlord', [LINE], NOW)
       ).rejects.toMatchObject({ message: 'STATEMENT_EVIDENCE_URL_NOT_ALLOWED' })

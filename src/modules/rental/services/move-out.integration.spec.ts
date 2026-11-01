@@ -6,7 +6,12 @@ import type { MoveInSettlement } from '../schemas/move-in-settlement.schema'
 import type { MoveOutHandover } from '../schemas/move-out-handover.schema'
 import { DepositSettlementStatementsService } from './deposit-settlement-statements.service'
 import { MoveOutHandoversService } from './move-out-handovers.service'
-import { createMemoryRepo, createSupportMock } from './move-out.fixtures'
+import {
+  STORAGE_BASE,
+  createMemoryRepo,
+  createStorage,
+  createSupportMock,
+} from './move-out.fixtures'
 
 const CONTRACT_ID = new ObjectId()
 const CID = CONTRACT_ID.toHexString()
@@ -25,7 +30,7 @@ const HANDOVER_INPUT = {
 const LINE = {
   reason: 'Sơn lại tường',
   amount: 2_000_000,
-  evidenceUrls: ['https://res.cloudinary.com/demo/a.jpg'],
+  evidenceUrls: [`${STORAGE_BASE}/apartments/a.jpg`],
 }
 
 type Ctx = {
@@ -63,7 +68,7 @@ function setup(): Ctx {
     contractRepo as never,
     handoverRepo as never,
     support as never,
-    { get: jest.fn().mockReturnValue('demo') } as never
+    createStorage()
   )
   return { handovers, statements, handoverRepo, statementRepo }
 }

@@ -8,6 +8,7 @@ import { envValidationSchema } from './config/env.validation'
 import { AppController } from './app.controller'
 import { ActivityLogInterceptor } from './common/interceptors/activity-log.interceptor'
 import { LoggerModule } from './common/logger/logger.module'
+import { StorageModule } from './common/storage/storage.module'
 import { ThrottlerModule } from '@nestjs/throttler'
 import { HttpThrottlerGuard } from './common/guards/http-throttler.guard'
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard'
@@ -73,6 +74,7 @@ import { JobsModule } from './modules/jobs/jobs.module'
 
     ScheduleModule.forRoot(),
     LoggerModule,
+    StorageModule,
     // Cắt ngang
     HealthModule,
     AuthModule,
