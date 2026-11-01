@@ -11,12 +11,9 @@ describe('resolveEnabledSigningMethods', () => {
     process.env['NODE_ENV'] = originalNodeEnv
   })
 
-  it('defaults to v1 and biometric only', () => {
+  it('defaults to smartca_v1 only', () => {
     process.env['ENABLE_TEST_SIGN_BYPASS'] = 'false'
-    expect(resolveEnabledSigningMethods({})).toEqual([
-      'smartca_v1',
-      'biometric_smart_otp',
-    ])
+    expect(resolveEnabledSigningMethods({})).toEqual(['smartca_v1'])
   })
 
   it('enables smartca_v2 only through its dedicated flag', () => {

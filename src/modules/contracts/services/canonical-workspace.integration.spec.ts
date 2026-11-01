@@ -327,15 +327,12 @@ describe('canonical contract workspace integration', () => {
     )
     const contractsService = new ContractsService(
       contractRepository as never,
-      {} as never,
       depositRepository as never,
       {} as never,
       {} as never,
       {} as never,
       {} as never,
-      kycService as never,
-      {} as never,
-      {} as never
+      kycService as never
     )
     const smartCaService = new SmartCaSigningService(
       contractRepository as never,

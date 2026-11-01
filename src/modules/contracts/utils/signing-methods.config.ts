@@ -3,17 +3,16 @@ import { isTestSignBypassEnabled } from './test-sign-bypass'
 export const SIGNING_METHOD_IDS = [
   'smartca_v1',
   'smartca_v2',
-  'biometric_smart_otp',
   'dev_sign',
 ] as const
 
 export type SigningMethodId = (typeof SIGNING_METHOD_IDS)[number]
 
-const DEFAULT_ENABLED: SigningMethodId[] = ['smartca_v1', 'biometric_smart_otp']
+const DEFAULT_ENABLED: SigningMethodId[] = ['smartca_v1']
 
 /**
  * Tập phương thức ký được bật theo cấu hình backend (nguồn sự thật cho UI).
- * - SIGNING_METHODS (CSV) chọn tập thường; mặc định smartca_v1 + biometric_smart_otp.
+ * - SIGNING_METHODS (CSV) chọn tập thường; mặc định smartca_v1.
  * - smartca_v2 chỉ bật khi SMARTCA_V2_ENABLED=true (tắt mặc định).
  * - dev_sign chỉ bật khi test-sign bypass bật và không phải production.
  */

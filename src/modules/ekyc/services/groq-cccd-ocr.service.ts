@@ -3,7 +3,7 @@ import { GroqKeyPool } from '../../ai/services/groq-key-pool.service'
 import type {
   EkycOcrBackResult,
   EkycOcrFrontResult,
-} from './ekyc-proxy.service'
+} from '../interfaces/ekyc-ocr.interface'
 
 export const CCCD_OCR_MODEL = 'qwen/qwen3.8-27b'
 const GROQ_CHAT_COMPLETIONS_URL =

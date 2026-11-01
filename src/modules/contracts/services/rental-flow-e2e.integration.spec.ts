@@ -259,18 +259,13 @@ function buildContext(): Context {
   )
   const contractsService = new ContractsService(
     contractRepo as never,
-    {} as never, // signingGrantRepository (not exercised by this flow)
     depositRepo as never,
     { findOne: jest.fn(), save: jest.fn() } as never, // apartmentRepository
     {} as never, // policiesService
     fabricService as never,
     ledgerOutboxService as never,
     kycService as never,
-    {} as never, // ekycProxyService
-    {} as never, // kycMediaService
     paymentsService,
-    undefined, // biometricEvidenceService
-    undefined, // smartOtpService
     undefined, // templateGovernanceService
     undefined, // amendmentRepository
     undefined, // flowNotificationService

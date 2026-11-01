@@ -18,8 +18,7 @@ export type EmailOtpAction = 'login' | 'forgot-password' | 'signup'
 
 /**
  * OTP hợp nhất: EmailOtp (kind 'email') và TransactionOtp (kind 'transaction');
- * giữ `_id` cũ (migration 021) vì `Contract.otpSessionId` và
- * `SigningGrant.otpSessionId` lưu id phiên giao dịch.
+ * giữ `_id` cũ (migration 021) vì `Contract.otpSessionId` lưu id phiên giao dịch.
  *
  * Trường chung: `otpCode`, `action`, `expiredAt`. Trường riêng của từng loại là
  * tùy chọn; mọi truy vấn đi qua `KindScopedOtpRepository` để tự thêm `kind`.

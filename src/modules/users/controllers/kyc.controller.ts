@@ -25,12 +25,9 @@ import {
   KycSelfResult,
 } from '../services/kyc.service'
 import {
-  EkycProxyService,
-  EkycFaceMatchResult,
-  EkycFaceOrientationResult,
   EkycOcrBackResult,
   EkycOcrFrontResult,
-} from '../../ekyc/services/ekyc-proxy.service'
+} from '../../ekyc/interfaces/ekyc-ocr.interface'
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard'
 import { RolesGuard } from '../../../common/guards/roles.guard'
 import { Roles } from '../../../common/decorators/roles.decorator'
@@ -50,7 +47,6 @@ import { RequirePermission } from '../../rbac/guards/require-permission.decorato
 export class KycController {
   constructor(
     private readonly kycService: KycService,
-    private readonly ekycProxyService: EkycProxyService,
     private readonly groqCccdOcr: GroqCccdOcrService
   ) {}
 
@@ -86,53 +82,6 @@ export class KycController {
     if (!file) throw new BadRequestException('Thiếu file backID')
     validateKycImage(file)
     return this.groqCccdOcr.ocrBack(file)
-  }
-
-  @Post('face-orientation')
-  @ApiConsumes('multipart/form-data')
-  @UseInterceptors(
-    FileInterceptor('frame', { limits: { fileSize: KYC_IMAGE_MAX_BYTES } })
-  )
-  async faceOrientation(
-    @UploadedFile() file: Express.Multer.File | undefined,
-    @Body('expected') expected?: string
-  ): Promise<EkycFaceOrientationResult> {
-    if (!file) throw new BadRequestException('Thiếu file frame')
-    if (!expected || !['center', 'left', 'right'].includes(expected)) {
-      throw new BadRequestException('Tham số expected không hợp lệ')
-    }
-    validateKycImage(file)
-    return this.ekycProxyService.detectOrientation(file, expected)
-  }
-
-  @Post('face-match')
-  @ApiConsumes('multipart/form-data')
-  @UseInterceptors(
-    FileFieldsInterceptor(
-      [
-        { name: 'portraitImages', maxCount: 7 },
-        { name: 'frontID', maxCount: 1 },
-      ],
-      { limits: { fileSize: KYC_IMAGE_MAX_BYTES, files: 8 } }
-    )
-  )
-  async faceMatch(
-    @UploadedFiles()
-    files: {
-      portraitImages?: Express.Multer.File[]
-      frontID?: Express.Multer.File[]
-    }
-  ): Promise<EkycFaceMatchResult> {
-    const portraits = files?.portraitImages ?? []
-    const frontCard = files?.frontID?.[0]
-    if (portraits.length < 1)
-      throw new BadRequestException('Thiếu file portraitImages')
-    if (portraits.length > 7)
-      throw new BadRequestException('Tối đa 7 ảnh portraitImages')
-    if (!frontCard) throw new BadRequestException('Thiếu file frontID')
-    portraits.forEach(validateKycImage)
-    validateKycImage(frontCard)
-    return this.ekycProxyService.verifyFaceMatch(portraits, frontCard)
   }
 
   /**
