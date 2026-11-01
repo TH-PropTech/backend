@@ -67,7 +67,7 @@ const SIGNING_METHOD_LABELS: Record<
   },
   smartca_v2: {
     label: 'VNPT SmartCA (mật khẩu + OTP)',
-    description: 'Nhập mật khẩu và OTP SmartCA TH để ký ngay trên web.',
+    description: 'Nhập mật khẩu và OTP SmartCA TH để ký ngay trong ứng dụng.',
   },
   biometric_smart_otp: {
     label: 'Sinh trắc học + Smart OTP',
