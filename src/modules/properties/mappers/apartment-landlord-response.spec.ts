@@ -25,7 +25,9 @@ function buildApartment(overrides: Partial<Apartment> = {}): Apartment {
     electricity: 'Giá nhà nước',
     water: 'Giá nhà nước',
     internet: 'Miễn phí',
-    gallery: ['https://res.cloudinary.com/x/a.jpg'],
+    gallery: [
+      'https://thproptech-bucket.s3.ap-southeast-1.amazonaws.com/apartments/a.jpg',
+    ],
     images360: [],
     vrUrl: '',
     amenities: ['pool'],

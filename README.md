@@ -154,6 +154,23 @@ Copy `.env.example` to `.env`.
 | `DATABASE_SYNCHRONIZE`      | Local-only MongoDB entity sync switch; keep `false` in shared/production environments. Xem lưu ý tên chỉ mục trong mục MongoDB                  |
 | `PAYMENT_PROVIDERS_ENABLED` | Gateways tenants may choose: `mock-bank,momo,zalopay,mocbank` (default `mock-bank`). Listing one makes its `MOMO_*` / `ZALOPAY_*` keys required |
 
+### Image storage (AWS S3)
+
+Apartment images and encrypted KYC images are stored in S3 (`StorageService`, `src/common/storage`). Cloudinary is no longer used.
+
+| Variable                | Purpose                                                                                                   |
+| ----------------------- | --------------------------------------------------------------------------------------------------------- |
+| `AWS_REGION`            | Bucket region, e.g. `ap-southeast-1`. With `AWS_S3_BUCKET` empty, `POST /apartments/upload` answers `503` |
+| `AWS_S3_BUCKET`         | Bucket name, e.g. `thproptech-bucket`                                                                     |
+| `AWS_ACCESS_KEY_ID`     | Local development only. Leave empty on EC2                                                                |
+| `AWS_SECRET_ACCESS_KEY` | Local development only. Leave empty on EC2                                                                |
+| `S3_PUBLIC_BASE_URL`    | Optional (CloudFront). Empty uses `https://<bucket>.s3.<region>.amazonaws.com`                            |
+
+- **Local:** set both key variables for an IAM user that has `s3:GetObject`, `s3:PutObject`, `s3:DeleteObject` on `<bucket>/*`. Keys are used only when both are set.
+- **EC2:** attach an IAM role with the same permissions to the instance and set only `AWS_REGION` and `AWS_S3_BUCKET`. The AWS SDK then uses the role credentials. Check with `aws sts get-caller-identity` on the instance.
+- **Public read:** only the `apartments/*` and `seed/*` prefixes need a public `s3:GetObject` bucket policy (or a CloudFront distribution). Keep `kyc/*` private: KYC objects are AES-256-GCM encrypted and are read only through the backend.
+- **Migrating legacy Cloudinary images:** `pnpm migrate:cloudinary-to-s3` is a dry run. Add `-- --write` to back up the collections to `.tmp/`, copy the images to `seed/` and rewrite the URLs. Set `MIGRATE_FORCE_PUBLIC_DNS=true` if `querySrv ECONNREFUSED` blocks the Atlas connection.
+
 > VNPAY has been removed (`VNPAY_*` env vars and `/bank/vnpay/*` routes are gone; listing `vnpay` in `PAYMENT_PROVIDERS_ENABLED` is now a validation error). See `.env.example` for tunnel setup when testing gateway IPN callbacks locally.
 
 ## API Contract

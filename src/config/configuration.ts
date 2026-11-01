@@ -103,10 +103,14 @@ export const configuration = (): {
     mediaEncryptionKey: string
     privateMediaDir: string
   }
-  cloudinary: {
-    cloudName: string
-    apiKey: string
-    apiSecret: string
+  storage: {
+    region: string
+    bucket: string
+    /** Tuỳ chọn: EC2 dùng IAM role nên không cần cặp key. */
+    accessKeyId: string
+    secretAccessKey: string
+    /** Tuỳ chọn: CloudFront. Trống thì dùng host S3 của bucket. */
+    publicBaseUrl: string
   }
   legalTerms: {
     /** Cho phép người sửa bản nháp tự duyệt (demo một admin). Production: false. */
@@ -214,10 +218,12 @@ export const configuration = (): {
     mediaEncryptionKey: process.env.KYC_MEDIA_ENCRYPTION_KEY ?? '',
     privateMediaDir: process.env.KYC_PRIVATE_MEDIA_DIR ?? '.data/kyc',
   },
-  cloudinary: {
-    cloudName: process.env.CLOUDINARY_CLOUD_NAME ?? '',
-    apiKey: process.env.CLOUDINARY_API_KEY ?? '',
-    apiSecret: process.env.CLOUDINARY_API_SECRET ?? '',
+  storage: {
+    region: process.env.AWS_REGION ?? '',
+    bucket: process.env.AWS_S3_BUCKET ?? '',
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID ?? '',
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY ?? '',
+    publicBaseUrl: process.env.S3_PUBLIC_BASE_URL ?? '',
   },
   legalTerms: {
     allowSelfApproval: process.env.LEGAL_TERMS_ALLOW_SELF_APPROVAL === 'true',

@@ -6,10 +6,10 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common'
-import { ConfigService } from '@nestjs/config'
 import { InjectRepository } from '@nestjs/typeorm'
 import { randomUUID } from 'node:crypto'
 import { Repository } from 'typeorm'
+import { StorageService } from '../../../common/storage/storage.service'
 import { Contract } from '../../contracts/schemas/contract.schema'
 import { sha256Hex } from '../../fabric/utils/canonical-json'
 import { buildMoveInSettlementArgs } from '../../fabric/utils/ledger-action-args'
@@ -80,7 +80,7 @@ export class DepositSettlementStatementsService {
     @InjectRepository(MoveOutHandover)
     private readonly handoverRepo: Repository<MoveOutHandover>,
     private readonly support: MoveOutSupportService,
-    private readonly config: ConfigService
+    private readonly storage: StorageService
   ) {}
 
   async findByContract(
@@ -524,9 +524,7 @@ export class DepositSettlementStatementsService {
   private assertEvidenceHosted(lines: StatementLineInput[]): void {
     const urls = lines.flatMap(line => line.evidenceUrls ?? [])
     if (urls.length === 0) return
-    const cloudName = this.config.get<string>('cloudinary.cloudName')
-    const prefix = cloudName ? `https://res.cloudinary.com/${cloudName}/` : null
-    if (!prefix || urls.some(url => !url.startsWith(prefix)))
+    if (urls.some(url => !this.storage.isOwnPublicUrl(url)))
       throw new BadRequestException('STATEMENT_EVIDENCE_URL_NOT_ALLOWED')
   }
 

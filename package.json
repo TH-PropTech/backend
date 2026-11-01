@@ -21,6 +21,7 @@
     "start:prod": "node dist/main.js",
     "seed": "ts-node -r tsconfig-paths/register -r dotenv/config src/data/dataSeeder.ts",
     "seed:legal": "ts-node -r tsconfig-paths/register -r dotenv/config src/scripts/seed-legal-knowledge.ts",
+    "migrate:cloudinary-to-s3": "ts-node -r tsconfig-paths/register -r dotenv/config src/scripts/migrate-cloudinary-to-s3.ts",
     "transfer-landlord": "ts-node -r tsconfig-paths/register -r dotenv/config src/scripts/transfer-landlord.ts",
     "backfill-move-in-settlements": "ts-node -r tsconfig-paths/register -r dotenv/config src/scripts/backfill-move-in-settlements.ts",
     "lint": "eslint .",
@@ -42,6 +43,8 @@
     "check:cycles": "node scripts/check-module-cycles.cjs"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1161.0",
+    "@aws-sdk/s3-request-presigner": "^3.1161.0",
     "@grpc/grpc-js": "^1.14.4",
     "@hyperledger/fabric-gateway": "^1.11.0",
     "@nestjs/common": "^11.1.13",
@@ -63,7 +66,6 @@
     "cheerio": "^1.2.0",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.2",
-    "cloudinary": "^2.11.0",
     "cron": "4.4.0",
     "dejavu-fonts-ttf": "^2.37.3",
     "dotenv": "^16.6.1",

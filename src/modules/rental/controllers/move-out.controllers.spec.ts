@@ -35,7 +35,9 @@ const VALID_HANDOVER = {
 const VALID_LINE = {
   reason: 'Sơn tường',
   amount: 1000,
-  evidenceUrls: ['https://res.cloudinary.com/demo/a.PNG'],
+  evidenceUrls: [
+    'https://thproptech-bucket.s3.ap-southeast-1.amazonaws.com/apartments/a.PNG',
+  ],
 }
 
 describe('move-out DTO validation', () => {

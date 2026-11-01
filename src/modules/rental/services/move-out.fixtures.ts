@@ -1,4 +1,23 @@
+import type { ConfigService } from '@nestjs/config'
 import { ObjectId } from 'mongodb'
+import { StorageService } from '../../../common/storage/storage.service'
+
+/** Cơ sở URL công khai của kho ảnh S3 dùng trong test. */
+export const STORAGE_BASE =
+  'https://thproptech-bucket.s3.ap-southeast-1.amazonaws.com'
+
+/** StorageService thật với cấu hình giả, để test đúng quy tắc nhận diện URL. */
+export function createStorage(configured = true): StorageService {
+  const values: Record<string, string> = configured
+    ? {
+        'storage.region': 'ap-southeast-1',
+        'storage.bucket': 'thproptech-bucket',
+      }
+    : {}
+  return new StorageService({
+    get: (key: string): string | undefined => values[key],
+  } as unknown as ConfigService)
+}
 
 type Where = Record<string, unknown>
 

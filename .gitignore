@@ -10,3 +10,4 @@ CHANGELOG.md
 *.log
 .codex*
 .test-logs
+.tmp

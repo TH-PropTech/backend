@@ -194,17 +194,21 @@ describe('ApartmentsController listing posting', () => {
   })
 
   describe('uploadImages', () => {
-    it('returns the Cloudinary urls', async () => {
+    it('returns the storage urls', async () => {
       const { controller, upload } = buildController()
       upload.uploadImages.mockResolvedValue([
-        'https://res.cloudinary.com/x/a.jpg',
+        'https://thproptech-bucket.s3.ap-southeast-1.amazonaws.com/apartments/a.jpg',
       ])
 
       const result = await controller.uploadImages([
         { originalname: 'a.jpg' } as Express.Multer.File,
       ])
 
-      expect(result).toEqual({ urls: ['https://res.cloudinary.com/x/a.jpg'] })
+      expect(result).toEqual({
+        urls: [
+          'https://thproptech-bucket.s3.ap-southeast-1.amazonaws.com/apartments/a.jpg',
+        ],
+      })
     })
 
     it.each([[[]], [undefined as unknown as Express.Multer.File[]]])(
