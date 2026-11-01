@@ -1,4 +1,4 @@
-import { Controller, Post, Body, UseGuards, Request } from '@nestjs/common'
+import { Controller, Post, Body, UseGuards, Request, Req } from '@nestjs/common'
 import { AuthService } from '../services/auth.service'
 import { SignupService, SignupDto } from '../services/signup.service'
 import { PinService } from '../services/pin.service'
@@ -101,6 +101,36 @@ export class ResetPinDto {
   sessionId!: string
 }
 
+export type ClientRequestContext = {
+  headers?: Record<string, string | string[] | undefined>
+  ip?: string
+  socket?: { remoteAddress?: string }
+}
+
+function extractClientContext(
+  req?: ClientRequestContext
+): { ip: string; userAgent: string } | undefined {
+  if (!req) return undefined
+  const hasHeaders = !!req.headers
+  const hasIp = !!req.ip
+  const hasSocket = !!req.socket
+  if (!hasHeaders && !hasIp && !hasSocket) return undefined
+
+  const xForwardedFor = req.headers?.['x-forwarded-for']
+  let ip = '127.0.0.1'
+  if (typeof xForwardedFor === 'string' && xForwardedFor.length > 0) {
+    ip = xForwardedFor.split(',')[0]?.trim() || '127.0.0.1'
+  } else if (Array.isArray(xForwardedFor) && xForwardedFor.length > 0) {
+    ip = xForwardedFor[0]?.trim() || '127.0.0.1'
+  } else if (req.ip) {
+    ip = req.ip
+  } else if (req.socket?.remoteAddress) {
+    ip = req.socket.remoteAddress
+  }
+  const userAgent = (req.headers?.['user-agent'] as string) || ''
+  return { ip, userAgent }
+}
+
 @Controller('auth')
 export class AuthController {
   constructor(
@@ -129,25 +159,44 @@ export class AuthController {
   @Post('login')
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   async login(
-    @Body() dto: LoginDto
-  ): Promise<TokenResponse & { user: UserPayload }> {
-    return this.authService.login(dto.emailOrPhone, dto.password)
+    @Body() dto: LoginDto,
+    @Req() req?: ClientRequestContext
+  ): Promise<
+    | (TokenResponse & { user: UserPayload })
+    | {
+        is2faRequired: true
+        twoFactorTempToken: string
+        user: { _id: string; email: string }
+      }
+  > {
+    const ctx = extractClientContext(req)
+    return ctx
+      ? this.authService.login(dto.emailOrPhone, dto.password, ctx)
+      : this.authService.login(dto.emailOrPhone, dto.password)
   }
 
   @Public()
   @Post('2fa/authenticate')
   async authenticate2fa(
-    @Body() dto: Authenticate2faDto
+    @Body() dto: Authenticate2faDto,
+    @Req() req?: ClientRequestContext
   ): Promise<TokenResponse & { user: UserPayload }> {
-    return this.authService.authenticate2fa(dto.twoFactorTempToken, dto.code)
+    const ctx = extractClientContext(req)
+    return ctx
+      ? this.authService.authenticate2fa(dto.twoFactorTempToken, dto.code, ctx)
+      : this.authService.authenticate2fa(dto.twoFactorTempToken, dto.code)
   }
 
   @Public()
   @Post('refresh')
   async refresh(
-    @Body() dto: RefreshTokenDto
+    @Body() dto: RefreshTokenDto,
+    @Req() req?: ClientRequestContext
   ): Promise<TokenResponse & { user: UserPayload }> {
-    return this.authService.refresh(dto.refreshToken)
+    const ctx = extractClientContext(req)
+    return ctx
+      ? this.authService.refresh(dto.refreshToken, ctx)
+      : this.authService.refresh(dto.refreshToken)
   }
 
   @Public()

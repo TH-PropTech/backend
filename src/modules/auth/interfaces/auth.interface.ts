@@ -7,6 +7,7 @@ export interface UserPayload {
   roles?: string[]
 
   kycStatus?: string
+  sessionId?: string
 }
 
 export interface KeycloakUser {

@@ -141,6 +141,11 @@ import {
   type NotificationsMongoDatabase,
 } from './035-move-in-overdue-notifications-vi'
 import {
+  migrateAuthSessionsAndUserPreferences,
+  rollbackAuthSessionsAndUserPreferences,
+  type AuthSessionsMigrationDatabase,
+} from './036-auth-sessions-and-user-preferences'
+import {
   MigrationRunner,
   type MigrationCheckpointStore,
   type MigrationStep,
@@ -194,6 +199,7 @@ export type CliMigrationId =
   | '033'
   | '034'
   | '035'
+  | '036'
 
 export type CliArgs = {
   apply: boolean
@@ -230,6 +236,7 @@ const ALL: CliMigrationId[] = [
   '033',
   '034',
   '035',
+  '036',
 ]
 
 /**
@@ -574,6 +581,17 @@ function steps(db: CliDb, only: readonly CliMigrationId[]): MigrationStep[] {
           ),
       },
     ],
+    [
+      '036',
+      {
+        id: '036-auth-sessions-and-user-preferences',
+        run: o =>
+          migrateAuthSessionsAndUserPreferences(
+            db as unknown as AuthSessionsMigrationDatabase,
+            o
+          ),
+      },
+    ],
   ]
   return all.filter(([id]) => only.includes(id)).map(([, step]) => step)
 }
@@ -708,6 +726,11 @@ export async function runMigrationCli(
           { dryRun }
         ),
       '035': () => rollbackMoveInOverdueNotificationsVi({ dryRun }),
+      '036': () =>
+        rollbackAuthSessionsAndUserPreferences(
+          db as unknown as AuthSessionsMigrationDatabase,
+          { dryRun }
+        ),
     }
     const reports: MigrationReport[] = []
     const checkpoints = createCheckpointStore(db)

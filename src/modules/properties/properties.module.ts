@@ -4,6 +4,7 @@ import { Apartment } from './schemas/apartment.schema'
 import { Project } from './schemas/project.schema'
 import { ReviewCase } from './schemas/review-case.schema'
 import { SavedSearchRecord } from './schemas/saved-search-record.schema'
+import { FavoriteApartment } from './schemas/favorite-apartment.schema'
 import { DesignRequest } from './schemas/design-request.schema'
 import { DesignRequestsService } from './services/design-requests.service'
 import { DesignRequestsController } from './controllers/design-requests.controller'
@@ -20,6 +21,7 @@ import { ApartmentExpirationService } from './services/apartment-expiration.serv
 import { ProjectsService } from './services/projects.service'
 import { ListingFreshnessService } from './services/listing-freshness.service'
 import { SavedSearchesService } from './services/saved-searches.service'
+import { FavoritesService } from './services/favorites.service'
 import { PriceBenchmarkService } from './insights/services/price-benchmark.service'
 import { ApartmentInsightsService } from './insights/services/apartment-insights.service'
 import { ApartmentInsightsController } from './insights/controllers/apartment-insights.controller'
@@ -31,6 +33,7 @@ import { NaiveBayesEngine } from './recommendations/engine/naive-bayes.engine'
 import { ApartmentsController } from './controllers/apartments.controller'
 import { ProjectsController } from './controllers/projects.controller'
 import { SavedSearchesController } from './controllers/saved-searches.controller'
+import { FavoritesController } from './controllers/favorites.controller'
 import { PriceBenchmarkController } from './insights/controllers/price-benchmark.controller'
 import { SafetyReportsController } from './insights/controllers/safety-reports.controller'
 import { RecommendationsController } from './recommendations/controllers/recommendations.controller'
@@ -45,6 +48,7 @@ import { NotificationsModule } from '../notifications/notifications.module'
       Project,
       ReviewCase,
       SavedSearchRecord,
+      FavoriteApartment,
       DesignRequest,
       ActivityLog,
       SystemConfig,
@@ -62,6 +66,7 @@ import { NotificationsModule } from '../notifications/notifications.module'
     ProjectsService,
     ListingFreshnessService,
     SavedSearchesService,
+    FavoritesService,
     PriceBenchmarkService,
     ApartmentInsightsService,
     SafetyReportsService,
@@ -75,6 +80,7 @@ import { NotificationsModule } from '../notifications/notifications.module'
     DesignRequestsController,
     ProjectsController,
     SavedSearchesController,
+    FavoritesController,
     PriceBenchmarkController,
     ApartmentInsightsController,
     SafetyReportsController,
@@ -88,6 +94,7 @@ import { NotificationsModule } from '../notifications/notifications.module'
     ProjectsService,
     ListingFreshnessService,
     SavedSearchesService,
+    FavoritesService,
     PriceBenchmarkService,
     ApartmentInsightsService,
     SafetyReportsService,

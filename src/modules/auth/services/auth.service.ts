@@ -2,18 +2,21 @@ import {
   Injectable,
   UnauthorizedException,
   BadRequestException,
+  Optional,
 } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository, FindOptionsWhere } from 'typeorm'
 import { JwtService } from '@nestjs/jwt'
 import { ObjectId } from 'mongodb'
 import * as bcrypt from 'bcryptjs'
+import * as crypto from 'crypto'
 import { User, UserStatus } from '../../users/schemas/user.schema'
 import { Otp, EmailOtpRecord } from '../schemas/otp.schema'
 import { KindScopedOtpRepository } from '../utils/otp.repository'
 import { EmailService } from './email.service'
 import { TokenResponse, UserPayload } from '../interfaces/auth.interface'
 import { TwoFactorService } from './two-factor.service'
+import { SessionsService, hashRefreshToken } from './sessions.service'
 
 interface TwoFactorTempPayload {
   _id: string
@@ -31,7 +34,9 @@ export class AuthService {
     otpRepository: Repository<Otp>,
     private readonly emailService: EmailService,
     private readonly jwtService: JwtService,
-    private readonly twoFactorService: TwoFactorService
+    private readonly twoFactorService: TwoFactorService,
+    @Optional()
+    private readonly sessionsService?: SessionsService
   ) {
     this.emailOtpRepository = new KindScopedOtpRepository(
       otpRepository,
@@ -44,8 +49,19 @@ export class AuthService {
    */
   async login(
     emailOrPhone: string,
-    password: string
-  ): Promise<TokenResponse & { user: UserPayload }> {
+    password: string,
+    context?: { ip?: string; userAgent?: string }
+  ): Promise<
+    | (TokenResponse & { user: UserPayload })
+    | {
+        is2faRequired: true
+        twoFactorTempToken: string
+        user: {
+          _id: string
+          email: string
+        }
+      }
+  > {
     const user = await this.userRepository.findOne({
       where: {
         $or: [{ email: emailOrPhone }, { phone: emailOrPhone }],
@@ -61,7 +77,36 @@ export class AuthService {
       throw new UnauthorizedException('Tài khoản hoặc mật khẩu không chính xác')
     }
 
-    return this.generateAuthToken(user)
+    // Nếu tài khoản đã kích hoạt 2FA, yêu cầu xác thực 2FA trước khi cấp token chính
+    if (user.twoFactor && user.twoFactor.enabled) {
+      const twoFactorTempToken = this.jwtService.sign(
+        { _id: user._id.toString(), is2faTemp: true },
+        { expiresIn: '5m' }
+      )
+      return {
+        is2faRequired: true,
+        twoFactorTempToken,
+        user: {
+          _id: user._id.toString(),
+          email: user.email,
+        },
+      }
+    }
+
+    const sessionId = new ObjectId()
+    const tokens = this.generateAuthToken(user, sessionId.toString())
+
+    if (this.sessionsService) {
+      await this.sessionsService.createSession({
+        customSessionId: sessionId,
+        userId: user._id,
+        refreshToken: tokens.refreshToken,
+        userAgent: context?.userAgent,
+        ip: context?.ip,
+      })
+    }
+
+    return tokens
   }
 
   /**
@@ -69,7 +114,8 @@ export class AuthService {
    */
   async authenticate2fa(
     twoFactorTempToken: string,
-    code: string
+    code: string,
+    context?: { ip?: string; userAgent?: string }
   ): Promise<TokenResponse & { user: UserPayload }> {
     let payload: TwoFactorTempPayload | null = null
     try {
@@ -94,7 +140,20 @@ export class AuthService {
       throw new UnauthorizedException('Tài khoản không tồn tại')
     }
 
-    return this.generateAuthToken(user)
+    const sessionId = new ObjectId()
+    const tokens = this.generateAuthToken(user, sessionId.toString())
+
+    if (this.sessionsService) {
+      await this.sessionsService.createSession({
+        customSessionId: sessionId,
+        userId: user._id,
+        refreshToken: tokens.refreshToken,
+        userAgent: context?.userAgent,
+        ip: context?.ip,
+      })
+    }
+
+    return tokens
   }
 
   /**
@@ -235,7 +294,8 @@ export class AuthService {
    * Làm mới access token từ refresh token
    */
   async refresh(
-    refreshToken: string
+    refreshToken: string,
+    context?: { ip?: string; userAgent?: string }
   ): Promise<TokenResponse & { user: UserPayload }> {
     try {
       const payload = this.jwtService.verify<UserPayload>(refreshToken)
@@ -246,6 +306,46 @@ export class AuthService {
       const user = await this.validateUserById(payload._id)
       if (!user) {
         throw new UnauthorizedException('Tài khoản không tồn tại trên hệ thống')
+      }
+
+      if (this.sessionsService) {
+        const oldHash = hashRefreshToken(refreshToken)
+        const existingSession =
+          await this.sessionsService.findByTokenHash(oldHash)
+
+        if (existingSession) {
+          if (
+            existingSession.revokedAt != null &&
+            this.sessionsService.isEnforceEnabled()
+          ) {
+            throw new UnauthorizedException('Phiên đăng nhập đã bị thu hồi')
+          }
+
+          const sessionId = existingSession._id.toString()
+          const newTokens = this.generateAuthToken(user, sessionId)
+
+          await this.sessionsService.rotateSession(
+            refreshToken,
+            newTokens.refreshToken,
+            context
+          )
+
+          return newTokens
+        } else {
+          // Token cũ không có bản ghi phiên: chấp nhận một lần và tạo bản ghi
+          const sessionId = new ObjectId()
+          const newTokens = this.generateAuthToken(user, sessionId.toString())
+
+          await this.sessionsService.createSession({
+            customSessionId: sessionId,
+            userId: user._id,
+            refreshToken: newTokens.refreshToken,
+            userAgent: context?.userAgent,
+            ip: context?.ip,
+          })
+
+          return newTokens
+        }
       }
 
       return this.generateAuthToken(user)
@@ -261,7 +361,10 @@ export class AuthService {
   /**
    * Hàm phụ trợ sinh token JWT
    */
-  private generateAuthToken(user: User): TokenResponse & { user: UserPayload } {
+  private generateAuthToken(
+    user: User,
+    sessionId?: string
+  ): TokenResponse & { user: UserPayload } {
     if (
       user.status === UserStatus.INACTIVE ||
       user.status === UserStatus.SUSPENDED
@@ -284,10 +387,14 @@ export class AuthService {
       username: user.email,
       roles,
       kycStatus: user.kycStatus,
+      ...(sessionId ? { sessionId } : {}),
     }
 
     const accessToken = this.jwtService.sign(payload, { expiresIn: '1d' })
-    const refreshToken = this.jwtService.sign(payload, { expiresIn: '7d' })
+    const refreshToken = this.jwtService.sign(
+      { ...payload, nonce: crypto.randomUUID() },
+      { expiresIn: '7d' }
+    )
 
     return {
       accessToken,

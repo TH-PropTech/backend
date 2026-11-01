@@ -463,4 +463,57 @@ describe('NotificationsService push delivery', () => {
       service.createNotification('user-1', 'T', 'B', 'flow')
     ).resolves.toEqual(expect.objectContaining({ userId: 'user-1' }))
   })
+
+  it('tôn trọng tùy chọn tắt push của người dùng', async () => {
+    const repository = createRepository(null)
+    repository.save.mockImplementation((value: Partial<Notification>) =>
+      Promise.resolve({ ...value, _id: new ObjectId(), createdAt: new Date() })
+    )
+    const publisher = { publish: jest.fn().mockResolvedValue(undefined) }
+    const push = { sendToUser: jest.fn().mockResolvedValue(undefined) }
+    const userRepo = {
+      findOne: jest.fn().mockResolvedValue({
+        _id: new ObjectId(),
+        notificationPreferences: { email: true, push: false },
+      }),
+    }
+
+    const service = new NotificationsService(
+      repository as never,
+      publisher,
+      push as never,
+      userRepo as never
+    )
+
+    await service.createNotification('user-1', 'T', 'B', 'flow')
+
+    expect(publisher.publish).toHaveBeenCalledTimes(1)
+    expect(push.sendToUser).not.toHaveBeenCalled()
+  })
+
+  it('tôn trọng tùy chọn bật push của người dùng hoặc mặc định', async () => {
+    const repository = createRepository(null)
+    repository.save.mockImplementation((value: Partial<Notification>) =>
+      Promise.resolve({ ...value, _id: new ObjectId(), createdAt: new Date() })
+    )
+    const publisher = { publish: jest.fn().mockResolvedValue(undefined) }
+    const push = { sendToUser: jest.fn().mockResolvedValue(undefined) }
+    const userRepo = {
+      findOne: jest.fn().mockResolvedValue({
+        _id: new ObjectId(),
+        notificationPreferences: { email: true, push: true },
+      }),
+    }
+
+    const service = new NotificationsService(
+      repository as never,
+      publisher,
+      push as never,
+      userRepo as never
+    )
+
+    await service.createNotification('user-1', 'T', 'B', 'flow')
+
+    expect(push.sendToUser).toHaveBeenCalledTimes(1)
+  })
 })
