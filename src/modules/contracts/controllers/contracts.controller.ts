@@ -163,22 +163,6 @@ export class CreateContractDto {
   terminationNoticeDays!: number
 }
 
-export class SignContractDto {
-  @IsString()
-  @IsNotEmpty()
-  signingGrantId!: string
-}
-
-export class IssueSigningGrantDto {
-  @IsString()
-  @IsNotEmpty()
-  biometricGrantId!: string
-
-  @IsString()
-  @IsNotEmpty()
-  otpSessionId!: string
-}
-
 export class SaveContractContentDto {
   @IsObject()
   content!: Record<string, unknown>
@@ -757,22 +741,6 @@ export class ContractsController {
     return this.contractsService.findByUser(userId)
   }
 
-  /** Ký hợp đồng (tenant hoặc landlord) — yêu cầu KYC đã verified */
-  @Put(':id/sign')
-  @RequirePermission('approve', 'Contract')
-  @Roles('landlord', 'tenant')
-  async sign(
-    @Param('id') id: string,
-    @Body() dto: SignContractDto,
-    @CurrentUser('id') userId: string
-  ): Promise<Contract> {
-    return this.contractsService.signContractForUser(
-      id,
-      userId,
-      dto.signingGrantId
-    )
-  }
-
   /** Dev/test: ký bỏ qua SmartCA. Bị chặn trừ khi ENABLE_TEST_SIGN_BYPASS=true và không phải production. */
   @Post(':id/test-sign')
   @Roles('landlord', 'tenant')
@@ -876,21 +844,6 @@ export class ContractsController {
     )
   }
 
-  @Post(':id/signing-grant')
-  @Roles('landlord', 'tenant')
-  async issueSigningGrant(
-    @Param('id') id: string,
-    @Body() dto: IssueSigningGrantDto,
-    @CurrentUser('id') userId: string
-  ): Promise<{ grantId: string; expiresAt: Date }> {
-    return this.contractsService.issueSigningGrant(
-      id,
-      userId,
-      dto.biometricGrantId,
-      dto.otpSessionId
-    )
-  }
-
   /** Xác minh tính toàn vẹn hợp đồng với Hyperledger Fabric */
   @Get(':id/verify')
   @Roles('admin', 'staff', 'landlord', 'tenant')
@@ -933,24 +886,6 @@ export class ContractsController {
       user._id ?? '',
       isStaff
     )
-  }
-
-  /** Xác thực khuôn mặt người ký trước khi ký hợp đồng */
-  @Post(':id/verify-signer')
-  @Roles('admin', 'staff', 'landlord', 'tenant')
-  @UseInterceptors(FileInterceptor('selfie'))
-  async verifySigner(
-    @Param('id') id: string,
-    @CurrentUser('id') userId: string,
-    @UploadedFile() file?: Express.Multer.File
-  ): Promise<{
-    verified: boolean
-    faceMatch: boolean
-    liveness: boolean
-    spoofScore: number | null
-  }> {
-    if (!file) throw new BadRequestException('Thiếu file selfie')
-    return this.contractsService.verifySignerForUser(id, userId, file)
   }
 
   /** Đồng bộ cấu hình quy trình thuê mới cho hợp đồng nháp */

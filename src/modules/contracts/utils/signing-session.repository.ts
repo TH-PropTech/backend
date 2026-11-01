@@ -6,21 +6,6 @@ import type {
 
 type Where = Record<string, unknown>
 
-/** Vé ký một lần (kind='grant') đọc từ bảng hợp nhất; khớp hình `SigningGrant` cũ. */
-export type SigningGrantDoc = Pick<
-  SmartCaSigningSession,
-  '_id' | 'contractId' | 'expiresAt' | 'createdAt'
-> & {
-  kind: 'grant'
-  tokenHash: string
-  userId: string
-  role: 'tenant' | 'landlord'
-  contentLockedHash: string
-  biometricGrantId: string
-  otpSessionId: string
-  consumedAt: Date | null
-}
-
 /**
  * Repository facade (D6) cho `smartca_signing_sessions` hợp nhất: giữ chữ ký như
  * repo cũ của từng loại (phiên SmartCA hoặc grant) nhưng tự cộng điều kiện `kind`

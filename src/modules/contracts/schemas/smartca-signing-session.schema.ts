@@ -7,7 +7,8 @@ import {
   UpdateDateColumn,
   Index,
 } from 'typeorm'
-import type { SigningRole } from '../utils/signing-grant.util'
+
+export type SigningRole = 'tenant' | 'landlord'
 
 /**
  * `session`: phiên giao dịch với nhà cung cấp SmartCA (trường `providerTransactionId`).
@@ -64,8 +65,6 @@ export class SmartCaSigningSession {
   @Column({ nullable: true }) userId?: string
   @Column({ nullable: true }) role?: SigningRole
   @Column({ nullable: true }) contentLockedHash?: string
-  @Column({ nullable: true }) biometricGrantId?: string
-  @Column({ nullable: true }) otpSessionId?: string
   @Column({ nullable: true }) consumedAt?: Date | null
 
   @Column() expiresAt!: Date

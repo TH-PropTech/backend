@@ -1,12 +1,5 @@
-import {
-  BadGatewayException,
-  BadRequestException,
-  ConflictException,
-  ForbiddenException,
-} from '@nestjs/common'
+import { ConflictException, ForbiddenException } from '@nestjs/common'
 
-import type { EkycProxyService } from '../../ekyc/services/ekyc-proxy.service'
-import type { KycMediaService } from '../../users/services/kyc-media.service'
 import type { KycService } from '../../users/services/kyc.service'
 import { ObjectId } from 'mongodb'
 import { ContractsService } from './contracts.service'
@@ -148,92 +141,25 @@ describe('ContractsService application draft factory', () => {
   })
 })
 
-function createService(options?: { kycStatus?: string }): {
+function createService(): {
   service: ContractsService
   kycService: { findByUserId: jest.Mock }
-  media: { asMulterFile: jest.Mock }
-  proxy: { verifyFace: jest.Mock }
 } {
   const kycService = {
     findByUserId: jest.fn().mockResolvedValue({
-      status: options?.kycStatus ?? 'verified',
+      status: 'verified',
       frontCardUrl: 'kyc-media:owner:front-card:id',
-    }),
-  }
-  const media = {
-    asMulterFile: jest.fn().mockResolvedValue({ fieldname: 'frontID' }),
-  }
-  const proxy = {
-    verifyFace: jest.fn().mockResolvedValue({
-      verified: true,
-      faceMatch: true,
-      liveness: true,
-      realConfidence: 0.91,
     }),
   }
   const service = Object.create(ContractsService.prototype) as ContractsService
   Reflect.set(service, 'logger', { log: jest.fn(), warn: jest.fn() })
   Reflect.set(service, 'kycService', kycService as unknown as KycService)
-  Reflect.set(service, 'kycMediaService', media as unknown as KycMediaService)
-  Reflect.set(service, 'ekycProxyService', proxy as unknown as EkycProxyService)
   jest.spyOn(service, 'findOne').mockResolvedValue({
     tenantId: '507f1f77bcf86cd799439011',
     landlordId: '507f1f77bcf86cd799439012',
   } as never)
-  return { service, kycService, media, proxy }
+  return { service, kycService }
 }
-
-describe('ContractsService.verifySigner', () => {
-  it('compares the selfie with the decrypted verified KYC card', async () => {
-    const { service, media, proxy } = createService()
-    const selfie = { fieldname: 'selfie' } as Express.Multer.File
-
-    await expect(
-      service.verifySigner('contract-id', 'tenant', selfie)
-    ).resolves.toEqual({
-      verified: true,
-      faceMatch: true,
-      liveness: true,
-      spoofScore: 0.91,
-    })
-    expect(media.asMulterFile).toHaveBeenCalledWith(
-      'kyc-media:owner:front-card:id',
-      'frontID'
-    )
-    expect(proxy.verifyFace).toHaveBeenCalledWith(
-      selfie,
-      expect.objectContaining({ fieldname: 'frontID' })
-    )
-  })
-
-  it('rejects a signer whose KYC record is not verified', async () => {
-    const { service, proxy } = createService({ kycStatus: 'pending' })
-
-    await expect(
-      service.verifySigner('contract-id', 'tenant', {} as Express.Multer.File)
-    ).rejects.toBeInstanceOf(BadRequestException)
-    expect(proxy.verifyFace).not.toHaveBeenCalled()
-  })
-
-  it('fails closed when the eKYC provider is unavailable', async () => {
-    const { service, proxy } = createService()
-    proxy.verifyFace.mockRejectedValue(new BadGatewayException('unavailable'))
-
-    await expect(
-      service.verifySigner('contract-id', 'landlord', {} as Express.Multer.File)
-    ).rejects.toBeInstanceOf(BadGatewayException)
-  })
-})
-
-describe('ContractsService.signContractForUser', () => {
-  it('rejects a non-participant before reading a signing grant', async () => {
-    const { service } = createService()
-
-    await expect(
-      service.signContractForUser('contract-id', 'outsider', 'sg_invalid')
-    ).rejects.toThrow('CONTRACT_SIGN_ACCESS_DENIED')
-  })
-})
 
 describe('ContractsService.signContractForTest', () => {
   const originalEnv = { ...process.env }

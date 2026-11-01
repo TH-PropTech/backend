@@ -14,7 +14,7 @@ import { EkycModule } from '../ekyc/ekyc.module'
   controllers: [UsersController, KycController],
   exports: [
     TypeOrmModule,
-    // Re-export để mọi nơi trước đây nhận ekyc/biometric provider + repository qua UsersModule vẫn nhận được
+    // Re-export để mọi nơi trước đây nhận ekyc provider qua UsersModule vẫn nhận được
     EkycModule,
     KycService,
     KycMediaService,

@@ -33,7 +33,7 @@ export class SignSmartCaV2Dto extends CreateSmartCaSigningSessionDto {
 
 export class SigningMethodOptionDto {
   @ApiProperty({
-    enum: ['smartca_v1', 'smartca_v2', 'biometric_smart_otp', 'dev_sign'],
+    enum: ['smartca_v1', 'smartca_v2', 'dev_sign'],
   })
   id!: string
 

@@ -69,10 +69,6 @@ const SIGNING_METHOD_LABELS: Record<
     label: 'VNPT SmartCA (mật khẩu + OTP)',
     description: 'Nhập mật khẩu và OTP SmartCA TH để ký ngay trong ứng dụng.',
   },
-  biometric_smart_otp: {
-    label: 'Sinh trắc học + Smart OTP',
-    description: 'Xác thực khuôn mặt và Smart OTP của TH-PropTech.',
-  },
   dev_sign: {
     label: 'Ký thử nghiệm (dev)',
     description:
@@ -154,12 +150,7 @@ export class SmartCaSigningService {
     }
 
     return resolveEnabledSigningMethods().map(id => {
-      const reason =
-        id === 'dev_sign'
-          ? undefined
-          : id === 'biometric_smart_otp'
-            ? gateReason
-            : (gateReason ?? kycReason)
+      const reason = id === 'dev_sign' ? undefined : (gateReason ?? kycReason)
       return {
         id,
         ...SIGNING_METHOD_LABELS[id],

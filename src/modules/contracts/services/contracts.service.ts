@@ -15,22 +15,10 @@ import { ObjectId } from 'mongodb'
 import * as crypto from 'crypto'
 import { Contract, ContractSignature } from '../schemas/contract.schema'
 import { ContractAmendmentStore } from './contract-amendment.store'
-import { SmartCaSigningSession } from '../schemas/smartca-signing-session.schema'
-import {
-  KindScopedSmartCaSigningRepository,
-  type SigningGrantDoc,
-} from '../utils/signing-session.repository'
 import { DepositAgreement } from '../schemas/deposit-agreement.schema'
-import {
-  consumeSigningGrant,
-  createSigningGrant,
-  hashGrantId,
-} from '../utils/signing-grant.util'
 import { PoliciesService } from '../../legal/services/policies.service'
 import { FabricService } from '../../fabric/services/fabric.service'
 import { KycService } from '../../users/services/kyc.service'
-import { EkycProxyService } from '../../ekyc/services/ekyc-proxy.service'
-import { KycMediaService } from '../../users/services/kyc-media.service'
 import { sanitizeTipTapContent } from '../legal/tiptap-content'
 import {
   buildPublicServiceChecklist,
@@ -42,8 +30,6 @@ import { LedgerOutboxService } from '../../fabric/services/ledger-outbox.service
 import { PaymentsService } from '../../payments/services/payments.service'
 import type { RentalPackageSnapshot } from '../../properties/utils/rental-package.util'
 import type { RentalExecutionPolicyRef } from '../../rental/utils/rental-execution-policy.util'
-import { BiometricEvidenceService } from '../../ekyc/services/biometric-evidence.service'
-import { SmartOtpService } from '../../auth/services/smart-otp.service'
 import {
   ContractArtifactService,
   requireCanonicalArtifactReference,
@@ -179,14 +165,9 @@ function describeIdIssuance(kyc: {
 @Injectable()
 export class ContractsService {
   private readonly logger = new Logger(ContractsService.name)
-  /** Vé ký (kind='grant') trên bảng SmartCa hợp nhất; xem migration 028. */
-  private readonly signingGrantRepository: KindScopedSmartCaSigningRepository<SigningGrantDoc>
-
   constructor(
     @InjectRepository(Contract)
     private readonly contractRepository: Repository<Contract>,
-    @InjectRepository(SmartCaSigningSession)
-    signingGrantStore: Repository<SmartCaSigningSession>,
     @InjectRepository(DepositAgreement)
     private readonly depositAgreementRepository: Repository<DepositAgreement>,
     @InjectRepository(Apartment)
@@ -196,12 +177,7 @@ export class ContractsService {
     private readonly fabricService: FabricService,
     private readonly ledgerOutboxService: LedgerOutboxService,
     private readonly kycService: KycService,
-    private readonly ekycProxyService: EkycProxyService,
-    private readonly kycMediaService: KycMediaService,
     @Optional() private readonly paymentsService?: PaymentsService,
-    @Optional()
-    private readonly biometricEvidenceService?: BiometricEvidenceService,
-    @Optional() private readonly smartOtpService?: SmartOtpService,
     @Optional()
     private readonly templateGovernanceService?: ContractTemplateGovernanceService,
     @Optional()
@@ -219,13 +195,7 @@ export class ContractsService {
     @Optional()
     @InjectRepository(User)
     private readonly userRepository?: Repository<User>
-  ) {
-    this.signingGrantRepository =
-      new KindScopedSmartCaSigningRepository<SigningGrantDoc>(
-        signingGrantStore,
-        'grant'
-      )
-  }
+  ) {}
 
   private async recordTransactionEvent(input: {
     contractId: string
@@ -567,49 +537,8 @@ export class ContractsService {
 
   // ── Ký hợp đồng — snapshot chính sách & đẩy lên blockchain ──
 
-  async signContractForUser(
-    contractId: string,
-    userId: string,
-    signingGrantId: string
-  ): Promise<Contract> {
-    const contract = await this.findOne(contractId)
-    const role =
-      contract.tenantId === userId
-        ? 'tenant'
-        : contract.landlordId === userId
-          ? 'landlord'
-          : null
-    if (!role) throw new ForbiddenException('CONTRACT_SIGN_ACCESS_DENIED')
-    if (!contract.contentLockedHash) {
-      throw new BadRequestException('CONTRACT_CONTENT_NOT_LOCKED')
-    }
-    const grant = await this.signingGrantRepository.findOne({
-      where: { tokenHash: hashGrantId(signingGrantId) },
-    })
-    if (!grant) throw new BadRequestException('SIGNING_GRANT_INVALID')
-
-    const consumed = consumeSigningGrant(
-      grant,
-      signingGrantId,
-      {
-        userId,
-        role,
-        contractId,
-        contentLockedHash: contract.contentLockedHash,
-        biometricGrantId: grant.biometricGrantId,
-        otpSessionId: grant.otpSessionId,
-      },
-      new Date()
-    )
-    grant.consumedAt = consumed.consumedAt
-    await this.signingGrantRepository.save(grant)
-    const signed = await this.signContract(contractId, role)
-    await this.flowNotificationService?.notifyForContract(contractId)
-    return signed
-  }
-
   /**
-   * Chỉ dành cho dev/test: ký bỏ qua SmartCA, sinh trắc và Smart OTP để đi tiếp các bước sau
+   * Chỉ dành cho dev/test: ký bỏ qua SmartCA để đi tiếp các bước sau
    * khi đang chờ tích hợp. Cần đồng thời NODE_ENV != production và ENABLE_TEST_SIGN_BYPASS=true.
    */
   async signContractForTest(
@@ -1272,111 +1201,6 @@ export class ContractsService {
     })
   }
 
-  async issueSigningGrant(
-    contractId: string,
-    userId: string,
-    biometricGrantId: string,
-    otpSessionId: string
-  ): Promise<{ grantId: string; expiresAt: Date }> {
-    const contract = await this.findOne(contractId)
-    const role =
-      contract.tenantId === userId
-        ? 'tenant'
-        : contract.landlordId === userId
-          ? 'landlord'
-          : null
-    if (!role) throw new ForbiddenException('CONTRACT_SIGN_ACCESS_DENIED')
-    if (!contract.contentLockedHash) {
-      throw new BadRequestException('CONTRACT_CONTENT_NOT_LOCKED')
-    }
-
-    if (this.biometricEvidenceService) {
-      const bioResult = await this.biometricEvidenceService.consumeEvidence(
-        biometricGrantId,
-        {
-          userId,
-          role,
-          contractId,
-          contentLockedHash: contract.contentLockedHash,
-        }
-      )
-      if (!bioResult.valid) {
-        throw new BadRequestException(
-          bioResult.message || 'BIOMETRIC_EVIDENCE_INVALID'
-        )
-      }
-    }
-
-    if (this.smartOtpService) {
-      const otpResult = await this.smartOtpService.consumeContractOtp(
-        otpSessionId,
-        userId,
-        contractId,
-        role,
-        contract.contentLockedHash
-      )
-      if (!otpResult.valid) {
-        throw new BadRequestException(
-          otpResult.message || 'OTP_SESSION_INVALID'
-        )
-      }
-    }
-
-    const created = createSigningGrant(
-      {
-        userId,
-        role,
-        contractId,
-        contentLockedHash: contract.contentLockedHash,
-        biometricGrantId,
-        otpSessionId,
-      },
-      new Date(),
-      5 * 60 * 1000
-    )
-    const record = this.signingGrantRepository.create({
-      ...created.record,
-      tokenHash: created.record.tokenHash,
-    })
-    await this.signingGrantRepository.save(record)
-    return { grantId: created.grantId, expiresAt: created.record.expiresAt }
-  }
-
-  async verifySignerForUser(
-    contractId: string,
-    userId: string,
-    selfie: Express.Multer.File
-  ): Promise<{
-    verified: boolean
-    faceMatch: boolean
-    liveness: boolean
-    spoofScore: number | null
-    biometricEvidenceId?: string
-  }> {
-    const contract = await this.findOne(contractId)
-    const role =
-      contract.tenantId === userId
-        ? 'tenant'
-        : contract.landlordId === userId
-          ? 'landlord'
-          : null
-    if (!role) throw new ForbiddenException('CONTRACT_SIGN_ACCESS_DENIED')
-    const result = await this.verifySigner(contractId, role, selfie)
-    if (result.verified && this.biometricEvidenceService) {
-      const evidence = await this.biometricEvidenceService.issueEvidence({
-        userId,
-        contractId,
-        role,
-        contentLockedHash: contract.contentLockedHash ?? '',
-      })
-      return {
-        ...result,
-        biometricEvidenceId: evidence.evidenceId,
-      }
-    }
-    return result
-  }
-
   async signContract(
     contractId: string,
     role: 'tenant' | 'landlord'
@@ -1918,69 +1742,6 @@ export class ContractsService {
   ): Promise<Awaited<ReturnType<ContractsService['verifyIntegrity']>>> {
     await this.findOneForUser(contractId, actorId, isStaff)
     return this.verifyIntegrity(contractId)
-  }
-
-  // ── Xác thực khuôn mặt người ký hợp đồng ──
-
-  async verifySigner(
-    contractId: string,
-    role: 'tenant' | 'landlord',
-    selfie: Express.Multer.File
-  ): Promise<{
-    verified: boolean
-    faceMatch: boolean
-    liveness: boolean
-    spoofScore: number | null
-  }> {
-    this.logger.log(
-      `Verifying signer identity for contract ${contractId}, role: ${role}`
-    )
-
-    let userId: string
-    try {
-      const contract = await this.findOne(contractId)
-      userId = role === 'tenant' ? contract.tenantId : contract.landlordId
-    } catch {
-      this.logger.warn(
-        `Contract ${contractId} not found. Falling back to contractId as userId.`
-      )
-      userId = contractId
-    }
-
-    if (!userId || !ObjectId.isValid(userId)) {
-      throw new BadRequestException(
-        `Hợp đồng thiếu thông tin ID hoặc ID không hợp lệ cho ${role}`
-      )
-    }
-
-    const kycRecord = await this.kycService.findByUserId(userId)
-    if (!kycRecord || kycRecord.status !== 'verified') {
-      throw new BadRequestException(
-        `Người ký (${role}) chưa hoàn tất xác minh KYC hoặc trạng thái không hợp lệ`
-      )
-    }
-
-    if (!kycRecord.frontCardUrl) {
-      throw new BadRequestException(
-        'Hồ sơ KYC thiếu ảnh mặt trước CCCD để đối sánh'
-      )
-    }
-
-    const frontCard = await this.kycMediaService.asMulterFile(
-      kycRecord.frontCardUrl,
-      'frontID'
-    )
-    const verificationResult = await this.ekycProxyService.verifyFace(
-      selfie,
-      frontCard
-    )
-
-    return {
-      verified: verificationResult.verified,
-      faceMatch: verificationResult.faceMatch,
-      liveness: verificationResult.liveness,
-      spoofScore: verificationResult.realConfidence,
-    }
   }
 
   private async resolveCanonicalTemplateRef(): Promise<NonNullable<

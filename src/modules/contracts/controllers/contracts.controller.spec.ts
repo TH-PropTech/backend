@@ -1,8 +1,4 @@
-import {
-  BadRequestException,
-  ConflictException,
-  ForbiddenException,
-} from '@nestjs/common'
+import { ConflictException, ForbiddenException } from '@nestjs/common'
 import type { ConfigService } from '@nestjs/config'
 import { ContractsController } from './contracts.controller'
 import type { ContractsService } from '../services/contracts.service'
@@ -33,9 +29,6 @@ function createBinaryResponse(): {
 
 describe('ContractsController', () => {
   const service = {
-    signContractForUser: jest.fn(),
-    issueSigningGrant: jest.fn(),
-    verifySignerForUser: jest.fn(),
     saveContractContent: jest.fn(),
     lockContractContent: jest.fn(),
     terminateContract: jest.fn(),
@@ -91,16 +84,6 @@ describe('ContractsController', () => {
   )
 
   beforeEach(() => jest.clearAllMocks())
-
-  it('passes JWT identity and one-time grant instead of a caller role', async () => {
-    service.signContractForUser.mockResolvedValue({ status: 'active' })
-    await controller.sign('contract-1', { signingGrantId: 'sg_1' }, 'tenant-1')
-    expect(service.signContractForUser).toHaveBeenCalledWith(
-      'contract-1',
-      'tenant-1',
-      'sg_1'
-    )
-  })
 
   it('creates a deposit agreement through the staff contract route', async () => {
     depositAgreementsService.createForContract.mockResolvedValue({
@@ -213,12 +196,6 @@ describe('ContractsController', () => {
 
     expect(service.findByUser).toHaveBeenNthCalledWith(1, 'tenant-2')
     expect(service.findByUser).toHaveBeenNthCalledWith(2, 'tenant-1')
-  })
-
-  it('requires selfie input for signer verification', async () => {
-    await expect(
-      controller.verifySigner('contract-1', 'tenant-1', undefined)
-    ).rejects.toThrow(BadRequestException)
   })
 
   it('passes staff ownership context when saving contract content', async () => {

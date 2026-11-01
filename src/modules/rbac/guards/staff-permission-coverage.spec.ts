@@ -215,10 +215,7 @@ const TABLE_EXTRA: Array<[string, Ctor, Expect[]]> = [
   [
     'ContractsController (signing)',
     ContractsController,
-    [
-      ['PUT', ':id/sign', 'approve', 'Contract'],
-      ['POST', ':id/smartca/sign-v2', 'approve', 'Contract'],
-    ],
+    [['POST', ':id/smartca/sign-v2', 'approve', 'Contract']],
   ],
   [
     'CommunityController (posting)',
