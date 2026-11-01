@@ -9,7 +9,6 @@ import type { ApiResponse } from '../src/common/interfaces/api-response.interfac
 import { ResponseEnvelopeInterceptor } from '../src/common/interceptors/response-envelope.interceptor'
 import { RolesGuard } from '../src/common/guards/roles.guard'
 import { JwtAuthGuard } from '../src/modules/auth/guards/jwt-auth.guard'
-import { EkycProxyService } from '../src/modules/ekyc/services/ekyc-proxy.service'
 import { GroqCccdOcrService } from '../src/modules/ekyc/services/groq-cccd-ocr.service'
 import { KycController } from '../src/modules/users/controllers/kyc.controller'
 import { KycService } from '../src/modules/users/services/kyc.service'
@@ -32,7 +31,6 @@ describe('KYC HTTP flow', () => {
     }),
     ocrBack: jest.fn().mockResolvedValue({ success: true }),
   }
-  const proxy = {}
   const service = {
     submitKyc: jest.fn().mockImplementation(() => {
       status = 'pending'
@@ -60,7 +58,6 @@ describe('KYC HTTP flow', () => {
       controllers: [KycController],
       providers: [
         { provide: KycService, useValue: service },
-        { provide: EkycProxyService, useValue: proxy },
         { provide: GroqCccdOcrService, useValue: ocr },
       ],
     })
