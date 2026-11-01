@@ -72,10 +72,11 @@ export class FavoritesService {
       }
 
       apartments = await this.apartmentRepository.find({
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment
+        /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment -- Mongo $or filter is not expressible as FindOptionsWhere */
         where: (orConditions.length === 1
           ? orConditions[0]
           : { $or: orConditions }) as any,
+        /* eslint-enable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment */
       })
     }
 
