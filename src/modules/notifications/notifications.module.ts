@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm'
 import { Expo } from 'expo-server-sdk'
 import { Notification } from './schemas/notification.schema'
 import { PushToken } from './schemas/push-token.schema'
+import { User } from '../users/schemas/user.schema'
 import { NotificationsService } from './services/notifications.service'
 import { PushTokensService } from './services/push-tokens.service'
 import { EXPO_CLIENT, PushService } from './services/push.service'
@@ -11,7 +12,7 @@ import { NotificationsGateway } from './gateways/notifications.gateway'
 import { NOTIFICATIONS_PUBLISHER } from './gateways/notifications.publisher'
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Notification, PushToken])],
+  imports: [TypeOrmModule.forFeature([Notification, PushToken, User])],
   providers: [
     NotificationsService,
     PushTokensService,

@@ -69,6 +69,16 @@ export interface UserPreferences {
   requiresParking?: boolean
 }
 
+export interface NotificationPreferences {
+  email: boolean
+  push: boolean
+}
+
+export const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferences = {
+  email: true,
+  push: true,
+}
+
 export interface DigitalSignatureInfo {
   certificateDn?: string // Distinguished Name của chứng thư số
   serialNumber?: string // Số serial của chứng thư số
@@ -219,6 +229,9 @@ export class User {
 
   @Column({ type: 'json', nullable: true })
   preferences?: UserPreferences
+
+  @Column({ type: 'json', nullable: true })
+  notificationPreferences?: NotificationPreferences
 
   @Column({ type: 'json', nullable: true, default: null })
   metadata?: Record<string, unknown>

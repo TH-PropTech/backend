@@ -2,11 +2,19 @@ import {
   Controller,
   Get,
   Patch,
+  Put,
+  Delete,
   Param,
   Body,
   UseGuards,
   Request,
   NotFoundException,
+  BadRequestException,
+  HttpCode,
+  HttpStatus,
+  UsePipes,
+  ValidationPipe,
+  Optional,
 } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
@@ -16,7 +24,17 @@ import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard'
 import { RolesGuard } from '../../../common/guards/roles.guard'
 import { Roles } from '../../../common/decorators/roles.decorator'
 import { UpdateUserPermissionsDto } from '../dto/update-user-permissions.dto'
-import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger'
+import { UpdateUserProfileDto } from '../dto/update-user-profile.dto'
+import { NotificationPreferencesDto } from '../dto/notification-preferences.dto'
+import { SessionListResponseDto } from '../dto/session-response.dto'
+import { UsersService } from '../services/users.service'
+import { SessionsService } from '../../auth/services/sessions.service'
+import {
+  ApiTags,
+  ApiOperation,
+  ApiBearerAuth,
+  ApiResponse,
+} from '@nestjs/swagger'
 
 /** Bỏ `smartOTP.devices` (publicKey/deviceId nhạy cảm) khỏi phản hồi; giữ phần còn lại. */
 function withoutSmartOtpDevices(
@@ -34,44 +52,160 @@ function withoutSmartOtpDevices(
 export class UsersController {
   constructor(
     @InjectRepository(User)
-    private readonly userRepository: Repository<User>
+    private readonly userRepository: Repository<User>,
+    @Optional()
+    private readonly usersService?: UsersService,
+    @Optional()
+    private readonly sessionsService?: SessionsService
   ) {}
+
+  private getEffectiveUsersService(): UsersService {
+    return (
+      this.usersService ??
+      new UsersService(this.userRepository, this.sessionsService)
+    )
+  }
 
   /**
    * Lấy thông tin profile đầy đủ của người dùng hiện tại
    * Loại bỏ các trường nhạy cảm (passwordHash, pin.hash, twoFactor.secret)
    */
+  @ApiOperation({ summary: 'Lấy thông tin tài khoản của người dùng hiện tại' })
   @Get('me')
   @UseGuards(JwtAuthGuard)
   async getMe(
     @Request() req: { user: { _id: string } }
-  ): Promise<Partial<User>> {
+  ): Promise<Record<string, unknown>> {
     const userId = req.user._id
     const user = await this.userRepository.findOne({
       where: { _id: new ObjectId(userId) },
     })
 
     if (!user) {
-      throw new Error('Tài khoản không tồn tại')
+      throw new NotFoundException('Tài khoản không tồn tại')
     }
 
-    // Loại bỏ các trường nhạy cảm trước khi trả về
     const { passwordHash, pin, twoFactor, smartOTP, ...safeUser } = user
+    void passwordHash
 
-    // Trả về pin status thay vì pin hash
-    const result: Record<string, unknown> = {
+    return {
       ...safeUser,
-      ...withoutSmartOtpDevices(smartOTP),
+      ...(smartOTP ? withoutSmartOtpDevices(smartOTP) : {}),
       hasPin: !!pin?.hash,
       pinSetAt: pin?.setAt || null,
       twoFactorEnabled: twoFactor?.enabled || false,
       twoFactorEnabledAt: twoFactor?.enabledAt || null,
     }
+  }
 
-    // Suppress unused variable warnings
-    void passwordHash
+  /**
+   * Cập nhật thông tin hồ sơ người dùng (họ và tên, số điện thoại)
+   * Không cho phép sửa email hoặc số định danh
+   */
+  @ApiOperation({ summary: 'Cập nhật hồ sơ cá nhân' })
+  @ApiResponse({ status: 200, description: 'Cập nhật hồ sơ thành công' })
+  @ApiResponse({
+    status: 400,
+    description: 'Dữ liệu không hợp lệ hoặc cố sửa trường cấm',
+  })
+  @Patch('me')
+  @UseGuards(JwtAuthGuard)
+  @UsePipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true }))
+  async updateMe(
+    @Request() req: { user: { _id: string } },
+    @Body() dto: UpdateUserProfileDto
+  ): Promise<Record<string, unknown>> {
+    const raw = dto as Record<string, unknown>
+    if ('email' in raw || 'idCardNumber' in raw) {
+      throw new BadRequestException(
+        'Không được phép chỉnh sửa email hoặc số định danh qua endpoint này'
+      )
+    }
+    return this.getEffectiveUsersService().updateProfile(req.user._id, dto)
+  }
 
-    return result
+  /**
+   * Lấy tùy chọn kênh thông báo của người dùng
+   */
+  @ApiOperation({ summary: 'Lấy tùy chọn kênh thông báo' })
+  @Get('me/notification-preferences')
+  @UseGuards(JwtAuthGuard)
+  async getNotificationPreferences(
+    @Request() req: { user: { _id: string } }
+  ): Promise<NotificationPreferencesDto> {
+    return this.getEffectiveUsersService().getNotificationPreferences(
+      req.user._id
+    )
+  }
+
+  /**
+   * Cập nhật tùy chọn kênh thông báo của người dùng
+   */
+  @ApiOperation({ summary: 'Cập nhật tùy chọn kênh thông báo' })
+  @ApiResponse({ status: 200, type: NotificationPreferencesDto })
+  @Put('me/notification-preferences')
+  @UseGuards(JwtAuthGuard)
+  @UsePipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true }))
+  async updateNotificationPreferences(
+    @Request() req: { user: { _id: string } },
+    @Body() dto: NotificationPreferencesDto
+  ): Promise<NotificationPreferencesDto> {
+    return this.getEffectiveUsersService().updateNotificationPreferences(
+      req.user._id,
+      dto
+    )
+  }
+
+  /**
+   * Lấy danh sách phiên đăng nhập đang hoạt động
+   */
+  @ApiOperation({ summary: 'Lấy danh sách phiên đăng nhập của người dùng' })
+  @ApiResponse({ status: 200, type: SessionListResponseDto })
+  @Get('me/sessions')
+  @UseGuards(JwtAuthGuard)
+  async getSessions(
+    @Request()
+    req: {
+      user: { _id: string; sessionId?: string }
+      headers?: Record<string, string>
+    }
+  ): Promise<SessionListResponseDto> {
+    const currentSessionId =
+      req.user?.sessionId || req.headers?.['x-session-id']
+    return this.getEffectiveUsersService().getUserSessions(
+      req.user._id,
+      currentSessionId
+    )
+  }
+
+  /**
+   * Thu hồi một phiên đăng nhập khác của người dùng
+   */
+  @ApiOperation({ summary: 'Thu hồi phiên đăng nhập khác' })
+  @ApiResponse({ status: 204, description: 'Đã thu hồi phiên thành công' })
+  @ApiResponse({ status: 400, description: 'Không thể thu hồi phiên hiện tại' })
+  @ApiResponse({
+    status: 404,
+    description: 'Phiên không tồn tại hoặc thuộc người khác',
+  })
+  @Delete('me/sessions/:id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @UseGuards(JwtAuthGuard)
+  async revokeSession(
+    @Param('id') id: string,
+    @Request()
+    req: {
+      user: { _id: string; sessionId?: string }
+      headers?: Record<string, string>
+    }
+  ): Promise<void> {
+    const currentSessionId =
+      req.user?.sessionId || req.headers?.['x-session-id']
+    await this.getEffectiveUsersService().revokeSession(
+      req.user._id,
+      id,
+      currentSessionId
+    )
   }
 
   @Get()
