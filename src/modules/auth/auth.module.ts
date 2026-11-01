@@ -4,7 +4,9 @@ import { JwtModule } from '@nestjs/jwt'
 import { User } from '../users/schemas/user.schema'
 import { Notification } from '../notifications/schemas/notification.schema'
 import { Otp } from './schemas/otp.schema'
+import { AuthSession } from './schemas/auth-session.schema'
 import { AuthService } from './services/auth.service'
+import { SessionsService } from './services/sessions.service'
 import { SignupService } from './services/signup.service'
 import { PinService } from './services/pin.service'
 import { EmailService } from './services/email.service'
@@ -20,7 +22,7 @@ import { SmartOtpController } from './controllers/smart-otp.controller'
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([User, Notification, Otp]),
+    TypeOrmModule.forFeature([User, Notification, Otp, AuthSession]),
     JwtModule.register({
       global: true,
       secret: process.env.JWT_SECRET || 'TH_PROPTECH_SECRET_JWT_KEY',
@@ -30,6 +32,7 @@ import { SmartOtpController } from './controllers/smart-otp.controller'
   controllers: [AuthController, TwoFactorController, SmartOtpController],
   providers: [
     AuthService,
+    SessionsService,
     SignupService,
     PinService,
     EmailService,
@@ -42,6 +45,7 @@ import { SmartOtpController } from './controllers/smart-otp.controller'
   ],
   exports: [
     AuthService,
+    SessionsService,
     SignupService,
     PinService,
     EmailService,

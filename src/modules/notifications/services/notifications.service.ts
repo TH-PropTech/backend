@@ -6,9 +6,10 @@ import {
   Optional,
 } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
-import { MongoRepository } from 'typeorm'
+import { MongoRepository, Repository } from 'typeorm'
 import { ObjectId } from 'mongodb'
 import { Notification } from '../schemas/notification.schema'
+import { User } from '../../users/schemas/user.schema'
 import { NotificationQueryDto } from '../dto/notification-query.dto'
 import {
   NOTIFICATIONS_PUBLISHER,
@@ -38,8 +39,38 @@ export class NotificationsService {
     @Inject(NOTIFICATIONS_PUBLISHER)
     private readonly publisher?: NotificationsPublisher,
     @Optional()
-    private readonly pushService?: PushService
+    private readonly pushService?: PushService,
+    @Optional()
+    @InjectRepository(User)
+    private readonly userRepository?: Repository<User>
   ) {}
+
+  private async getUser(userId: string): Promise<User | null> {
+    if (!this.userRepository) return null
+    try {
+      if (ObjectId.isValid(userId)) {
+        const byId = await this.userRepository.findOne({
+          where: { _id: new ObjectId(userId) },
+        })
+        if (byId) return byId
+      }
+      return await this.userRepository.findOne({
+        where: { _id: userId as never },
+      })
+    } catch {
+      return null
+    }
+  }
+
+  async isPushNotificationEnabled(userId: string): Promise<boolean> {
+    const user = await this.getUser(userId)
+    return user?.notificationPreferences?.push ?? true
+  }
+
+  async isEmailNotificationEnabled(userId: string): Promise<boolean> {
+    const user = await this.getUser(userId)
+    return user?.notificationPreferences?.email ?? true
+  }
 
   /**
    * Đưa thông báo vừa lưu tới người nhận qua realtime và push. Hai kênh chạy
@@ -51,6 +82,15 @@ export class NotificationsService {
 
   private async pushCreated(saved: Notification): Promise<void> {
     if (!this.pushService) return
+
+    const pushEnabled = await this.isPushNotificationEnabled(saved.userId)
+    if (!pushEnabled) {
+      this.logger.log(
+        `Push notification disabled by user preferences for user ${saved.userId}`
+      )
+      return
+    }
+
     try {
       await this.pushService.sendToUser(saved.userId, {
         title: saved.title,
