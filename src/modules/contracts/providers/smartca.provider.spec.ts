@@ -383,6 +383,31 @@ describe('SmartCaProvider', () => {
     })
   })
 
+  it.each([[{}], [null]])(
+    'maps PENDING with non-array empty signatures (%j) to pending',
+    async emptySignatures => {
+      jest.spyOn(global, 'fetch').mockResolvedValue(
+        jsonResponse({
+          status_code: 200,
+          message: 'PENDING',
+          data: {
+            transaction_id: 'vnpt-transaction-1',
+            expired_in: 300,
+            signatures: emptySignatures,
+          },
+        })
+      )
+      const provider = createProvider()
+
+      await expect(
+        provider.getSignatureStatus('vnpt-transaction-1', documentId)
+      ).resolves.toEqual({
+        transactionId: 'vnpt-transaction-1',
+        status: 'pending',
+      })
+    }
+  )
+
   it('maps transport, malformed JSON, HTTP and provider status failures to typed safe errors', async () => {
     const provider = createProvider()
     jest.spyOn(global, 'fetch').mockRejectedValueOnce(new Error('timeout'))

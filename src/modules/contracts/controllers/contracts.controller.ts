@@ -55,6 +55,9 @@ import { Contract } from '../schemas/contract.schema'
 import { ContractArtifactService } from '../services/contract-artifact.service'
 import { ContractEvidencePackageExportService } from '../services/contract-evidence-package.export.service'
 import { EvidencePackageQueryDto } from '../dto/evidence-package-query.dto'
+import { ContractRecordsPageDto } from '../dto/contract-record.dto'
+import { ContractRecordsQueryDto } from '../dto/contract-records-query.dto'
+import { ContractRecordsService } from '../services/contract-records.service'
 import type { PublicServiceChecklist } from '../legal/public-service-checklist'
 import { ContractViewService } from '../services/contract-view.service'
 import { LedgerAuditQueryService } from '../../fabric/services/ledger-audit-query.service'
@@ -243,8 +246,32 @@ export class ContractsController {
     @Optional()
     private readonly configService?: ConfigService,
     @Optional()
-    private readonly signedArtifactService?: SignedArtifactService
+    private readonly signedArtifactService?: SignedArtifactService,
+    @Optional()
+    private readonly contractRecordsService?: ContractRecordsService
   ) {}
+
+  /**
+   * Tra cứu hồ sơ hợp đồng cho Admin/Staff: lọc theo căn hộ, bên thuê, ngày, trạng thái và phân trang.
+   * PHẢI khai báo trước các route `:id`, nếu không `records` bị coi là id hợp đồng.
+   */
+  @Get('records')
+  @RequirePermission('read', 'Contract')
+  @Roles('admin', 'staff')
+  @ApiOperation({
+    summary: 'Danh sách hồ sơ hợp đồng có lọc và phân trang (Admin/Staff)',
+  })
+  @ApiOkResponse({ type: ContractRecordsPageDto })
+  @ApiBadRequestResponse({ description: 'Bộ lọc không hợp lệ' })
+  @ApiForbiddenResponse({ description: 'Chỉ Admin và Staff được truy cập' })
+  async listRecords(
+    @Query() query: ContractRecordsQueryDto
+  ): Promise<ContractRecordsPageDto> {
+    if (!this.contractRecordsService) {
+      throw new ServiceUnavailableException('CONTRACT_RECORDS_UNAVAILABLE')
+    }
+    return this.contractRecordsService.listRecords(query)
+  }
 
   /** Lấy chi tiết hợp đồng phong phú cho Contract Workspace */
   @Get(':id/view')

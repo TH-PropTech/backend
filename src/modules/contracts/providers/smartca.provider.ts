@@ -279,7 +279,14 @@ export class SmartCaProvider {
       sp_password: config.spPassword,
     })
     const transactionId = optionalString(envelope.data.transaction_id)
-    const signatures = envelope.data.signatures
+    // Khi chưa duyệt, gateway trả PENDING kèm signatures là null hoặc {} thay vì [].
+    const rawSignatures = envelope.data.signatures
+    const signatures =
+      rawSignatures === null ||
+      rawSignatures === undefined ||
+      (isRecord(rawSignatures) && Object.keys(rawSignatures).length === 0)
+        ? []
+        : rawSignatures
     if (transactionId !== providerTransactionId || !Array.isArray(signatures)) {
       this.invalidResponse()
     }
