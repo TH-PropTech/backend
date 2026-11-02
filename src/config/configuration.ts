@@ -81,6 +81,13 @@ export const configuration = (): {
   security: {
     rateLimitTtl: number
     rateLimitMax: number
+    trustProxyHops: number
+  }
+  cache: {
+    ttlSeconds: number
+  }
+  listing: {
+    maxLimit: number
   }
   database: {
     url: string
@@ -186,6 +193,13 @@ export const configuration = (): {
   security: {
     rateLimitTtl: Number(process.env.RATE_LIMIT_TTL_MS ?? 60000),
     rateLimitMax: Number(process.env.RATE_LIMIT_MAX ?? 100),
+    trustProxyHops: Number(process.env.TRUST_PROXY_HOPS ?? 1),
+  },
+  cache: {
+    ttlSeconds: Number(process.env.CACHE_TTL_SECONDS ?? 30),
+  },
+  listing: {
+    maxLimit: Number(process.env.LISTING_MAX_LIMIT ?? 200),
   },
   database: {
     url: process.env.DATABASE_URL ?? 'mongodb://localhost:27017/th_proptech',

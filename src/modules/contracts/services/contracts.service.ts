@@ -1,3 +1,4 @@
+import { ApartmentChangeNotifier } from '../../read-model/services/apartment-change-notifier.service'
 import {
   Injectable,
   Logger,
@@ -194,7 +195,9 @@ export class ContractsService {
     private readonly governanceService?: FabricGovernanceService,
     @Optional()
     @InjectRepository(User)
-    private readonly userRepository?: Repository<User>
+    private readonly userRepository?: Repository<User>,
+    @Optional()
+    private readonly apartmentChangeNotifier?: ApartmentChangeNotifier
   ) {}
 
   private async recordTransactionEvent(input: {
@@ -354,6 +357,7 @@ export class ContractsService {
       reservation.leaseActivatedAt = new Date()
     }
     await this.apartmentRepository.save(apartment)
+    await this.apartmentChangeNotifier?.changed()
   }
 
   // ── Tạo draft từ application snapshot — không mở payment/signing ──
@@ -797,6 +801,7 @@ export class ContractsService {
         reservation.contractId = contract._id.toHexString()
         reservation.leaseActivatedAt = new Date()
         await this.apartmentRepository.save(apartment)
+        await this.apartmentChangeNotifier?.changed()
       }
     }
 
@@ -1148,6 +1153,7 @@ export class ContractsService {
     }
     await this.contractRepository.save(contract)
     await this.apartmentRepository.save(apartment)
+    await this.apartmentChangeNotifier?.changed()
     await this.enqueueTerminationLedgerEvent(contract, actorId, {
       reasonCode: normalizedReasonCode,
       reasonHash,
@@ -1314,6 +1320,7 @@ export class ContractsService {
           reservation.contractId = contractId
           reservation.leaseActivatedAt = new Date()
           await this.apartmentRepository.save(apartment)
+          await this.apartmentChangeNotifier?.changed()
         }
       }
 

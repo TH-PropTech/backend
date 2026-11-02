@@ -16,22 +16,36 @@ import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard'
 import { RolesGuard } from '../../../common/guards/roles.guard'
 import { Roles } from '../../../common/decorators/roles.decorator'
 import { Public } from '../../../common/decorators/public.decorator'
+import { ReadCacheService } from '../../health/services/read-cache.service'
+import { APARTMENT_CACHE_NAMESPACE } from '../../read-model/services/apartment-cache-invalidator.service'
 
 @ApiTags('projects')
 @Controller('projects')
 export class ProjectsController {
-  constructor(private readonly projectsService: ProjectsService) {}
+  constructor(
+    private readonly projectsService: ProjectsService,
+    private readonly readCache: ReadCacheService
+  ) {}
 
   @Public()
   @Get()
   async findAll(@Query() query: ProjectFilterDto): Promise<Project[]> {
-    return this.projectsService.findAll(query)
+    // Dự án công khai đổi ít; dùng chung version với căn hộ vì danh sách dự án phản ánh căn hộ của dự án
+    return this.readCache.wrap(
+      APARTMENT_CACHE_NAMESPACE,
+      { kind: 'projects', query },
+      () => this.projectsService.findAll(query)
+    )
   }
 
   @Public()
   @Get(':id')
   async findOne(@Param('id') id: string): Promise<Project> {
-    return this.projectsService.findOne(id)
+    return this.readCache.wrap(
+      APARTMENT_CACHE_NAMESPACE,
+      { kind: 'project', id },
+      () => this.projectsService.findOne(id)
+    )
   }
 
   @Post()

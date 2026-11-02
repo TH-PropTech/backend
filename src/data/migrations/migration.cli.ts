@@ -146,6 +146,11 @@ import {
   type AuthSessionsMigrationDatabase,
 } from './036-auth-sessions-and-user-preferences'
 import {
+  ensureApartmentReadIndexes,
+  rollbackApartmentReadIndexes,
+  type ApartmentIndexDatabase,
+} from './037-apartment-read-indexes'
+import {
   MigrationRunner,
   type MigrationCheckpointStore,
   type MigrationStep,
@@ -200,6 +205,7 @@ export type CliMigrationId =
   | '034'
   | '035'
   | '036'
+  | '037'
 
 export type CliArgs = {
   apply: boolean
@@ -237,6 +243,7 @@ const ALL: CliMigrationId[] = [
   '034',
   '035',
   '036',
+  '037',
 ]
 
 /**
@@ -592,6 +599,17 @@ function steps(db: CliDb, only: readonly CliMigrationId[]): MigrationStep[] {
           ),
       },
     ],
+    [
+      '037',
+      {
+        id: '037-apartment-read-indexes',
+        run: o =>
+          ensureApartmentReadIndexes(
+            db as unknown as ApartmentIndexDatabase,
+            o
+          ),
+      },
+    ],
   ]
   return all.filter(([id]) => only.includes(id)).map(([, step]) => step)
 }
@@ -731,6 +749,10 @@ export async function runMigrationCli(
           db as unknown as AuthSessionsMigrationDatabase,
           { dryRun }
         ),
+      '037': () =>
+        rollbackApartmentReadIndexes(db as unknown as ApartmentIndexDatabase, {
+          dryRun,
+        }),
     }
     const reports: MigrationReport[] = []
     const checkpoints = createCheckpointStore(db)

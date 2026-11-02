@@ -10,6 +10,7 @@ import { ActivityLogInterceptor } from './common/interceptors/activity-log.inter
 import { LoggerModule } from './common/logger/logger.module'
 import { StorageModule } from './common/storage/storage.module'
 import { ThrottlerModule } from '@nestjs/throttler'
+import { ThrottlerStorageRedisService } from '@nest-lab/throttler-storage-redis'
 import { HttpThrottlerGuard } from './common/guards/http-throttler.guard'
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard'
 import { ScheduleModule } from '@nestjs/schedule'
@@ -21,6 +22,7 @@ import { RbacModule } from './modules/rbac/rbac.module'
 import { ActivityLogModule } from './modules/activity-log/activity-log.module'
 // Domain
 import { UsersModule } from './modules/users/users.module'
+import { ReadModelModule } from './modules/read-model/read-model.module'
 import { PropertiesModule } from './modules/properties/properties.module'
 import { BookingsModule } from './modules/bookings/bookings.module'
 import { RentalModule } from './modules/rental/rental.module'
@@ -61,15 +63,27 @@ import { JobsModule } from './modules/jobs/jobs.module'
         autoLoadEntities: true,
       }),
     }),
-    // Rate limiting toàn cục (có thể chỉnh qua RATE_LIMIT_TTL_MS / RATE_LIMIT_MAX)
+    // Rate limiting toàn cục (RATE_LIMIT_TTL_MS / RATE_LIMIT_MAX), bộ đếm lưu ở Redis
     ThrottlerModule.forRootAsync({
       inject: [ConfigService],
-      useFactory: (configService: ConfigService) => [
-        {
-          ttl: configService.getOrThrow<number>('security.rateLimitTtl'),
-          limit: configService.getOrThrow<number>('security.rateLimitMax'),
-        },
-      ],
+      useFactory: (configService: ConfigService) => ({
+        throttlers: [
+          {
+            ttl: configService.getOrThrow<number>('security.rateLimitTtl'),
+            limit: configService.getOrThrow<number>('security.rateLimitMax'),
+          },
+        ],
+        // Lệnh Redis lỗi nhanh để HttpThrottlerGuard kịp fail-open
+        storage: new ThrottlerStorageRedisService(
+          configService.getOrThrow<string>('redis.url'),
+          {
+            enableOfflineQueue: false,
+            maxRetriesPerRequest: 1,
+            commandTimeout: 1000,
+            connectTimeout: 2000,
+          }
+        ),
+      }),
     }),
 
     ScheduleModule.forRoot(),
@@ -82,6 +96,7 @@ import { JobsModule } from './modules/jobs/jobs.module'
     ActivityLogModule,
     // Domain
     UsersModule,
+    ReadModelModule,
     PropertiesModule,
     BookingsModule,
     RentalModule,

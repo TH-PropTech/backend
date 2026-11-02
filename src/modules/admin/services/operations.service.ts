@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
-import { Repository } from 'typeorm'
+import { MongoRepository } from 'typeorm'
+import { ReadCacheService } from '../../health/services/read-cache.service'
 import { Booking } from '../../bookings/schemas/booking.schema'
 import { KycService } from '../../users/services/kyc.service'
 import { Apartment } from '../../properties/schemas/apartment.schema'
@@ -59,39 +60,59 @@ export class OperationsService {
 
   constructor(
     @InjectRepository(Booking)
-    private readonly bookingRepo: Repository<Booking>,
+    private readonly bookingRepo: MongoRepository<Booking>,
     private readonly kycService: KycService,
     @InjectRepository(Apartment)
-    private readonly apartmentRepo: Repository<Apartment>,
+    private readonly apartmentRepo: MongoRepository<Apartment>,
     @InjectRepository(SupportTicket)
-    private readonly ticketRepo: Repository<SupportTicket>
+    private readonly ticketRepo: MongoRepository<SupportTicket>,
+    private readonly readCache: ReadCacheService
   ) {}
 
   /**
    * GET /api/v1/operations/stats
-   * Aggregate dashboard statistics across all collections.
+   * Thống kê tổng quan; đếm theo trạng thái ngay trong MongoDB, không nạp document vào bộ nhớ.
    */
-  async getStats(): Promise<OperationsStats> {
+  getStats(): Promise<OperationsStats> {
+    return this.readCache.wrap(
+      OPERATIONS_CACHE_NAMESPACE,
+      { kind: 'stats' },
+      () => this.loadStats(),
+      OPERATIONS_CACHE_TTL_SECONDS
+    )
+  }
+
+  /**
+   * GET /api/v1/operations/chart-data?days=7
+   * Xu hướng đặt lịch và phân bố trạng thái cho biểu đồ.
+   */
+  getChartData(days: number): Promise<OperationsChartData> {
+    return this.readCache.wrap(
+      OPERATIONS_CACHE_NAMESPACE,
+      { kind: 'chart', days },
+      () => this.loadChartData(days),
+      OPERATIONS_CACHE_TTL_SECONDS
+    )
+  }
+
+  private async loadStats(): Promise<OperationsStats> {
     this.logger.log('Fetching operations stats')
 
     const [bookings, kycCounts, apartments, tickets] = await Promise.all([
-      this.bookingRepo.find(),
+      countByStatus(this.bookingRepo),
       // KYC nhúng trong users.kyc (G-KYC): đếm qua KycService
       this.kycService.countByStatus(),
-      this.apartmentRepo.find(),
-      // Chỉ cần _id và status để đếm; không nạp messages[] (tối đa 500 tin/ticket).
-      this.ticketRepo.find({ select: ['_id', 'status'] }),
+      countByStatus(this.apartmentRepo),
+      countByStatus(this.ticketRepo),
     ])
 
     return {
       bookings: {
-        total: bookings.length,
-        pending: bookings.filter(b => b.status === 'pending').length,
-        confirmed: bookings.filter(b => b.status === 'confirmed').length,
-        cancelled: bookings.filter(
-          b => b.status === 'cancelled' || b.status === 'rejected'
-        ).length,
-        completed: bookings.filter(b => b.status === 'completed').length,
+        total: bookings.total,
+        pending: bookings.of('pending'),
+        confirmed: bookings.of('confirmed'),
+        cancelled: bookings.of('cancelled', 'rejected'),
+        completed: bookings.of('completed'),
       },
       kyc: {
         total: kycCounts.total,
@@ -100,44 +121,35 @@ export class OperationsService {
         rejected: kycCounts.rejected,
       },
       apartments: {
-        total: apartments.length,
-        pending: apartments.filter(a => a.status === 'pending').length,
-        available: apartments.filter(a => a.status === 'available').length,
-        rejected: apartments.filter(a => a.status === 'rejected').length,
+        total: apartments.total,
+        pending: apartments.of('pending'),
+        available: apartments.of('available'),
+        rejected: apartments.of('rejected'),
       },
       tickets: {
-        total: tickets.length,
-        open: tickets.filter(t => t.status === 'open').length,
-        inProgress: tickets.filter(
-          t => t.status === 'in_progress' || t.status === 'waiting_staff'
-        ).length,
-        resolved: tickets.filter(
-          t => t.status === 'resolved' || t.status === 'closed'
-        ).length,
+        total: tickets.total,
+        open: tickets.of('open'),
+        inProgress: tickets.of('in_progress', 'waiting_staff'),
+        resolved: tickets.of('resolved', 'closed'),
       },
     }
   }
 
-  /**
-   * GET /api/v1/operations/chart-data?days=7
-   * Returns booking trend and status breakdown for charts.
-   */
-  async getChartData(days: number): Promise<OperationsChartData> {
+  private async loadChartData(days: number): Promise<OperationsChartData> {
     this.logger.log(`Fetching operations chart data for last ${days} days`)
 
     const cutoff = new Date()
     cutoff.setDate(cutoff.getDate() - days)
     cutoff.setHours(0, 0, 0, 0)
 
-    const bookings = await this.bookingRepo.find()
+    const rows = await this.groupBookingsByDayAndStatus(cutoff)
+    const countOf = (dayKey: string, ...statuses: string[]): number =>
+      rows
+        .filter(r => r.day === dayKey && statuses.includes(r.status))
+        .reduce((sum, r) => sum + r.count, 0)
+    const dayTotal = (dayKey: string): number =>
+      rows.filter(r => r.day === dayKey).reduce((sum, r) => sum + r.count, 0)
 
-    // Filter bookings within date range
-    const filtered = bookings.filter(b => {
-      const d = new Date(b.visitAt ?? b.createdAt)
-      return d >= cutoff
-    })
-
-    // Build daily trend
     const trend: ChartPoint[] = []
     const weekdayLabels = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7']
 
@@ -146,14 +158,7 @@ export class OperationsService {
       day.setDate(day.getDate() - i)
       day.setHours(0, 0, 0, 0)
 
-      const next = new Date(day)
-      next.setDate(next.getDate() + 1)
-
-      const dayBookings = filtered.filter(b => {
-        const d = new Date(b.visitAt ?? b.createdAt)
-        return d >= day && d < next
-      })
-
+      const dayKey = localDayKey(day)
       const dayLabel =
         weekdayLabels[day.getDay()] ?? `${day.getDate()}/${day.getMonth() + 1}`
       const dateStr = day.toISOString().split('T')[0] ?? ''
@@ -161,18 +166,12 @@ export class OperationsService {
       trend.push({
         label: dayLabel,
         date: dateStr,
-        bookings: dayBookings.length,
-        confirmed: dayBookings.filter(
-          b => b.status === 'confirmed' || b.status === 'completed'
-        ).length,
-        pending: dayBookings.filter(b => b.status === 'pending').length,
-        cancelled: dayBookings.filter(
-          b => b.status === 'cancelled' || b.status === 'rejected'
-        ).length,
+        bookings: dayTotal(dayKey),
+        confirmed: countOf(dayKey, 'confirmed', 'completed'),
+        pending: countOf(dayKey, 'pending'),
+        cancelled: countOf(dayKey, 'cancelled', 'rejected'),
       })
     }
-
-    // Build status breakdown
 
     const statuses = [
       { status: 'pending', label: 'Chờ xác nhận', color: 'var(--warning)' },
@@ -185,10 +184,82 @@ export class OperationsService {
     const statusBreakdown = statuses
       .map(s => ({
         ...s,
-        count: filtered.filter(b => b.status === s.status).length,
+        count: rows
+          .filter(r => r.status === s.status)
+          .reduce((sum, r) => sum + r.count, 0),
       }))
       .filter(s => s.count > 0)
 
     return { trend, statusBreakdown }
   }
+
+  /** Gom theo (ngày theo múi giờ của tiến trình, trạng thái) ngay trong MongoDB. */
+  private async groupBookingsByDayAndStatus(
+    cutoff: Date
+  ): Promise<DayStatusCount[]> {
+    const rows = await this.bookingRepo
+      .aggregate<{ _id: { day: string; status: string }; count: number }>([
+        { $addFields: { at: { $ifNull: ['$visitAt', '$createdAt'] } } },
+        { $match: { at: { $gte: cutoff } } },
+        {
+          $group: {
+            _id: {
+              day: {
+                $dateToString: {
+                  format: '%Y-%m-%d',
+                  date: '$at',
+                  timezone: PROCESS_TIME_ZONE,
+                },
+              },
+              status: '$status',
+            },
+            count: { $sum: 1 },
+          },
+        },
+      ])
+      .toArray()
+    return rows.map(row => ({
+      day: row._id.day,
+      status: row._id.status,
+      count: row.count,
+    }))
+  }
+}
+
+const OPERATIONS_CACHE_NAMESPACE = 'operations'
+const OPERATIONS_CACHE_TTL_SECONDS = 60
+const PROCESS_TIME_ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone
+
+interface DayStatusCount {
+  day: string
+  status: string
+  count: number
+}
+
+interface StatusCounts {
+  total: number
+  of: (...statuses: string[]) => number
+}
+
+async function countByStatus(
+  repository: Pick<MongoRepository<object>, 'aggregate'>
+): Promise<StatusCounts> {
+  const rows = await repository
+    .aggregate<{
+      _id: string | null
+      count: number
+    }>([{ $group: { _id: '$status', count: { $sum: 1 } } }])
+    .toArray()
+  const byStatus = new Map(rows.map(row => [row._id ?? '', row.count]))
+  return {
+    total: rows.reduce((sum, row) => sum + row.count, 0),
+    of: (...statuses) =>
+      statuses.reduce((sum, status) => sum + (byStatus.get(status) ?? 0), 0),
+  }
+}
+
+function localDayKey(day: Date): string {
+  const month = String(day.getMonth() + 1).padStart(2, '0')
+  const date = String(day.getDate()).padStart(2, '0')
+  return `${day.getFullYear()}-${month}-${date}`
 }
