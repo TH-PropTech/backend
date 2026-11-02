@@ -1,3 +1,4 @@
+import { ApartmentChangeNotifier } from '../../read-model/services/apartment-change-notifier.service'
 import {
   ConflictException,
   ForbiddenException,
@@ -46,7 +47,9 @@ export class DepositAgreementsService {
     @Optional()
     private readonly flowNotificationService?: FlowNotificationService,
     @Optional()
-    private readonly transactionEventService?: RentalTransactionEventService
+    private readonly transactionEventService?: RentalTransactionEventService,
+    @Optional()
+    private readonly apartmentChangeNotifier?: ApartmentChangeNotifier
   ) {}
 
   /** Thỏa thuận cọc gắn với một hợp đồng thuê, nếu có. */
@@ -587,6 +590,7 @@ export class DepositAgreementsService {
     reservation.depositAgreementId = agreement._id.toHexString()
     reservation.depositPaidAt = agreement.paidAt
     await this.apartmentRepository.save(apartment)
+    await this.apartmentChangeNotifier?.changed()
   }
 
   private async releaseReservation(agreement: DepositAgreement): Promise<void> {
@@ -628,6 +632,7 @@ export class DepositAgreementsService {
 
     apartment.rentalReservation = null
     await this.apartmentRepository.save(apartment)
+    await this.apartmentChangeNotifier?.changed()
   }
 
   private calculateDepositHash(agreement: DepositAgreement): string {

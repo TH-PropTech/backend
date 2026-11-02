@@ -36,8 +36,10 @@ export class PriceBenchmarkService {
     }
     if (query.furniture) where.furniture = query.furniture
 
+    // Chỉ cần diện tích và giá; không nạp gallery, mô tả... của từng căn
     const records = await this.apartmentRepository.find({
       where,
+      select: ['area', 'priceMonthly'],
       order: { updatedAt: 'DESC' },
     })
     const targetArea = query.area

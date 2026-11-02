@@ -13,6 +13,12 @@ import { ObjectId } from 'mongodb'
 import { Apartment } from '../schemas/apartment.schema'
 import { User } from '../../users/schemas/user.schema'
 import { ApartmentFilterDto } from '../dto/apartment-filter.dto'
+import { ApartmentChangeNotifier } from '../../read-model/services/apartment-change-notifier.service'
+import { buildApartmentQuery } from '../utils/apartment-query.builder'
+import {
+  attachCurrentLandlords,
+  type ApartmentWithLandlord,
+} from '../utils/attach-landlords'
 import {
   CreateApartmentDto,
   UpdateRentalPackagesDto,
@@ -31,32 +37,6 @@ import { recordPriceChange } from '../utils/price-history.util'
 import { ProjectsService } from './projects.service'
 import { SavedSearchesService } from './saved-searches.service'
 import { RentalExecutionPoliciesService } from '../../rental/services/rental-execution-policies.service'
-
-interface ApartmentMongoQuery {
-  $or?: Array<Record<string, unknown>>
-  city?: string | Record<string, unknown>
-  district?: string | Record<string, unknown>
-  ward?: string | Record<string, unknown>
-  street?: string | Record<string, unknown>
-  projectName?: string | Record<string, unknown>
-  category?: string
-  priceMonthly?: { $gte?: number; $lte?: number }
-  area?: { $gte?: number; $lte?: number }
-  bedrooms?: number
-  bathrooms?: number
-  direction?: string
-  balconyDirection?: string
-  furniture?: string | Record<string, unknown>
-  moveInTime?: string
-  electricity?: string
-  water?: string
-  internet?: string
-  isVerified?: boolean
-  amenities?: { $all: string[] }
-  [key: string]: unknown
-}
-
-type ApartmentWithLandlord = Apartment & { landlord?: User | null }
 
 function toRentalPackageInputs(
   packages: CreateApartmentDto['rentalPackages']
@@ -169,108 +149,6 @@ function validateRentalPackages(
   }
 }
 
-function normalizeCity(city?: string): string {
-  if (!city) return ''
-  const norm = city.toLowerCase()
-  if (
-    norm.includes('hồ chí minh') ||
-    norm.includes('tp.hcm') ||
-    norm.includes('tphcm') ||
-    norm.includes('hcm') ||
-    norm.includes('sài gòn')
-  ) {
-    return 'hcm'
-  }
-  if (norm.includes('hà nội') || norm.includes('hn')) {
-    return 'hn'
-  }
-  return norm
-}
-
-function buildVietnameseRegex(str: string): string {
-  const search = str.toLowerCase()
-  const map: Record<string, string> = {
-    a: '[aàáảãạăằắẳẵặâầấẩẫậAÀÁẢÃẠĂẰẮẲẴẶÂẦẤẨẪẬ]',
-    à: '[aàáảãạăằắẳẵặâầấẩẫậAÀÁẢÃẠĂẰẮẲẴẶÂẦẤẨẪẬ]',
-    á: '[aàáảãạăằắẳẵặâầấẩẫậAÀÁẢÃẠĂẰẮẲẴẶÂẦẤẨẪẬ]',
-    ả: '[aàáảãạăằắẳẵặâầấẩẫậAÀÁẢÃẠĂẰẮẲẴẶÂẦẤẨẪẬ]',
-    ã: '[aàáảãạăằắẳẵặâầấẩẫậAÀÁẢÃẠĂẰẮẲẴẶÂẦẤẨẪẬ]',
-    ạ: '[aàáảãạăằắẳẵặâầấẩẫậAÀÁẢÃẠĂẰẮẲẴẶÂẦẤẨẪẬ]',
-    ă: '[aàáảãạăằắẳẵặâầấẩẫậAÀÁẢÃẠĂẰẮẲẴẶÂẦẤẨẪẬ]',
-    ằ: '[aàáảãạăằắẳẵặâầấẩẫậAÀÁẢÃẠĂẰẮẲẴẶÂẦẤẨẪẬ]',
-    ắ: '[aàáảãạăằắẳẵặâầấẩẫậAÀÁẢÃẠĂẰẮẲẴẶÂẦẤẨẪẬ]',
-    ẳ: '[aàáảãạăằắẳẵặâầấẩẫậAÀÁẢÃẠĂẰẮẲẴẶÂẦẤẨẪẬ]',
-    ẵ: '[aàáảãạăằắẳẵặâầấẩẫậAÀÁẢÃẠĂẰẮẲẴẶÂẦẤẨẪẬ]',
-    ặ: '[aàáảãạăằắẳẵặâầấẩẫậAÀÁẢÃẠĂẰẮẲẴẶÂẦẤẨẪẬ]',
-    â: '[aàáảãạăằắẳẵặâầấẩẫậAÀÁẢÃẠĂẰẮẲẴẶÂẦẤẨẪẬ]',
-    ầ: '[aàáảãạăằắẳẵặâầấẩẫậAÀÁẢÃẠĂẰẮẲẴẶÂẦẤẨẪẬ]',
-    ấ: '[aàáảãạăằắẳẵặâầấẩẫậAÀÁẢÃẠĂẰẮẲẴẶÂẦẤẨẪẬ]',
-    ẩ: '[aàáảãạăằắẳẵặâầấẩẫậAÀÁẢÃẠĂẰẮẲẴẶÂẦẤẨẪẬ]',
-    ẫ: '[aàáảãạăằắẳẵặâầấẩẫậAÀÁẢÃẠĂẰẮẲẴẶÂẦẤẨẪẬ]',
-    ậ: '[aàáảãạăằắẳẵặâầấẩẫậAÀÁẢÃẠĂẰẮẲẴẶÂẦẤẨẪẬ]',
-    e: '[eèéẻẽẹêềếểễệEÈÉẺẼẸÊỀẾỂỄỆ]',
-    è: '[eèéẻẽẹêềếểễệEÈÉẺẼẸÊỀẾỂỄỆ]',
-    é: '[eèéẻẽẹêềếểễệEÈÉẺẼẸÊỀẾỂỄỆ]',
-    ẻ: '[eèéẻẽẹêềếểễệEÈÉẺẼẸÊỀẾỂỄỆ]',
-    ẽ: '[eèéẻẽẹêềếểễệEÈÉẺẼẸÊỀẾỂỄỆ]',
-    ẹ: '[eèéẻẽẹêềếểễệEÈÉẺẼẸÊỀẾỂỄỆ]',
-    ê: '[eèéẻẽẹêềếểễệEÈÉẺẼẸÊỀẾỂỄỆ]',
-    ề: '[eèéẻẽẹêềếểễệEÈÉẺẼẸÊỀẾỂỄỆ]',
-    ế: '[eèéẻẽẹêềếểễệEÈÉẺẼẸÊỀẾỂỄỆ]',
-    ể: '[eèéẻẽẹêềếểễệEÈÉẺẼẸÊỀẾỂỄỆ]',
-    ẽ: '[eèéẻẽẹêềếểễệEÈÉẺẼẸÊỀẾỂỄỆ]',
-    ệ: '[eèéẻẽẹêềếểễệEÈÉẺẼẸÊỀẾỂỄỆ]',
-    i: '[iìíỉĩịIÌÍỈĨỊ]',
-    ì: '[iìíỉĩịIÌÍỈĨỊ]',
-    í: '[iìíỉĩịIÌÍỈĨỊ]',
-    ỉ: '[iìíỉĩịIÌÍỈĨỊ]',
-    ĩ: '[iìíỉĩịIÌÍỈĨỊ]',
-    ị: '[iìíỉĩịIÌÍỈĨỊ]',
-    o: '[oòóỏõọôồốổỗộơờớởỡợOÒÓỎÕỌÔỒỐỔỖỘƠỜỚỞỠỢ]',
-    ò: '[oòóỏõọôồốổỗộơờớởỡợOÒÓỎÕỌÔỒỐỔỖỘƠỜỚỞỠỢ]',
-    ó: '[oòóỏõọôồốổỗộơờớởỡợOÒÓỎÕỌÔỒỐỔỖỘƠỜỚỞỠỢ]',
-    ỏ: '[oòóỏõọôồốổỗộơờớởỡợOÒÓỎÕỌÔỒỐỔỖỘƠỜỚỞỠỢ]',
-    õ: '[oòóỏõọôồốổỗộơờớởỡợOÒÓỎÕỌÔỒỐỔỖỘƠỜỚỞỠỢ]',
-    ọ: '[oòóỏõọôồốổỗộơờớởỡợOÒÓỎÕỌÔỒỐỔỖỘƠỜỚỞỠỢ]',
-    ô: '[oòóỏõọôồốổỗộơờớởỡợOÒÓỎÕỌÔỒỐỔỖỘƠỜỚỞỠỢ]',
-    ồ: '[oòóỏõọôồốổỗộơờớởỡợOÒÓỎÕỌÔỒỐỔỖỘƠỜỚỞỠỢ]',
-    ố: '[oòóỏõọôồốổỗộơờớởỡợOÒÓỎÕỌÔỒỐỔỖỘƠỜỚỞỠỢ]',
-    ổ: '[oòóỏõọôồốổỗộơờớởỡợOÒÓỎÕỌÔỒỐỔỖỘƠỜỚỞỠỢ]',
-    ỗ: '[oòóỏõọôồốổỗộơờớởỡợOÒÓỎÕỌÔỒỐỔỖỘƠỜỚỞỠỢ]',
-    ộ: '[oòóỏõọôồốổỗộơờớởỡợOÒÓỎÕỌÔỒỐỔỖỘƠỜỚỞỠỢ]',
-    ơ: '[oòóỏõọôồốổỗộơờớởỡợOÒÓỎÕỌÔỒỐỔỖỘƠỜỚỞỠỢ]',
-    ờ: '[oòóỏõọôồốổỗộơờớởỡợOÒÓỎÕỌÔỒỐỔỖỘƠỜỚỞỠỢ]',
-    ớ: '[oòóỏõọôồốổỗộơờớởỡợOÒÓỎÕỌÔỒỐỔỖỘƠỜỚỞỠỢ]',
-    ở: '[oòóỏõọôồốổỗộơờớởỡợOÒÓỎÕỌÔỒỐỔỖỘƠỜỚỞỠỢ]',
-    ỡ: '[oòóỏõọôồốổỗộơờớởỡợOÒÓỎÕỌÔỒỐỔỖỘƠỜỚỞỠỢ]',
-    ợ: '[oòóỏõọôồốổỗộơờớởỡợOÒÓỎÕỌÔỒỐỔỖỘƠỜỚỞỠỢ]',
-    u: '[uùúủũụưừứửữựUÙÚỦŨỤƯỪỨỬỮỰ]',
-    ù: '[uùúủũụưừứửữựUÙÚỦŨỤƯỪỨỬỮỰ]',
-    ú: '[uùúủũụưừứửữựUÙÚỦŨỤƯỪỨỬỮỰ]',
-    ủ: '[uùúủũụưừứửữựUÙÚỦŨỤƯỪỨỬỮỰ]',
-    ũ: '[uùúủũụưừứửữựUÙÚỦŨỤƯỪỨỬỮỰ]',
-    ụ: '[uùúủũụưừứửữựUÙÚỦŨỤƯỪỨỬỮỰ]',
-    ư: '[uùúủũụưừứửữựUÙÚỦŨỤƯỪỨỬỮỰ]',
-    ừ: '[uùúủũụưừứửữựUÙÚỦŨỤƯỪỨỬỮỰ]',
-    ứ: '[uùúủũụưừứửữựUÙÚỦŨỤƯỪỨỬỮỰ]',
-    ử: '[uùúủũụưừứửữựUÙÚỦŨỤƯỪỨỬỮỰ]',
-    ữ: '[uùúủũụưừứửữựUÙÚỦŨỤƯỪỨỬỮỰ]',
-    ự: '[uùúủũụưừứửữựUÙÚỦŨỤƯỪỨỬỮỰ]',
-    y: '[yỳýỷỹỵYỲÝỶỸỴ]',
-    ỳ: '[yỳýỷỹỵYỲÝỶỸỴ]',
-    ý: '[yỳýỷỹỵYỲÝỶỸỴ]',
-    ỷ: '[yỳýỷỹỵYỲÝỶỸỴ]',
-    ỹ: '[yỳýỷỹỵYỲÝỶỸỴ]',
-    ỵ: '[yỳýỷỹỵYỲÝỶỸỴ]',
-    d: '[dđDĐ]',
-    đ: '[dđDĐ]',
-  }
-  return search
-    .split('')
-    .map(char => map[char] || char)
-    .join('')
-}
-
 const LISTING_VALIDITY_DAYS = 30
 const EXPIRY_REMINDER_DAYS = 3
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -314,8 +192,17 @@ export class ApartmentsService {
     private readonly projectsService: ProjectsService,
     private readonly savedSearchesService: SavedSearchesService,
     @Optional()
-    private readonly executionPoliciesService?: RentalExecutionPoliciesService
+    private readonly executionPoliciesService?: RentalExecutionPoliciesService,
+    @Optional()
+    private readonly apartmentChangeNotifier?: ApartmentChangeNotifier
   ) {}
+
+  /** Mọi thao tác ghi căn hộ đi qua đây để phía đọc (cache) biết dữ liệu đã đổi. */
+  private async saveAndNotify(apartment: Apartment): Promise<Apartment> {
+    const saved = await this.apartmentRepository.save(apartment)
+    await this.apartmentChangeNotifier?.changed(saved._id?.toString())
+    return saved
+  }
 
   // ── Đánh dấu hết hạn các bài đã quá expiresAt và báo chủ nhà ──
   async checkExpiration(): Promise<void> {
@@ -332,7 +219,7 @@ export class ApartmentsService {
     )
     for (const apt of expiredApartments) {
       apt.status = 'expired'
-      const saved = await this.apartmentRepository.save(apt)
+      const saved = await this.saveAndNotify(apt)
       await this.notifyLandlord(
         saved,
         'Bài đăng đã hết hạn',
@@ -392,167 +279,7 @@ export class ApartmentsService {
     this.logger.log(
       `Fetching apartments with filters: ${JSON.stringify(filters)}`
     )
-    const query: ApartmentMongoQuery = {}
-
-    if (filters) {
-      const {
-        search,
-        city,
-        district,
-        ward,
-        street,
-        projectName,
-        category,
-        minPrice,
-        maxPrice,
-        minArea,
-        maxArea,
-        bedrooms,
-        bathrooms,
-        direction,
-        balconyDirection,
-        furniture,
-        moveInTime,
-        electricity,
-        water,
-        internet,
-        isVerified,
-        hasMedia,
-        amenities,
-      } = filters
-
-      // 1. Từ khóa tìm kiếm (Accent insensitive regex)
-      if (search && search.trim() !== '') {
-        const regexVal = { $regex: buildVietnameseRegex(search), $options: 'i' }
-        query.$or = [
-          { title: regexVal },
-          { description: regexVal },
-          { location: regexVal },
-        ]
-      }
-
-      // 2. Thành phố (Chuẩn hóa TP.HCM và Hà Nội)
-      if (city && city.trim() !== '') {
-        const cityNorm = normalizeCity(city)
-        if (cityNorm === 'hcm') {
-          query.city = { $regex: 'Hồ Chí Minh|TP.HCM|HCM', $options: 'i' }
-        } else if (cityNorm === 'hn') {
-          query.city = { $regex: 'Hà Nội|HN', $options: 'i' }
-        } else {
-          query.city = { $regex: city, $options: 'i' }
-        }
-      }
-
-      // 3. Quận, Phường, Đường phố, Dự án, Tòa nhà
-      if (district && district.trim() !== '') {
-        query.district = { $regex: district, $options: 'i' }
-      }
-      if (ward && ward.trim() !== '') {
-        query.ward = { $regex: ward, $options: 'i' }
-      }
-      if (street && street.trim() !== '') {
-        query.street = { $regex: street, $options: 'i' }
-      }
-      if (projectName && projectName.trim() !== '') {
-        query.projectName = { $regex: projectName, $options: 'i' }
-      }
-
-      // 4. Phân loại căn hộ
-      if (category && category !== 'Tất cả') {
-        query.category = category
-      }
-
-      // 5. Khoảng giá (Triệu VNĐ -> VNĐ)
-      if (minPrice !== undefined || maxPrice !== undefined) {
-        query.priceMonthly = {}
-        if (minPrice !== undefined) {
-          query.priceMonthly.$gte = minPrice * 1000000
-        }
-        if (maxPrice !== undefined) {
-          query.priceMonthly.$lte = maxPrice * 1000000
-        }
-      }
-
-      // 6. Diện tích (m²)
-      if (minArea !== undefined || maxArea !== undefined) {
-        query.area = {}
-        if (minArea !== undefined) {
-          query.area.$gte = minArea
-        }
-        if (maxArea !== undefined) {
-          query.area.$lte = maxArea
-        }
-      }
-
-      // 7. Phòng ngủ / Phòng tắm
-      if (bedrooms !== undefined) {
-        query.bedrooms = bedrooms
-      }
-      if (bathrooms !== undefined) {
-        query.bathrooms = bathrooms
-      }
-
-      // 8. Hướng nhà, Hướng ban công
-      if (direction && direction !== 'all') {
-        query.direction = direction
-      }
-      if (balconyDirection && balconyDirection !== 'all') {
-        query.balconyDirection = balconyDirection
-      }
-
-      // 9. Nội thất (So khớp fuzzy chứa)
-      if (furniture && furniture !== 'all') {
-        query.furniture = { $regex: furniture, $options: 'i' }
-      }
-
-      // 10. Thời gian dọn vào
-      if (moveInTime && moveInTime !== 'all') {
-        query.moveInTime = moveInTime
-      }
-
-      // 11. Các loại chi phí
-      if (electricity && electricity !== 'all') {
-        query.electricity = electricity
-      }
-      if (water && water !== 'all') {
-        query.water = water
-      }
-      if (internet && internet !== 'all') {
-        query.internet = internet
-      }
-
-      // 12. Trạng thái kiểm duyệt
-      if (isVerified === true) {
-        query.isVerified = true
-      }
-
-      // 13. Có Media (gallery hoặc images360 hoặc vrUrl)
-      if (hasMedia === true) {
-        query.$or = [
-          ...(query.$or || []),
-          { 'gallery.0': { $exists: true } },
-          { 'images360.0': { $exists: true } },
-          { vrUrl: { $ne: '' } },
-        ]
-      }
-
-      // 14. Tiện ích (Phải chứa tất cả các tiện ích được chọn)
-      if (amenities && amenities.trim() !== '') {
-        const amenitiesList = amenities
-          .split(',')
-          .map(a => a.trim())
-          .filter(Boolean)
-        if (amenitiesList.length > 0) {
-          query.amenities = { $all: amenitiesList }
-        }
-      }
-    }
-
-    // Mặc định hiển thị bài đăng đã duyệt cho public (gồm cả căn đang trống và căn đang cho thuê)
-    if (!query.status && !query.landlordId) {
-      query.status = { $in: ['available', 'rented'] }
-    }
-
+    const query = buildApartmentQuery(filters)
     const apartments = await this.apartmentRepository.find({
       // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment
       where: query as any,
@@ -683,7 +410,7 @@ export class ApartmentsService {
     }
 
     apartment.rentalReservation = reservation
-    await this.apartmentRepository.save(apartment)
+    await this.saveAndNotify(apartment)
     return true
   }
 
@@ -717,7 +444,7 @@ export class ApartmentsService {
     reservation.revision = (reservation.revision ?? 1) + 1
     reservation.depositAgreementId = depositAgreementId
     reservation.depositPaidAt = new Date()
-    await this.apartmentRepository.save(apartment)
+    await this.saveAndNotify(apartment)
     return true
   }
 
@@ -743,7 +470,7 @@ export class ApartmentsService {
     reservation.contractId = contractId
     reservation.leaseActivatedAt = new Date()
     apartment.status = 'rented'
-    await this.apartmentRepository.save(apartment)
+    await this.saveAndNotify(apartment)
     return true
   }
 
@@ -792,7 +519,7 @@ export class ApartmentsService {
     }
 
     apartment.rentalReservation = null
-    await this.apartmentRepository.save(apartment)
+    await this.saveAndNotify(apartment)
     return true
   }
 
@@ -816,35 +543,10 @@ export class ApartmentsService {
     return this.attachCurrentLandlords(apartments)
   }
 
-  private async attachCurrentLandlords(
+  private attachCurrentLandlords(
     apartments: readonly Apartment[]
   ): Promise<ApartmentWithLandlord[]> {
-    const landlordIds = [
-      ...new Set(
-        apartments
-          .map(apartment => apartment.landlordId)
-          .filter(landlordId => ObjectId.isValid(landlordId))
-      ),
-    ]
-
-    const landlords =
-      landlordIds.length > 0
-        ? await this.userRepository.find({
-            where: {
-              _id: {
-                $in: landlordIds.map(landlordId => new ObjectId(landlordId)),
-              },
-            } as unknown as FindOptionsWhere<User>,
-          })
-        : []
-    const landlordMap = new Map(
-      landlords.map(landlord => [landlord._id.toString(), landlord])
-    )
-
-    return apartments.map(apartment => ({
-      ...apartment,
-      landlord: landlordMap.get(apartment.landlordId) ?? null,
-    }))
+    return attachCurrentLandlords(this.userRepository, apartments)
   }
 
   // ── Toàn bộ tin đăng mọi trạng thái kèm thông tin chủ nhà (màn quản lý của Staff/Admin) ──
@@ -907,7 +609,7 @@ export class ApartmentsService {
     } else {
       apartment.isVerified = false
     }
-    const saved = await this.apartmentRepository.save(apartment)
+    const saved = await this.saveAndNotify(apartment)
     await this.publishSearchAlerts(saved, 'status_change', {
       previousValue: previousStatus,
       newValue: saved.status,
@@ -934,7 +636,7 @@ export class ApartmentsService {
 
     const previousPrice = apartment.priceMonthly
     recordPriceChange(apartment, priceMonthly)
-    const saved = await this.apartmentRepository.save(apartment)
+    const saved = await this.saveAndNotify(apartment)
     await this.publishSearchAlerts(saved, 'price_change', {
       previousValue: String(previousPrice),
       newValue: String(saved.priceMonthly),
@@ -978,7 +680,7 @@ export class ApartmentsService {
       apartment.approvedBy = null
       apartment.submittedAt = new Date()
     }
-    return this.apartmentRepository.save(apartment)
+    return this.saveAndNotify(apartment)
   }
 
   async updateMedia(
@@ -1006,7 +708,7 @@ export class ApartmentsService {
     if (dto.images360 !== undefined) apartment.images360 = dto.images360
     if (dto.vrUrl !== undefined) apartment.vrUrl = dto.vrUrl
 
-    return this.apartmentRepository.save(apartment)
+    return this.saveAndNotify(apartment)
   }
 
   // ── Tạo bài đăng căn hộ mới ──
@@ -1081,7 +783,7 @@ export class ApartmentsService {
       submittedAt: new Date(),
     })
 
-    const saved = await this.apartmentRepository.save(apartment)
+    const saved = await this.saveAndNotify(apartment)
     this.notifyStaffNewListing(saved).catch(err => {
       this.logger.error('Error notifying staff of new listing:', err)
     })
@@ -1113,7 +815,7 @@ export class ApartmentsService {
     apartment.expiresAt = new Date(Date.now() + LISTING_VALIDITY_DAYS * DAY_MS)
     apartment.rejectedReason = null
 
-    const saved = await this.apartmentRepository.save(apartment)
+    const saved = await this.saveAndNotify(apartment)
     this.notificationsService
       .createNotification(
         saved.landlordId,
@@ -1154,7 +856,7 @@ export class ApartmentsService {
     apartment.isVerified = false
     apartment.rejectedReason = reason
 
-    const saved = await this.apartmentRepository.save(apartment)
+    const saved = await this.saveAndNotify(apartment)
     this.notificationsService
       .createNotification(
         saved.landlordId,
@@ -1241,7 +943,7 @@ export class ApartmentsService {
       rejectedReason: null,
     })
 
-    const saved = await this.apartmentRepository.save(apartment)
+    const saved = await this.saveAndNotify(apartment)
     this.notifyStaffNewListing(saved).catch(err => {
       this.logger.error('Error notifying staff of resubmitted listing:', err)
     })
@@ -1272,7 +974,7 @@ export class ApartmentsService {
     apartment.expiresAt = new Date(Date.now() + LISTING_VALIDITY_DAYS * DAY_MS)
     apartment.rejectedReason = null
 
-    return this.apartmentRepository.save(apartment)
+    return this.saveAndNotify(apartment)
   }
 
   // ── Chỉnh sửa bài đăng (chỉ khi đang chờ duyệt hoặc bị từ chối) ──
@@ -1339,7 +1041,7 @@ export class ApartmentsService {
       )
     }
 
-    return this.apartmentRepository.save(apartment)
+    return this.saveAndNotify(apartment)
   }
 
   private async notifyStaffNewListing(apartment: Apartment): Promise<void> {

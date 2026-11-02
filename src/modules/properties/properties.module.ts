@@ -12,6 +12,7 @@ import { ActivityLog } from '../activity-log/schemas/activity-log.schema'
 import { SystemConfig } from './schemas/system-config.schema'
 import { User } from '../users/schemas/user.schema'
 import { ApartmentsService } from './services/apartments.service'
+import { ApartmentsQueryService } from './services/apartments-query.service'
 import { ApartmentDesignsService } from './services/apartment-designs.service'
 import { ApartmentDesignsController } from './controllers/apartment-designs.controller'
 import { MaintenanceTicketsService } from './services/maintenance-tickets.service'
@@ -57,6 +58,7 @@ import { NotificationsModule } from '../notifications/notifications.module'
   ],
   providers: [
     ApartmentsService,
+    ApartmentsQueryService,
     ListingQualityService,
     MaintenanceTicketsService,
     ApartmentDesignsService,

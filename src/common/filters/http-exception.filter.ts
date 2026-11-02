@@ -19,6 +19,9 @@ type ResponseLike = {
 
 import { Logger } from '@nestjs/common'
 
+const TOO_MANY_REQUESTS_MESSAGE =
+  'Bạn thao tác quá nhanh, vui lòng thử lại sau ít phút.'
+
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger(HttpExceptionFilter.name)
@@ -67,6 +70,12 @@ function toErrorBody(
   status: number
 ): { code: string; message: string; details?: unknown } {
   if (exception instanceof HttpException) {
+    if (Number(status) === Number(HttpStatus.TOO_MANY_REQUESTS)) {
+      return {
+        code: 'HTTP_429',
+        message: TOO_MANY_REQUESTS_MESSAGE,
+      }
+    }
     const response = exception.getResponse()
 
     if (typeof response === 'object' && response !== null) {

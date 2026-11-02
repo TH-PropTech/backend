@@ -1,8 +1,10 @@
+import { ApartmentChangeNotifier } from '../../read-model/services/apartment-change-notifier.service'
 import {
   BadRequestException,
   ForbiddenException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { ObjectId } from 'mongodb'
@@ -55,7 +57,9 @@ export class ListingFreshnessService {
     @InjectRepository(Apartment)
     private readonly apartmentRepository: Repository<Apartment>,
     @InjectRepository(ReviewCase)
-    reviewCaseRepository: Repository<ReviewCase>
+    reviewCaseRepository: Repository<ReviewCase>,
+    @Optional()
+    private readonly apartmentChangeNotifier?: ApartmentChangeNotifier
   ) {
     this.reviewCaseRepository = new KindScopedReviewCaseRepository(
       reviewCaseRepository,
@@ -81,6 +85,7 @@ export class ListingFreshnessService {
 
     apartment.updatedAt = new Date()
     const saved = await this.apartmentRepository.save(apartment)
+    await this.apartmentChangeNotifier?.changed()
     return this.toFreshnessResult(saved)
   }
 

@@ -13,6 +13,7 @@ ENV HUSKY=0 CI=true
 RUN pnpm install --frozen-lockfile
 
 COPY nest-cli.json tsconfig.json tsconfig.build.json ./
+COPY scripts/run-migration.cjs ./scripts/run-migration.cjs
 COPY src ./src
 RUN pnpm build
 
@@ -26,6 +27,8 @@ WORKDIR /app
 COPY --from=build /app/package.json ./
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
+# Chạy migration trong container: node scripts/run-migration.cjs --only=037 --apply
+COPY --from=build /app/scripts ./scripts
 
 # uploads và KYC media ghi ra đĩa, mount volume vào đây
 RUN mkdir -p uploads && chown -R node:node /app

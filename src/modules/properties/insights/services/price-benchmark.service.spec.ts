@@ -163,6 +163,7 @@ describe('PriceBenchmarkService', () => {
         bedrooms: 3,
         furniture: 'Đầy đủ',
       },
+      select: ['area', 'priceMonthly'],
       order: { updatedAt: 'DESC' },
     })
   })

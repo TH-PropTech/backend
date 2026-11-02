@@ -4,6 +4,8 @@ import { ApartmentsController } from './apartments.controller'
 import type { ApartmentsService } from '../services/apartments.service'
 import type { ApartmentMediaUploadService } from '../services/apartment-media-upload.service'
 import type { ListingQualityService } from '../services/listing-quality.service'
+import type { ApartmentsQueryService } from '../services/apartments-query.service'
+import type { ConfigService } from '@nestjs/config'
 
 function rolesOf(method: keyof ApartmentsController): string[] {
   const descriptor = Object.getOwnPropertyDescriptor(
@@ -23,6 +25,7 @@ function buildController(): {
     updateMedia: jest.Mock
   }
   upload: { uploadImages: jest.Mock }
+  query: { findPublicPage: jest.Mock; findPublicById: jest.Mock }
 } {
   const apartments = {
     renew: jest.fn(),
@@ -32,12 +35,16 @@ function buildController(): {
     updateMedia: jest.fn(),
   }
   const upload = { uploadImages: jest.fn() }
+  const query = { findPublicPage: jest.fn(), findPublicById: jest.fn() }
+  const config = { getOrThrow: jest.fn(() => 200) }
   const controller = new ApartmentsController(
     apartments as unknown as ApartmentsService,
     {} as ListingQualityService,
-    upload as unknown as ApartmentMediaUploadService
+    upload as unknown as ApartmentMediaUploadService,
+    query as unknown as ApartmentsQueryService,
+    config as unknown as ConfigService
   )
-  return { controller, apartments, upload }
+  return { controller, apartments, upload, query }
 }
 
 describe('ApartmentsController listing posting', () => {
@@ -222,5 +229,69 @@ describe('ApartmentsController listing posting', () => {
         expect(upload.uploadImages).not.toHaveBeenCalled()
       }
     )
+  })
+})
+
+describe('ApartmentsController public listing', () => {
+  const response = (): { setHeader: jest.Mock } => ({ setHeader: jest.fn() })
+
+  it('returns the array and exposes the total in X-Total-Count', async () => {
+    const { controller, query } = buildController()
+    query.findPublicPage.mockResolvedValue({ items: [{ id: 'a' }], total: 345 })
+    const res = response()
+
+    const result = await controller.findAll(
+      { city: 'hcm' },
+      res as unknown as Parameters<typeof controller.findAll>[1]
+    )
+
+    expect(result).toEqual([{ id: 'a' }])
+    expect(res.setHeader).toHaveBeenCalledWith('X-Total-Count', '345')
+    expect(query.findPublicPage).toHaveBeenCalledWith({ city: 'hcm' }, 'web', {
+      skip: 0,
+      take: 200,
+    })
+  })
+
+  it('maps page and limit to skip and take and keeps them out of the filters', async () => {
+    const { controller, query } = buildController()
+    query.findPublicPage.mockResolvedValue({ items: [], total: 0 })
+
+    await controller.findAll(
+      { page: '2', limit: '20', format: 'mobile' },
+      response() as unknown as Parameters<typeof controller.findAll>[1]
+    )
+
+    expect(query.findPublicPage).toHaveBeenCalledWith({}, 'mobile', {
+      skip: 20,
+      take: 20,
+    })
+  })
+
+  it('rejects a limit above the ceiling and a page below 1', async () => {
+    const { controller } = buildController()
+    const res = response() as unknown as Parameters<
+      typeof controller.findAll
+    >[1]
+
+    await expect(
+      controller.findAll({ limit: '201' }, res)
+    ).rejects.toBeInstanceOf(BadRequestException)
+    await expect(controller.findAll({ page: '0' }, res)).rejects.toBeInstanceOf(
+      BadRequestException
+    )
+    await expect(
+      controller.findAll({ limit: 'abc' }, res)
+    ).rejects.toBeInstanceOf(BadRequestException)
+  })
+
+  it('serves the detail through the cached query side', async () => {
+    const { controller, query } = buildController()
+    query.findPublicById.mockResolvedValue({ id: 'x' })
+
+    await expect(controller.findOne('x', 'mobile')).resolves.toEqual({
+      id: 'x',
+    })
+    expect(query.findPublicById).toHaveBeenCalledWith('x', 'mobile')
   })
 })

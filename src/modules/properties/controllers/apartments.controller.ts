@@ -3,6 +3,7 @@ import {
   Get,
   Param,
   Query,
+  Res,
   Patch,
   Body,
   UseGuards,
@@ -11,7 +12,11 @@ import {
   UploadedFiles,
   BadRequestException,
 } from '@nestjs/common'
+import { ConfigService } from '@nestjs/config'
 import { ApiOkResponse, ApiTags } from '@nestjs/swagger'
+import type { Response } from 'express'
+import { ApartmentsQueryService } from '../services/apartments-query.service'
+import { parseListingPage } from '../utils/listing-pagination'
 import { ApartmentsService } from '../services/apartments.service'
 import {
   ApartmentResponseMapper,
@@ -59,7 +64,9 @@ export class ApartmentsController {
   constructor(
     private readonly apartmentsService: ApartmentsService,
     private readonly listingQualityService: ListingQualityService,
-    private readonly mediaUploadService: ApartmentMediaUploadService
+    private readonly mediaUploadService: ApartmentMediaUploadService,
+    private readonly apartmentsQuery: ApartmentsQueryService,
+    private readonly configService: ConfigService
   ) {}
 
   @Get('my-listings')
@@ -125,18 +132,28 @@ export class ApartmentsController {
   @Public()
   @Get()
   async findAll(
-    @Query() query: ApartmentFilterDto & { format?: 'web' | 'mobile' }
+    @Query()
+    query: ApartmentFilterDto & {
+      format?: 'web' | 'mobile'
+      page?: string
+      limit?: string
+    },
+    @Res({ passthrough: true }) response: Response
   ): Promise<WebApartmentResponse[] | MobileApartmentResponse[]> {
-    const { format, ...filters } = query
-    const apartments = await this.apartmentsService.findAll(filters)
-    if (format === 'web') {
-      return apartments.map(apt => ApartmentResponseMapper.toWebJson(apt))
-    }
-    if (format === 'mobile') {
-      return apartments.map(apt => ApartmentResponseMapper.toMobileJson(apt))
-    }
+    const { format, page, limit, ...filters } = query
+    const listingPage = parseListingPage(
+      page,
+      limit,
+      this.configService.getOrThrow<number>('listing.maxLimit')
+    )
     // Mặc định trả về định dạng Web cho tương thích tốt nhất
-    return apartments.map(apt => ApartmentResponseMapper.toWebJson(apt))
+    const { items, total } = await this.apartmentsQuery.findPublicPage(
+      filters,
+      format === 'mobile' ? 'mobile' : 'web',
+      listingPage
+    )
+    response.setHeader('X-Total-Count', String(total))
+    return items as WebApartmentResponse[] | MobileApartmentResponse[]
   }
 
   /** GET /api/v1/apartments/:id/quality — Owner listing quality [uc_staff_apartment] */
@@ -157,14 +174,10 @@ export class ApartmentsController {
     @Param('id') id: string,
     @Query('format') format?: 'web' | 'mobile'
   ): Promise<WebApartmentResponse | MobileApartmentResponse> {
-    const apartment = await this.apartmentsService.findOne(id)
-    if (format === 'web') {
-      return ApartmentResponseMapper.toWebJson(apartment)
-    }
-    if (format === 'mobile') {
-      return ApartmentResponseMapper.toMobileJson(apartment)
-    }
-    return ApartmentResponseMapper.toWebJson(apartment)
+    return this.apartmentsQuery.findPublicById(
+      id,
+      format === 'mobile' ? 'mobile' : 'web'
+    )
   }
 
   @Post()
