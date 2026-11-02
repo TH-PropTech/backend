@@ -52,6 +52,7 @@ import { ContractLayoutService } from './layout/contract-layout.service'
 import { ContractLayoutsController } from './layout/contract-layouts.controller'
 import { SignedArtifactService } from './signed-artifact/signed-artifact.service'
 import { ContractEvidencePackageService } from './services/contract-evidence-package.service'
+import { ContractRecordsService } from './services/contract-records.service'
 import { ContractEvidencePackageExportService } from './services/contract-evidence-package.export.service'
 import { OwnershipTransferController } from './controllers/ownership-transfer.controller'
 import { MongoOwnershipTransferStore } from './services/mongo-ownership-transfer.store'
@@ -139,6 +140,7 @@ import { WalletsModule } from '../wallets/wallets.module'
     FlowNotificationService,
     ContractLayoutService,
     ContractEvidencePackageService,
+    ContractRecordsService,
     ContractEvidencePackageExportService,
     OwnershipTransferService,
     OwnershipTransferResolver,

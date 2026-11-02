@@ -51,6 +51,18 @@ function matchesCondition(actual: unknown, condition: unknown): boolean {
         return !equals(actual, expected)
       case '$in':
         return (expected as unknown[]).some(item => equals(actual, item))
+      case '$regex': {
+        const flags = (condition as Row)['$options']
+        return (
+          typeof actual === 'string' &&
+          new RegExp(
+            String(expected),
+            typeof flags === 'string' ? flags : ''
+          ).test(actual)
+        )
+      }
+      case '$options':
+        return true
       case '$exists':
         return (actual !== undefined) === Boolean(expected)
       case '$gt':
@@ -130,10 +142,9 @@ export function memoryRepository<T extends Row>(
       const total = rows.filter(row => matchesWhere(row, options?.where)).length
       return Promise.resolve([select(options), total] as [T[], number])
     }),
-    count: jest.fn((options?: FindOptions) =>
-      Promise.resolve(
-        rows.filter(row => matchesWhere(row, options?.where)).length
-      )
+    // Như MongoRepository.count: nhận thẳng bộ lọc, không bọc trong { where }.
+    count: jest.fn((query?: FindOptions['where']) =>
+      Promise.resolve(rows.filter(row => matchesWhere(row, query)).length)
     ),
     create: jest.fn((value: Partial<T>): T => ({ ...value }) as T),
     save: jest.fn((value: T): Promise<T> => {
