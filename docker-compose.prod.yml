@@ -19,6 +19,8 @@ services:
     volumes:
       - ./uploads:/app/uploads
       - ./.data:/app/.data
+      # Cert và key Fabric (writer, reader, operator, peer-tls-ca.crt); không commit
+      - ./fabric:/app/fabric:ro
     mem_limit: 768m
     healthcheck:
       test:
