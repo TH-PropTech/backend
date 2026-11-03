@@ -293,6 +293,49 @@ describe('SmartCaProvider', () => {
     expect(JSON.stringify(error)).not.toContain('pw-secret')
   })
 
+  it('maps VNPT status_code 1003 to a specific wrong-OTP error', async () => {
+    jest
+      .spyOn(global, 'fetch')
+      .mockResolvedValue(
+        jsonResponse({ status_code: 1003, message: 'OTP không chính xác' })
+      )
+    const provider = createProvider()
+
+    await expect(
+      provider.signV2({ ...signingRequest, password: 'pw', otp: '000000' })
+    ).rejects.toThrow('SMARTCA_OTP_INVALID')
+  })
+
+  it('maps VNPT status_code 403 to a specific invalid-certificate error', async () => {
+    jest
+      .spyOn(global, 'fetch')
+      .mockResolvedValue(
+        jsonResponse({ status_code: 403, message: 'credential_status_invalid' })
+      )
+    const provider = createProvider()
+
+    await expect(
+      provider.signV2({ ...signingRequest, password: 'pw', otp: '123456' })
+    ).rejects.toThrow('SMARTCA_CERTIFICATE_INVALID')
+  })
+
+  it('reads the body status_code even when VNPT answers with a non-2xx HTTP status', async () => {
+    // Quan sát thật từ sandbox VNPT: OTP sai trả HTTP 500 kèm status_code=1003.
+    jest
+      .spyOn(global, 'fetch')
+      .mockResolvedValue(
+        jsonResponse(
+          { status_code: 1003, message: 'OTP không chính xác' },
+          false
+        )
+      )
+    const provider = createProvider()
+
+    await expect(
+      provider.signV2({ ...signingRequest, password: 'pw', otp: '000000' })
+    ).rejects.toThrow('SMARTCA_OTP_INVALID')
+  })
+
   it('confirms v2 with sad and parses the matching signature', async () => {
     const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue(
       jsonResponse({
