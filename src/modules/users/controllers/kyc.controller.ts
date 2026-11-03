@@ -18,13 +18,14 @@ import {
   FileInterceptor,
   FileFieldsInterceptor,
 } from '@nestjs/platform-express'
-import { GroqCccdOcrService } from '../../ekyc/services/groq-cccd-ocr.service'
+import { EkycClient } from '../../ekyc/services/ekyc-client.service'
 import {
   KycService,
   KycListResult,
   KycSelfResult,
 } from '../services/kyc.service'
 import {
+  EkycFaceResult,
   EkycOcrBackResult,
   EkycOcrFrontResult,
 } from '../../ekyc/interfaces/ekyc-ocr.interface'
@@ -47,12 +48,12 @@ import { RequirePermission } from '../../rbac/guards/require-permission.decorato
 export class KycController {
   constructor(
     private readonly kycService: KycService,
-    private readonly groqCccdOcr: GroqCccdOcrService
+    private readonly ekycClient: EkycClient
   ) {}
 
   /**
    * POST /api/v1/kyc/ocr-front
-   * Nhận ảnh mặt trước CCCD từ client, đọc thông tin in trên thẻ bằng Groq vision
+   * Nhận ảnh mặt trước CCCD từ client, đọc thông tin in trên thẻ qua dịch vụ eKYC
    */
   @Post('ocr-front')
   @ApiConsumes('multipart/form-data')
@@ -64,12 +65,12 @@ export class KycController {
   ): Promise<EkycOcrFrontResult> {
     if (!file) throw new BadRequestException('Thiếu file frontID')
     validateKycImage(file)
-    return this.groqCccdOcr.ocrFront(file)
+    return this.ekycClient.ocrFront(file)
   }
 
   /**
    * POST /api/v1/kyc/ocr-back
-   * Nhận ảnh mặt sau CCCD từ client, đọc thông tin in trên thẻ bằng Groq vision
+   * Nhận ảnh mặt sau CCCD từ client, đọc thông tin in trên thẻ qua dịch vụ eKYC
    */
   @Post('ocr-back')
   @ApiConsumes('multipart/form-data')
@@ -81,12 +82,40 @@ export class KycController {
   ): Promise<EkycOcrBackResult> {
     if (!file) throw new BadRequestException('Thiếu file backID')
     validateKycImage(file)
-    return this.groqCccdOcr.ocrBack(file)
+    return this.ekycClient.ocrBack(file)
+  }
+
+  /**
+   * POST /api/v1/kyc/face-verify
+   * Bước báo trước cho UX: kiểm tra liveness và so khớp khuôn mặt, không lưu gì.
+   * `submit` luôn chạy lại bước này phía server.
+   */
+  @Post('face-verify')
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(
+    FileFieldsInterceptor(
+      [
+        { name: 'selfie', maxCount: 1 },
+        { name: 'frontID', maxCount: 1 },
+      ],
+      { limits: { fileSize: KYC_IMAGE_MAX_BYTES, files: 2 } }
+    )
+  )
+  async faceVerify(
+    @UploadedFiles()
+    files: {
+      selfie?: Express.Multer.File[]
+      frontID?: Express.Multer.File[]
+    }
+  ): Promise<EkycFaceResult> {
+    const selfie = requireImage(files.selfie?.[0], 'selfie')
+    const frontID = requireImage(files.frontID?.[0], 'frontID')
+    return this.ekycClient.verifyFace(selfie, frontID)
   }
 
   /**
    * POST /api/v1/kyc/submit
-   * Người dùng nộp hồ sơ KYC (lưu DB)
+   * Người dùng nộp hồ sơ KYC (lưu DB). Bắt buộc có selfie; khuôn mặt được xác thực lại phía server.
    */
   @Post('submit')
   @ApiConsumes('multipart/form-data')
@@ -95,8 +124,9 @@ export class KycController {
       [
         { name: 'frontCard', maxCount: 1 },
         { name: 'backCard', maxCount: 1 },
+        { name: 'selfie', maxCount: 1 },
       ],
-      { limits: { fileSize: KYC_IMAGE_MAX_BYTES, files: 2 } }
+      { limits: { fileSize: KYC_IMAGE_MAX_BYTES, files: 3 } }
     )
   )
   async submitKyc(
@@ -105,13 +135,19 @@ export class KycController {
     files: {
       frontCard?: Express.Multer.File[]
       backCard?: Express.Multer.File[]
+      selfie?: Express.Multer.File[]
     },
     @CurrentUser('id') userId: string
   ): Promise<KycRecord> {
     if (!userId) throw new BadRequestException('Không thể xác thực người dùng')
     const frontCard = requireImage(files.frontCard?.[0], 'frontCard')
     const backCard = requireImage(files.backCard?.[0], 'backCard')
-    return this.kycService.submitKyc(userId, dto, { frontCard, backCard })
+    const selfie = requireImage(files.selfie?.[0], 'selfie')
+    return this.kycService.submitKyc(userId, dto, {
+      frontCard,
+      backCard,
+      selfie,
+    })
   }
 
   /**

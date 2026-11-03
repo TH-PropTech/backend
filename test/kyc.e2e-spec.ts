@@ -9,7 +9,7 @@ import type { ApiResponse } from '../src/common/interfaces/api-response.interfac
 import { ResponseEnvelopeInterceptor } from '../src/common/interceptors/response-envelope.interceptor'
 import { RolesGuard } from '../src/common/guards/roles.guard'
 import { JwtAuthGuard } from '../src/modules/auth/guards/jwt-auth.guard'
-import { GroqCccdOcrService } from '../src/modules/ekyc/services/groq-cccd-ocr.service'
+import { EkycClient } from '../src/modules/ekyc/services/ekyc-client.service'
 import { KycController } from '../src/modules/users/controllers/kyc.controller'
 import { KycService } from '../src/modules/users/services/kyc.service'
 import { PermissionsGuard } from '../src/modules/rbac/guards/permissions.guard'
@@ -58,7 +58,7 @@ describe('KYC HTTP flow', () => {
       controllers: [KycController],
       providers: [
         { provide: KycService, useValue: service },
-        { provide: GroqCccdOcrService, useValue: ocr },
+        { provide: EkycClient, useValue: ocr },
       ],
     })
       .overrideGuard(JwtAuthGuard)
@@ -108,6 +108,10 @@ describe('KYC HTTP flow', () => {
       })
       .attach('backCard', jpeg, {
         filename: 'back.jpg',
+        contentType: 'image/jpeg',
+      })
+      .attach('selfie', jpeg, {
+        filename: 'selfie.jpg',
         contentType: 'image/jpeg',
       })
       .expect(201)

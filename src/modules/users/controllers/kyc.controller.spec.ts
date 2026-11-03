@@ -1,7 +1,7 @@
 import { BadRequestException } from '@nestjs/common'
 
 import { KycController } from './kyc.controller'
-import type { GroqCccdOcrService } from '../../ekyc/services/groq-cccd-ocr.service'
+import type { EkycClient } from '../../ekyc/services/ekyc-client.service'
 import type { KycService } from '../services/kyc.service'
 
 function createImage(fieldname: string): Express.Multer.File {
@@ -25,9 +25,10 @@ describe('KycController eKYC boundaries', () => {
     findMine: jest.fn(),
     readMedia: jest.fn(),
   }
-  const groqOcr = {
+  const ekycClient = {
     ocrFront: jest.fn(),
     ocrBack: jest.fn(),
+    verifyFace: jest.fn(),
   }
   let controller: KycController
 
@@ -35,7 +36,7 @@ describe('KycController eKYC boundaries', () => {
     jest.clearAllMocks()
     controller = new KycController(
       kycService as unknown as KycService,
-      groqOcr as unknown as GroqCccdOcrService
+      ekycClient as unknown as EkycClient
     )
   })
 
@@ -43,7 +44,7 @@ describe('KycController eKYC boundaries', () => {
     await expect(controller.ocrFront(undefined)).rejects.toBeInstanceOf(
       BadRequestException
     )
-    expect(groqOcr.ocrFront).not.toHaveBeenCalled()
+    expect(ekycClient.ocrFront).not.toHaveBeenCalled()
   })
 
   it('rejects spoofed image bytes before proxying', async () => {
@@ -54,7 +55,66 @@ describe('KycController eKYC boundaries', () => {
     await expect(controller.ocrFront(invalid)).rejects.toBeInstanceOf(
       BadRequestException
     )
-    expect(groqOcr.ocrFront).not.toHaveBeenCalled()
+    expect(ekycClient.ocrFront).not.toHaveBeenCalled()
+  })
+
+  it('returns the face result of a precheck without storing anything', async () => {
+    const face = {
+      liveness: true,
+      spoofScore: 0.1,
+      match: true,
+      distance: 0.4,
+      threshold: 0.85,
+    }
+    ekycClient.verifyFace.mockResolvedValue(face)
+    const selfie = createImage('selfie')
+    const frontID = createImage('frontID')
+
+    await expect(
+      controller.faceVerify({ selfie: [selfie], frontID: [frontID] })
+    ).resolves.toEqual(face)
+    expect(ekycClient.verifyFace).toHaveBeenCalledWith(selfie, frontID)
+  })
+
+  it('reports no-match and spoof results as data, not errors', async () => {
+    ekycClient.verifyFace.mockResolvedValue({
+      liveness: false,
+      spoofScore: 0.9,
+      match: false,
+      distance: 1.2,
+      threshold: 0.85,
+    })
+
+    await expect(
+      controller.faceVerify({
+        selfie: [createImage('selfie')],
+        frontID: [createImage('frontID')],
+      })
+    ).resolves.toMatchObject({ liveness: false, match: false })
+  })
+
+  it('rejects face-verify with a missing selfie or card', async () => {
+    await expect(
+      controller.faceVerify({ frontID: [createImage('frontID')] })
+    ).rejects.toBeInstanceOf(BadRequestException)
+    await expect(
+      controller.faceVerify({ selfie: [createImage('selfie')] })
+    ).rejects.toBeInstanceOf(BadRequestException)
+    expect(ekycClient.verifyFace).not.toHaveBeenCalled()
+  })
+
+  it('rejects spoofed selfie bytes before proxying', async () => {
+    const invalid = createImage('selfie')
+    invalid.buffer = Buffer.from('not an image')
+    invalid.size = invalid.buffer.length
+
+    await expect(
+      controller.faceVerify({
+        selfie: [invalid],
+        frontID: [createImage('frontID')],
+      })
+    ).rejects.toBeInstanceOf(BadRequestException)
+    expect(ekycClient.verifyFace).not.toHaveBeenCalled()
   })
 
   it('returns only the current user KYC status', async () => {

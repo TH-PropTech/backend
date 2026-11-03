@@ -7,6 +7,8 @@ import {
 import { ObjectId } from 'mongodb'
 
 import type { KycMediaService } from './kyc-media.service'
+import { UnprocessableEntityException } from '@nestjs/common'
+import type { EkycClient } from '../../ekyc/services/ekyc-client.service'
 import { KycService } from './kyc.service'
 
 function createImage(fieldname: string): Express.Multer.File {
@@ -23,6 +25,14 @@ function createImage(fieldname: string): Express.Multer.File {
     path: '',
     stream: undefined as unknown as Express.Multer.File['stream'],
   }
+}
+
+const FACE_OK = {
+  liveness: true,
+  spoofScore: 0.1,
+  match: true,
+  distance: 0.4,
+  threshold: 0.85,
 }
 
 const USER_ID = '507f1f77bcf86cd799439011'
@@ -68,6 +78,7 @@ function createService(): {
     updateOne: jest.Mock
   }
   media: jest.Mocked<Pick<KycMediaService, 'store' | 'read' | 'remove'>>
+  ekyc: { verifyFace: jest.Mock }
 } {
   const userRepository = {
     aggregate: aggregateReturns([]),
@@ -93,8 +104,10 @@ function createService(): {
   Reflect.set(service, 'logger', { log: jest.fn(), warn: jest.fn() })
   Reflect.set(service, 'userRepository', userRepository)
   Reflect.set(service, 'kycMediaService', media as unknown as KycMediaService)
+  const ekyc = { verifyFace: jest.fn().mockResolvedValue(FACE_OK) }
+  Reflect.set(service, 'ekycClient', ekyc as unknown as EkycClient)
 
-  return { service, userRepository, media }
+  return { service, userRepository, media, ekyc }
 }
 
 function setOf(call: unknown[]): Record<string, unknown> {
@@ -109,6 +122,7 @@ describe('KycService.submitKyc', () => {
   const files = {
     frontCard: createImage('frontCard'),
     backCard: createImage('backCard'),
+    selfie: createImage('selfie'),
   }
 
   it('nhúng hồ sơ vào user bằng updateOne nguyên tử, không save toàn User', async () => {
@@ -126,16 +140,13 @@ describe('KycService.submitKyc', () => {
     expect(update.$set['kyc.frontCardUrl']).toBe(
       `kyc-media:${USER_ID}:front-card`
     )
-    expect(update.$set['kyc.selfieUrl']).toBe('')
-    expect(update.$set).not.toHaveProperty('kyc.faceMatchResult')
+    expect(update.$set['kyc.selfieUrl']).toBe(`kyc-media:${USER_ID}:selfie`)
+    expect(update.$set['kyc.faceMatchResult']).toBe(true)
+    expect(update.$set['kyc.livenessResult']).toBe(true)
+    expect(update.$set['kyc.spoofScore']).toBe(0.1)
     expect(update.$set['kyc.status']).toBe('pending')
     expect(update.$set['kycStatus']).toBe('pending')
-    expect(update.$unset).toEqual({
-      'kyc.ocrMatchRate': '',
-      'kyc.faceMatchResult': '',
-      'kyc.livenessResult': '',
-      'kyc.spoofScore': '',
-    })
+    expect(update.$unset).toEqual({ 'kyc.ocrMatchRate': '' })
     expect(userRepository.updateOne.mock.calls[0]?.[0]).not.toHaveProperty(
       'save'
     )
@@ -172,7 +183,40 @@ describe('KycService.submitKyc', () => {
     await expect(service.submitKyc(USER_ID, dto, files)).rejects.toThrow(
       'database unavailable'
     )
-    expect(media.remove).toHaveBeenCalledTimes(2)
+    expect(media.remove).toHaveBeenCalledTimes(3)
+  })
+
+  it.each([
+    ['liveness fails', { ...FACE_OK, liveness: false, match: false }],
+    ['face does not match', { ...FACE_OK, match: false }],
+  ])('từ chối 422 và không lưu gì khi %s', async (_name, face) => {
+    const { service, userRepository, media, ekyc } = createService()
+    ekyc.verifyFace.mockResolvedValue(face)
+
+    await expect(service.submitKyc(USER_ID, dto, files)).rejects.toBeInstanceOf(
+      UnprocessableEntityException
+    )
+    expect(media.store).not.toHaveBeenCalled()
+    expect(userRepository.updateOne).not.toHaveBeenCalled()
+  })
+
+  it('không lưu gì khi dịch vụ eKYC lỗi (fail closed)', async () => {
+    const { service, userRepository, media, ekyc } = createService()
+    ekyc.verifyFace.mockRejectedValue(new Error('upstream down'))
+
+    await expect(service.submitKyc(USER_ID, dto, files)).rejects.toThrow(
+      'upstream down'
+    )
+    expect(media.store).not.toHaveBeenCalled()
+    expect(userRepository.updateOne).not.toHaveBeenCalled()
+  })
+
+  it('xác thực khuôn mặt bằng selfie và mặt trước thẻ của lần nộp này', async () => {
+    const { service, ekyc } = createService()
+
+    await service.submitKyc(USER_ID, dto, files)
+
+    expect(ekyc.verifyFace).toHaveBeenCalledWith(files.selfie, files.frontCard)
   })
 
   it('từ chối khi tài khoản đã xác minh KYC', async () => {
@@ -474,6 +518,16 @@ describe('KycService.readMedia', () => {
     await expect(
       service.readMedia(recordId, 'front-card', 'another-user')
     ).rejects.toBeInstanceOf(ForbiddenException)
+    expect(media.read).not.toHaveBeenCalled()
+  })
+
+  it('trả 404 (không phải 500) khi hồ sơ cũ chưa có selfie', async () => {
+    const { service, userRepository, media } = createService()
+    userRepository.aggregate = aggregateReturns([userRow({ selfieUrl: '' })])
+
+    await expect(
+      service.readMedia(recordId, 'selfie', ownerId)
+    ).rejects.toBeInstanceOf(NotFoundException)
     expect(media.read).not.toHaveBeenCalled()
   })
 })

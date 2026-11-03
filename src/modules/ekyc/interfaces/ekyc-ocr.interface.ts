@@ -18,3 +18,12 @@ export interface EkycOcrBackResult {
     placeOfBirth?: string
   }
 }
+
+/** Face verification outcome. The embedding returned upstream is never kept. */
+export interface EkycFaceResult {
+  liveness: boolean
+  spoofScore: number
+  match: boolean
+  distance: number
+  threshold: number
+}
