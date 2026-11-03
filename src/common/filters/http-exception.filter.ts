@@ -9,18 +9,23 @@ import type { ApiResponse } from '../interfaces/api-response.interface'
 
 type RequestLike = {
   headers: Record<string, string | string[] | undefined>
+  originalUrl?: string
+  url?: string
 }
 
 type ResponseLike = {
   status: (code: number) => {
     json: (body: ApiResponse<never>) => void
   }
+  getHeader?: (name: string) => unknown
 }
 
 import { Logger } from '@nestjs/common'
 
-const TOO_MANY_REQUESTS_MESSAGE =
-  'Bạn thao tác quá nhanh, vui lòng thử lại sau ít phút.'
+/** Nhóm hạn mức bị vượt, để client chọn câu chữ: `auth` là đăng nhập và OTP, còn lại là `global`. */
+export type RateLimitScope = 'auth' | 'global'
+
+const AUTH_ROUTE = /^\/api\/v\d+\/auth(\/|$)/
 
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
@@ -42,7 +47,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
       )
     }
 
-    const errorBody = toErrorBody(exception, status)
+    const errorBody = toErrorBody(exception, status, request, response)
 
     response.status(status).json({
       success: false,
@@ -65,16 +70,70 @@ function buildMeta(request: RequestLike): {
   return requestId === undefined ? meta : { ...meta, requestId }
 }
 
+/**
+ * Mô hình lỗi 429 dùng chung cho web và mobile: `error.code` giữ `HTTP_429`, mã ổn định
+ * nằm ở `details.code` (như các lỗi nghiệp vụ khác), kèm số giây phải chờ và nhóm hạn mức.
+ */
+function toRateLimitBody(
+  request: RequestLike,
+  response: ResponseLike
+): { code: string; message: string; details: Record<string, unknown> } {
+  const scope = readRateLimitScope(request)
+  const retryAfterSeconds = readRetryAfterSeconds(response)
+
+  return {
+    code: 'HTTP_429',
+    message: buildRateLimitMessage(scope, retryAfterSeconds),
+    details: {
+      code: 'RATE_LIMITED',
+      scope,
+      ...(retryAfterSeconds === undefined ? {} : { retryAfterSeconds }),
+    },
+  }
+}
+
+function readRateLimitScope(request: RequestLike): RateLimitScope {
+  const path = (request.originalUrl ?? request.url ?? '').split('?')[0] ?? ''
+  return AUTH_ROUTE.test(path) ? 'auth' : 'global'
+}
+
+function readRetryAfterSeconds(response: ResponseLike): number | undefined {
+  const raw: unknown = response.getHeader?.('Retry-After')
+  const value: unknown = Array.isArray(raw) ? (raw[0] as unknown) : raw
+  const seconds = Math.ceil(Number(value))
+  return Number.isFinite(seconds) && seconds > 0 ? seconds : undefined
+}
+
+function formatWait(seconds: number): string {
+  if (seconds < 60) return `${seconds} giây`
+  const minutes = Math.ceil(seconds / 60)
+  return `${minutes} phút`
+}
+
+function buildRateLimitMessage(
+  scope: RateLimitScope,
+  retryAfterSeconds: number | undefined
+): string {
+  const reason =
+    scope === 'auth'
+      ? 'Bạn đã thử đăng nhập hoặc xác thực quá nhiều lần.'
+      : 'Bạn thao tác quá nhanh.'
+  const wait =
+    retryAfterSeconds === undefined
+      ? 'Vui lòng thử lại sau ít phút.'
+      : `Vui lòng thử lại sau ${formatWait(retryAfterSeconds)}.`
+  return `${reason} ${wait}`
+}
+
 function toErrorBody(
   exception: unknown,
-  status: number
+  status: number,
+  request: RequestLike,
+  httpResponse: ResponseLike
 ): { code: string; message: string; details?: unknown } {
   if (exception instanceof HttpException) {
     if (Number(status) === Number(HttpStatus.TOO_MANY_REQUESTS)) {
-      return {
-        code: 'HTTP_429',
-        message: TOO_MANY_REQUESTS_MESSAGE,
-      }
+      return toRateLimitBody(request, httpResponse)
     }
     const response = exception.getResponse()
 
