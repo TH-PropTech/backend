@@ -4,7 +4,7 @@ import { Injectable, Logger } from '@nestjs/common'
 export class ConsultationEmailService {
   private readonly logger = new Logger(ConsultationEmailService.name)
   private readonly apiKey = process.env.RESEND_API_KEY || ''
-  private readonly fromAddress = 'TH PropTech <onboarding@websitedev.software>'
+  private readonly fromAddress = 'TH PropTech <noreply@th-proptech.store>'
 
   async sendInvitation(
     toEmail: string,
