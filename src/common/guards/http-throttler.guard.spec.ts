@@ -99,7 +99,14 @@ describe('HttpThrottlerGuard', () => {
         success: false,
         error: {
           code: 'HTTP_429',
-          message: 'Bạn thao tác quá nhanh, vui lòng thử lại sau ít phút.',
+          message: expect.stringMatching(
+            /^Bạn thao tác quá nhanh\. Vui lòng thử lại sau \d+ (giây|phút)\.$/
+          ) as string,
+          details: {
+            code: 'RATE_LIMITED',
+            scope: 'global',
+            retryAfterSeconds: Number(response.headers['retry-after']),
+          },
         },
       })
     })
