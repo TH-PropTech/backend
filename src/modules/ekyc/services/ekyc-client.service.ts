@@ -56,7 +56,7 @@ export class EkycClient {
       fullName: readText(fields, 'fullName'),
       dob: normalizeDate(readText(fields, 'dob')),
       gender: normalizeGender(readText(fields, 'gender')),
-      nationality: readText(fields, 'nationality') || 'Việt Nam',
+      nationality: readNationality(fields),
       ...(birthplace ? { birthplace } : {}),
       ...(address ? { address } : {}),
     }
@@ -148,6 +148,12 @@ export class EkycClient {
     }
     return body.result
   }
+}
+
+/** A misread box ("%", "1") must not reach the form; fall back to the card's usual value. */
+function readNationality(fields: JsonRecord): string {
+  const value = readText(fields, 'nationality')
+  return /^\p{L}[\p{L} ]{2,}$/u.test(value) ? value : 'Việt Nam'
 }
 
 function appendImage(

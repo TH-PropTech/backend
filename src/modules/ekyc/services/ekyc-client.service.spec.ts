@@ -98,6 +98,27 @@ describe('EkycClient', () => {
     })
   })
 
+  it.each(['%', '1', '', '12'])(
+    'falls back to Việt Nam when the nationality box is misread as "%s"',
+    async garbage => {
+      fetchSpy.mockResolvedValue(
+        upstream({
+          result: {
+            idNumber: '079123456789',
+            fullName: 'NGUYEN VAN A',
+            dob: '01/02/2000',
+            gender: 'Nam',
+            nationality: garbage,
+          },
+        })
+      )
+
+      await expect(
+        createClient().ocrFront(createImage())
+      ).resolves.toMatchObject({ nationality: 'Việt Nam' })
+    }
+  )
+
   it('returns an empty back read instead of rejecting the card', async () => {
     fetchSpy.mockResolvedValue(
       upstream({ result: { version: 'new', issueDate: '10/2021' } })
