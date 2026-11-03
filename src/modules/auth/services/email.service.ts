@@ -4,7 +4,7 @@ import { Injectable, Logger } from '@nestjs/common'
 export class EmailService {
   private readonly logger = new Logger(EmailService.name)
   private readonly apiKey = process.env.RESEND_API_KEY
-  private readonly fromAddress = 'TH PropTech <onboarding@websitedev.software>'
+  private readonly fromAddress = 'TH PropTech <noreply@th-proptech.store>'
 
   /**
    * Gửi mã OTP xác nhận tới email người dùng
