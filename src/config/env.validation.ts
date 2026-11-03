@@ -187,9 +187,6 @@ export const envValidationSchema = Joi.object({
   EKYC_SERVICE_URL: Joi.string()
     .uri({ scheme: ['http', 'https'] })
     .required(),
-  THEKYC_SERVICE_URL: Joi.string()
-    .uri({ scheme: ['http', 'https'] })
-    .optional(),
   EKYC_REQUEST_TIMEOUT_MS: Joi.number()
     .integer()
     .min(1000)

@@ -4,6 +4,7 @@ import {
   NotFoundException,
   BadRequestException,
   ForbiddenException,
+  UnprocessableEntityException,
 } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { MongoRepository } from 'typeorm'
@@ -16,6 +17,8 @@ import {
   KycMediaKind,
   KycMediaService,
 } from './kyc-media.service'
+import { EkycClient } from '../../ekyc/services/ekyc-client.service'
+import type { EkycFaceResult } from '../../ekyc/interfaces/ekyc-ocr.interface'
 
 /**
  * Hồ sơ KYC nhúng trong `users.kyc` (G-KYC, migration 026). `KycRecord` vẫn là
@@ -60,6 +63,7 @@ export interface KycSelfResult {
 export interface KycSubmissionFiles {
   frontCard: Express.Multer.File
   backCard: Express.Multer.File
+  selfie: Express.Multer.File
 }
 
 export type KycMediaField = 'front-card' | 'back-card' | 'selfie'
@@ -95,7 +99,8 @@ export class KycService {
   constructor(
     @InjectRepository(User)
     private readonly userRepository: MongoRepository<User>,
-    private readonly kycMediaService: KycMediaService
+    private readonly kycMediaService: KycMediaService,
+    private readonly ekycClient: EkycClient
   ) {}
 
   /**
@@ -238,7 +243,12 @@ export class KycService {
       'back-card': row.kyc.backCardUrl,
       selfie: row.kyc.selfieUrl,
     }
-    return this.kycMediaService.read(references[field])
+    const reference = references[field]
+    // Hồ sơ nộp trước khi có bước selfie không có ảnh này.
+    if (!reference) {
+      throw new NotFoundException('Hồ sơ KYC không có ảnh này')
+    }
+    return this.kycMediaService.read(reference)
   }
 
   /**
@@ -354,7 +364,11 @@ export class KycService {
       throw new BadRequestException('Tài khoản đã được xác minh KYC thành công')
     }
 
-    // 2. Hồ sơ cũ (nếu có) nhúng trong user
+    // 2. Xác thực khuôn mặt phía server (không tin kết quả client); lỗi thì không lưu gì
+    const face = await this.ekycClient.verifyFace(files.selfie, files.frontCard)
+    assertFaceVerified(face)
+
+    // 3. Hồ sơ cũ (nếu có) nhúng trong user
     const existing = await this.findKycRowByUser(oid)
     const recordId = existing?.kyc.recordId ?? new ObjectId()
     const previousReferences = existing
@@ -368,7 +382,7 @@ export class KycService {
     const storedReferences: string[] = []
     let frontCardUrl: string
     let backCardUrl: string
-    const selfieUrl = ''
+    let selfieUrl: string
     try {
       frontCardUrl = await this.storeMedia(
         userId,
@@ -382,27 +396,32 @@ export class KycService {
         files.backCard,
         storedReferences
       )
+      selfieUrl = await this.storeMedia(
+        userId,
+        'selfie',
+        files.selfie,
+        storedReferences
+      )
     } catch (error) {
       await this.cleanupMedia(storedReferences)
       throw error
     }
 
-    // 3. Trường của hồ sơ: giữ nguyên giá trị cũ cho trường DTO không gửi lên
+    // 4. Trường của hồ sơ: giữ nguyên giá trị cũ cho trường DTO không gửi lên
     const now = new Date()
     const fields: Record<string, unknown> = {
       idCardNumber: dto.idCardNumber,
       frontCardUrl,
       backCardUrl,
       selfieUrl,
+      faceMatchResult: face.match,
+      livenessResult: face.liveness,
+      spoofScore: face.spoofScore,
     }
     for (const key of OPTIONAL_DTO_FIELDS) {
       if (dto[key] !== undefined) fields[key] = dto[key]
     }
     const unset: Record<string, ''> = { 'kyc.ocrMatchRate': '' }
-    // Hồ sơ không còn bước sinh trắc: xóa kết quả sinh trắc cũ (nếu có).
-    unset['kyc.faceMatchResult'] = ''
-    unset['kyc.livenessResult'] = ''
-    unset['kyc.spoofScore'] = ''
 
     // Cập nhật trạng thái
     fields.status = 'pending'
@@ -493,6 +512,20 @@ export class KycService {
     if (results.some(result => result.status === 'rejected')) {
       this.logger.warn('Could not remove one or more private KYC media files')
     }
+  }
+}
+
+/** Chỉ cho nộp hồ sơ khi ảnh selfie là người thật và khớp với ảnh trên thẻ. */
+function assertFaceVerified(face: EkycFaceResult): void {
+  if (!face.liveness) {
+    throw new UnprocessableEntityException(
+      'Ảnh selfie không hợp lệ (nghi ngờ ảnh chụp lại). Vui lòng chụp trực tiếp khuôn mặt của bạn'
+    )
+  }
+  if (!face.match) {
+    throw new UnprocessableEntityException(
+      'Khuôn mặt không khớp với ảnh trên thẻ. Vui lòng chụp lại selfie'
+    )
   }
 }
 

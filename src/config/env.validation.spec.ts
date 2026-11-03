@@ -14,6 +14,15 @@ describe('envValidationSchema eKYC configuration', () => {
     expect(result.error).toBeUndefined()
   })
 
+  it('accepts a plain-HTTP private-address eKYC service URL', () => {
+    const result = envValidationSchema.validate({
+      ...baseEnvironment,
+      EKYC_SERVICE_URL: 'http://172.31.34.116:8000',
+    })
+
+    expect(result.error).toBeUndefined()
+  })
+
   it('rejects a missing eKYC service URL', () => {
     const result = envValidationSchema.validate(baseEnvironment)
 
