@@ -356,15 +356,33 @@ export class SmartCaProvider {
     } catch {
       throw new BadGatewayException('SMARTCA_PROVIDER_RESPONSE_INVALID')
     }
-    if (!response.ok) throw new BadGatewayException('SMARTCA_REQUEST_FAILED')
 
-    const envelope = this.parseEnvelope(payload)
+    // VNPT không luôn trả HTTP 2xx khi có lỗi cụ thể: ví dụ OTP sai có lúc
+    // trả HTTP 500 kèm status_code=1003 trong body (quan sát trực tiếp từ
+    // gateway, không ghi trong tài liệu chính thức). Ưu tiên đọc status_code
+    // của body trước khi dựa vào mã HTTP.
+    const envelope = this.tryParseEnvelope(payload)
+    if (!envelope) {
+      if (!response.ok) throw new BadGatewayException('SMARTCA_REQUEST_FAILED')
+      this.invalidResponse()
+    }
     if (envelope.statusCode !== 200) {
       // 65000: gói dịch vụ của người ký hết hạn / hết lượt ký (cần mua lượt ký trong app SmartCA).
       if (envelope.statusCode === 65000) {
         throw new UnprocessableEntityException('SMARTCA_SERVICE_PACK_EXPIRED')
       }
-      if ([400, 401, 403, 422].includes(envelope.statusCode)) {
+      // 1003: sai mã OTP (chỉ xảy ra ở v2, nơi otp là tham số thật).
+      if (envelope.statusCode === 1003) {
+        throw new UnprocessableEntityException('SMARTCA_OTP_INVALID')
+      }
+      // 403: CREDENTIAL_STATUS_INVALID — chứng thư không hợp lệ/chưa sẵn sàng.
+      if (envelope.statusCode === 403) {
+        throw new UnprocessableEntityException('SMARTCA_CERTIFICATE_INVALID')
+      }
+      // 400/401/422: SP_CREDENTIAL_INVALID hoặc yêu cầu không hợp lệ khác —
+      // mã cụ thể tùy theo luồng gọi (v1 không có password nên 401 ở đây có
+      // thể là lỗi tài khoản SP, không riêng gì mật khẩu người ký).
+      if ([400, 401, 422].includes(envelope.statusCode)) {
         throw new UnprocessableEntityException(rejectionCode)
       }
       throw new BadGatewayException('SMARTCA_REQUEST_FAILED')
@@ -372,8 +390,9 @@ export class SmartCaProvider {
     return envelope
   }
 
-  private parseEnvelope(payload: unknown): SmartCaEnvelope {
-    if (!isRecord(payload)) this.invalidResponse()
+  /** Như `parseEnvelope`, nhưng trả `null` thay vì ném lỗi khi body không hợp lệ. */
+  private tryParseEnvelope(payload: unknown): SmartCaEnvelope | null {
+    if (!isRecord(payload)) return null
     const rawStatusCode = payload.status_code
     const statusCode =
       typeof rawStatusCode === 'number'
@@ -382,9 +401,9 @@ export class SmartCaProvider {
           ? Number(rawStatusCode)
           : Number.NaN
     if (!Number.isFinite(statusCode) || typeof payload.message !== 'string') {
-      this.invalidResponse()
+      return null
     }
-    if (statusCode === 200 && !isRecord(payload.data)) this.invalidResponse()
+    if (statusCode === 200 && !isRecord(payload.data)) return null
     return {
       statusCode,
       message: payload.message,
