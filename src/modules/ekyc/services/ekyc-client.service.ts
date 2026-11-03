@@ -23,7 +23,6 @@ import {
 
 const UPSTREAM_UNAVAILABLE = 'Dịch vụ xác thực eKYC tạm thời không khả dụng'
 const FRONT_UNREADABLE = 'Không đọc được thông tin mặt trước thẻ'
-const BACK_UNREADABLE = 'Không đọc được thông tin mặt sau thẻ'
 
 /**
  * HTTP adapter for the Python eKYC service (OCR + face verification). Images go
@@ -47,18 +46,15 @@ export class EkycClient {
     appendImage(form, 'frontID', file)
     const fields = await this.post('/api/ocr/front', form)
 
+    // Partial reads are returned as-is: the user corrects the form, so a field
+    // that failed validation is left empty instead of rejecting the whole card.
     const idNumber = digitsOnly(readText(fields, 'idNumber'))
-    const fullName = readText(fields, 'fullName')
-    const dob = normalizeDate(readText(fields, 'dob'))
-    if (!/^(\d{9}|\d{12})$/.test(idNumber) || !fullName || !dob) {
-      throw new UnprocessableEntityException(FRONT_UNREADABLE)
-    }
     const birthplace = readText(fields, 'birthplace')
     const address = readText(fields, 'address')
     return {
-      idNumber,
-      fullName,
-      dob,
+      idNumber: /^(\d{9}|\d{12})$/.test(idNumber) ? idNumber : '',
+      fullName: readText(fields, 'fullName'),
+      dob: normalizeDate(readText(fields, 'dob')),
       gender: normalizeGender(readText(fields, 'gender')),
       nationality: readText(fields, 'nationality') || 'Việt Nam',
       ...(birthplace ? { birthplace } : {}),
@@ -80,9 +76,6 @@ export class EkycClient {
       : normalizeDate(readText(fields, 'expiryDate'))
     const placeOfBirth = isOldCard ? '' : readText(fields, 'placeOfBirth')
     const address = isOldCard ? '' : readText(fields, 'address')
-    if (!issueDate && !expiryDate && !placeOfBirth && !address) {
-      throw new UnprocessableEntityException(BACK_UNREADABLE)
-    }
     return {
       success: true,
       ...(version ? { version } : {}),

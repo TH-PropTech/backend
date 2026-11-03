@@ -84,9 +84,33 @@ describe('EkycClient', () => {
     )
   })
 
-  it('turns an unreadable front into a user-fixable 422', async () => {
+  it('returns a partial front read with invalid fields left empty', async () => {
     fetchSpy.mockResolvedValue(
-      upstream({ result: { idNumber: '12', fullName: 'A', dob: '' } })
+      upstream({ result: { idNumber: '12', fullName: 'A', dob: 'x' } })
+    )
+
+    await expect(createClient().ocrFront(createImage())).resolves.toEqual({
+      idNumber: '',
+      fullName: 'A',
+      dob: '',
+      gender: '',
+      nationality: 'Việt Nam',
+    })
+  })
+
+  it('returns an empty back read instead of rejecting the card', async () => {
+    fetchSpy.mockResolvedValue(
+      upstream({ result: { version: 'new', issueDate: '10/2021' } })
+    )
+
+    await expect(
+      createClient().ocrBack(createImage('backID'))
+    ).resolves.toEqual({ success: true, version: 'new', data: {} })
+  })
+
+  it('still reports an upstream 422 from the front OCR as a 422', async () => {
+    fetchSpy.mockResolvedValue(
+      upstream({ error: 'Không phát hiện nội dung mặt trước' }, 422)
     )
 
     await expect(createClient().ocrFront(createImage())).rejects.toBeInstanceOf(
