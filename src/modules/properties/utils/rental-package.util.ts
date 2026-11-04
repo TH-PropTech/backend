@@ -100,6 +100,10 @@ function isAuthorableDuration(
   return (SUPPORTED_RENTAL_DURATIONS as readonly number[]).includes(value)
 }
 
+/** Ceiling for a monthly rent in VND (1 billion): above it the figure is a slip in the unit. */
+export const MAX_MONTHLY_RENT_VND = 1_000_000_000
+const MAX_DEPOSIT_MONTHS = 12
+
 function isPositiveInteger(value: number): boolean {
   return Number.isInteger(value) && value > 0
 }
@@ -117,6 +121,11 @@ function resolveDepositAmount(
 
   if (!isPositiveInteger(policy.amount)) {
     throw new Error('INVALID_RENTAL_PACKAGE: invalid fixed deposit amount')
+  }
+  if (policy.amount > monthlyRent * MAX_DEPOSIT_MONTHS) {
+    throw new Error(
+      'INVALID_RENTAL_PACKAGE: fixed deposit exceeds 12 months of rent'
+    )
   }
   return policy.amount
 }
@@ -262,7 +271,8 @@ export function validateRentalPackages(
       !Number.isInteger(packageItem.version) ||
       packageItem.version < 1 ||
       !isAuthorableDuration(packageItem.durationMonths) ||
-      !isPositiveInteger(packageItem.monthlyRent)
+      !isPositiveInteger(packageItem.monthlyRent) ||
+      packageItem.monthlyRent > MAX_MONTHLY_RENT_VND
     ) {
       throw new Error('INVALID_RENTAL_PACKAGE: invalid package fields')
     }

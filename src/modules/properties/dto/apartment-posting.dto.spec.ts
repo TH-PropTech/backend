@@ -171,6 +171,11 @@ describe('CreateApartmentDto validation (design §8)', () => {
       'description',
     ],
     ['priceMonthly of zero', { priceMonthly: 0 }, 'priceMonthly'],
+    [
+      'priceMonthly above one billion',
+      { priceMonthly: 1_000_000_001 },
+      'priceMonthly',
+    ],
     ['negative priceMonthly', { priceMonthly: -1 }, 'priceMonthly'],
     ['area of zero', { area: 0 }, 'area'],
     ['negative bedrooms', { bedrooms: -1 }, 'bedrooms'],
@@ -194,6 +199,15 @@ describe('CreateApartmentDto validation (design §8)', () => {
       property
     )
   })
+
+  it.each([100_000, 300_000, 500_000, 45_000_000])(
+    'accepts a monthly rent of %i dong',
+    async priceMonthly => {
+      expect(
+        await invalidFields({ ...validPayload, priceMonthly })
+      ).not.toContain('priceMonthly')
+    }
+  )
 
   it('accepts a payload without a description (optional field)', async () => {
     const withoutDescription: Record<string, unknown> = { ...validPayload }
