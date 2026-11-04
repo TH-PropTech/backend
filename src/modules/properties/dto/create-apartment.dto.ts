@@ -19,6 +19,7 @@ import {
   ValidateIf,
 } from 'class-validator'
 import { Type } from 'class-transformer'
+import { MAX_MONTHLY_RENT_VND } from '../utils/rental-package.util'
 import type { RentalExecutionPolicyRef } from '../../rental/utils/rental-execution-policy.util'
 
 class RentalExecutionPolicyRefDto implements RentalExecutionPolicyRef {
@@ -137,6 +138,7 @@ export class RentalPackageDto {
 
   @IsInt()
   @Min(1)
+  @Max(MAX_MONTHLY_RENT_VND)
   monthlyRent!: number
 
   @IsObject()
@@ -312,6 +314,7 @@ export class CreateApartmentDto {
   @Type(() => Number)
   @IsNumber()
   @IsPositive()
+  @Max(MAX_MONTHLY_RENT_VND)
   priceMonthly!: number
 
   @ApiPropertyOptional({ type: [RentalPackageDto] })

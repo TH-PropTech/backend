@@ -27,6 +27,46 @@ describe('rental package rules', () => {
     },
   ]
 
+  it('accepts rents from a few hundred thousand dong up to the ceiling', () => {
+    for (const monthlyRent of [100_000, 500_000, 12_000_000, 1_000_000_000]) {
+      expect(() =>
+        validateRentalPackages([
+          { ...validPackages[0]!, monthlyRent, packageId: `r-${monthlyRent}` },
+        ])
+      ).not.toThrow()
+    }
+  })
+
+  it('rejects a rent above one billion dong a month', () => {
+    expect(() =>
+      validateRentalPackages([
+        { ...validPackages[0]!, monthlyRent: 1_000_000_001 },
+      ])
+    ).toThrow('INVALID_RENTAL_PACKAGE')
+  })
+
+  it('caps a fixed deposit at 12 months of rent', () => {
+    const rent = 12_000_000
+    expect(() =>
+      validateRentalPackages([
+        {
+          ...validPackages[0]!,
+          monthlyRent: rent,
+          depositPolicy: { type: 'FIXED_AMOUNT', amount: rent * 12 },
+        },
+      ])
+    ).not.toThrow()
+    expect(() =>
+      validateRentalPackages([
+        {
+          ...validPackages[0]!,
+          monthlyRent: rent,
+          depositPolicy: { type: 'FIXED_AMOUNT', amount: rent * 12 + 1 },
+        },
+      ])
+    ).toThrow('fixed deposit exceeds 12 months of rent')
+  })
+
   it('derives the representative rent from active packages', () => {
     expect(calculateRepresentativeMonthlyRent(validPackages)).toBe(12_000_000)
   })
