@@ -87,6 +87,20 @@ type SigningContext = {
   documentId: string
 }
 
+/**
+ * VNPT lists a signer's certificates by service type: `SMARTCA` is the ordinary personal
+ * certificate, `ESEAL` the one integrated with TH PropTech. When a signer holds both, only
+ * the integrated one may sign here.
+ */
+export const INTEGRATED_CERTIFICATE_SERVICE_TYPE = 'ESEAL'
+
+function isIntegratedCertificate(certificate: SmartCaCertificate): boolean {
+  return (
+    certificate.serviceType?.toUpperCase() ===
+    INTEGRATED_CERTIFICATE_SERVICE_TYPE
+  )
+}
+
 @Injectable()
 export class SmartCaSigningService {
   private readonly logger = new Logger(SmartCaSigningService.name)
@@ -541,6 +555,12 @@ export class SmartCaSigningService {
       )
       if (!selected) {
         throw new ConflictException('SMARTCA_CERTIFICATE_INVALID')
+      }
+      if (
+        !isIntegratedCertificate(selected) &&
+        certificates.some(isIntegratedCertificate)
+      ) {
+        throw new ConflictException('SMARTCA_INTEGRATED_CERTIFICATE_REQUIRED')
       }
       return selected
     }
