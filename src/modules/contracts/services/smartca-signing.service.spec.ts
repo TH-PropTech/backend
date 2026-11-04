@@ -256,6 +256,58 @@ describe('SmartCaSigningService', () => {
     ).resolves.toEqual({ certificates: [validCertificate] })
   })
 
+  it('rejects an ordinary certificate when an integrated one is available', async () => {
+    const ordinary = {
+      ...validCertificate,
+      serialNumber: 'SERIAL-ORD',
+      serviceType: 'SMARTCA',
+    }
+    const integrated = {
+      ...validCertificate,
+      serialNumber: 'SERIAL-INT',
+      serviceType: 'ESEAL',
+    }
+    const wrong = context()
+    wrong.provider.listCertificates.mockResolvedValue([ordinary, integrated])
+
+    await expect(
+      wrong.service.createSession(contractId, 'tenant-1', {
+        ...signingInputWithoutSerial,
+        certificateSerial: 'SERIAL-ORD',
+      })
+    ).rejects.toMatchObject({
+      message: 'SMARTCA_INTEGRATED_CERTIFICATE_REQUIRED',
+    })
+    expect(wrong.provider.requestSignature).not.toHaveBeenCalled()
+
+    const right = context()
+    right.provider.listCertificates.mockResolvedValue([ordinary, integrated])
+    await right.service.createSession(contractId, 'tenant-1', {
+      ...signingInputWithoutSerial,
+      certificateSerial: 'SERIAL-INT',
+    })
+    expect(right.provider.requestSignature).toHaveBeenCalledWith(
+      expect.objectContaining({ certificateSerial: 'SERIAL-INT' })
+    )
+  })
+
+  it('lets a signer with only an ordinary certificate sign with it', async () => {
+    const only = context()
+    only.provider.listCertificates.mockResolvedValue([
+      { ...validCertificate, serviceType: 'SMARTCA' },
+    ])
+
+    await only.service.createSession(
+      contractId,
+      'tenant-1',
+      signingInputWithoutSerial
+    )
+
+    expect(only.provider.requestSignature).toHaveBeenCalledWith(
+      expect.objectContaining({ certificateSerial: 'SERIAL-001' })
+    )
+  })
+
   it('auto-selects one valid certificate and requires selection when multiple exist', async () => {
     const single = context()
     await single.service.createSession(
