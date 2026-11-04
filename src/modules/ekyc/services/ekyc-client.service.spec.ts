@@ -204,6 +204,34 @@ describe('EkycClient', () => {
     expect(result).not.toHaveProperty('embedding')
   })
 
+  it('forwards the pose challenge and returns the verdict', async () => {
+    fetchSpy.mockResolvedValue(
+      upstream({
+        result: { faceFound: true, pose: 'center', matches: true },
+      })
+    )
+
+    const result = await createClient().checkPose(createImage('image'), 'up')
+
+    expect(result).toEqual({
+      faceFound: true,
+      pose: 'center',
+      matches: true,
+    })
+    const form = (fetchSpy.mock.calls[0]?.[1] as RequestInit).body as FormData
+    expect(form.get('expected')).toBe('up')
+  })
+
+  it('maps a pose payload with an unknown pose to 502', async () => {
+    fetchSpy.mockResolvedValue(
+      upstream({ result: { faceFound: true, pose: 'down', matches: false } })
+    )
+
+    await expect(
+      createClient().checkPose(createImage('image'), 'center')
+    ).rejects.toBeInstanceOf(BadGatewayException)
+  })
+
   it('passes an upstream 422 message through as a 422', async () => {
     fetchSpy.mockResolvedValue(
       upstream({ error: 'Không tìm thấy khuôn mặt' }, 422)

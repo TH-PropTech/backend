@@ -29,6 +29,7 @@ describe('KycController eKYC boundaries', () => {
     ocrFront: jest.fn(),
     ocrBack: jest.fn(),
     verifyFace: jest.fn(),
+    checkPose: jest.fn(),
   }
   let controller: KycController
 
@@ -115,6 +116,24 @@ describe('KycController eKYC boundaries', () => {
       })
     ).rejects.toBeInstanceOf(BadRequestException)
     expect(ekycClient.verifyFace).not.toHaveBeenCalled()
+  })
+
+  it('proxies a pose step', async () => {
+    const verdict = { faceFound: true, pose: 'left', matches: true }
+    ekycClient.checkPose.mockResolvedValue(verdict)
+    const image = createImage('image')
+
+    await expect(
+      controller.facePose(image, { expected: 'left' })
+    ).resolves.toEqual(verdict)
+    expect(ekycClient.checkPose).toHaveBeenCalledWith(image, 'left')
+  })
+
+  it('rejects a pose step without a valid image', async () => {
+    await expect(
+      controller.facePose(undefined, { expected: 'center' })
+    ).rejects.toBeInstanceOf(BadRequestException)
+    expect(ekycClient.checkPose).not.toHaveBeenCalled()
   })
 
   it('returns only the current user KYC status', async () => {
