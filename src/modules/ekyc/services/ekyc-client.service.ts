@@ -7,10 +7,13 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
-import type {
-  EkycFaceResult,
-  EkycOcrBackResult,
-  EkycOcrFrontResult,
+import {
+  FACE_POSES,
+  type EkycFaceResult,
+  type EkycOcrBackResult,
+  type EkycOcrFrontResult,
+  type EkycPoseResult,
+  type FacePose,
 } from '../interfaces/ekyc-ocr.interface'
 import {
   digitsOnly,
@@ -109,6 +112,32 @@ export class EkycClient {
       throw new BadGatewayException(UPSTREAM_UNAVAILABLE)
     }
     return { liveness, spoofScore, match, distance, threshold }
+  }
+
+  /** One step of the head-pose challenge: does this frame show the expected direction? */
+  async checkPose(
+    image: Express.Multer.File,
+    expected: FacePose
+  ): Promise<EkycPoseResult> {
+    const form = new FormData()
+    appendImage(form, 'image', image)
+    form.append('expected', expected)
+    const result = await this.post('/api/face/pose', form)
+
+    const { faceFound, matches, pose } = result
+    if (
+      typeof faceFound !== 'boolean' ||
+      typeof matches !== 'boolean' ||
+      (pose !== null && !FACE_POSES.includes(pose as FacePose))
+    ) {
+      this.logger.warn('eKYC pose payload failed shape guards')
+      throw new BadGatewayException(UPSTREAM_UNAVAILABLE)
+    }
+    return {
+      faceFound,
+      matches,
+      pose: pose as FacePose | null,
+    }
   }
 
   /** Posts the form and returns the `result` object, mapping failures per design D1. */

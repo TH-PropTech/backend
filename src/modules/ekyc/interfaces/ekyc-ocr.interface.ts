@@ -27,3 +27,12 @@ export interface EkycFaceResult {
   distance: number
   threshold: number
 }
+
+export const FACE_POSES = ['center', 'left', 'right', 'up'] as const
+export type FacePose = (typeof FACE_POSES)[number]
+
+export interface EkycPoseResult {
+  faceFound: boolean
+  pose: FacePose | null
+  matches: boolean
+}

@@ -28,12 +28,14 @@ import {
   EkycFaceResult,
   EkycOcrBackResult,
   EkycOcrFrontResult,
+  EkycPoseResult,
 } from '../../ekyc/interfaces/ekyc-ocr.interface'
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard'
 import { RolesGuard } from '../../../common/guards/roles.guard'
 import { Roles } from '../../../common/decorators/roles.decorator'
 import { KycQueryDto } from '../dto/kyc-query.dto'
 import { ReviewKycDto } from '../dto/review-kyc.dto'
+import { FacePoseDto } from '../dto/face-pose.dto'
 import { SubmitKycDto } from '../dto/submit-kyc.dto'
 import { KycRecord } from '../schemas/kyc-record.schema'
 import { CurrentUser } from '../../../common/decorators/current-user.decorator'
@@ -111,6 +113,23 @@ export class KycController {
     const selfie = requireImage(files.selfie?.[0], 'selfie')
     const frontID = requireImage(files.frontID?.[0], 'frontID')
     return this.ekycClient.verifyFace(selfie, frontID)
+  }
+
+  /**
+   * POST /api/v1/kyc/face-pose
+   * Một bước thử thách quay mặt (center/left/right/up): kiểm tra khung hình có đúng hướng không, không lưu gì.
+   */
+  @Post('face-pose')
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(
+    FileInterceptor('image', { limits: { fileSize: KYC_IMAGE_MAX_BYTES } })
+  )
+  async facePose(
+    @UploadedFile() file: Express.Multer.File | undefined,
+    @Body() dto: FacePoseDto
+  ): Promise<EkycPoseResult> {
+    const image = requireImage(file, 'image')
+    return this.ekycClient.checkPose(image, dto.expected)
   }
 
   /**
