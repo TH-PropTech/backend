@@ -19,6 +19,7 @@ import { RentalFlowConfig } from './schemas/rental-flow-config.schema'
 import { RentalApplicationsController } from './controllers/rental-applications.controller'
 import { RentalTransactionsController } from './controllers/rental-transactions.controller'
 import { RentalExecutionPoliciesController } from './controllers/rental-execution-policies.controller'
+import { HandoverTemplateController } from './controllers/handover-template.controller'
 import { MoveInSettlementsController } from './controllers/move-in-settlements.controller'
 import { MoveOutHandoversController } from './controllers/move-out-handovers.controller'
 import { DepositSettlementStatementsController } from './controllers/deposit-settlement-statements.controller'
@@ -31,6 +32,7 @@ import { RentalFlowAssignmentsService } from './services/rental-flow-assignments
 import { RentalFlowConfigResolver } from './services/rental-flow-config-resolver.service'
 import { ContractImpactAnalyzer } from './services/contract-impact-analyzer.service'
 import { RentalExecutionPoliciesService } from './services/rental-execution-policies.service'
+import { HandoverTemplateService } from './services/handover-template.service'
 import { MoveInSettlementsService } from './services/move-in-settlements.service'
 import { MoveOutSupportService } from './services/move-out-support.service'
 import { MoveOutHandoversService } from './services/move-out-handovers.service'
@@ -66,6 +68,7 @@ import { RentalTransactionEvent } from './schemas/rental-transaction-event.schem
     RentalApplicationsController,
     RentalTransactionsController,
     RentalExecutionPoliciesController,
+    HandoverTemplateController,
     MoveInSettlementsController,
     MoveOutHandoversController,
     DepositSettlementStatementsController,
@@ -80,6 +83,7 @@ import { RentalTransactionEvent } from './schemas/rental-transaction-event.schem
     RentalFlowConfigResolver,
     ContractImpactAnalyzer,
     RentalExecutionPoliciesService,
+    HandoverTemplateService,
     MoveInSettlementsService,
     MoveOutSupportService,
     MoveOutHandoversService,

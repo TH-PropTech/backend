@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Inject,
@@ -17,9 +18,12 @@ import { Payment } from '../../payments/schemas/payment.schema'
 import { NotificationsService } from '../../notifications/services/notifications.service'
 import { RentalTransactionEventService } from '../services/rental-transaction-event.service'
 import type { RentalTransactionActorRole } from '../schemas/rental-transaction-event.schema'
+import { HandoverTemplateService } from './handover-template.service'
 import {
   MoveInSettlement,
+  type HandoverChecklistEntry,
   type HandoverInventoryItem,
+  type HandoverTemplateRef,
   type LedgerEvidenceRef,
   type SettlementLine,
 } from '../schemas/move-in-settlement.schema'
@@ -92,7 +96,9 @@ export class MoveInSettlementsService {
       )
     )
     /* eslint-enable @typescript-eslint/no-require-imports, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-member-access */
-    private readonly depositAgreementsService?: DepositAgreementsService
+    private readonly depositAgreementsService?: DepositAgreementsService,
+    @Optional()
+    private readonly handoverTemplateService?: HandoverTemplateService
   ) {}
 
   /**
@@ -485,6 +491,7 @@ export class MoveInSettlementsService {
         condition: 'good' | 'damaged'
         note?: string
       }>
+      checklist?: Array<{ id: string; checked: boolean }>
       inventoryReference?: string
       notes?: string
       overrideReason?: string
@@ -513,6 +520,9 @@ export class MoveInSettlementsService {
       condition: item.condition,
       note: item.note?.trim() || null,
     }))
+    const { checklist, templateRef } = await this.resolveChecklist(
+      input.checklist
+    )
     const body = {
       revision,
       handedOverAt: new Date(input.handedOverAt).toISOString(),
@@ -522,6 +532,8 @@ export class MoveInSettlementsService {
       inventoryReference: input.inventoryReference ?? null,
       inventoryItems,
       notes: input.notes ?? null,
+      // Chỉ đưa vào hash khi có checklist, để biên bản không dùng mẫu giữ nguyên hash như cũ.
+      ...(templateRef ? { templateRef, checklist } : {}),
     }
     const handoverHash = createHash('sha256')
       .update(JSON.stringify(body))
@@ -534,6 +546,7 @@ export class MoveInSettlementsService {
       keyCount: input.keyCount,
       inventoryReference: input.inventoryReference ?? null,
       inventoryItems,
+      ...(templateRef ? { templateRef, checklist } : {}),
       // Phản hồi của các bản trước được giữ lại, không ghi đè.
       discrepancies: settlement.handover?.discrepancies ?? [],
       responseDueAt,
@@ -564,6 +577,39 @@ export class MoveInSettlementsService {
       saved
     )
     return saved
+  }
+
+  /**
+   * Đối chiếu câu trả lời checklist với mẫu đang phát hành và chụp lại nhãn + phiên bản mẫu.
+   * Không gửi checklist thì không dùng mẫu (templateRef = null).
+   */
+  private async resolveChecklist(
+    answers: Array<{ id: string; checked: boolean }> | undefined
+  ): Promise<{
+    checklist: HandoverChecklistEntry[]
+    templateRef: HandoverTemplateRef | null
+  }> {
+    if (!answers?.length) return { checklist: [], templateRef: null }
+    const template = await this.handoverTemplateService?.getPublished()
+    if (!template || template.version === null || !template.contentHash)
+      throw new ConflictException('HANDOVER_TEMPLATE_UNAVAILABLE')
+    const checkedById = new Map(answers.map(answer => [answer.id, answer]))
+    if (checkedById.size !== answers.length)
+      throw new BadRequestException('HANDOVER_CHECKLIST_DUPLICATE_ITEM')
+    const knownIds = new Set(template.checklist.map(item => item.id))
+    if (answers.some(answer => !knownIds.has(answer.id)))
+      throw new BadRequestException('HANDOVER_CHECKLIST_ITEM_UNKNOWN')
+    return {
+      checklist: template.checklist.map(item => ({
+        id: item.id,
+        label: item.label,
+        checked: checkedById.get(item.id)?.checked ?? false,
+      })),
+      templateRef: {
+        version: template.version,
+        contentHash: template.contentHash,
+      },
+    }
   }
 
   async confirmHandover(

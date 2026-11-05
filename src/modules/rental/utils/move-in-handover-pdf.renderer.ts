@@ -188,6 +188,30 @@ export function renderMoveInHandoverPdf(
         pdf.moveDown(1)
       }
 
+      const checklist = handover.checklist ?? []
+      if (checklist.length) {
+        pdf
+          .font(FONT_BOLD)
+          .fontSize(BODY_SIZE)
+          .text('Các mục kiểm tra khi bàn giao', MARGIN_LEFT, pdf.y, {
+            width: contentWidth,
+          })
+        pdf.moveDown(0.3)
+        drawTable(
+          pdf,
+          theme,
+          [
+            { header: 'Mục kiểm tra', width: 420 },
+            { header: 'Kết quả', width: 120, align: 'center' },
+          ],
+          checklist.map(entry => [
+            entry.label,
+            entry.checked ? 'Đã thực hiện' : 'Chưa thực hiện',
+          ])
+        )
+        pdf.moveDown(0.5)
+      }
+
       if (handover.notes) {
         pdf
           .font(FONT_BOLD)

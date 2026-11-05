@@ -12,6 +12,7 @@ import type {
   FlowProfileStatus,
   FlowProfileSteps,
 } from './rental-flow-profile.schema'
+import type { HandoverTemplateContent } from '../utils/handover-template.util'
 import type {
   RentalExecutionPolicyDisclosure,
   RentalExecutionPolicyStatus,
@@ -19,7 +20,11 @@ import type {
 } from '../utils/rental-execution-policy.util'
 
 /** Phân loại bản ghi cấu hình luồng thuê; mọi truy vấn bắt buộc lọc theo kind. */
-export type RentalFlowConfigKind = 'profile' | 'policy' | 'assignment'
+export type RentalFlowConfigKind =
+  | 'profile'
+  | 'policy'
+  | 'assignment'
+  | 'handover-template'
 
 export type FlowAssignmentScope = 'GLOBAL' | 'DURATION' | 'PACKAGE'
 
@@ -100,6 +105,10 @@ export class RentalFlowConfig {
 
   @Column('json', { nullable: true })
   disclosure?: RentalExecutionPolicyDisclosure
+
+  /** Chỉ kind 'handover-template': danh mục đồ nạp sẵn và checklist bàn giao. */
+  @Column('json', { nullable: true })
+  handoverTemplate?: HandoverTemplateContent
 
   @Column({ nullable: true })
   createdBy?: string | null
