@@ -27,6 +27,14 @@ export type HandoverInventoryItem = {
   condition: 'good' | 'damaged'
   note: string | null
 }
+/** Mục kiểm tra của mẫu bàn giao tại thời điểm lập biên bản (nhãn được chụp lại, không đổi theo mẫu về sau). */
+export type HandoverChecklistEntry = {
+  id: string
+  label: string
+  checked: boolean
+}
+/** Phiên bản mẫu bàn giao đã dùng để lập biên bản. */
+export type HandoverTemplateRef = { version: number; contentHash: string }
 /** Phản hồi sai lệch của khách thuê, gắn với bản sửa đổi mà nó phản hồi; chỉ thêm, không ghi đè. */
 export type HandoverDiscrepancy = { revision: number; note: string; at: Date }
 export type HandoverCompletionReason = 'both-confirmed' | 'tenant-no-response'
@@ -66,6 +74,8 @@ export class MoveInSettlement {
     inventoryReference: string | null
     /** Các trường dưới đây tùy chọn để bản ghi cũ (trước phương án A) vẫn đọc được. */
     inventoryItems?: HandoverInventoryItem[]
+    checklist?: HandoverChecklistEntry[]
+    templateRef?: HandoverTemplateRef | null
     discrepancies?: HandoverDiscrepancy[]
     responseDueAt?: Date | null
     completionReason?: HandoverCompletionReason | null

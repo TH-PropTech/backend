@@ -3,6 +3,7 @@ import { Transform, Type } from 'class-transformer'
 import {
   ArrayMaxSize,
   IsArray,
+  IsBoolean,
   IsIn,
   IsInt,
   IsISO8601,
@@ -46,6 +47,18 @@ export class HandoverInventoryItemDto {
   note?: string
 }
 
+export class HandoverChecklistAnswerDto {
+  @ApiProperty({ example: 'keys-handed' })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(60)
+  id!: string
+
+  @ApiProperty()
+  @IsBoolean()
+  checked!: boolean
+}
+
 export class RecordHandoverDto {
   @ApiProperty({ example: '2030-02-01T09:00:00.000Z' })
   @IsISO8601({ strict: true })
@@ -76,6 +89,17 @@ export class RecordHandoverDto {
   @ValidateNested({ each: true })
   @Type(() => HandoverInventoryItemDto)
   inventoryItems?: HandoverInventoryItemDto[]
+
+  @ApiPropertyOptional({
+    type: [HandoverChecklistAnswerDto],
+    maxItems: HANDOVER_INVENTORY_MAX_ITEMS,
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(HANDOVER_INVENTORY_MAX_ITEMS)
+  @ValidateNested({ each: true })
+  @Type(() => HandoverChecklistAnswerDto)
+  checklist?: HandoverChecklistAnswerDto[]
 
   @ApiPropertyOptional({ maxLength: 500 })
   @IsOptional()

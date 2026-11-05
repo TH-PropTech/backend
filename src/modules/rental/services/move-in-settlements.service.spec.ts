@@ -566,6 +566,91 @@ describe('MoveInSettlementsService handover (phương án A)', () => {
       expect(saved.handover?.completionReason).toBeNull()
     })
 
+    describe('handover template checklist', () => {
+      const template = {
+        version: 2,
+        contentHash: 'a'.repeat(64),
+        checklist: [
+          { id: 'keys-handed', label: 'Đã giao chìa khóa' },
+          { id: 'condition-checked', label: 'Đã kiểm tra hiện trạng' },
+        ],
+      }
+      function withTemplate(): ReturnType<typeof setup> {
+        const base = setup()
+        return {
+          ...base,
+          service: new MoveInSettlementsService(
+            base.settlementRepo as never,
+            {} as never,
+            {} as never,
+            base.notifications as never,
+            undefined,
+            base.outbox as never,
+            undefined,
+            { getPublished: jest.fn().mockResolvedValue(template) } as never
+          ),
+        }
+      }
+
+      it('snapshots labels and template version, and folds them into the hash', async () => {
+        const { service, id } = withTemplate()
+        const plain = await setup().service.updateHandover(
+          setup().id,
+          'landlord',
+          RECORD,
+          T0
+        )
+        const saved = await service.updateHandover(
+          id,
+          'landlord',
+          { ...RECORD, checklist: [{ id: 'keys-handed', checked: true }] },
+          T0
+        )
+        expect(saved.handover?.templateRef).toEqual({
+          version: 2,
+          contentHash: template.contentHash,
+        })
+        expect(saved.handover?.checklist).toEqual([
+          { id: 'keys-handed', label: 'Đã giao chìa khóa', checked: true },
+          {
+            id: 'condition-checked',
+            label: 'Đã kiểm tra hiện trạng',
+            checked: false,
+          },
+        ])
+        expect(saved.handover?.handoverHash).not.toBe(
+          plain.handover?.handoverHash
+        )
+      })
+
+      it('keeps the legacy hash and no template ref when no checklist is sent', async () => {
+        const { service, id } = withTemplate()
+        const saved = await service.updateHandover(id, 'landlord', RECORD, T0)
+        expect(saved.handover?.templateRef).toBeUndefined()
+        expect(saved.handover?.checklist).toBeUndefined()
+      })
+
+      it('rejects checklist ids that are not in the published template', async () => {
+        const { service, id } = withTemplate()
+        await expect(
+          service.updateHandover(id, 'landlord', {
+            ...RECORD,
+            checklist: [{ id: 'made-up', checked: true }],
+          })
+        ).rejects.toThrow('HANDOVER_CHECKLIST_ITEM_UNKNOWN')
+      })
+
+      it('rejects a checklist when no template is available', async () => {
+        const { service, id } = setup()
+        await expect(
+          service.updateHandover(id, 'landlord', {
+            ...RECORD,
+            checklist: [{ id: 'keys-handed', checked: true }],
+          })
+        ).rejects.toThrow('HANDOVER_TEMPLATE_UNAVAILABLE')
+      })
+    })
+
     it('does not confirm on behalf of the landlord when staff records the handover', async () => {
       const { service, id } = setup()
       const saved = await service.updateHandover(id, 'staff-1', {
