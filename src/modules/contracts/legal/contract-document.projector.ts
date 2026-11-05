@@ -5,6 +5,8 @@ import {
   DEPOSIT_REFUND_DUE_TEXT,
 } from '../../rental/utils/deposit-refund.constants'
 import type { Contract } from '../schemas/contract.schema'
+import { resolveEffectiveCommercial } from '../commercial/resolve-effective-commercial'
+import { CUSTOM_CLAUSES_ANNEX_ID } from './lease-template.manifest'
 import {
   validateDocumentManifest,
   LeaseDocumentManifest,
@@ -60,9 +62,12 @@ export class ContractDocumentProjector {
     const sections = template?.clauses.some(clause => clause.content)
       ? this.buildTemplateSections(contract, template)
       : this.buildStructuredSections(contract)
-    const annexes = template?.annexDefinitions?.length
-      ? this.buildTemplateAnnexes(template.annexDefinitions)
-      : this.buildAnnexes()
+    const annexes = [
+      ...(template?.annexDefinitions?.length
+        ? this.buildTemplateAnnexes(template.annexDefinitions)
+        : this.buildAnnexes()),
+      ...this.buildCustomClausesAnnex(contract),
+    ]
 
     // Validate manifest
     const manifest: LeaseDocumentManifest = {
@@ -222,6 +227,24 @@ export class ContractDocumentProjector {
       hash: clause.contentHash,
       citationIds: clause.citationIds,
     }))
+  }
+
+  private static buildCustomClausesAnnex(
+    contract: Contract
+  ): ContractDocumentAnnexDto[] {
+    const text = resolveEffectiveCommercial(contract).customClauses?.trim()
+    if (!text) return []
+    return [
+      {
+        id: CUSTOM_CLAUSES_ANNEX_ID,
+        title: 'Điều khoản bổ sung do chủ nhà cung cấp',
+        description:
+          `${text}\n\n` +
+          'Các điều khoản trên không thay thế hay sửa đổi 12 điều bắt buộc của hợp đồng; ' +
+          'nếu có mâu thuẫn thì 12 điều bắt buộc được ưu tiên áp dụng.',
+        required: false,
+      },
+    ]
   }
 
   private static buildTemplateAnnexes(

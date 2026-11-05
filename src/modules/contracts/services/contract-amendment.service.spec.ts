@@ -451,3 +451,113 @@ describe('ContractAmendmentService', () => {
     expect(projectionService.projectResult).not.toHaveBeenCalled()
   })
 })
+
+describe('ContractAmendmentService participant creation', () => {
+  const contractId = new ObjectId('507f1f77bcf86cd799439044')
+  const future = (): string => new Date(Date.now() + 86_400_000).toISOString()
+
+  function build(overrides: Partial<Contract> = {}): ContractAmendmentService {
+    const contract = {
+      _id: contractId,
+      tenantId: 'tenant-1',
+      landlordId: 'landlord-1',
+      status: 'active',
+      monthlyRent: 15_000_000,
+      deposit: 30_000_000,
+      paymentDay: 1,
+      latePenaltyRate: 8,
+      terminationNoticeDays: 30,
+      durationMonths: 12,
+      effectiveCommercial: null,
+      contentLockedHash: 'locked-hash',
+      ...overrides,
+    } as unknown as Contract
+    const amendmentRepository = {
+      findOne: jest.fn().mockResolvedValue(null),
+      find: jest.fn().mockResolvedValue([]),
+      create: jest.fn((input: Partial<ContractAmendment>) => input),
+      save: jest.fn((value: unknown) => Promise.resolve(value)),
+    }
+    const contractRepository = {
+      findOne: jest.fn().mockResolvedValue(contract),
+      save: jest.fn().mockResolvedValue(contract),
+    }
+    return new ContractAmendmentService(
+      amendmentRepository as never,
+      contractRepository as never,
+      { find: jest.fn() } as never
+    )
+  }
+
+  const landlord = {
+    actorId: 'landlord-1',
+    isStaff: false,
+    role: 'landlord' as const,
+  }
+
+  it('lets the landlord create an amendment for a locked contract', async () => {
+    const created = await build().create(
+      contractId.toHexString(),
+      {
+        changes: [
+          { field: 'customClauses', after: 'Giờ yên tĩnh 22:00 đến 06:00.' },
+        ],
+        effectiveFrom: future(),
+      },
+      landlord
+    )
+    expect(created).toMatchObject({
+      createdBy: 'landlord-1',
+      status: 'draft',
+      changes: [
+        expect.objectContaining({
+          field: 'customClauses',
+          after: 'Giờ yên tĩnh 22:00 đến 06:00.',
+        }),
+      ],
+    })
+  })
+
+  it('rejects custom clauses above 2000 characters', async () => {
+    await expect(
+      build().create(
+        contractId.toHexString(),
+        {
+          changes: [{ field: 'customClauses', after: 'a'.repeat(2001) }],
+          effectiveFrom: future(),
+        },
+        landlord
+      )
+    ).rejects.toThrow('CONTRACT_AMENDMENT_FIELD_NOT_ALLOWED')
+  })
+
+  it('sends participants of an unlocked draft to the change-request flow', async () => {
+    await expect(
+      build({
+        status: 'draft',
+        contentLockedHash: null,
+        contentLockedAt: null,
+      }).create(
+        contractId.toHexString(),
+        {
+          changes: [{ field: 'monthlyRent', after: 16_000_000 }],
+          effectiveFrom: future(),
+        },
+        landlord
+      )
+    ).rejects.toThrow('CONTRACT_AMENDMENT_USE_CHANGE_REQUEST')
+  })
+
+  it('refuses a user who is not a participant', async () => {
+    await expect(
+      build().create(
+        contractId.toHexString(),
+        {
+          changes: [{ field: 'monthlyRent', after: 16_000_000 }],
+          effectiveFrom: future(),
+        },
+        { actorId: 'other', isStaff: false, role: 'tenant' }
+      )
+    ).rejects.toThrow('CONTRACT_AMENDMENT_ACCESS_DENIED')
+  })
+})

@@ -315,4 +315,44 @@ describe('prepaid rent policy', () => {
       expect(result.packages[0]?.moveOutPolicy).toEqual({ responseDays: 3 })
     })
   })
+
+  describe('lease terms set by the landlord', () => {
+    const base = pkg()
+
+    it('keeps the terms on the validated package', () => {
+      const result = validateRentalPackages([
+        {
+          ...base,
+          paymentDay: 5,
+          latePenaltyRate: 10,
+          terminationNoticeDays: 45,
+          customClauses: '  Không nuôi thú cưng.  ',
+        },
+      ])
+      expect(result.packages[0]).toMatchObject({
+        paymentDay: 5,
+        latePenaltyRate: 10,
+        terminationNoticeDays: 45,
+        customClauses: 'Không nuôi thú cưng.',
+      })
+    })
+
+    it('omits the terms when the landlord leaves them empty', () => {
+      const pkg = validateRentalPackages([base]).packages[0]!
+      expect(pkg).not.toHaveProperty('paymentDay')
+      expect(pkg).not.toHaveProperty('customClauses')
+    })
+
+    it.each([
+      ['payment day 0', { paymentDay: 0 }],
+      ['payment day 32', { paymentDay: 32 }],
+      ['penalty above the cap', { latePenaltyRate: 25 }],
+      ['notice below the minimum', { terminationNoticeDays: 10 }],
+      ['clauses over 2000 characters', { customClauses: 'a'.repeat(2001) }],
+    ])('rejects %s', (_label, terms) => {
+      expect(() => validateRentalPackages([{ ...base, ...terms }])).toThrow(
+        'INVALID_RENTAL_PACKAGE'
+      )
+    })
+  })
 })

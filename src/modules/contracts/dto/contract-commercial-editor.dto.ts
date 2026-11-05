@@ -80,6 +80,13 @@ export class ContractCommercialDraftDto implements ContractCommercialDraft {
   @IsArray()
   @IsString({ each: true })
   addendaIds?: string[]
+
+  /** Chỉ đọc: điều khoản riêng của chủ nhà. Gửi lên sẽ bị từ chối ở service. */
+  @ApiPropertyOptional({ maxLength: 2000, readOnly: true })
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  customClauses?: string | null
 }
 
 export class SaveContractCommercialDraftDto {
@@ -116,6 +123,13 @@ export class ContractCommercialEditorResponseDto {
 
   @ApiProperty()
   locked!: boolean
+
+  @ApiProperty({
+    type: [String],
+    description:
+      'Trường chỉ đổi khi khách đồng ý (rỗng nếu hợp đồng không có gói thuê làm mốc)',
+  })
+  consentRequiredFields!: string[]
 }
 
 export class ContractCommercialValidationDto {

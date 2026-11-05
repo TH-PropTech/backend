@@ -34,6 +34,44 @@ describe('buildCanonicalContractPayload', () => {
     expect(payload.layout).toBeNull()
   })
 
+  it('leaves the digest of a contract without custom clauses unchanged', () => {
+    const legacy = hashCanonicalContractPayload(
+      buildCanonicalContractPayload(contract)
+    )
+    for (const customClauses of [undefined, null, '']) {
+      const same = Object.assign(new Contract(), contract, { customClauses })
+      expect(
+        hashCanonicalContractPayload(buildCanonicalContractPayload(same))
+      ).toBe(legacy)
+    }
+    expect(
+      buildCanonicalContractPayload(contract).commercial
+    ).not.toHaveProperty('customClauses')
+  })
+
+  it('keeps the digest of a stored legacy contract identical to the pre-change value', () => {
+    const legacy = Object.assign(new Contract(), contract, {
+      _id: new ObjectId('507f1f77bcf86cd799439011'),
+      contractCode: 'HD-LEGACY-1',
+    })
+    // Giá trị này được tính bằng mã trước khi thêm customClauses (HEAD) và bằng mã hiện tại: hai kết quả trùng nhau.
+    expect(
+      hashCanonicalContractPayload(buildCanonicalContractPayload(legacy))
+    ).toBe('1b7bda7bd68ced1c036c6558ab4aa592f53570ab1c0d793c1404eef5c0d555f7')
+  })
+
+  it('changes the digest when the custom clauses change', () => {
+    const withClauses = (customClauses: string): string =>
+      hashCanonicalContractPayload(
+        buildCanonicalContractPayload(
+          Object.assign(new Contract(), contract, { customClauses })
+        )
+      )
+    expect(withClauses('Không nuôi thú cưng.')).not.toBe(
+      withClauses('Được nuôi thú cưng.')
+    )
+  })
+
   it('uses v3 and changes the digest when the layout snapshot changes', () => {
     const first = Object.assign(new Contract(), contract, {
       hashSchemaVersion: 3,

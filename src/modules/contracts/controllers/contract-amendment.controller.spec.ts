@@ -15,7 +15,7 @@ function getMethodTarget(prototype: object, methodName: string): object {
 }
 
 describe('ContractAmendmentController', () => {
-  it('keeps create staff-only and delegates participant signing context', async () => {
+  it('opens create to participants, keeps lock and artifact staff-only and delegates participant signing context', async () => {
     const service = {
       create: jest.fn().mockResolvedValue({ sequence: 1 }),
       sign: jest.fn().mockResolvedValue({ status: 'effective' }),
@@ -56,7 +56,19 @@ describe('ContractAmendmentController', () => {
         ROLES_KEY,
         getMethodTarget(ContractAmendmentController.prototype, 'create')
       )
-    ).toEqual(['admin', 'staff'])
+    ).toEqual(['admin', 'staff', 'landlord', 'tenant'])
+    for (const method of [
+      'lock',
+      'lockArtifact',
+      'cancel',
+      'update',
+    ] as const) {
+      const target = getMethodTarget(
+        ContractAmendmentController.prototype,
+        method
+      )
+      expect(Reflect.getMetadata(ROLES_KEY, target)).toEqual(['admin', 'staff'])
+    }
   })
 
   it('resolves landlord signing from the contract relationship when JWT has both roles', async () => {

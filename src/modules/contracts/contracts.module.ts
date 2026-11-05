@@ -41,6 +41,9 @@ import { ContractCommercialEditorController } from './controllers/contract-comme
 import { ContractAmendmentService } from './services/contract-amendment.service'
 import { ContractAmendmentStore } from './services/contract-amendment.store'
 import { ContractAmendmentController } from './controllers/contract-amendment.controller'
+import { ContractChangeRequestController } from './controllers/contract-change-request.controller'
+import { ContractChangeRequestService } from './services/contract-change-request.service'
+import { ContractChangeRequest } from './schemas/contract-change-request.schema'
 import { DepositConfirmationResolver } from './services/deposit-confirmation.resolver'
 import { FlowNotificationService } from './flow/flow-notification.service'
 import { NotificationsModule } from '../notifications/notifications.module'
@@ -67,6 +70,7 @@ import { WalletsModule } from '../wallets/wallets.module'
   imports: [
     TypeOrmModule.forFeature([
       Contract,
+      ContractChangeRequest,
       SmartCaSigningSession,
       DepositAgreement,
       Apartment,
@@ -99,6 +103,7 @@ import { WalletsModule } from '../wallets/wallets.module'
     ContractTemplatesController,
     ContractCommercialEditorController,
     ContractAmendmentController,
+    ContractChangeRequestController,
     ContractLayoutsController,
     OwnershipTransferController,
   ],
@@ -132,6 +137,7 @@ import { WalletsModule } from '../wallets/wallets.module'
     ContractCommercialEditorService,
     ContractAmendmentService,
     ContractAmendmentStore,
+    ContractChangeRequestService,
     DepositConfirmationResolver,
     {
       provide: CONTRACT_ARTIFACT_STORAGE,

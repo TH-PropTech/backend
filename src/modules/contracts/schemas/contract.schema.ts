@@ -48,7 +48,14 @@ export type ContractCommercialDraft = {
   inventoryReference?: string | null
   noticePeriodDays?: number | null
   addendaIds?: string[]
+  /** Điều khoản riêng của chủ nhà; chỉ đổi qua yêu cầu chỉnh sửa hoặc phụ lục. */
+  customClauses?: string | null
 }
+
+export type ConsentedContractTerms = Pick<
+  ContractCommercialDraft,
+  'monthlyRent' | 'deposit' | 'durationMonths'
+>
 
 export type ContractCommercialAuditEvent = {
   actorId: string
@@ -181,6 +188,10 @@ export class Contract {
   /** Số ngày báo trước khi đơn phương chấm dứt — validate với MIN_TERMINATION_NOTICE_DAYS */
   @Column()
   terminationNoticeDays!: number
+
+  /** Điều khoản riêng của chủ nhà lấy từ gói thuê, hiển thị như phụ lục ngoài 12 điều khung. */
+  @Column({ nullable: true })
+  customClauses?: string | null
 
   // ── Trạng thái ký kết ──
 
@@ -331,6 +342,10 @@ export class Contract {
 
   @Column('json', { nullable: true })
   commercialAudit?: ContractCommercialAuditEvent[] | null
+
+  /** Giá, cọc, kỳ hạn đã được khách đồng ý qua yêu cầu chỉnh sửa; vắng mặt = giá trị trong packageSnapshot. */
+  @Column('json', { nullable: true })
+  consentedTerms?: ConsentedContractTerms | null
 
   /** Server-owned current terms projection; the immutable base fields remain unchanged. */
   @Column('json', { nullable: true })

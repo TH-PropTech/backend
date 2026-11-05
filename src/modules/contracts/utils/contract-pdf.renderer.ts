@@ -12,6 +12,7 @@ import {
 } from './contract-pdf.blocks'
 import { buildRentSchedule } from './contract-payment-schedule'
 import { vndInWords } from '../legal/vnd-in-words'
+import { CUSTOM_CLAUSES_ANNEX_ID } from '../legal/lease-template.manifest'
 
 export const CONTRACT_PDF_RENDERER_VERSION = 'th-proptech-pdf-v4'
 
@@ -441,6 +442,13 @@ export function renderContractPdf(
           })
         }
         pdf.moveDown(1)
+        for (const annex of document.annexes) {
+          if (annex.id !== CUSTOM_CLAUSES_ANNEX_ID || !annex.description)
+            continue
+          paragraph(annex.title, { font: FONT_BOLD, align: 'left' })
+          clauseBody(annex.description)
+          pdf.moveDown(0.5)
+        }
       }
 
       // Khối chữ ký: giữ nguyên trên cùng một trang.

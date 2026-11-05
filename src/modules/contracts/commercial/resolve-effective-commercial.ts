@@ -20,5 +20,8 @@ export function resolveEffectiveCommercial(
     latePenaltyRate: contract.latePenaltyRate,
     terminationNoticeDays: contract.terminationNoticeDays,
     durationMonths: contract.durationMonths ?? 12,
+    ...(contract.customClauses
+      ? { customClauses: contract.customClauses }
+      : {}),
   }
 }

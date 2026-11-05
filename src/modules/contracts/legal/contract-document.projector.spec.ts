@@ -53,6 +53,35 @@ describe('ContractDocumentProjector', () => {
     expect(result.sections[7]!.content).toContain('36.000.000 VNĐ')
   })
 
+  describe('landlord custom clauses annex', () => {
+    const clauses = 'Không nuôi thú cưng. Giờ yên tĩnh 22:00 đến 06:00.'
+
+    it('adds a dedicated annex after the required articles and annexes', () => {
+      const result = ContractDocumentProjector.projectDocument({
+        ...mockContract,
+        customClauses: clauses,
+      } as Contract)
+
+      expect(result.sections).toHaveLength(12)
+      expect(result.annexes).toHaveLength(5)
+      const annex = result.annexes[4]!
+      expect(annex.id).toBe('LANDLORD_CUSTOM_CLAUSES')
+      expect(annex.required).toBe(false)
+      expect(annex.description).toContain(clauses)
+      expect(annex.description).toContain('12 điều bắt buộc được ưu tiên')
+    })
+
+    it('adds no annex when the clauses are empty or blank', () => {
+      for (const customClauses of [undefined, null, '   ']) {
+        const result = ContractDocumentProjector.projectDocument({
+          ...mockContract,
+          customClauses,
+        } as Contract)
+        expect(result.annexes).toHaveLength(4)
+      }
+    })
+  })
+
   it('should project a locked contract with mode=locked and integrity=valid', () => {
     const lockedContract: Partial<Contract> = {
       ...mockContract,

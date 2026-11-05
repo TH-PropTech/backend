@@ -51,6 +51,10 @@ import {
 import { resolveDepositConfirmation } from './deposit-confirmation.resolver'
 import { evaluateLockContent } from '../flow/flow-guards'
 import { FlowNotificationService } from '../flow/flow-notification.service'
+import {
+  loadLeaseComplianceLimits,
+  validateLeaseCompliance,
+} from '../legal/lease-compliance.validator'
 import { resolveEffectiveCommercial } from '../commercial/resolve-effective-commercial'
 import { MoveInSettlementsService } from '../../rental/services/move-in-settlements.service'
 import { ContractLayoutService } from '../layout/contract-layout.service'
@@ -397,9 +401,11 @@ export class ContractsService {
       input.packageSnapshot.resolvedPrepaidRentMonths ?? null
     contract.monthlyRent = input.packageSnapshot.monthlyRent
     contract.deposit = input.packageSnapshot.resolvedDepositAmount
-    contract.paymentDay = 1
-    contract.latePenaltyRate = 0
-    contract.terminationNoticeDays = 30
+    contract.paymentDay = input.packageSnapshot.paymentDay ?? 1
+    contract.latePenaltyRate = input.packageSnapshot.latePenaltyRate ?? 0
+    contract.terminationNoticeDays =
+      input.packageSnapshot.terminationNoticeDays ?? 30
+    contract.customClauses = input.packageSnapshot.customClauses ?? null
     contract.status = 'draft'
     contract.legacyFlow = false
     contract.signedByTenant = false
@@ -440,49 +446,20 @@ export class ContractsService {
   // ── Tạo hợp đồng mới — validate theo chính sách pháp luật ──
 
   async createContract(input: CreateContractInput): Promise<Contract> {
-    // Bước 1: Đọc chính sách pháp luật hiện hành từ MongoDB
-    const [maxInterestRate, minNoticeDays, maxDepositPercent] =
-      await Promise.all([
-        this.policiesService.getValue(
-          'MAX_LATE_PAYMENT_INTEREST_RATE_YEAR',
-          '20'
-        ),
-        this.policiesService.getValue('MIN_TERMINATION_NOTICE_DAYS', '30'),
-        this.policiesService.getValue('MAX_DEPOSIT_LIMIT_PERCENT', '5'),
-      ])
-
-    // Bước 2: Kiểm tra tuân thủ pháp luật (Compliance Check)
-    const violations: string[] = []
-
-    if (input.latePenaltyRate > Number(maxInterestRate)) {
-      violations.push(
-        `Lãi suất phạt chậm đóng ${input.latePenaltyRate}%/năm vượt mức tối đa ${maxInterestRate}%/năm ` +
-          `theo Khoản 1 Điều 468 Bộ luật Dân sự 2015`
-      )
-    }
-
-    if (input.terminationNoticeDays < Number(minNoticeDays)) {
-      violations.push(
-        `Thời hạn báo trước chấm dứt ${input.terminationNoticeDays} ngày thấp hơn tối thiểu ${minNoticeDays} ngày ` +
-          `theo Khoản 3 Điều 130 Luật Nhà ở 2023`
-      )
-    }
-
-    if (input.propertyValue > 0) {
-      const depositPercent = (input.deposit / input.propertyValue) * 100
-      if (depositPercent > Number(maxDepositPercent)) {
-        violations.push(
-          `Tiền cọc ${input.deposit.toLocaleString('vi-VN')}đ chiếm ${depositPercent.toFixed(1)}% giá trị tài sản, ` +
-            `vượt mức tối đa ${maxDepositPercent}% theo Khoản 5 Điều 23 Luật KDBDS 2023`
-        )
-      }
-    }
-
+    // Bước 1-2: Đọc chính sách pháp luật hiện hành rồi kiểm tra tuân thủ
     const start = new Date(input.startDate)
     const end = new Date(input.endDate)
-    if (end <= start) {
-      violations.push('Ngày kết thúc hợp đồng phải sau ngày bắt đầu')
-    }
+    const violations = validateLeaseCompliance(
+      {
+        latePenaltyRate: input.latePenaltyRate,
+        terminationNoticeDays: input.terminationNoticeDays,
+        deposit: input.deposit,
+        propertyValue: input.propertyValue,
+        startDate: start,
+        endDate: end,
+      },
+      await loadLeaseComplianceLimits(this.policiesService)
+    )
 
     if (violations.length > 0) {
       throw new BadRequestException({

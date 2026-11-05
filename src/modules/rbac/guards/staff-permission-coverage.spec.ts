@@ -168,7 +168,7 @@ const TABLE: Array<[string, Ctor, Expect[]]> = [
     'ContractAmendmentController',
     ContractAmendmentController,
     [
-      ['POST', '/', 'create', 'Contract'],
+      // POST '/' không qua ma trận: chủ nhà và khách tạo phụ lục theo tư cách bên tham gia (kiểm tra ở service).
       ['PUT', ':amendmentId', 'update', 'Contract'],
       ['POST', ':amendmentId/lock', 'update', 'Contract'],
       ['POST', ':amendmentId/artifact', 'update', 'Contract'],

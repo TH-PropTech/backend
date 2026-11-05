@@ -119,6 +119,18 @@ function toRentalPackageInputs(
         ? { settlementPolicy: normalizedSettlementPolicy }
         : {}),
       ...(prepaidRent ? { prepaidRent } : {}),
+      ...(packageItem.paymentDay !== undefined
+        ? { paymentDay: packageItem.paymentDay }
+        : {}),
+      ...(packageItem.latePenaltyRate !== undefined
+        ? { latePenaltyRate: packageItem.latePenaltyRate }
+        : {}),
+      ...(packageItem.terminationNoticeDays !== undefined
+        ? { terminationNoticeDays: packageItem.terminationNoticeDays }
+        : {}),
+      ...(packageItem.customClauses
+        ? { customClauses: packageItem.customClauses }
+        : {}),
       ...(packageItem.moveOutPolicy
         ? {
             moveOutPolicy: {

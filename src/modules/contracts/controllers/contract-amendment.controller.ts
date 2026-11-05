@@ -45,9 +45,9 @@ export class ContractAmendmentController {
     return this.amendmentService.list(contractId, this.actor(user))
   }
 
+  /** Chủ nhà và khách tự khởi tạo phụ lục; quyền được kiểm tra theo bên tham gia ở service. */
   @Post()
-  @RequirePermission('create', 'Contract')
-  @Roles('admin', 'staff')
+  @Roles('admin', 'staff', 'landlord', 'tenant')
   create(
     @Param('contractId') contractId: string,
     @Body() dto: CreateContractAmendmentDto,
