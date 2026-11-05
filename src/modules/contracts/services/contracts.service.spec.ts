@@ -1762,3 +1762,64 @@ describe('ContractsService contract ownership', () => {
     expect(repository.findOne).not.toHaveBeenCalled()
   })
 })
+
+describe('ContractsService draft lease terms from the package snapshot', () => {
+  const baseInput = {
+    rentalApplicationId: 'app-terms',
+    depositAgreementId: 'dpa-terms',
+    propertyId: 'apt-1',
+    propertyTitle: 'Sunrise',
+    propertyAddress: '1 Example',
+    propertyArea: 68,
+    propertyFurniture: null,
+    landlordId: 'landlord-1',
+    tenantId: 'tenant-1',
+    moveInDate: new Date('2030-01-01'),
+    packageSnapshot: {
+      packageId: 'pkg-12',
+      version: 1,
+      durationMonths: 12 as const,
+      monthlyRent: 12_000_000,
+      depositPolicy: { type: 'MONTHS_OF_RENT' as const, months: 2 },
+      resolvedDepositAmount: 24_000_000,
+      currency: 'VND' as const,
+    },
+  }
+
+  function createService(): ContractsService {
+    const repository = {
+      findOne: jest.fn().mockResolvedValue(null),
+      save: jest.fn((value: unknown) => Promise.resolve(value)),
+    }
+    const service = Object.create(
+      ContractsService.prototype
+    ) as ContractsService
+    Reflect.set(service, 'contractRepository', repository)
+    return service
+  }
+
+  it('copies payment day, penalty, notice and custom clauses from the snapshot', async () => {
+    const draft = await createService().createDraftFromApplication({
+      ...baseInput,
+      packageSnapshot: {
+        ...baseInput.packageSnapshot,
+        paymentDay: 5,
+        latePenaltyRate: 10,
+        terminationNoticeDays: 45,
+        customClauses: 'Không nuôi thú cưng.',
+      },
+    })
+    expect(draft.paymentDay).toBe(5)
+    expect(draft.latePenaltyRate).toBe(10)
+    expect(draft.terminationNoticeDays).toBe(45)
+    expect(draft.customClauses).toBe('Không nuôi thú cưng.')
+  })
+
+  it('falls back to 1 / 0 / 30 and no clauses for a legacy snapshot', async () => {
+    const draft = await createService().createDraftFromApplication(baseInput)
+    expect(draft.paymentDay).toBe(1)
+    expect(draft.latePenaltyRate).toBe(0)
+    expect(draft.terminationNoticeDays).toBe(30)
+    expect(draft.customClauses).toBeNull()
+  })
+})

@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { createHash } from 'node:crypto'
+import { MAX_CUSTOM_CLAUSES_LENGTH } from '../legal/lease-compliance.validator'
 import { Repository } from 'typeorm'
 import { ObjectId } from 'mongodb'
 import {
@@ -37,6 +38,7 @@ const AMENDABLE_FIELDS = new Set<keyof ContractCommercialDraft>([
   'inventoryReference',
   'noticePeriodDays',
   'addendaIds',
+  'customClauses',
 ])
 
 type AmendmentActor = {
@@ -84,6 +86,9 @@ export class ContractAmendmentService {
       ['terminated', 'cancelled', 'completed'].includes(contract.status ?? '')
     ) {
       throw new ConflictException('CONTRACT_AMENDMENT_STATE_CLOSED')
+    }
+    if (!actor.isStaff && !this.isContentLocked(contract)) {
+      throw new ConflictException('CONTRACT_AMENDMENT_USE_CHANGE_REQUEST')
     }
     if (input.idempotencyKey) {
       const existing = await this.amendmentRepository.findOne({
@@ -515,6 +520,9 @@ export class ContractAmendmentService {
         latePenaltyRate: contract.latePenaltyRate,
         terminationNoticeDays: contract.terminationNoticeDays,
         durationMonths: contract.durationMonths ?? 12,
+        ...(contract.customClauses
+          ? { customClauses: contract.customClauses }
+          : {}),
       }
     )
   }
@@ -532,6 +540,13 @@ export class ContractAmendmentService {
       next[change.field as keyof ContractCommercialDraft] =
         change.after as never
     }
+    const clauses = next.customClauses
+    if (
+      clauses != null &&
+      (typeof clauses !== 'string' ||
+        clauses.length > MAX_CUSTOM_CLAUSES_LENGTH)
+    )
+      throw new BadRequestException('CONTRACT_AMENDMENT_FIELD_NOT_ALLOWED')
     return next
   }
 
@@ -583,6 +598,15 @@ export class ContractAmendmentService {
     })
     if (!contract) throw new NotFoundException('CONTRACT_NOT_FOUND')
     return contract
+  }
+
+  /** Hợp đồng nháp chưa khóa đi qua yêu cầu chỉnh sửa, chỉ hợp đồng đã khóa hoặc đã ký mới có phụ lục. */
+  private isContentLocked(contract: Contract): boolean {
+    return Boolean(
+      contract.contentLockedHash ||
+      contract.contentLockedAt ||
+      contract.status === 'active'
+    )
   }
 
   private assertStaffOrParticipant(

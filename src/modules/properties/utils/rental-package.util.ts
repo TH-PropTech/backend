@@ -39,6 +39,10 @@ export type SettlementPolicyInput = {
 }
 
 import {
+  MAX_CUSTOM_CLAUSES_LENGTH,
+  validateLeaseCompliance,
+} from '../../contracts/legal/lease-compliance.validator'
+import {
   DEFAULT_MOVE_OUT_RESPONSE_DAYS,
   MAX_MOVE_OUT_RESPONSE_DAYS,
   MIN_MOVE_OUT_RESPONSE_DAYS,
@@ -56,6 +60,10 @@ export type RentalPackageInput = {
   depositPolicy: DepositPolicyInput
   status: 'active' | 'inactive'
   settlementPolicy?: SettlementPolicyInput
+  paymentDay?: number
+  latePenaltyRate?: number
+  terminationNoticeDays?: number
+  customClauses?: string
   prepaidRent?: PrepaidRentInput
   moveOutPolicy?: MoveOutPolicy
   allowedExecutionPolicies?: RentalExecutionPolicyRef[]
@@ -69,6 +77,11 @@ export type RentalPackageSnapshot = {
   monthlyRent: number
   depositPolicy: DepositPolicyInput
   resolvedDepositAmount: number
+  /** Điều khoản hợp đồng do chủ nhà đặt. Vắng mặt = gói cũ (1 / 0 / 30 / rỗng). */
+  paymentDay?: number
+  latePenaltyRate?: number
+  terminationNoticeDays?: number
+  customClauses?: string
   settlementPolicy?: SettlementPolicyInput
   resolvedHoldingDepositAmount?: number
   resolvedSecurityTopUpAmount?: number
@@ -253,6 +266,39 @@ export function calculateRepresentativeMonthlyRent(
   return activeRents.length > 0 ? Math.min(...activeRents) : null
 }
 
+type LeaseTermsFields = Pick<
+  RentalPackageInput,
+  'paymentDay' | 'latePenaltyRate' | 'terminationNoticeDays' | 'customClauses'
+>
+
+/** Kiểm tra điều khoản hợp đồng do chủ nhà đặt và chỉ giữ lại các trường được nhập. */
+function resolveLeaseTerms(packageItem: LeaseTermsFields): LeaseTermsFields {
+  const { paymentDay, latePenaltyRate, terminationNoticeDays } = packageItem
+  const customClauses = packageItem.customClauses?.trim()
+  if (
+    paymentDay !== undefined &&
+    (!Number.isInteger(paymentDay) || paymentDay < 1 || paymentDay > 31)
+  ) {
+    throw new Error('INVALID_RENTAL_PACKAGE: invalid payment day')
+  }
+  if (customClauses && customClauses.length > MAX_CUSTOM_CLAUSES_LENGTH) {
+    throw new Error('INVALID_RENTAL_PACKAGE: custom clauses too long')
+  }
+  const violations = validateLeaseCompliance({
+    latePenaltyRate: latePenaltyRate ?? 0,
+    terminationNoticeDays: terminationNoticeDays ?? 30,
+  })
+  if (violations.length > 0) {
+    throw new Error(`INVALID_RENTAL_PACKAGE: ${violations.join('; ')}`)
+  }
+  return {
+    ...(paymentDay !== undefined ? { paymentDay } : {}),
+    ...(latePenaltyRate !== undefined ? { latePenaltyRate } : {}),
+    ...(terminationNoticeDays !== undefined ? { terminationNoticeDays } : {}),
+    ...(customClauses ? { customClauses } : {}),
+  }
+}
+
 export function validateRentalPackages(
   packages: RentalPackageInput[]
 ): RentalPackageValidationResult {
@@ -314,6 +360,7 @@ export function validateRentalPackages(
       ...settlementSnapshot,
       ...prepaidSnapshot,
       moveOutPolicy: resolveMoveOutPolicy(packageItem.moveOutPolicy),
+      ...resolveLeaseTerms(packageItem),
       ...(packageItem.allowedExecutionPolicies
         ? { allowedExecutionPolicies: packageItem.allowedExecutionPolicies }
         : {}),

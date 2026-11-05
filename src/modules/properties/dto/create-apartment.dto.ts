@@ -174,6 +174,48 @@ export class RentalPackageDto {
   @Type(() => MoveOutPolicyDto)
   moveOutPolicy?: MoveOutPolicyDto
 
+  @ApiPropertyOptional({
+    minimum: 1,
+    maximum: 31,
+    description: 'Ngày thanh toán hằng tháng. Vắng mặt = 1',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(31)
+  paymentDay?: number
+
+  @ApiPropertyOptional({
+    minimum: 0,
+    maximum: 20,
+    description: 'Lãi phạt chậm đóng (%/năm). Vắng mặt = 0',
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(20)
+  latePenaltyRate?: number
+
+  @ApiPropertyOptional({
+    minimum: 30,
+    maximum: 365,
+    description: 'Số ngày báo trước khi chấm dứt. Vắng mặt = 30',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(30)
+  @Max(365)
+  terminationNoticeDays?: number
+
+  @ApiPropertyOptional({
+    maxLength: 2000,
+    description: 'Điều khoản riêng của chủ nhà, hiển thị như phụ lục hợp đồng',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  customClauses?: string
+
   @ApiPropertyOptional({ description: 'Số tháng trả trước đã quy đổi' })
   @IsOptional()
   @IsNumber()

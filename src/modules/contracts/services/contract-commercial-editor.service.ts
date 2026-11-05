@@ -20,6 +20,23 @@ import type {
 } from '../dto/contract-commercial-editor.dto'
 import { isUtilityParty } from '../dto/contract-commercial-editor.dto'
 import { DepositAgreementsService } from './deposit-agreements.service'
+import { PoliciesService } from '../../legal/services/policies.service'
+import {
+  loadLeaseComplianceLimits,
+  validateLeaseCompliance,
+  type LeaseComplianceLimits,
+} from '../legal/lease-compliance.validator'
+import {
+  CONSENT_REQUIRED_FIELDS,
+  resolveConsentedTerms,
+} from '../commercial/resolve-consented-terms'
+import type { ConsentedContractTerms } from '../schemas/contract.schema'
+
+type ValidationContext = {
+  consentedTerms: ConsentedContractTerms | null
+  limits: LeaseComplianceLimits | undefined
+  propertyValue: number | undefined
+}
 
 export const PROTECTED_CONTRACT_EDITOR_FIELDS = Object.freeze([
   'legalProfile',
@@ -35,6 +52,7 @@ export const PROTECTED_CONTRACT_EDITOR_FIELDS = Object.freeze([
   'tenantSignature',
   'landlordSignature',
   'ledgerStatus',
+  'customClauses',
 ])
 
 const ALLOWED_ADDENDA = new Set([
@@ -64,7 +82,8 @@ export class ContractCommercialEditorService {
     @InjectRepository(Contract)
     private readonly contractRepository: Repository<Contract>,
     @Optional()
-    private readonly depositAgreementsService?: DepositAgreementsService
+    private readonly depositAgreementsService?: DepositAgreementsService,
+    @Optional() private readonly policiesService?: PoliciesService
   ) {}
 
   async getEditor(
@@ -87,7 +106,8 @@ export class ContractCommercialEditorService {
     this.assertAdmin(actorId, isAdmin)
     return this.validation(
       input,
-      contract.commercialDraft ?? this.baseCommercial(contract)
+      contract.commercialDraft ?? this.baseCommercial(contract),
+      await this.validationContext(contract)
     )
   }
 
@@ -114,7 +134,11 @@ export class ContractCommercialEditorService {
       throw new ConflictException('CONTRACT_COMMERCIAL_REVISION_STALE')
     }
     const current = contract.commercialDraft ?? this.baseCommercial(contract)
-    const validation = this.validation(input, current)
+    const validation = this.validation(
+      input,
+      current,
+      await this.validationContext(contract)
+    )
     if (!validation.valid)
       throw new ConflictException(validation.errors.join(','))
     if (
@@ -137,15 +161,33 @@ export class ContractCommercialEditorService {
       afterHash,
       createdAt: new Date(),
     }
-    contract.commercialDraft = this.cloneDraft(input)
+    contract.commercialDraft = {
+      ...this.cloneDraft(input),
+      ...(current.customClauses
+        ? { customClauses: current.customClauses }
+        : {}),
+    }
     contract.commercialRevision = auditEvent.revision
     contract.commercialAudit = [...(contract.commercialAudit ?? []), auditEvent]
     return this.toResponse(await this.contractRepository.save(contract))
   }
 
+  private async validationContext(
+    contract: Contract
+  ): Promise<ValidationContext> {
+    return {
+      consentedTerms: resolveConsentedTerms(contract),
+      limits: this.policiesService
+        ? await loadLeaseComplianceLimits(this.policiesService)
+        : undefined,
+      propertyValue: contract.propertyValue,
+    }
+  }
+
   private validation(
     input: ContractCommercialDraft,
-    previous?: ContractCommercialDraft | null
+    previous: ContractCommercialDraft | null | undefined,
+    context: ValidationContext
   ): ContractCommercialValidationDto {
     const errors: string[] = []
     if (
@@ -179,8 +221,30 @@ export class ContractCommercialEditorService {
       Object.values(input.utilities).some(value => !isUtilityParty(value))
     )
       errors.push('UTILITY_PARTY_INVALID')
+    if (this.changesConsentedTerms(input, context.consentedTerms)) {
+      errors.push('CONTRACT_CONSENT_REQUIRED')
+    }
+    errors.push(
+      ...validateLeaseCompliance(
+        {
+          latePenaltyRate: input.latePenaltyRate,
+          terminationNoticeDays: input.terminationNoticeDays,
+          deposit: input.deposit,
+          propertyValue: context.propertyValue,
+        },
+        context.limits
+      )
+    )
     const changedFields = this.changedFields(previous, input)
     return { valid: errors.length === 0, errors, changedFields }
+  }
+
+  private changesConsentedTerms(
+    input: ContractCommercialDraft,
+    terms: ConsentedContractTerms | null
+  ): boolean {
+    if (!terms) return false
+    return CONSENT_REQUIRED_FIELDS.some(field => input[field] !== terms[field])
   }
 
   private changedFields(
@@ -202,6 +266,9 @@ export class ContractCommercialEditorService {
       commercial: contract.commercialDraft ?? this.baseCommercial(contract),
       protectedFields: [...PROTECTED_CONTRACT_EDITOR_FIELDS],
       locked: Boolean(contract.contentLockedHash || contract.contentLockedAt),
+      consentRequiredFields: resolveConsentedTerms(contract)
+        ? [...CONSENT_REQUIRED_FIELDS]
+        : [],
     }
   }
 
@@ -217,6 +284,9 @@ export class ContractCommercialEditorService {
       latePenaltyRate: contract.latePenaltyRate,
       terminationNoticeDays: contract.terminationNoticeDays,
       durationMonths: contract.durationMonths ?? 12,
+      ...(contract.customClauses
+        ? { customClauses: contract.customClauses }
+        : {}),
     }
   }
 
