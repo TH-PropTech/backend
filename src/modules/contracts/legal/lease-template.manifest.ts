@@ -3,6 +3,12 @@ import type { LegalProfile } from './legal-profile.resolver'
 /** Phụ lục chứa điều khoản riêng của chủ nhà; luôn nằm sau 12 điều khung và không thay thế điều nào. */
 export const CUSTOM_CLAUSES_ANNEX_ID = 'LANDLORD_CUSTOM_CLAUSES'
 
+/** Phụ lục danh sách người ở kèm, sinh từ dữ liệu hợp đồng; không thay đổi 12 điều khung. */
+export const OCCUPANTS_ANNEX_ID = 'LEASE_OCCUPANTS'
+
+/** Phụ lục đơn giá điện, nước, dịch vụ thỏa thuận và nguyên tắc tính khi bàn giao lại nhà. */
+export const UTILITY_RATES_ANNEX_ID = 'LEASE_UTILITY_RATES'
+
 export const LEASE_ARTICLE_NUMBERS = Object.freeze(
   Array.from({ length: 12 }, (_, index) => index + 1)
 )

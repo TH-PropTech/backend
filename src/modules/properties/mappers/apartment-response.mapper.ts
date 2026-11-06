@@ -162,6 +162,7 @@ export interface LandlordApartmentResponse {
   priceMonthly: number
   area: number
   bedrooms: number
+  maxOccupants: number | null
   bathrooms: number
   direction: string
   balconyDirection: string
@@ -227,6 +228,7 @@ export class ApartmentResponseMapper {
       priceMonthly: apartment.priceMonthly,
       area: apartment.area,
       bedrooms: apartment.bedrooms,
+      maxOccupants: apartment.maxOccupants ?? null,
       bathrooms: apartment.bathrooms,
       direction: apartment.direction ?? '',
       balconyDirection: apartment.balconyDirection ?? '',

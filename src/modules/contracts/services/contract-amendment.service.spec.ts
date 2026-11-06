@@ -279,6 +279,50 @@ describe('ContractAmendmentService', () => {
     )
   })
 
+  it('applies agreed occupants and the surcharge to future unpaid rent only', async () => {
+    const { service, contract, amendment, payments } = setup()
+    const added = [
+      { fullName: 'Trần Thị B', birthYear: 2000, relationship: 'Chị' },
+    ]
+    amendment.afterSnapshot = {
+      ...baseCommercial,
+      monthlyRent: 15_300_000,
+      occupants: added,
+    }
+    amendment.effectiveFrom = new Date(Date.now() - 86_400_000)
+    amendment.artifactHash = 'c'.repeat(64)
+    amendment.artifactRef = {
+      artifactId: 'artifact-1',
+      revision: 1,
+      artifactHash: amendment.artifactHash,
+      canonicalContentHash: amendment.contentHash ?? '',
+      rendererVersion: 'renderer-v1',
+      sourceSchemaVersion: 2,
+      byteLength: 100,
+      contentType: 'application/pdf',
+      lockedAt: new Date(),
+    }
+    amendment.revision = 2
+    amendment.status = 'pending-signature'
+    const id = amendment._id.toHexString()
+    const hash = amendment.artifactHash
+    await service.sign(contractId.toHexString(), id, 2, hash, {
+      actorId: 'tenant-1',
+      isStaff: false,
+      role: 'tenant',
+    })
+    await service.sign(contractId.toHexString(), id, 3, hash, {
+      actorId: 'landlord-1',
+      isStaff: false,
+      role: 'landlord',
+    })
+    expect(contract.effectiveCommercial).toEqual(
+      expect.objectContaining({ monthlyRent: 15_300_000, occupants: added })
+    )
+    expect(payments[0]!.amount).toBe(15_300_000)
+    expect(payments[1]!.amount).toBe(15_000_000)
+  })
+
   it('rejects a pending amendment without changing the governing commercial terms', async () => {
     const { service, amendment, contract } = setup()
     amendment.status = 'pending-signature'
@@ -516,6 +560,53 @@ describe('ContractAmendmentService participant creation', () => {
         }),
       ],
     })
+  })
+
+  it('amends occupants with a before/after diff and rejects malformed lists', async () => {
+    const existing = [
+      { fullName: 'Nguyễn Văn A', birthYear: 1995, relationship: 'Bạn' },
+    ]
+    const added = [
+      ...existing,
+      { fullName: 'Trần Thị B', birthYear: 2000, relationship: 'Chị' },
+    ]
+    const created = await build({ occupants: existing }).create(
+      contractId.toHexString(),
+      {
+        changes: [{ field: 'occupants', after: added }],
+        effectiveFrom: future(),
+      },
+      landlord
+    )
+    expect(created.changes).toEqual([
+      expect.objectContaining({
+        field: 'occupants',
+        before: existing,
+        after: added,
+      }),
+    ])
+    await expect(
+      build().create(
+        contractId.toHexString(),
+        {
+          changes: [{ field: 'occupants', after: [{ fullName: '' }] }],
+          effectiveFrom: future(),
+        },
+        landlord
+      )
+    ).rejects.toThrow('CONTRACT_AMENDMENT_OCCUPANTS_INVALID')
+    await expect(
+      build().create(
+        contractId.toHexString(),
+        {
+          changes: [
+            { field: 'utilityRates', after: { electricityPerKwh: -5 } },
+          ],
+          effectiveFrom: future(),
+        },
+        landlord
+      )
+    ).rejects.toThrow('CONTRACT_AMENDMENT_UTILITY_RATES_INVALID')
   })
 
   it('rejects custom clauses above 2000 characters', async () => {

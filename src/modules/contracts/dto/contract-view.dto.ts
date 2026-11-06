@@ -1,4 +1,4 @@
-import { ApiProperty } from '@nestjs/swagger'
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
 import type { LegalProfile } from '../legal/legal-profile.resolver'
 import type { MoveInSettlement } from '../../rental/schemas/move-in-settlement.schema'
 
@@ -40,6 +40,25 @@ export class ContractCommercialSnapshotDto {
 
   @ApiProperty()
   terminationNoticeDays!: number
+
+  @ApiPropertyOptional({
+    description: 'Người ở kèm ngoài người thuê (họ tên, năm sinh, quan hệ)',
+  })
+  occupants?: Array<{
+    fullName: string
+    birthYear: number
+    relationship: string
+  }>
+
+  @ApiPropertyOptional({
+    description: 'Đơn giá điện, nước, dịch vụ hai bên đã thỏa thuận',
+  })
+  utilityRates?: {
+    electricityPerKwh: number
+    waterPerM3: number
+    serviceFeeMonthly: number
+    note?: string
+  }
 }
 
 export class ContractExecutionPolicyViewDto {

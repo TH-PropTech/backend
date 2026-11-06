@@ -287,6 +287,15 @@ describe('RentalApplicationsService', () => {
     expect(repository.save).not.toHaveBeenCalled()
   })
 
+  it('rejects occupants above the apartment maxOccupants', async () => {
+    apartments.findOne.mockResolvedValue({ ...apartment, maxOccupants: 4 })
+
+    await expect(
+      service.create('tenant-1', input({ occupants: 5 }))
+    ).rejects.toThrow('Căn hộ này cho phép tối đa 4 người ở.')
+    expect(repository.save).not.toHaveBeenCalled()
+  })
+
   it('masks the other party fee line in application responses', async () => {
     const stored = application({
       emergencyContact: {

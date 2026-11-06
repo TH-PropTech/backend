@@ -41,6 +41,7 @@ function setup(
   options: {
     contract?: Partial<Contract> | null
     baseline?: boolean
+    baselineMeter?: { electricity: number; water: number }
     anchor?: boolean
     existing?: MoveOutHandover[]
   } = {}
@@ -69,6 +70,9 @@ function setup(
             contractId: CID,
             handover: {
               completedAt: NOW,
+              ...(options.baselineMeter
+                ? { meterReadings: options.baselineMeter }
+                : {}),
               inventoryItems: [
                 { name: 'sofa', quantity: 1, condition: 'good', note: 'Mới' },
               ],
@@ -120,6 +124,43 @@ describe('MoveOutHandoversService', () => {
         expect.any(String),
         expect.objectContaining({ contractId: CID })
       )
+    })
+
+    const PHOTOS = {
+      electricity: ['https://cdn.example.com/dien.jpg'],
+      water: ['https://cdn.example.com/nuoc.png'],
+    }
+
+    it('keeps the legacy hash without photos and changes it with photos', async () => {
+      const legacy = await setup().service.record(CID, 'landlord', INPUT, NOW)
+      const withPhotos = await setup().service.record(
+        CID,
+        'landlord',
+        { ...INPUT, meterPhotos: PHOTOS },
+        NOW
+      )
+      expect(legacy.meterPhotos).toBeNull()
+      expect(withPhotos.meterPhotos).toEqual(PHOTOS)
+      expect(withPhotos.handoverHash).not.toBe(legacy.handoverHash)
+      const again = await setup().service.record(CID, 'landlord', INPUT, NOW)
+      expect(again.handoverHash).toBe(legacy.handoverHash)
+    })
+
+    it('warns when meters are below the move-in readings until acknowledged', async () => {
+      const lower = { ...INPUT, electricity: 100, water: 80 }
+      const options = { baselineMeter: { electricity: 150, water: 70 } }
+      await expect(
+        setup(options).service.record(CID, 'landlord', lower, NOW)
+      ).rejects.toMatchObject({
+        response: { code: 'METER_READING_REGRESSION' },
+      })
+      const saved = await setup(options).service.record(
+        CID,
+        'landlord',
+        { ...lower, acknowledgeMeterRegression: true },
+        NOW
+      )
+      expect(saved.meterReadings.electricity).toBe(100)
     })
 
     it('accepts empty inventory and zero meter readings (boundary)', async () => {

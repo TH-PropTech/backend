@@ -7,7 +7,10 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
 } from 'typeorm'
-import type { RentalPackageSnapshot } from '../../properties/utils/rental-package.util'
+import type {
+  RentalPackageSnapshot,
+  UtilityRates,
+} from '../../properties/utils/rental-package.util'
 import type { RentalExecutionPolicyRef } from '../../rental/utils/rental-execution-policy.util'
 import type { EmbeddedContractAmendment } from './contract-amendment.schema'
 
@@ -36,6 +39,13 @@ export type ContractSignature = {
   verifiedAt?: Date | null
 }
 
+/** Người ở kèm ngoài người thuê (người thuê là bên của hợp đồng). */
+export type ContractOccupant = {
+  fullName: string
+  birthYear: number
+  relationship: string
+}
+
 export type ContractCommercialDraft = {
   monthlyRent: number
   deposit: number
@@ -50,6 +60,10 @@ export type ContractCommercialDraft = {
   addendaIds?: string[]
   /** Điều khoản riêng của chủ nhà; chỉ đổi qua yêu cầu chỉnh sửa hoặc phụ lục. */
   customClauses?: string | null
+  /** Chỉ đổi qua phụ lục; giá trị gốc nằm ở `Contract.occupants`. */
+  occupants?: ContractOccupant[]
+  /** Đơn giá thỏa thuận; giá trị gốc nằm ở `Contract.utilityRates`. */
+  utilityRates?: UtilityRates
 }
 
 export type ConsentedContractTerms = Pick<
@@ -192,6 +206,14 @@ export class Contract {
   /** Điều khoản riêng của chủ nhà lấy từ gói thuê, hiển thị như phụ lục ngoài 12 điều khung. */
   @Column({ nullable: true })
   customClauses?: string | null
+
+  /** Người ở kèm, sao chép từ hồ sơ thuê khi tạo hợp đồng; thay đổi sau ký qua phụ lục. */
+  @Column({ nullable: true })
+  occupants?: ContractOccupant[] | null
+
+  /** Đơn giá điện, nước, dịch vụ chốt từ gói thuê khi tạo hợp đồng. */
+  @Column({ nullable: true })
+  utilityRates?: UtilityRates | null
 
   // ── Trạng thái ký kết ──
 

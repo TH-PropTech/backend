@@ -39,6 +39,7 @@ export type MoveOutRevisionSnapshot = {
   recordedAt: Date
   handedBackAt: Date
   meterReadings: { electricity: number; water: number }
+  meterPhotos?: { electricity: string[]; water: string[] } | null
   keyCount: number
   inventoryItems: MoveOutInventoryItem[]
   notes: string | null
@@ -54,6 +55,11 @@ export class MoveOutHandover {
   @Column() revision!: number
   @Column() handedBackAt!: Date
   @Column('json') meterReadings!: { electricity: number; water: number }
+  /** Ảnh công tơ; bản ghi cũ không có. */
+  @Column('json', { nullable: true }) meterPhotos?: {
+    electricity: string[]
+    water: string[]
+  } | null
   @Column() keyCount!: number
   @Column('json') inventoryItems!: MoveOutInventoryItem[]
   @Column({ nullable: true }) notes!: string | null

@@ -112,10 +112,10 @@ describe('LegalSourcesService', () => {
     const seededSources = buildSeedLegalSources()
     const seededRegulations = buildSeedPlatformRegulations()
 
-    it('contains 6 procedures and 10 legal texts with unique keys', () => {
+    it('contains 6 procedures and 11 legal texts with unique keys', () => {
       expect(seededSources.filter(s => s.kind === 'procedure')).toHaveLength(6)
       expect(seededSources.filter(s => s.kind === 'legal_text')).toHaveLength(
-        10
+        11
       )
       expect(new Set(seededSources.map(s => s.key)).size).toBe(
         seededSources.length
@@ -186,6 +186,20 @@ describe('LegalSourcesService', () => {
 
       expect(rowsOf('source')).toHaveLength(buildSeedLegalSources().length)
       expect(rowsOf('regulation')).toHaveLength(1)
+    })
+  })
+
+  describe('seedMissingSources', () => {
+    it('adds the late seed source to a populated collection without touching others', async () => {
+      store.seed([sourceRow({ key: '1.004194' })])
+
+      await service.seedMissingSources()
+      await service.seedMissingSources()
+
+      const keys = rowsOf('source').map(row => row['key'])
+      expect(keys).toContain('circular-16-2014-bct')
+      expect(keys.filter(key => key === 'circular-16-2014-bct')).toHaveLength(1)
+      expect(keys).toHaveLength(2)
     })
   })
 

@@ -82,6 +82,41 @@ describe('ContractDocumentProjector', () => {
     })
   })
 
+  describe('occupants and utility rates annexes', () => {
+    it('adds an occupants annex listing each co-occupant', () => {
+      const result = ContractDocumentProjector.projectDocument({
+        ...mockContract,
+        occupants: [
+          { fullName: 'Nguyễn Văn A', birthYear: 1995, relationship: 'Bạn' },
+        ],
+      } as Contract)
+      const annex = result.annexes.find(a => a.id === 'LEASE_OCCUPANTS')!
+      expect(annex.description).toContain('Nguyễn Văn A, sinh năm 1995')
+      expect(result.sections).toHaveLength(12)
+    })
+
+    it('adds a utility annex with the move-out settlement note', () => {
+      const result = ContractDocumentProjector.projectDocument({
+        ...mockContract,
+        utilityRates: {
+          electricityPerKwh: 3500,
+          waterPerM3: 20000,
+          serviceFeeMonthly: 200000,
+        },
+      } as Contract)
+      const annex = result.annexes.find(a => a.id === 'LEASE_UTILITY_RATES')!
+      expect(annex.description).toContain('điện 3.500 đồng/kWh')
+      expect(annex.description).toContain('bàn giao lại nhà khi hết hợp đồng')
+    })
+
+    it('adds neither annex for contracts without the data', () => {
+      const result = ContractDocumentProjector.projectDocument(
+        mockContract as Contract
+      )
+      expect(result.annexes).toHaveLength(4)
+    })
+  })
+
   it('should project a locked contract with mode=locked and integrity=valid', () => {
     const lockedContract: Partial<Contract> = {
       ...mockContract,

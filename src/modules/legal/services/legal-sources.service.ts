@@ -19,6 +19,7 @@ import {
 } from '../schemas/legal-document.mapper'
 import { LegalDocumentScope } from '../utils/legal-document.scope'
 import {
+  ADDED_SEED_SOURCE_KEYS,
   buildSeedLegalSources,
   buildSeedPlatformRegulations,
 } from '../utils/legal-sources.seed-data'
@@ -57,6 +58,21 @@ export class LegalSourcesService implements OnApplicationBootstrap {
 
   async onApplicationBootstrap(): Promise<void> {
     await this.seedIfEmpty()
+    await this.seedMissingSources()
+  }
+
+  /** Bổ sung nguồn thêm sau lần seed đầu; không đụng tới nguồn đã có hoặc đã được admin sửa. */
+  async seedMissingSources(): Promise<void> {
+    const seeds = buildSeedLegalSources().filter(source =>
+      ADDED_SEED_SOURCE_KEYS.includes(source.key)
+    )
+    for (const source of seeds) {
+      if (await this.sourceRepository.findOneBy({ key: source.key })) continue
+      await this.sourceRepository.save(
+        this.sourceRepository.create(toSourceDocumentFields(source))
+      )
+      this.logger.log(`Seeded missing legal source ${source.key}`)
+    }
   }
 
   /** Seed từng collection độc lập, chỉ khi collection đó đang rỗng */

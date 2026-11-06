@@ -70,6 +70,8 @@ export class MoveInSettlement {
     revision: number
     handedOverAt: Date
     meterReadings: { electricity: number; water: number }
+    /** Ảnh công tơ; bản ghi cũ không có. */
+    meterPhotos?: { electricity: string[]; water: string[] } | null
     keyCount: number
     inventoryReference: string | null
     /** Các trường dưới đây tùy chọn để bản ghi cũ (trước phương án A) vẫn đọc được. */

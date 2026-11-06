@@ -181,6 +181,10 @@ export class Apartment {
   @Column()
   bedrooms!: number
 
+  /** Giới hạn số người ở do Chủ nhà đặt; tin cũ không có thì theo cấu hình luồng thuê. */
+  @Column({ nullable: true })
+  maxOccupants?: number | null
+
   @Column()
   bathrooms!: number
 

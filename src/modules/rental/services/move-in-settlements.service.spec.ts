@@ -552,6 +552,31 @@ describe('MoveInSettlementsService handover (phương án A)', () => {
       expect(a.handover?.handoverHash).not.toBe(b.handover?.handoverHash)
     })
 
+    it('stores meter photos in the hash only when present so legacy hashes stay valid', async () => {
+      const photos = {
+        electricity: ['https://cdn.example.com/dien.jpg'],
+        water: ['https://cdn.example.com/nuoc.png'],
+      }
+      const legacy = setup()
+      const a = await legacy.service.updateHandover(legacy.id, 'landlord', {
+        ...RECORD,
+      })
+      const again = setup()
+      const b = await again.service.updateHandover(again.id, 'landlord', {
+        ...RECORD,
+      })
+      const withPhotos = setup()
+      const c = await withPhotos.service.updateHandover(
+        withPhotos.id,
+        'landlord',
+        { ...RECORD, meterPhotos: photos }
+      )
+      expect(a.handover?.meterPhotos).toBeUndefined()
+      expect(b.handover?.handoverHash).toBe(a.handover?.handoverHash)
+      expect(c.handover?.meterPhotos).toEqual(photos)
+      expect(c.handover?.handoverHash).not.toBe(a.handover?.handoverHash)
+    })
+
     it('marks the landlord as confirmed for the recorded revision and sets a 3-day response deadline', async () => {
       const { service, id } = setup()
       const saved = await service.updateHandover(id, 'landlord', RECORD, T0)

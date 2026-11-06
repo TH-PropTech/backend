@@ -29,6 +29,10 @@ const VALID_HANDOVER = {
   handedBackAt: '2030-03-01T09:00:00.000Z',
   electricity: 10,
   water: 5,
+  meterPhotos: {
+    electricity: ['https://cdn.example.com/dien.jpg'],
+    water: ['https://cdn.example.com/nuoc.png'],
+  },
   keyCount: 2,
   inventoryItems: [{ name: 'Sofa', quantity: 1, condition: 'missing' }],
 }

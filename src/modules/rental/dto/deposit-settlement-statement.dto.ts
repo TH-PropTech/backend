@@ -12,6 +12,7 @@ import {
   IsString,
   IsUrl,
   Matches,
+  Max,
   MaxLength,
   Min,
   ValidateNested,
@@ -48,6 +49,25 @@ export class StatementLineDto {
     message: 'evidenceUrls must point to JPEG or PNG images',
   })
   evidenceUrls?: string[]
+
+  @ApiPropertyOptional({ enum: ['manual', 'meter-suggestion'] })
+  @IsOptional()
+  @IsIn(['manual', 'meter-suggestion'])
+  source?: 'manual' | 'meter-suggestion'
+}
+
+export class UtilitySuggestionQueryDto {
+  @ApiPropertyOptional({
+    minimum: 0,
+    maximum: 60,
+    description: 'Số tháng phí dịch vụ chưa thu',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(60)
+  unpaidServiceMonths?: number
 }
 
 export class SaveStatementDraftDto {

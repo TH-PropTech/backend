@@ -3,6 +3,11 @@ import PDFDocument from 'pdfkit'
 import type { Contract } from '../../contracts/schemas/contract.schema'
 import type { MoveInSettlement } from '../schemas/move-in-settlement.schema'
 import {
+  UTILITY_SETTLEMENT_NOTE,
+  describeUtilityRates,
+  resolveContractUtilityRates,
+} from './utility-note.util'
+import {
   drawLabelRows,
   drawSummaryBox,
   drawTable,
@@ -50,7 +55,8 @@ export function renderMoveInHandoverPdf(
   contract: Pick<
     Contract,
     'contractCode' | 'propertyAddress' | 'landlordName' | 'tenantName'
-  >,
+  > &
+    Partial<Pick<Contract, 'utilityRates' | 'effectiveCommercial'>>,
   settlement: MoveInSettlement
 ): Promise<Buffer> {
   const handover = settlement.handover
@@ -227,6 +233,29 @@ export function renderMoveInHandoverPdf(
           })
         pdf.moveDown(1)
       }
+
+      pdf
+        .font(FONT_BOLD)
+        .fontSize(BODY_SIZE)
+        .text('Điện, nước và dịch vụ', MARGIN_LEFT, pdf.y, {
+          width: contentWidth,
+        })
+      pdf.moveDown(0.2)
+      pdf
+        .font(FONT_REGULAR)
+        .fontSize(BODY_SIZE)
+        .text(
+          [
+            UTILITY_SETTLEMENT_NOTE,
+            describeUtilityRates(resolveContractUtilityRates(contract)),
+          ]
+            .filter(Boolean)
+            .join(' '),
+          MARGIN_LEFT,
+          pdf.y,
+          { width: contentWidth, lineGap: 2 }
+        )
+      pdf.moveDown(1)
 
       const confirmRows = [
         {

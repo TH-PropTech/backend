@@ -6,7 +6,11 @@ import {
 } from '../../rental/utils/deposit-refund.constants'
 import type { Contract } from '../schemas/contract.schema'
 import { resolveEffectiveCommercial } from '../commercial/resolve-effective-commercial'
-import { CUSTOM_CLAUSES_ANNEX_ID } from './lease-template.manifest'
+import {
+  CUSTOM_CLAUSES_ANNEX_ID,
+  OCCUPANTS_ANNEX_ID,
+  UTILITY_RATES_ANNEX_ID,
+} from './lease-template.manifest'
 import {
   validateDocumentManifest,
   LeaseDocumentManifest,
@@ -67,6 +71,8 @@ export class ContractDocumentProjector {
         ? this.buildTemplateAnnexes(template.annexDefinitions)
         : this.buildAnnexes()),
       ...this.buildCustomClausesAnnex(contract),
+      ...this.buildOccupantsAnnex(contract),
+      ...this.buildUtilityRatesAnnex(contract),
     ]
 
     // Validate manifest
@@ -227,6 +233,48 @@ export class ContractDocumentProjector {
       hash: clause.contentHash,
       citationIds: clause.citationIds,
     }))
+  }
+
+  private static buildOccupantsAnnex(
+    contract: Contract
+  ): ContractDocumentAnnexDto[] {
+    const occupants = resolveEffectiveCommercial(contract).occupants
+    if (!occupants?.length) return []
+    const lines = occupants.map(
+      (person, index) =>
+        `${index + 1}. ${person.fullName}, sinh năm ${person.birthYear}, quan hệ với Bên B: ${person.relationship}.`
+    )
+    return [
+      {
+        id: OCCUPANTS_ANNEX_ID,
+        title: 'Danh sách người ở cùng Bên B',
+        description:
+          `Ngoài Bên B, những người sau cùng sinh sống tại nhà ở thuê:\n${lines.join('\n')}\n` +
+          'Việc thay đổi danh sách này sau khi ký được lập thành phụ lục hợp đồng có xác nhận của hai Bên.',
+        required: false,
+      },
+    ]
+  }
+
+  private static buildUtilityRatesAnnex(
+    contract: Contract
+  ): ContractDocumentAnnexDto[] {
+    const rates = resolveEffectiveCommercial(contract).utilityRates
+    if (!rates) return []
+    const vnd = (value: number): string =>
+      `${value.toLocaleString('vi-VN')} đồng`
+    const note = rates.note?.trim()
+    return [
+      {
+        id: UTILITY_RATES_ANNEX_ID,
+        title: 'Đơn giá điện, nước và phí dịch vụ',
+        description:
+          `Đơn giá do hai Bên thỏa thuận: điện ${vnd(rates.electricityPerKwh)}/kWh; nước ${vnd(rates.waterPerM3)}/m³; phí dịch vụ ${vnd(rates.serviceFeeMonthly)}/tháng.` +
+          `${note ? ` Ghi chú: ${note}` : ''}\n` +
+          'Tiền dịch vụ và tiền điện, nước được tính vào lúc bàn giao lại nhà khi hết hợp đồng, theo chỉ số công tơ ghi trong Biên bản nhận nhà và Biên bản trả nhà.',
+        required: false,
+      },
+    ]
   }
 
   private static buildCustomClausesAnnex(

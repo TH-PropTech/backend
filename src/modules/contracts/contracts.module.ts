@@ -44,6 +44,9 @@ import { ContractAmendmentController } from './controllers/contract-amendment.co
 import { ContractChangeRequestController } from './controllers/contract-change-request.controller'
 import { ContractChangeRequestService } from './services/contract-change-request.service'
 import { ContractChangeRequest } from './schemas/contract-change-request.schema'
+import { OccupantChangeRequest } from './schemas/occupant-change-request.schema'
+import { OccupantChangeRequestController } from './controllers/occupant-change-request.controller'
+import { OccupantChangeRequestService } from './services/occupant-change-request.service'
 import { DepositConfirmationResolver } from './services/deposit-confirmation.resolver'
 import { FlowNotificationService } from './flow/flow-notification.service'
 import { NotificationsModule } from '../notifications/notifications.module'
@@ -71,6 +74,7 @@ import { WalletsModule } from '../wallets/wallets.module'
     TypeOrmModule.forFeature([
       Contract,
       ContractChangeRequest,
+      OccupantChangeRequest,
       SmartCaSigningSession,
       DepositAgreement,
       Apartment,
@@ -104,6 +108,7 @@ import { WalletsModule } from '../wallets/wallets.module'
     ContractCommercialEditorController,
     ContractAmendmentController,
     ContractChangeRequestController,
+    OccupantChangeRequestController,
     ContractLayoutsController,
     OwnershipTransferController,
   ],
@@ -138,6 +143,7 @@ import { WalletsModule } from '../wallets/wallets.module'
     ContractAmendmentService,
     ContractAmendmentStore,
     ContractChangeRequestService,
+    OccupantChangeRequestService,
     DepositConfirmationResolver,
     {
       provide: CONTRACT_ARTIFACT_STORAGE,

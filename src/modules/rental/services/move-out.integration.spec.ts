@@ -212,3 +212,144 @@ describe('move-out flow (handover → statement → refund → evidence)', () =>
     expect(row.status).toBe('accepted')
   })
 })
+
+describe('move-out flow with meter photos and utility suggestions', () => {
+  const photo = (name: string): string =>
+    `${STORAGE_BASE}/apartments/${name}.jpg`
+
+  function setupWithMeters(): Ctx {
+    const contract = {
+      _id: CONTRACT_ID,
+      contractCode: 'HD-1',
+      tenantId: 'tenant',
+      landlordId: 'landlord',
+      status: 'active',
+      deposit: DEPOSIT,
+      packageSnapshot: { moveOutPolicy: { responseDays: 5 } },
+      utilityRates: {
+        electricityPerKwh: 3500,
+        waterPerM3: 20000,
+        serviceFeeMonthly: 200000,
+      },
+    } as unknown as Contract
+    const contractRepo = { findOne: jest.fn().mockResolvedValue(contract) }
+    const settlementRepo = createMemoryRepo<MoveInSettlement>([
+      {
+        contractId: CID,
+        handover: {
+          completedAt: T0,
+          inventoryItems: [],
+          meterReadings: { electricity: 1200, water: 40 },
+          meterPhotos: {
+            electricity: [photo('in-e')],
+            water: [photo('in-w')],
+          },
+        },
+      },
+    ] as unknown as MoveInSettlement[])
+    const handoverRepo = createMemoryRepo<MoveOutHandover>()
+    const statementRepo = createMemoryRepo<DepositSettlementStatement>()
+    const support = createSupportMock(true)
+    const storage = createStorage()
+    const handovers = new MoveOutHandoversService(
+      handoverRepo as never,
+      contractRepo as never,
+      settlementRepo as never,
+      support as never,
+      storage
+    )
+    const statements = new DepositSettlementStatementsService(
+      statementRepo as never,
+      contractRepo as never,
+      handoverRepo as never,
+      support as never,
+      storage,
+      settlementRepo as never
+    )
+    return { handovers, statements, handoverRepo, statementRepo }
+  }
+
+  it('move-in photos → move-out photos → suggested lines → tenant objects to one line', async () => {
+    const ctx = setupWithMeters()
+    const recorded = await ctx.handovers.record(
+      CID,
+      'landlord',
+      {
+        ...HANDOVER_INPUT,
+        electricity: 1450,
+        water: 46,
+        meterPhotos: {
+          electricity: [photo('out-e')],
+          water: [photo('out-w')],
+        },
+      },
+      T0
+    )
+    expect(recorded.meterPhotos).toEqual({
+      electricity: [photo('out-e')],
+      water: [photo('out-w')],
+    })
+    await ctx.handovers.confirm(CID, 'tenant', recorded.handoverHash, at(1))
+
+    const suggestion = await ctx.statements.suggestUtilityLines(CID, 'landlord')
+    expect(suggestion.lines.map(line => [line.kind, line.amount])).toEqual([
+      ['electricity', 875_000],
+      ['water', 120_000],
+    ])
+    expect(suggestion.lines[0]!.evidenceUrls).toEqual([
+      photo('in-e'),
+      photo('out-e'),
+    ])
+
+    await ctx.statements.saveDraft(
+      CID,
+      'landlord',
+      suggestion.lines.map(line => ({
+        reason: line.reason,
+        amount: line.amount,
+        evidenceUrls: line.evidenceUrls,
+        source: 'meter-suggestion' as const,
+      })),
+      at(2)
+    )
+    const submitted = await ctx.statements.submit(CID, 'landlord', at(2))
+    expect(
+      submitted.lines.every(line => line.source === 'meter-suggestion')
+    ).toBe(true)
+
+    const responded = await ctx.statements.respond(
+      CID,
+      'tenant',
+      [
+        { lineId: submitted.lines[0]!.id, decision: 'reject', note: 'Sai số' },
+        { lineId: submitted.lines[1]!.id, decision: 'accept' },
+      ],
+      at(3)
+    )
+    expect(responded.status).toBe('disputed')
+    expect(responded.lines[0]!.tenantResponse?.decision).toBe('reject')
+    expect(responded.lines[1]!.tenantResponse?.decision).toBe('accept')
+  })
+
+  it('warns when the move-out reading is below the move-in reading, then records once confirmed', async () => {
+    const ctx = setupWithMeters()
+    const input = {
+      ...HANDOVER_INPUT,
+      electricity: 1100,
+      water: 46,
+      meterPhotos: { electricity: [photo('out-e')], water: [photo('out-w')] },
+    }
+    await expect(
+      ctx.handovers.record(CID, 'landlord', input, T0)
+    ).rejects.toMatchObject({
+      response: { code: 'METER_READING_REGRESSION' },
+    })
+    const recorded = await ctx.handovers.record(
+      CID,
+      'landlord',
+      { ...input, acknowledgeMeterRegression: true },
+      T0
+    )
+    expect(recorded.meterReadings.electricity).toBe(1100)
+  })
+})

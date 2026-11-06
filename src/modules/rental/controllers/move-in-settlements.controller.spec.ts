@@ -21,6 +21,10 @@ const VALID_RECORD = {
   handedOverAt: '2030-02-01T09:00:00.000Z',
   electricity: 120,
   water: 45,
+  meterPhotos: {
+    electricity: ['https://cdn.example.com/dien.jpg'],
+    water: ['https://cdn.example.com/nuoc.png'],
+  },
   keyCount: 2,
   inventoryItems: [{ name: 'Sofa', quantity: 1, condition: 'good' }],
   notes: 'Bàn giao đủ',
