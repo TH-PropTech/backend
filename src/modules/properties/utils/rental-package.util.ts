@@ -64,10 +64,46 @@ export type RentalPackageInput = {
   latePenaltyRate?: number
   terminationNoticeDays?: number
   customClauses?: string
+  utilityRates?: UtilityRates
   prepaidRent?: PrepaidRentInput
   moveOutPolicy?: MoveOutPolicy
   allowedExecutionPolicies?: RentalExecutionPolicyRef[]
   defaultExecutionPolicy?: RentalExecutionPolicyRef
+}
+
+/** Đơn giá điện, nước, dịch vụ do hai bên thỏa thuận; không phải giá nhà nước quy định. */
+export type UtilityRates = {
+  electricityPerKwh: number
+  waterPerM3: number
+  serviceFeeMonthly: number
+  note?: string
+}
+
+const MAX_UTILITY_RATE_VND = 10_000_000
+const MAX_UTILITY_NOTE_LENGTH = 500
+
+/** Trả về thông báo lỗi tiếng Việt đầu tiên, hoặc null khi đơn giá hợp lệ. */
+export function validateUtilityRates(rates: UtilityRates): string | null {
+  const fields: Array<[keyof UtilityRates, string]> = [
+    ['electricityPerKwh', 'Đơn giá điện'],
+    ['waterPerM3', 'Đơn giá nước'],
+    ['serviceFeeMonthly', 'Phí dịch vụ hằng tháng'],
+  ]
+  for (const [key, label] of fields) {
+    const value = rates[key]
+    if (
+      typeof value !== 'number' ||
+      !Number.isFinite(value) ||
+      value < 0 ||
+      value > MAX_UTILITY_RATE_VND
+    ) {
+      return `${label} phải là số từ 0 đến ${MAX_UTILITY_RATE_VND.toLocaleString('vi-VN')} đồng.`
+    }
+  }
+  if (rates.note !== undefined && rates.note.length > MAX_UTILITY_NOTE_LENGTH) {
+    return `Ghi chú cách tính tối đa ${MAX_UTILITY_NOTE_LENGTH} ký tự.`
+  }
+  return null
 }
 
 export type RentalPackageSnapshot = {
@@ -82,6 +118,7 @@ export type RentalPackageSnapshot = {
   latePenaltyRate?: number
   terminationNoticeDays?: number
   customClauses?: string
+  utilityRates?: UtilityRates
   settlementPolicy?: SettlementPolicyInput
   resolvedHoldingDepositAmount?: number
   resolvedSecurityTopUpAmount?: number
@@ -268,13 +305,22 @@ export function calculateRepresentativeMonthlyRent(
 
 type LeaseTermsFields = Pick<
   RentalPackageInput,
-  'paymentDay' | 'latePenaltyRate' | 'terminationNoticeDays' | 'customClauses'
+  | 'paymentDay'
+  | 'latePenaltyRate'
+  | 'terminationNoticeDays'
+  | 'customClauses'
+  | 'utilityRates'
 >
 
 /** Kiểm tra điều khoản hợp đồng do chủ nhà đặt và chỉ giữ lại các trường được nhập. */
 function resolveLeaseTerms(packageItem: LeaseTermsFields): LeaseTermsFields {
   const { paymentDay, latePenaltyRate, terminationNoticeDays } = packageItem
   const customClauses = packageItem.customClauses?.trim()
+  const { utilityRates } = packageItem
+  if (utilityRates) {
+    const utilityError = validateUtilityRates(utilityRates)
+    if (utilityError) throw new Error(`INVALID_RENTAL_PACKAGE: ${utilityError}`)
+  }
   if (
     paymentDay !== undefined &&
     (!Number.isInteger(paymentDay) || paymentDay < 1 || paymentDay > 31)
@@ -296,6 +342,7 @@ function resolveLeaseTerms(packageItem: LeaseTermsFields): LeaseTermsFields {
     ...(latePenaltyRate !== undefined ? { latePenaltyRate } : {}),
     ...(terminationNoticeDays !== undefined ? { terminationNoticeDays } : {}),
     ...(customClauses ? { customClauses } : {}),
+    ...(utilityRates ? { utilityRates } : {}),
   }
 }
 

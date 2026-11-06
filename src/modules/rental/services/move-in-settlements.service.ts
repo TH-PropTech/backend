@@ -28,6 +28,8 @@ import {
   type SettlementLine,
 } from '../schemas/move-in-settlement.schema'
 import { LedgerOutboxService } from '../../fabric/services/ledger-outbox.service'
+import { StorageService } from '../../../common/storage/storage.service'
+import { assertMeterPhotosHosted } from '../utils/utility-charges.util'
 import type { LedgerOutbox } from '../../fabric/schemas/ledger-outbox.schema'
 import {
   MOVE_IN_SETTLEMENT_EVIDENCE_SCHEMA_VERSION,
@@ -98,7 +100,8 @@ export class MoveInSettlementsService {
     /* eslint-enable @typescript-eslint/no-require-imports, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-member-access */
     private readonly depositAgreementsService?: DepositAgreementsService,
     @Optional()
-    private readonly handoverTemplateService?: HandoverTemplateService
+    private readonly handoverTemplateService?: HandoverTemplateService,
+    @Optional() private readonly storage?: StorageService
   ) {}
 
   /**
@@ -484,6 +487,7 @@ export class MoveInSettlementsService {
       handedOverAt: string
       electricity: number
       water: number
+      meterPhotos?: { electricity: string[]; water: string[] }
       keyCount: number
       inventoryItems?: Array<{
         name: string
@@ -503,6 +507,7 @@ export class MoveInSettlementsService {
     const isLandlord = actorId === settlement.landlordId
     if (!isLandlord && !input.isStaff)
       throw new ForbiddenException('HANDOVER_ACCESS_DENIED')
+    assertMeterPhotosHosted(this.storage, input.meterPhotos)
     if (settlement.handover?.completedAt)
       throw new ConflictException('HANDOVER_COMPLETED_IMMUTABLE')
     if (
@@ -534,6 +539,8 @@ export class MoveInSettlementsService {
       notes: input.notes ?? null,
       // Chỉ đưa vào hash khi có checklist, để biên bản không dùng mẫu giữ nguyên hash như cũ.
       ...(templateRef ? { templateRef, checklist } : {}),
+      // Chỉ đưa vào hash khi có ảnh công tơ, để biên bản cũ giữ nguyên hash.
+      ...(input.meterPhotos ? { meterPhotos: input.meterPhotos } : {}),
     }
     const handoverHash = createHash('sha256')
       .update(JSON.stringify(body))
@@ -543,6 +550,7 @@ export class MoveInSettlementsService {
       revision,
       handedOverAt: new Date(input.handedOverAt),
       meterReadings: { electricity: input.electricity, water: input.water },
+      ...(input.meterPhotos ? { meterPhotos: input.meterPhotos } : {}),
       keyCount: input.keyCount,
       inventoryReference: input.inventoryReference ?? null,
       inventoryItems,

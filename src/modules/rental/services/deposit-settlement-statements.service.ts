@@ -5,12 +5,20 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { randomUUID } from 'node:crypto'
 import { Repository } from 'typeorm'
 import { StorageService } from '../../../common/storage/storage.service'
 import { Contract } from '../../contracts/schemas/contract.schema'
+import { resolveEffectiveCommercial } from '../../contracts/commercial/resolve-effective-commercial'
+import { MoveInSettlement } from '../schemas/move-in-settlement.schema'
+import {
+  buildUtilityChargeSuggestions,
+  type UtilityChargeNote,
+  type UtilityChargeSuggestion,
+} from '../utils/utility-charges.util'
 import { sha256Hex } from '../../fabric/utils/canonical-json'
 import { buildMoveInSettlementArgs } from '../../fabric/utils/ledger-action-args'
 import {
@@ -40,6 +48,11 @@ export type StatementLineInput = {
   reason: string
   amount: number
   evidenceUrls?: string[]
+  source?: 'manual' | 'meter-suggestion'
+}
+export type UtilitySuggestionView = {
+  lines: UtilityChargeSuggestion[]
+  notes: UtilityChargeNote[]
 }
 export type LineResponseInput = {
   lineId: string
@@ -80,7 +93,10 @@ export class DepositSettlementStatementsService {
     @InjectRepository(MoveOutHandover)
     private readonly handoverRepo: Repository<MoveOutHandover>,
     private readonly support: MoveOutSupportService,
-    private readonly storage: StorageService
+    private readonly storage: StorageService,
+    @Optional()
+    @InjectRepository(MoveInSettlement)
+    private readonly settlementRepo?: Repository<MoveInSettlement>
   ) {}
 
   async findByContract(
@@ -145,6 +161,31 @@ export class DepositSettlementStatementsService {
       if (isDuplicateKeyError(error))
         throw new ConflictException('STATEMENT_EXISTS')
       throw error
+    })
+  }
+
+  /** Gợi ý khoản điện, nước, dịch vụ từ chỉ số công tơ; chỉ tính, không ghi. */
+  async suggestUtilityLines(
+    contractId: string,
+    actorId: string,
+    unpaidServiceMonths = 0
+  ): Promise<UtilitySuggestionView> {
+    const contract = await loadContract(this.contractRepo, contractId)
+    if (actorId !== contract.landlordId)
+      throw new ForbiddenException('STATEMENT_ACCESS_DENIED')
+    const moveOut = await this.handoverRepo.findOne({ where: { contractId } })
+    if (moveOut?.status !== 'completed')
+      throw new ConflictException('MOVE_OUT_HANDOVER_NOT_COMPLETED')
+    const settlement = await this.settlementRepo?.findOne({
+      where: { contractId },
+    })
+    return buildUtilityChargeSuggestions({
+      rates: resolveEffectiveCommercial(contract).utilityRates,
+      moveIn: settlement?.handover?.meterReadings,
+      moveOut: moveOut.meterReadings,
+      moveInPhotos: settlement?.handover?.meterPhotos,
+      moveOutPhotos: moveOut.meterPhotos,
+      unpaidServiceMonths,
     })
   }
 
@@ -534,6 +575,8 @@ export class DepositSettlementStatementsService {
       reason: line.reason.trim(),
       amount: line.amount,
       evidenceUrls: line.evidenceUrls ?? [],
+      // Chỉ ghi khi là gợi ý để bảng cũ và dòng nhập tay giữ nguyên dạng.
+      ...(line.source === 'meter-suggestion' ? { source: line.source } : {}),
       tenantResponse: null,
     }))
   }

@@ -91,6 +91,26 @@ describe('rental package rules', () => {
     ).toThrow('INVALID_RENTAL_PACKAGE')
   })
 
+  it('keeps valid utility rates on the package and rejects negative ones', () => {
+    const rates = {
+      electricityPerKwh: 3500,
+      waterPerM3: 20000,
+      serviceFeeMonthly: 200000,
+    }
+    const ok = validateRentalPackages([
+      { ...validPackages[0], utilityRates: rates } as RentalPackageInput,
+    ])
+    expect(ok.packages[0]?.utilityRates).toEqual(rates)
+    expect(() =>
+      validateRentalPackages([
+        {
+          ...validPackages[0],
+          utilityRates: { ...rates, electricityPerKwh: -1 },
+        } as RentalPackageInput,
+      ])
+    ).toThrow('Đơn giá điện')
+  })
+
   it('accepts a legacy listing without packages for read compatibility', () => {
     expect(validateRentalPackages([])).toEqual({
       pricingMode: 'legacy',

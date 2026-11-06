@@ -530,6 +530,12 @@ export class ContractViewService {
             ('noticePeriodDays' in commercial
               ? commercial.noticePeriodDays
               : undefined) ?? commercial.terminationNoticeDays,
+          ...(commercial.occupants?.length
+            ? { occupants: commercial.occupants }
+            : {}),
+          ...(commercial.utilityRates
+            ? { utilityRates: commercial.utilityRates }
+            : {}),
         },
         startDate: contract.startDate
           ? new Date(contract.startDate).toISOString()

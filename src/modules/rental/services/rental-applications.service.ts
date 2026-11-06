@@ -16,6 +16,7 @@ import { BookingsService } from '../../bookings/services/bookings.service'
 import { PlatformFeesService } from '../../payments/services/platform-fees.service'
 import { UnprocessableEntityException } from '@nestjs/common'
 import { ApartmentsService } from '../../properties/services/apartments.service'
+import { assertWithinApartmentOccupantLimit } from '../utils/occupant-limit.util'
 import type { RentalPackageRecord } from '../../properties/utils/rental-package.util'
 import { ContractsService } from '../../contracts/services/contracts.service'
 import { DepositAgreementsService } from '../../contracts/services/deposit-agreements.service'
@@ -123,6 +124,7 @@ export class RentalApplicationsService {
         landlordDisplayName: apartment.landlord?.fullName ?? null,
       },
       pricingRevision: apartment.pricingRevision ?? 0,
+      maxOccupants: apartment.maxOccupants ?? null,
       packages: [],
       disclosure: {
         version: RENTAL_REVIEW_DISCLOSURE_VERSION,
@@ -230,6 +232,7 @@ export class RentalApplicationsService {
     ) {
       throw new BadRequestException('APPLICATION_OCCUPANTS_MISMATCH')
     }
+    assertWithinApartmentOccupantLimit(apartment.maxOccupants, dto.occupants)
 
     const selectedPaymentCycleMonths =
       dto.selectedPaymentCycleMonths ??
@@ -721,6 +724,7 @@ export class RentalApplicationsService {
         tenantId: application.tenantId,
         moveInDate: application.moveInDate,
         packageSnapshot: application.packageSnapshot,
+        occupants: application.occupantsDetail ?? null,
         paymentCycleMonths: application.selectedPaymentCycleMonths ?? 1,
         feeSnapshot: application.feeSnapshot ?? null,
         executionPolicySnapshot: application.executionPolicySnapshot ?? null,

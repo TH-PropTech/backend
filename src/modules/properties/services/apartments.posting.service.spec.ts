@@ -135,6 +135,18 @@ describe('ApartmentsService listing posting', () => {
       expect(result.projectName).toBe('Vinhomes Grand Park')
     })
 
+    it('stores the occupant limit the landlord set and null when omitted', async () => {
+      const { service } = createContext()
+      const limited = await service.create(
+        buildCreateDto({ maxOccupants: 4 }),
+        'landlord-1'
+      )
+      const legacy = await service.create(buildCreateDto(), 'landlord-1')
+
+      expect(limited.maxOccupants).toBe(4)
+      expect(legacy.maxOccupants).toBeNull()
+    })
+
     it('starts with empty VR/360 media: only staff attach them later', async () => {
       const { service } = createContext()
       const result = await service.create(buildCreateDto(), 'landlord-1')

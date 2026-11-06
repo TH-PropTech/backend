@@ -4,10 +4,13 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 import { Contract } from '../../contracts/schemas/contract.schema'
+import { StorageService } from '../../../common/storage/storage.service'
+import { assertMeterPhotosHosted } from '../utils/utility-charges.util'
 import { sha256Hex } from '../../fabric/utils/canonical-json'
 import {
   buildMoveInHandoverEvidenceEnvelope,
@@ -41,6 +44,8 @@ export type RecordMoveOutInput = {
   handedBackAt: string
   electricity: number
   water: number
+  meterPhotos?: { electricity: string[]; water: string[] }
+  acknowledgeMeterRegression?: boolean
   keyCount: number
   inventoryItems?: Array<{
     name: string
@@ -66,7 +71,8 @@ export class MoveOutHandoversService {
     private readonly contractRepo: Repository<Contract>,
     @InjectRepository(MoveInSettlement)
     private readonly settlementRepo: Repository<MoveInSettlement>,
-    private readonly support: MoveOutSupportService
+    private readonly support: MoveOutSupportService,
+    @Optional() private readonly storage?: StorageService
   ) {}
 
   async findByContract(
@@ -86,10 +92,12 @@ export class MoveOutHandoversService {
     now = new Date()
   ): Promise<MoveOutHandoverEntity> {
     const contract = await this.loadLandlordContract(contractId, actorId)
+    assertMeterPhotosHosted(this.storage, input.meterPhotos)
     if (await this.repo.findOne({ where: { contractId } }))
       throw new ConflictException('MOVE_OUT_HANDOVER_EXISTS')
     const baseline = await this.loadBaseline(contractId)
     const responseDays = resolveMoveOutResponseDays(contract.packageSnapshot)
+    this.assertMeterNotBelowMoveIn(input, baseline)
     const body = this.buildBody(1, input, baseline)
     const handoverHash = this.hashOf(body)
     const entity = this.repo.create({
@@ -99,6 +107,7 @@ export class MoveOutHandoversService {
       revision: 1,
       handedBackAt: new Date(input.handedBackAt),
       meterReadings: body.meterReadings,
+      meterPhotos: body.meterPhotos ?? null,
       keyCount: input.keyCount,
       inventoryItems: body.inventoryItems,
       notes: body.notes,
@@ -133,10 +142,12 @@ export class MoveOutHandoversService {
     now = new Date()
   ): Promise<MoveOutHandoverEntity> {
     const contract = await this.loadLandlordContract(contractId, actorId)
+    assertMeterPhotosHosted(this.storage, input.meterPhotos)
     const current = await this.findOrFail(contractId)
     this.assertOpen(current)
     const baseline = await this.loadBaseline(contractId)
     const responseDays = resolveMoveOutResponseDays(contract.packageSnapshot)
+    this.assertMeterNotBelowMoveIn(input, baseline)
     const body = this.buildBody(current.revision + 1, input, baseline)
     const handoverHash = this.hashOf(body)
     current.revisionHistory = [
@@ -147,6 +158,7 @@ export class MoveOutHandoversService {
         recordedAt: current.landlordConfirmation?.at ?? current.updatedAt,
         handedBackAt: current.handedBackAt,
         meterReadings: current.meterReadings,
+        meterPhotos: current.meterPhotos ?? null,
         keyCount: current.keyCount,
         inventoryItems: current.inventoryItems,
         notes: current.notes,
@@ -155,6 +167,7 @@ export class MoveOutHandoversService {
     current.revision = body.revision
     current.handedBackAt = new Date(input.handedBackAt)
     current.meterReadings = body.meterReadings
+    current.meterPhotos = body.meterPhotos ?? null
     current.keyCount = input.keyCount
     current.inventoryItems = body.inventoryItems
     current.notes = body.notes
@@ -398,6 +411,7 @@ export class MoveOutHandoversService {
     revision: number
     handedBackAt: string
     meterReadings: { electricity: number; water: number }
+    meterPhotos?: { electricity: string[]; water: string[] }
     keyCount: number
     inventoryItems: MoveOutInventoryItem[]
     notes: string | null
@@ -422,9 +436,32 @@ export class MoveOutHandoversService {
       revision,
       handedBackAt: new Date(input.handedBackAt).toISOString(),
       meterReadings: { electricity: input.electricity, water: input.water },
+      // Chỉ đưa vào hash khi có ảnh công tơ, để biên bản cũ giữ nguyên hash.
+      ...(input.meterPhotos ? { meterPhotos: input.meterPhotos } : {}),
       keyCount: input.keyCount,
       inventoryItems,
       notes: input.notes ?? null,
+    }
+  }
+
+  /** Công tơ có thể đã được thay, nên chỉ chặn đến khi người ghi xác nhận lại. */
+  private assertMeterNotBelowMoveIn(
+    input: RecordMoveOutInput,
+    baseline: Baseline
+  ): void {
+    if (input.acknowledgeMeterRegression) return
+    const atMoveIn = baseline.meterReadings
+    // Biên bản nhận nhà quá cũ có thể không còn chỉ số để so sánh.
+    if (!atMoveIn) return
+    if (
+      input.electricity < atMoveIn.electricity ||
+      input.water < atMoveIn.water
+    ) {
+      throw new ConflictException({
+        code: 'METER_READING_REGRESSION',
+        message:
+          'Chỉ số trả nhà nhỏ hơn chỉ số nhận nhà. Vui lòng kiểm tra lại hoặc xác nhận công tơ đã được thay.',
+      })
     }
   }
 

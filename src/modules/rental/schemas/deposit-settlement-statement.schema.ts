@@ -31,6 +31,8 @@ export type DepositStatementLine = {
   amount: number
   /** URL ảnh JPEG/PNG đã tải lên qua `POST /apartments/upload`. */
   evidenceUrls: string[]
+  /** Vắng mặt = Chủ nhà tự nhập; `meter-suggestion` = gợi ý từ chỉ số công tơ. */
+  source?: 'manual' | 'meter-suggestion'
   tenantResponse: {
     decision: 'accept' | 'reject'
     note: string | null

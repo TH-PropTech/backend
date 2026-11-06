@@ -153,6 +153,42 @@ describe('ContractViewService', () => {
     expect(view.actions.signingEligibility.reasonCode).toBeNull()
   })
 
+  it('exposes co-occupants and agreed utility rates in the commercial snapshot, and omits them for legacy contracts', async () => {
+    kycService.findByUserId.mockResolvedValue({
+      status: 'verified',
+      idCardNumber: '079123456789',
+    } as KycRecord)
+    const occupants = [
+      { fullName: 'Nguyễn Văn A', birthYear: 1995, relationship: 'Bạn' },
+    ]
+    const utilityRates = {
+      electricityPerKwh: 3500,
+      waterPerM3: 20000,
+      serviceFeeMonthly: 200000,
+    }
+    contractRepo.findOne.mockResolvedValue({
+      ...mockContract,
+      occupants,
+      utilityRates,
+    } as unknown as Contract)
+    const withData = await service.getForActor(
+      validContractId,
+      'user-tenant-1',
+      false
+    )
+    expect(withData.contract.commercial.occupants).toEqual(occupants)
+    expect(withData.contract.commercial.utilityRates).toEqual(utilityRates)
+
+    contractRepo.findOne.mockResolvedValue(mockContract as Contract)
+    const legacy = await service.getForActor(
+      validContractId,
+      'user-tenant-1',
+      false
+    )
+    expect('occupants' in legacy.contract.commercial).toBe(false)
+    expect('utilityRates' in legacy.contract.commercial).toBe(false)
+  })
+
   it('projects the current linked deposit agreement revision and hash for tenant consent', async () => {
     const agreementId = new ObjectId()
     contractRepo.findOne.mockResolvedValue({

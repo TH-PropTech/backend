@@ -735,6 +735,52 @@ export const SEED_LEGAL_SOURCES: Record<
       'Nghiêm cấm sạc pin xe điện qua đêm không người trông coi tại hành lang hoặc trong căn hộ trái quy định ban quản lý tòa nhà.',
     ],
   },
+  'circular-16-2014-bct': {
+    id: 'circular-16-2014-bct',
+    code: 'TT 16/2014/TT-BCT',
+    title: 'Thông tư 16/2014/TT-BCT về thực hiện giá bán điện',
+    subtitle:
+      'Quy định áp giá bán lẻ điện sinh hoạt cho sinh viên và người lao động thuê nhà',
+    agency: 'Bộ Công Thương',
+    duration: 'Đã đối chiếu nội dung ngày 05/11/2026',
+    fee: 'Văn bản quy phạm pháp luật',
+    externalUrl:
+      'https://hethongphapluat.com/thong-tu-16-2014-tt-bct-nam-2014-ve-thuc-hien-gia-ban-dien-do-bo-truong-bo-cong-thuong-ban-hanh.html',
+    icon: 'law',
+    description:
+      'Điều 10 khoản 4 quy định cách tính điện cho sinh viên và người lao động thuê nhà (bên thuê nhà không phải là một hộ gia đình): cứ 4 người được tính là một hộ sử dụng điện để tính số định mức áp dụng giá bán lẻ điện sinh hoạt.',
+    dossierItems: [
+      {
+        title: 'Cách tính định mức theo số người (Điều 10 khoản 4)',
+        detail:
+          'Cứ 4 người được tính là một hộ sử dụng điện; 1 người bằng 1/4 định mức, 2 người bằng 1/2 định mức.',
+      },
+      {
+        title: 'Người ký hợp đồng mua điện (Điều 10 khoản 4)',
+        detail:
+          'Thời hạn thuê từ 12 tháng trở lên thì đại diện người thuê có thể ký; dưới 12 tháng thì chủ nhà ký trực tiếp.',
+      },
+    ],
+    steps: [
+      {
+        step: 1,
+        title: 'Thỏa thuận đơn giá trong hợp đồng',
+        detail:
+          'Trên TH-PropTech, đơn giá điện, nước và phí dịch vụ do hai bên thỏa thuận và ghi trong hợp đồng; hệ thống không tự áp bảng giá nhà nước.',
+      },
+    ],
+    legalGrounds: [
+      {
+        title: 'Thông tư 16/2014/TT-BCT',
+        article: 'Điều 10 khoản 4',
+        url: 'https://hethongphapluat.com/thong-tu-16-2014-tt-bct-nam-2014-ve-thuc-hien-gia-ban-dien-do-bo-truong-bo-cong-thuong-ban-hanh.html',
+      },
+    ],
+    notes: [
+      'Tham khảo, chưa kiểm chứng phạm vi áp dụng: văn bản nói về sinh viên và người lao động thuê nhà, không nêu riêng căn hộ chung cư cho thuê.',
+      'Nguồn đọc lại: hethongphapluat.com (ngày 05/11/2026). Thông tư 25/2018/TT-BCT sửa đổi Thông tư này chưa được đối chiếu nên chưa đưa vào.',
+    ],
+  },
   'building-rules-circ05': {
     id: 'building-rules-circ05',
     code: 'TT 05/2024/TT-BXD',
@@ -1047,6 +1093,11 @@ export const SEED_PLATFORM_REGULATIONS: Array<
     ],
     updatedAt: '2026-09-23T20:00:00Z',
   },
+]
+
+/** Nguồn thêm sau lần seed đầu: được bổ sung vào DB đã có dữ liệu khi khởi động. */
+export const ADDED_SEED_SOURCE_KEYS: readonly string[] = [
+  'circular-16-2014-bct',
 ]
 
 /** Nguồn hiển thị mặc định trên panel hợp đồng (tương ứng `DVC_LINKS` cũ) */

@@ -79,6 +79,8 @@ describe('ContractsService application draft factory', () => {
     expect(created.paymentCycleMonths).toBe(3)
     expect(created.rentalApplicationId).toBe('app-1')
     expect(reused.contractCode).toBe('HD-APP-app-1')
+    expect(created.occupants).toBeNull()
+    expect(created.utilityRates).toBeNull()
     expect(repository.save).toHaveBeenCalledTimes(1)
     // gói cũ không có chính sách trả trước: hợp đồng không ghi nhận gì thêm
     expect(created.prepaidRentMonths).toBeNull()
@@ -114,6 +116,24 @@ describe('ContractsService application draft factory', () => {
         currency: 'VND' as const,
       },
     }
+
+    const withPeople = await service.createDraftFromApplication({
+      ...baseInput,
+      rentalApplicationId: 'app-people',
+      occupants: [
+        { fullName: 'Nguyễn Văn A', birthYear: 1995, relationship: 'Bạn' },
+      ],
+      packageSnapshot: {
+        ...baseInput.packageSnapshot,
+        utilityRates: {
+          electricityPerKwh: 3500,
+          waterPerM3: 20000,
+          serviceFeeMonthly: 200000,
+        },
+      },
+    })
+    expect(withPeople.occupants).toHaveLength(1)
+    expect(withPeople.utilityRates?.electricityPerKwh).toBe(3500)
 
     const prepaid = await service.createDraftFromApplication({
       ...baseInput,

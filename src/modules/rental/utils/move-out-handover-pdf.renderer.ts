@@ -3,6 +3,11 @@ import PDFDocument from 'pdfkit'
 import type { Contract } from '../../contracts/schemas/contract.schema'
 import type { MoveOutHandover } from '../schemas/move-out-handover.schema'
 import {
+  UTILITY_SETTLEMENT_NOTE,
+  describeUtilityRates,
+  resolveContractUtilityRates,
+} from './utility-note.util'
+import {
   drawLabelRows,
   drawSummaryBox,
   drawTable,
@@ -40,7 +45,8 @@ export function renderMoveOutHandoverPdf(
   contract: Pick<
     Contract,
     'contractCode' | 'propertyAddress' | 'landlordName' | 'tenantName'
-  >,
+  > &
+    Partial<Pick<Contract, 'utilityRates' | 'effectiveCommercial'>>,
   handover: MoveOutHandover
 ): Promise<Buffer> {
   return new Promise<Buffer>((resolve, reject) => {
@@ -172,6 +178,26 @@ export function renderMoveOutHandoverPdf(
           .text(handover.notes, MARGIN, pdf.y, { width, lineGap: 2 })
         pdf.moveDown(1)
       }
+
+      pdf
+        .font(FONT_BOLD)
+        .fontSize(BODY_SIZE)
+        .text('Điện, nước và dịch vụ', MARGIN, pdf.y, { width })
+      pdf.moveDown(0.2)
+      pdf
+        .font(FONT_REGULAR)
+        .text(
+          [
+            UTILITY_SETTLEMENT_NOTE,
+            describeUtilityRates(resolveContractUtilityRates(contract)),
+          ]
+            .filter(Boolean)
+            .join(' '),
+          MARGIN,
+          pdf.y,
+          { width, lineGap: 2 }
+        )
+      pdf.moveDown(1)
 
       drawSummaryBox(pdf, theme, 'Xác nhận hai bên', [
         {

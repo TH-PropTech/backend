@@ -14,7 +14,11 @@ import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 import { ObjectId } from 'mongodb'
 import * as crypto from 'crypto'
-import { Contract, ContractSignature } from '../schemas/contract.schema'
+import {
+  Contract,
+  ContractSignature,
+  type ContractOccupant,
+} from '../schemas/contract.schema'
 import { ContractAmendmentStore } from './contract-amendment.store'
 import { DepositAgreement } from '../schemas/deposit-agreement.schema'
 import { PoliciesService } from '../../legal/services/policies.service'
@@ -99,6 +103,7 @@ export interface CreateContractFromApplicationInput {
   tenantId: string
   moveInDate: Date
   packageSnapshot: RentalPackageSnapshot
+  occupants?: ContractOccupant[] | null
   paymentCycleMonths?: 1 | 3 | 6
   feeSnapshot?: Contract['feeSnapshot']
   executionPolicySnapshot?: RentalExecutionPolicyRef | null
@@ -406,6 +411,8 @@ export class ContractsService {
     contract.terminationNoticeDays =
       input.packageSnapshot.terminationNoticeDays ?? 30
     contract.customClauses = input.packageSnapshot.customClauses ?? null
+    contract.utilityRates = input.packageSnapshot.utilityRates ?? null
+    contract.occupants = input.occupants?.length ? input.occupants : null
     contract.status = 'draft'
     contract.legacyFlow = false
     contract.signedByTenant = false

@@ -39,6 +39,31 @@ describe('resolveEffectiveCommercial', () => {
     ).toBe(base.monthlyRent)
   })
 
+  it('merges contract-level occupants and utility rates into every source', () => {
+    const occupants = [
+      { fullName: 'Nguyễn Văn A', birthYear: 1995, relationship: 'Bạn' },
+    ]
+    const utilityRates = {
+      electricityPerKwh: 3500,
+      waterPerM3: 20000,
+      serviceFeeMonthly: 0,
+    }
+    const contract = { ...base, occupants, utilityRates } as Contract
+    expect(resolveEffectiveCommercial(contract)).toMatchObject({
+      occupants,
+      utilityRates,
+    })
+    const amended = [
+      { fullName: 'Trần Thị B', birthYear: 2000, relationship: 'Chị' },
+    ]
+    expect(
+      resolveEffectiveCommercial({
+        ...contract,
+        effectiveCommercial: { ...base, occupants: amended },
+      }).occupants
+    ).toEqual(amended)
+  })
+
   it('falls back to immutable legacy contract fields', () => {
     expect(resolveEffectiveCommercial(base as Contract)).toEqual(base)
   })

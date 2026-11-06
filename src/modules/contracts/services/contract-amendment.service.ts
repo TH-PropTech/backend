@@ -9,6 +9,11 @@ import {
 import { InjectRepository } from '@nestjs/typeorm'
 import { createHash } from 'node:crypto'
 import { MAX_CUSTOM_CLAUSES_LENGTH } from '../legal/lease-compliance.validator'
+import { withContractExtras } from '../commercial/resolve-effective-commercial'
+import {
+  isValidOccupantList,
+  isValidUtilityRates,
+} from '../utils/amendment-field-validators.util'
 import { Repository } from 'typeorm'
 import { ObjectId } from 'mongodb'
 import {
@@ -38,6 +43,8 @@ const AMENDABLE_FIELDS = new Set<keyof ContractCommercialDraft>([
   'inventoryReference',
   'noticePeriodDays',
   'addendaIds',
+  'occupants',
+  'utilityRates',
   'customClauses',
 ])
 
@@ -511,19 +518,20 @@ export class ContractAmendmentService {
   }
 
   private currentCommercial(contract: Contract): ContractCommercialDraft {
-    return (
+    return withContractExtras(
+      contract,
       contract.effectiveCommercial ??
-      contract.commercialDraft ?? {
-        monthlyRent: contract.monthlyRent,
-        deposit: contract.deposit,
-        paymentDay: contract.paymentDay,
-        latePenaltyRate: contract.latePenaltyRate,
-        terminationNoticeDays: contract.terminationNoticeDays,
-        durationMonths: contract.durationMonths ?? 12,
-        ...(contract.customClauses
-          ? { customClauses: contract.customClauses }
-          : {}),
-      }
+        contract.commercialDraft ?? {
+          monthlyRent: contract.monthlyRent,
+          deposit: contract.deposit,
+          paymentDay: contract.paymentDay,
+          latePenaltyRate: contract.latePenaltyRate,
+          terminationNoticeDays: contract.terminationNoticeDays,
+          durationMonths: contract.durationMonths ?? 12,
+          ...(contract.customClauses
+            ? { customClauses: contract.customClauses }
+            : {}),
+        }
     )
   }
 
@@ -537,6 +545,12 @@ export class ContractAmendmentService {
         throw new BadRequestException('CONTRACT_AMENDMENT_FIELD_NOT_ALLOWED')
       if (change.after === undefined)
         throw new BadRequestException('CONTRACT_AMENDMENT_VALUE_REQUIRED')
+      if (change.field === 'occupants' && !isValidOccupantList(change.after))
+        throw new BadRequestException('CONTRACT_AMENDMENT_OCCUPANTS_INVALID')
+      if (change.field === 'utilityRates' && !isValidUtilityRates(change.after))
+        throw new BadRequestException(
+          'CONTRACT_AMENDMENT_UTILITY_RATES_INVALID'
+        )
       next[change.field as keyof ContractCommercialDraft] =
         change.after as never
     }

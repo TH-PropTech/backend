@@ -17,6 +17,8 @@ export interface RentalApplicationContext {
     landlordDisplayName: string | null
   }
   pricingRevision: number
+  /** Giới hạn số người ở do Chủ nhà đặt cho căn hộ; null khi tin cũ chưa đặt. */
+  maxOccupants?: number | null
   packages: Array<
     RentalPackageRecord & {
       currency: 'VND'

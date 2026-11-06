@@ -123,6 +123,32 @@ class MoveOutPolicyDto {
   responseDays!: number
 }
 
+export class UtilityRatesDto {
+  @ApiProperty({ minimum: 0, description: 'Đơn giá điện (đồng/kWh)' })
+  @IsNumber({}, { message: 'Đơn giá điện phải là số.' })
+  @Min(0, { message: 'Đơn giá điện không được âm.' })
+  @Max(10_000_000, { message: 'Đơn giá điện vượt mức cho phép.' })
+  electricityPerKwh!: number
+
+  @ApiProperty({ minimum: 0, description: 'Đơn giá nước (đồng/m³)' })
+  @IsNumber({}, { message: 'Đơn giá nước phải là số.' })
+  @Min(0, { message: 'Đơn giá nước không được âm.' })
+  @Max(10_000_000, { message: 'Đơn giá nước vượt mức cho phép.' })
+  waterPerM3!: number
+
+  @ApiProperty({ minimum: 0, description: 'Phí dịch vụ hằng tháng (đồng)' })
+  @IsNumber({}, { message: 'Phí dịch vụ phải là số.' })
+  @Min(0, { message: 'Phí dịch vụ không được âm.' })
+  @Max(10_000_000, { message: 'Phí dịch vụ vượt mức cho phép.' })
+  serviceFeeMonthly!: number
+
+  @ApiPropertyOptional({ maxLength: 500, description: 'Ghi chú cách tính' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  note?: string
+}
+
 export class RentalPackageDto {
   @IsString()
   @IsNotEmpty()
@@ -215,6 +241,15 @@ export class RentalPackageDto {
   @IsString()
   @MaxLength(2000)
   customClauses?: string
+
+  @ApiPropertyOptional({
+    type: () => UtilityRatesDto,
+    description: 'Đơn giá điện, nước, dịch vụ do hai bên thỏa thuận',
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => UtilityRatesDto)
+  utilityRates?: UtilityRatesDto
 
   @ApiPropertyOptional({ description: 'Số tháng trả trước đã quy đổi' })
   @IsOptional()
@@ -377,6 +412,18 @@ export class CreateApartmentDto {
   @IsInt()
   @Min(0)
   bedrooms!: number
+
+  @ApiPropertyOptional({
+    description: 'Số người ở tối đa (1-20)',
+    minimum: 1,
+    maximum: 20,
+  })
+  @Type(() => Number)
+  @IsInt({ message: 'Số người ở tối đa phải là số nguyên từ 1 đến 20.' })
+  @Min(1, { message: 'Số người ở tối đa phải từ 1 đến 20.' })
+  @Max(20, { message: 'Số người ở tối đa phải từ 1 đến 20.' })
+  @IsOptional()
+  maxOccupants?: number
 
   @ApiProperty({ description: 'Số phòng tắm' })
   @Type(() => Number)

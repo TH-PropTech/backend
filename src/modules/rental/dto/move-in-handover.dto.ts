@@ -15,6 +15,7 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator'
+import { MeterPhotosDto } from './meter-photos.dto'
 
 export const HANDOVER_ITEM_CONDITIONS = ['good', 'damaged'] as const
 export const HANDOVER_INVENTORY_MAX_ITEMS = 100
@@ -78,6 +79,12 @@ export class RecordHandoverDto {
   @IsInt()
   @Min(0)
   keyCount!: number
+
+  @ApiPropertyOptional({ type: MeterPhotosDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => MeterPhotosDto)
+  meterPhotos?: MeterPhotosDto
 
   @ApiPropertyOptional({
     type: [HandoverInventoryItemDto],

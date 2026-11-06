@@ -131,6 +131,9 @@ function toRentalPackageInputs(
       ...(packageItem.customClauses
         ? { customClauses: packageItem.customClauses }
         : {}),
+      ...(packageItem.utilityRates
+        ? { utilityRates: packageItem.utilityRates }
+        : {}),
       ...(packageItem.moveOutPolicy
         ? {
             moveOutPolicy: {
@@ -776,6 +779,7 @@ export class ApartmentsService {
       rentalPackages: packages,
       area: dto.area,
       bedrooms: dto.bedrooms,
+      maxOccupants: dto.maxOccupants ?? null,
       bathrooms: dto.bathrooms,
       direction: dto.direction ?? '',
       balconyDirection: dto.balconyDirection ?? '',
@@ -938,6 +942,7 @@ export class ApartmentsService {
       rentalPackages: packages,
       area: dto.area,
       bedrooms: dto.bedrooms,
+      maxOccupants: dto.maxOccupants ?? null,
       bathrooms: dto.bathrooms,
       direction: dto.direction ?? '',
       balconyDirection: dto.balconyDirection ?? '',

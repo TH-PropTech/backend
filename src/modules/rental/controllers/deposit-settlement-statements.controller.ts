@@ -5,6 +5,7 @@ import {
   Param,
   Post,
   Put,
+  Query,
   UseGuards,
 } from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
@@ -17,6 +18,7 @@ import {
   RecordRefundDto,
   RespondStatementDto,
   SaveStatementDraftDto,
+  UtilitySuggestionQueryDto,
 } from '../dto/deposit-settlement-statement.dto'
 import { DisputeNoteDto } from '../dto/move-out-handover.dto'
 import { DepositSettlementStatementsService } from '../services/deposit-settlement-statements.service'
@@ -40,6 +42,20 @@ export class DepositSettlementStatementsController {
     const isStaff =
       user.roles?.some(role => ['admin', 'staff'].includes(role)) ?? false
     return this.service.findByContract(contractId, actorIdOf(user), isStaff)
+  }
+
+  @Get('contract/:contractId/utility-suggestions')
+  @Roles('landlord')
+  suggestUtilityLines(
+    @Param('contractId') contractId: string,
+    @Query() query: UtilitySuggestionQueryDto,
+    @CurrentUser() user: UserPayload
+  ): ReturnType<DepositSettlementStatementsService['suggestUtilityLines']> {
+    return this.service.suggestUtilityLines(
+      contractId,
+      actorIdOf(user),
+      query.unpaidServiceMonths ?? 0
+    )
   }
 
   @Put('contract/:contractId')

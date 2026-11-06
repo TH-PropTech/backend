@@ -13,7 +13,9 @@ import {
   MaxLength,
   Min,
   ValidateNested,
+  IsBoolean,
 } from 'class-validator'
+import { MeterPhotosDto } from './meter-photos.dto'
 import { HANDOVER_INVENTORY_MAX_ITEMS } from './move-in-handover.dto'
 
 export const MOVE_OUT_ITEM_CONDITIONS = ['good', 'damaged', 'missing'] as const
@@ -65,6 +67,20 @@ export class RecordMoveOutHandoverDto {
   @IsInt()
   @Min(0)
   keyCount!: number
+
+  @ApiPropertyOptional({ type: MeterPhotosDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => MeterPhotosDto)
+  meterPhotos?: MeterPhotosDto
+
+  @ApiPropertyOptional({
+    description:
+      'Xác nhận khi chỉ số trả nhà nhỏ hơn chỉ số nhận nhà (ví dụ công tơ đã được thay)',
+  })
+  @IsOptional()
+  @IsBoolean()
+  acknowledgeMeterRegression?: boolean
 
   @ApiPropertyOptional({
     type: [MoveOutInventoryItemDto],
