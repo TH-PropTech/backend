@@ -1,11 +1,15 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
+import { Type } from 'class-transformer'
 import {
+  ArrayMinSize,
+  IsArray,
   IsDateString,
   IsInt,
   IsNotEmpty,
   IsOptional,
   IsString,
   Min,
+  ValidateNested,
 } from 'class-validator'
 
 export class ContractAmendmentChangeDto {
@@ -21,6 +25,10 @@ export class ContractAmendmentChangeDto {
 
 export class CreateContractAmendmentDto {
   @ApiProperty({ type: [ContractAmendmentChangeDto] })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => ContractAmendmentChangeDto)
   changes!: ContractAmendmentChangeDto[]
 
   @ApiProperty()
