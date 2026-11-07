@@ -14,6 +14,7 @@ import { LedgerProjectionService } from './ledger-projection.service'
 import { LedgerOutbox } from '../schemas/ledger-outbox.schema'
 import {
   LEDGER_SUBMIT_ACTIONS,
+  fitLedgerArgsToAbi,
   validateLedgerActionArgs,
 } from '../utils/ledger-action-args'
 import { RentalTransactionEventService } from '../../rental/services/rental-transaction-event.service'
@@ -627,7 +628,7 @@ export class LedgerOutboxService {
       try {
         const result = await this.fabricService.submitTransaction(
           event.payload.action,
-          event.payload.args,
+          this.fitArgsToChaincode(event),
           event.payload.metadata
         )
         await this.complete(event._id, event.claimToken!, result)
@@ -640,11 +641,23 @@ export class LedgerOutboxService {
     return processed
   }
 
+  private fitArgsToChaincode(event: LedgerOutbox): string[] {
+    const abiVersion =
+      typeof this.fabricService.getChaincodeAbiVersion === 'function'
+        ? this.fabricService.getChaincodeAbiVersion()
+        : 2
+    return fitLedgerArgsToAbi(
+      event.payload.action,
+      event.payload.args,
+      abiVersion
+    )
+  }
+
   private requiresChaincodeUpgrade(event: LedgerOutbox): boolean {
     const metadata = event.payload?.metadata
     const minimumAbiVersion = metadata?.minimumAbiVersion
     if (
-      minimumAbiVersion === 2 &&
+      typeof minimumAbiVersion === 'number' &&
       typeof this.fabricService.getChaincodeAbiVersion === 'function' &&
       this.fabricService.getChaincodeAbiVersion() < minimumAbiVersion
     ) {

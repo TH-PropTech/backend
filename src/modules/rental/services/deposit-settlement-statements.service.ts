@@ -20,15 +20,24 @@ import {
   type UtilityChargeSuggestion,
 } from '../utils/utility-charges.util'
 import { sha256Hex } from '../../fabric/utils/canonical-json'
+import { LATE_PAYMENT_INTEREST_BASIS } from '../../legal/utils/legal-citations'
+import {
+  computeLatePenalty,
+  daysLateBetween,
+} from '../../payments/utils/late-penalty'
 import { buildMoveInSettlementArgs } from '../../fabric/utils/ledger-action-args'
 import {
   DepositSettlementStatement,
+  type DepositRefundLateInterest,
   type DepositRefundRecord,
   type DepositStatementAuditEntry,
   type DepositStatementLine,
 } from '../schemas/deposit-settlement-statement.schema'
 import { MoveOutHandover } from '../schemas/move-out-handover.schema'
-import { DEPOSIT_REFUND_DUE_DAYS } from '../utils/deposit-refund.constants'
+import {
+  DEPOSIT_REFUND_DUE_DAYS,
+  DEPOSIT_REFUND_LATE_INTEREST_RATE_PER_YEAR,
+} from '../utils/deposit-refund.constants'
 import {
   REFUND_REMINDER_LEAD_MS,
   addDays,
@@ -69,6 +78,14 @@ export type RefundInput = {
 const sum = (values: number[]): number =>
   values.reduce((total, value) => total + value, 0)
 
+/** Bảng khấu trừ kèm các trường chỉ để hiển thị, không lưu xuống DB. */
+export type StatementView = Statement & {
+  /** Lãi tạm tính trên phần còn phải hoàn khi đã quá hạn hoàn cọc; `null` nếu không có. */
+  accruedRefundInterest: number | null
+}
+
+const formatVnd = (amount: number): string => amount.toLocaleString('vi-VN')
+
 /** Khoản chủ nhà phải hoàn: cọc trừ các dòng chưa bị khách phản đối. */
 export const refundableAmount = (statement: Statement): number =>
   Math.max(
@@ -102,14 +119,67 @@ export class DepositSettlementStatementsService {
   async findByContract(
     contractId: string,
     actorId: string,
-    isStaff: boolean
-  ): Promise<Statement> {
+    isStaff: boolean,
+    now = new Date()
+  ): Promise<StatementView> {
     const statement = await this.findOrFail(contractId)
     assertPartyOrStaff(statement, actorId, isStaff, 'STATEMENT_ACCESS_DENIED')
     // Bản nháp chưa gửi là việc riêng của chủ nhà; khách chỉ thấy bảng đã gửi.
     if (statement.status === 'draft' && actorId === statement.tenantId)
       throw new NotFoundException('STATEMENT_NOT_FOUND')
-    return statement
+    return {
+      ...statement,
+      refunds: statement.refunds.map(refund => ({
+        ...refund,
+        lateInterest: refund.lateInterest ?? null,
+      })),
+      accruedRefundInterest: this.accruedRefundInterest(statement, now),
+    }
+  }
+
+  /** Lãi chậm hoàn tạm tính đến hôm nay trên phần cọc còn phải hoàn; chỉ để hiển thị. */
+  private accruedRefundInterest(
+    statement: Statement,
+    now: Date
+  ): number | null {
+    if (
+      !statement.refundDueAt ||
+      !['accepted', 'disputed', 'refund-recorded'].includes(statement.status)
+    )
+      return null
+    const remaining =
+      refundableAmount(statement) - sum(statement.refunds.map(r => r.amount))
+    const daysLate = daysLateBetween(new Date(statement.refundDueAt), now)
+    if (remaining <= 0 || daysLate <= 0) return null
+    const amount = computeLatePenalty(
+      remaining,
+      DEPOSIT_REFUND_LATE_INTEREST_RATE_PER_YEAR,
+      daysLate
+    )
+    return amount > 0 ? amount : null
+  }
+
+  /** Lãi theo luật khi chủ nhà hoàn cọc sau hạn; `null` khi hoàn đúng hạn hoặc lãi làm tròn bằng 0. */
+  private lateInterestOf(
+    statement: Statement,
+    amount: number,
+    paidAt: Date
+  ): DepositRefundLateInterest | null {
+    if (!statement.refundDueAt) return null
+    const daysLate = daysLateBetween(new Date(statement.refundDueAt), paidAt)
+    if (daysLate <= 0) return null
+    const interest = computeLatePenalty(
+      amount,
+      DEPOSIT_REFUND_LATE_INTEREST_RATE_PER_YEAR,
+      daysLate
+    )
+    if (interest <= 0) return null
+    return {
+      ratePerYear: DEPOSIT_REFUND_LATE_INTEREST_RATE_PER_YEAR,
+      daysLate,
+      amount: interest,
+      legalBasis: LATE_PAYMENT_INTEREST_BASIS,
+    }
   }
 
   /** Lập hoặc thay toàn bộ dòng của bảng nháp. Bảng không có dòng nghĩa là hoàn đủ cọc. */
@@ -332,16 +402,18 @@ export class DepositSettlementStatementsService {
     const alreadyRefunded = sum(statement.refunds.map(item => item.amount))
     if (alreadyRefunded + input.amount > refundableAmount(statement))
       throw new BadRequestException('STATEMENT_REFUND_EXCEEDS_LIMIT')
+    const paidAt = new Date(input.paidAt)
     const refund: DepositRefundRecord = {
       id: randomUUID(),
       amount: input.amount,
       transactionRef: input.transactionRef.trim(),
-      paidAt: new Date(input.paidAt),
+      paidAt,
       note: input.note?.trim() || null,
       recordedAt: now,
       recordedBy: actorId,
       tenantAcknowledgedAt: null,
       evidence: null,
+      lateInterest: this.lateInterestOf(statement, input.amount, paidAt),
     }
     statement.refunds = [...statement.refunds, refund]
     statement.status = 'refund-recorded'
@@ -364,12 +436,22 @@ export class DepositSettlementStatementsService {
       refs: { settlementId: id },
       transitionKey: `deposit-statement:${id}:refund:${refund.id}`,
     })
-    await this.support.notify(
-      [saved.tenantId],
-      'Chủ nhà đã ghi nhận hoàn cọc',
-      'Chủ nhà khai báo đã hoàn một khoản cọc. Vui lòng xác nhận nếu bạn đã nhận được tiền. Sàn không giữ hay chuyển tiền và không bảo đảm khoản này.',
-      this.dataOf(saved)
-    )
+    if (refund.lateInterest) {
+      const { daysLate, amount, legalBasis } = refund.lateInterest
+      await this.support.notify(
+        [saved.tenantId, saved.landlordId],
+        'Hoàn cọc trễ hạn, phát sinh lãi chậm hoàn',
+        `Chủ nhà khai báo đã hoàn một khoản cọc trễ ${daysLate} ngày so với hạn hoàn cọc, phát sinh lãi chậm hoàn ${formatVnd(amount)} VND theo ${legalBasis}. Hai bên tự thanh toán khoản lãi cho nhau; sàn không thu hộ, không giữ và không bảo đảm khoản này. Khách thuê vui lòng xác nhận nếu đã nhận được tiền hoàn cọc.`,
+        this.dataOf(saved)
+      )
+    } else {
+      await this.support.notify(
+        [saved.tenantId],
+        'Chủ nhà đã ghi nhận hoàn cọc',
+        'Chủ nhà khai báo đã hoàn một khoản cọc. Vui lòng xác nhận nếu bạn đã nhận được tiền. Sàn không giữ hay chuyển tiền và không bảo đảm khoản này.',
+        this.dataOf(saved)
+      )
+    }
     return saved
   }
 
@@ -494,7 +576,7 @@ export class DepositSettlementStatementsService {
       await this.support.notify(
         [saved.tenantId, saved.landlordId],
         'Đã quá hạn hoàn cọc',
-        'Đã quá hạn hoàn cọc theo hợp đồng nhưng chưa có bản ghi hoàn cọc. Hệ thống chỉ ghi nhận và nhắc, không áp dụng chế tài.',
+        `Đã quá hạn hoàn cọc theo hợp đồng nhưng chưa có bản ghi hoàn cọc. Chủ nhà chậm hoàn cọc phải trả lãi chậm hoàn ${DEPOSIT_REFUND_LATE_INTEREST_RATE_PER_YEAR}%/năm trên số tiền còn phải hoàn theo ${LATE_PAYMENT_INTEREST_BASIS}. Hệ thống chỉ tính và thông báo; hai bên tự thanh toán cho nhau, sàn không thu hộ hay giữ tiền.`,
         this.dataOf(saved)
       )
       return true
@@ -652,6 +734,8 @@ export class DepositSettlementStatementsService {
         amount: refund.amount,
         paidAt: refund.paidAt.toISOString(),
         transactionRefHash: sha256Hex(refund.transactionRef),
+        // Chỉ có khi hoàn trễ, nên hash của lần hoàn đúng hạn giữ nguyên như trước.
+        ...(refund.lateInterest ? { lateInterest: refund.lateInterest } : {}),
         occurredAt,
       })
       refund.evidence = pendingEvidence(EVIDENCE_SCHEMA_VERSION, manifestHash)

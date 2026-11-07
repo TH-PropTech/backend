@@ -377,7 +377,7 @@ export const SEED_LEGAL_SOURCES: Record<
       'https://vanban.chinhphu.vn/default.aspx?pageid=27160&docid=209627',
     icon: 'law',
     description:
-      'Quy định điều kiện của nhà ở tham gia giao dịch (Điều 160), trình tự ký kết hợp đồng thuê nhà ở (Điều 163), quyền đơn phương chấm dứt hợp đồng khi vi phạm (Điều 164), và quy chế quản lý vận hành nhà chung cư.',
+      'Quy định điều kiện của nhà ở tham gia giao dịch (Điều 160), trình tự ký kết hợp đồng thuê nhà ở (Điều 163), quyền đơn phương chấm dứt hợp đồng (Điều 172), và quy chế quản lý vận hành nhà chung cư.',
     dossierItems: [
       {
         title: 'Điều kiện nhà ở cho thuê (Điều 160)',

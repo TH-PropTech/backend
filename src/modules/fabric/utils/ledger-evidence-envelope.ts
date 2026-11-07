@@ -6,6 +6,18 @@ export const SIGNED_CONTRACT_LEDGER_EVIDENCE_SCHEMA_VERSION_V3 = 3 as const
 
 type SignerRole = 'tenant' | 'landlord'
 
+/** Nhà cung cấp chữ ký ghi trên ledger ABI 3; `dev-test` là đường ký thử ngoài production. */
+export const LEDGER_SIGNATURE_PROVIDERS = ['smartca', 'dev-test'] as const
+export type LedgerSignatureProvider =
+  (typeof LEDGER_SIGNATURE_PROVIDERS)[number]
+
+/** Trần lãi chậm trả (%/năm) khớp `lease-compliance.validator.ts` và chaincode. */
+const MAX_LATE_PENALTY_RATE_PER_YEAR = 20
+
+export type LedgerEvidenceTerms = {
+  latePenaltyRatePerYear: number
+}
+
 export type LedgerEvidenceArtifact = {
   artifactId: string
   revision: number
@@ -14,6 +26,8 @@ export type LedgerEvidenceArtifact = {
 }
 
 export type LedgerEvidenceSignatureInput = {
+  /** Bỏ trống thì envelope không có trường `provider` (giữ nguyên hash như trước ABI 3). */
+  provider?: LedgerSignatureProvider
   providerTransactionId: string
   certificateSerial: string
   certificateSubject?: string | null
@@ -29,6 +43,8 @@ export type SignedContractLedgerEvidenceInput = {
   signatures: Record<SignerRole, LedgerEvidenceSignatureInput>
   depositId?: string | null
   depositHash?: string | null
+  /** Tỷ lệ lãi chậm trả hiệu lực lúc kích hoạt; chaincode ABI 3 neo giá trị này. */
+  terms?: LedgerEvidenceTerms
 }
 
 export type SignedContractLedgerEvidenceEnvelope = {
@@ -38,6 +54,7 @@ export type SignedContractLedgerEvidenceEnvelope = {
   signatures: Record<
     SignerRole,
     {
+      provider?: LedgerSignatureProvider
       providerTransactionRef: string
       certificateEvidenceRef: string
       signatureEvidenceRef: string | null
@@ -47,6 +64,7 @@ export type SignedContractLedgerEvidenceEnvelope = {
     id: string | null
     hash: string | null
   }
+  terms?: LedgerEvidenceTerms
 }
 
 export type LegacySignedContractLedgerEvidence = {
@@ -67,11 +85,13 @@ function hashReference(value: Record<string, unknown>): string {
 }
 
 function signatureReference(input: LedgerEvidenceSignatureInput): {
+  provider?: LedgerSignatureProvider
   providerTransactionRef: string
   certificateEvidenceRef: string
   signatureEvidenceRef: string | null
 } {
   return {
+    ...(input.provider ? { provider: input.provider } : {}),
     providerTransactionRef: hashReference({
       providerTransactionId: input.providerTransactionId,
     }),
@@ -116,6 +136,22 @@ export function buildSignedContractLedgerEvidence(
   if (input.depositHash && !isSha256(input.depositHash)) {
     throw new Error('LEDGER_EVIDENCE_DEPOSIT_INVALID')
   }
+  for (const role of ['tenant', 'landlord'] as const) {
+    const provider = input.signatures[role].provider
+    if (provider && !LEDGER_SIGNATURE_PROVIDERS.includes(provider)) {
+      throw new Error('LEDGER_EVIDENCE_SIGNATURE_INVALID')
+    }
+  }
+  if (input.terms) {
+    const rate = input.terms.latePenaltyRatePerYear
+    if (
+      !Number.isFinite(rate) ||
+      rate < 0 ||
+      rate > MAX_LATE_PENALTY_RATE_PER_YEAR
+    ) {
+      throw new Error('LEDGER_EVIDENCE_TERMS_INVALID')
+    }
+  }
 
   return {
     schemaVersion: SIGNED_CONTRACT_LEDGER_EVIDENCE_SCHEMA_VERSION,
@@ -129,6 +165,11 @@ export function buildSignedContractLedgerEvidence(
       id: input.depositId ?? null,
       hash: input.depositHash ?? null,
     },
+    ...(input.terms
+      ? {
+          terms: { latePenaltyRatePerYear: input.terms.latePenaltyRatePerYear },
+        }
+      : {}),
   }
 }
 

@@ -8,6 +8,7 @@ export const LEDGER_SUBMIT_ACTIONS: ReadonlySet<string> = new Set([
   'recordDeposit',
   'createContract',
   'recordPayment',
+  'recordPenalty',
   'recordContractAmendment',
   'terminateContract',
   'publishGovernanceSnapshot',
@@ -132,9 +133,71 @@ export function buildHandoverArgs(input: HandoverArgsInput): string[] {
   ]
 }
 
+export type PenaltyArgsInput = {
+  penaltyId: string
+  contractId: string
+  sourcePaymentId: string
+  baseAmount: number
+  ratePerYear: number
+  daysLate: number
+  amount: number
+  penaltyHash: string
+}
+
 /**
- * Kiểm tra args đã lưu trong outbox ngay trước khi submit. Chỉ ràng buộc 3
- * action mới của PROP-399; action cũ do chaincode validate như trước.
+ * Args cho chaincode `recordPenalty(penaltyId, contractId, sourcePaymentId, baseAmount,
+ * ratePerYear, daysLate, amount, penaltyHash)`. Chỉ kiểm dạng dữ liệu; luật nghiệp vụ
+ * (công thức, tỷ lệ, khoản gốc) do chaincode kiểm.
+ */
+export function buildPenaltyArgs(input: PenaltyArgsInput): string[] {
+  const action = 'recordPenalty'
+  const baseAmount = positiveInt(input.baseAmount)
+  const daysLate = positiveInt(input.daysLate)
+  if (!isNonEmpty(input.penaltyId)) invalid(action, 'penaltyId required')
+  if (!isNonEmpty(input.contractId)) invalid(action, 'contractId required')
+  if (!isNonEmpty(input.sourcePaymentId)) {
+    invalid(action, 'sourcePaymentId required')
+  }
+  if (!baseAmount) invalid(action, 'baseAmount must be a positive integer')
+  if (!Number.isFinite(input.ratePerYear) || input.ratePerYear <= 0) {
+    invalid(action, 'ratePerYear must be a positive number')
+  }
+  if (!daysLate) invalid(action, 'daysLate must be a positive integer')
+  if (!Number.isInteger(input.amount) || input.amount < 0) {
+    invalid(action, 'amount must be a non-negative integer')
+  }
+  if (!isSha256(input.penaltyHash)) invalid(action, 'penaltyHash invalid')
+  return [
+    input.penaltyId,
+    input.contractId,
+    input.sourcePaymentId,
+    baseAmount,
+    String(input.ratePerYear),
+    daysLate,
+    String(input.amount),
+    input.penaltyHash,
+  ]
+}
+
+/**
+ * Fabric từ chối giao dịch khi số tham số khác khai báo của hàm chaincode. Args được dựng lúc
+ * enqueue theo ABI khi đó; nếu chaincode được nâng (hoặc hạ) trước khi mục được gửi thì chỉnh
+ * lại cho khớp ABI hiện hành. Hiện chỉ `recordPayment` đổi số tham số (4 → 5 từ ABI 3).
+ */
+export function fitLedgerArgsToAbi(
+  action: string,
+  args: string[],
+  abiVersion: number
+): string[] {
+  if (action !== 'recordPayment') return args
+  if (abiVersion >= 3 && args.length === 4) return [...args, '']
+  if (abiVersion < 3 && args.length === 5) return args.slice(0, 4)
+  return args
+}
+
+/**
+ * Kiểm tra args đã lưu trong outbox ngay trước khi submit. Chỉ ràng buộc các
+ * action mới (PROP-399 và recordPenalty); action cũ do chaincode validate như trước.
  * Trả về lý do lỗi, hoặc `null` nếu hợp lệ.
  */
 export function validateLedgerActionArgs(
@@ -199,6 +262,40 @@ export function validateLedgerActionArgs(
         return 'overrideUsed must be a boolean string'
       }
       if (!isIsoTime(occurredAt)) return 'occurredAt must be an ISO time'
+      return null
+    }
+    case 'recordPenalty': {
+      if (!list || list.length !== 8) return 'arity must be 8'
+      const [
+        penaltyId,
+        contractId,
+        sourcePaymentId,
+        baseAmount,
+        ratePerYear,
+        daysLate,
+        amount,
+        penaltyHash,
+      ] = list
+      if (
+        !isNonEmpty(penaltyId) ||
+        !isNonEmpty(contractId) ||
+        !isNonEmpty(sourcePaymentId)
+      ) {
+        return 'penaltyId, contractId and sourcePaymentId required'
+      }
+      if (!isPositiveIntegerString(baseAmount)) {
+        return 'baseAmount must be a positive integer'
+      }
+      if (typeof ratePerYear !== 'string' || !(Number(ratePerYear) > 0)) {
+        return 'ratePerYear must be a positive number'
+      }
+      if (!isPositiveIntegerString(daysLate)) {
+        return 'daysLate must be a positive integer'
+      }
+      if (typeof amount !== 'string' || !/^\d+$/.test(amount)) {
+        return 'amount must be a non-negative integer'
+      }
+      if (!isSha256(penaltyHash)) return 'penaltyHash must be a SHA-256 hash'
       return null
     }
     default:

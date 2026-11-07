@@ -290,6 +290,33 @@ describe('FabricService', () => {
       expect(evaluateTransaction).toHaveBeenCalledWith('getChaincodeInfo')
     })
 
+    it('reads chaincode ABI version 3 and falls back to 2 for unknown versions', async () => {
+      for (const [advertised, expected] of [
+        [3, 3],
+        [1, 1],
+        [4, 2],
+      ] as const) {
+        setupValidConfig()
+        const evaluateTransaction = jest
+          .fn()
+          .mockResolvedValue(
+            Buffer.from(JSON.stringify({ abiVersion: advertised }))
+          )
+        const getContract = jest.fn().mockReturnValue({ evaluateTransaction })
+        const getNetwork = jest.fn().mockReturnValue({ getContract })
+        mockConnect.mockReturnValue({ getNetwork, close: jest.fn() })
+
+        const service = new FabricService(
+          logRepository as never,
+          configService as never
+        )
+        await service.onModuleInit()
+
+        expect(service.getChaincodeAbiVersion()).toBe(expected)
+        expect(service.getStatus().chaincodeAbiVersion).toBe(expected)
+      }
+    })
+
     it('reports FABRIC_CHAINCODE_INCOMPATIBLE when the deployed chaincode lacks getChaincodeInfo, without scanning the ledger (PROP-399 6.5)', async () => {
       setupValidConfig()
       const evaluateTransaction = jest

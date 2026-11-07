@@ -193,6 +193,88 @@ describe('ContractDocumentProjector', () => {
     ])
     expect(result.sections).toHaveLength(12)
   })
+  describe('late-penalty rate printed in the document (single source with the penalty calculation)', () => {
+    const seed = buildReviewedLeaseTemplateSeed('PRIVATE_CIVIL_APARTMENT_LEASE')
+    const template = {
+      legalProfile: seed.legalProfile,
+      version: 3,
+      templateKey: 'VN_INDIVIDUAL_RESIDENTIAL_LEASE',
+      schemaVersion: seed.schemaVersion,
+      contentHash: 'hash',
+      clauses: seed.clauses,
+      annexDefinitions: seed.annexDefinitions,
+      citationIds: seed.citationIds,
+    }
+    const penaltyClause = (
+      contract: Partial<Contract>,
+      withTemplate: boolean
+    ): string => {
+      const result = ContractDocumentProjector.projectDocument(
+        contract as Contract,
+        withTemplate ? template : undefined
+      )
+      return (
+        result.sections
+          .map(section => section.content)
+          .find(
+            content => content.includes('lãi') && content.includes('%/năm')
+          ) ?? ''
+      )
+    }
+
+    it('prints a 0 rate as 0%/năm on the admin template', () => {
+      expect(
+        penaltyClause({ ...mockContract, latePenaltyRate: 0 }, true)
+      ).toContain('0%/năm')
+    })
+
+    it('prints a 0 rate as 10%/năm on the built-in layout', () => {
+      expect(
+        penaltyClause({ ...mockContract, latePenaltyRate: 0 }, false)
+      ).toContain('10%/năm')
+    })
+
+    it('prints the agreed rate unchanged on both layouts', () => {
+      expect(penaltyClause(mockContract, true)).toContain('10%/năm')
+      expect(
+        penaltyClause({ ...mockContract, latePenaltyRate: 12 }, false)
+      ).toContain('12%/năm')
+    })
+  })
+
+  describe('legal citations are the same on both layouts (add-rental-penalty-enforcement)', () => {
+    const seed = buildReviewedLeaseTemplateSeed('PRIVATE_CIVIL_APARTMENT_LEASE')
+    const template = {
+      legalProfile: seed.legalProfile,
+      version: 3,
+      templateKey: 'VN_INDIVIDUAL_RESIDENTIAL_LEASE',
+      schemaVersion: seed.schemaVersion,
+      contentHash: 'hash',
+      clauses: seed.clauses,
+      annexDefinitions: seed.annexDefinitions,
+      citationIds: seed.citationIds,
+    }
+    const textOf = (withTemplate: boolean): string =>
+      ContractDocumentProjector.projectDocument(
+        mockContract as Contract,
+        withTemplate ? template : undefined
+      )
+        .sections.map(section => section.content)
+        .join('\n')
+
+    it.each([
+      ['admin template', true],
+      ['built-in layout', false],
+    ])('cites the same articles in the %s', (_label, withTemplate) => {
+      const text = textOf(withTemplate)
+      expect(text).toContain('Điều 357 và Điều 468 Bộ luật Dân sự 2015')
+      expect(text).toContain('Khoản 4 Điều 172 Luật Nhà ở 2023')
+      expect(text).toContain('khoản 2 Điều 328 Bộ luật Dân sự 2015')
+      expect(text).not.toContain('Điều 130')
+      expect(text).not.toContain('01 tháng tiền thuê')
+    })
+  })
+
   describe('move-out and deposit refund clauses', () => {
     const seed = buildReviewedLeaseTemplateSeed('PRIVATE_CIVIL_APARTMENT_LEASE')
     const template = {

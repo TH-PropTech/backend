@@ -23,7 +23,7 @@ describe('reviewed lease template seed', () => {
       true
     )
     expect(seed.reviewReference).toContain('PROP-321')
-    expect(seed.reviewReference).toContain('MOVE-OUT')
+    expect(seed.reviewReference).toContain('PENALTY-CITATIONS')
   })
 
   it('declares the move-out variable as allowed and referenced by Điều 9', () => {

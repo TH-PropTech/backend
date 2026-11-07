@@ -22,7 +22,7 @@ describe('validateLeaseCompliance', () => {
     })
     expect(violations).toHaveLength(4)
     expect(violations.join(' ')).toContain('Điều 468 Bộ luật Dân sự 2015')
-    expect(violations.join(' ')).toContain('Điều 130 Luật Nhà ở 2023')
+    expect(violations.join(' ')).toContain('Điều 172 Luật Nhà ở 2023')
     expect(violations.join(' ')).toContain('Điều 23 Luật KDBDS 2023')
   })
 

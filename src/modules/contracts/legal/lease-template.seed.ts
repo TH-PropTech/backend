@@ -7,9 +7,9 @@ import type { LegalProfile } from './legal-profile.resolver'
 import { hashText } from './contract-template.canonical'
 import { LEASE_ARTICLE_DEFINITIONS } from './lease-template.articles'
 
-/** Bản soạn 2026-10 (thêm biên bản trả nhà, bảng khấu trừ cọc, hoàn cọc 07 ngày): chưa có xác nhận của luật sư; ghi rõ để không bị hiểu là đã thẩm định. Đổi chuỗi này sẽ làm bootstrap phát hành phiên bản mẫu kế tiếp. */
+/** Bản soạn 2026-11 (thêm lãi chậm trả theo Điều 357 và 468, báo trước theo khoản 4 Điều 172 Luật Nhà ở, chế tài khoản 2 Điều 328; trước đó 2026-10 thêm biên bản trả nhà, bảng khấu trừ cọc, hoàn cọc 07 ngày): chưa có xác nhận của luật sư; ghi rõ để không bị hiểu là đã thẩm định. Đổi chuỗi này sẽ làm bootstrap phát hành phiên bản mẫu kế tiếp. */
 export const LEASE_TEMPLATE_SEED_REVIEW_REFERENCE =
-  'PROP-321-LEGAL-DRAFT-2026-10-MOVE-OUT-PENDING-COUNSEL-REVIEW'
+  'PROP-321-LEGAL-DRAFT-2026-11-PENALTY-CITATIONS-PENDING-COUNSEL-REVIEW'
 
 const REQUIRED_ANNEXES: readonly ContractTemplateAnnexDefinition[] = [
   {

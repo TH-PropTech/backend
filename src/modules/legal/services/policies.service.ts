@@ -9,6 +9,10 @@ import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 import { Policy } from '../schemas/policy.schema'
 import {
+  RENT_TERMS_FREEDOM_BASIS,
+  TERMINATION_NOTICE_REFERENCE,
+} from '../utils/legal-citations'
+import {
   POLICY_DEFINITIONS,
   validatePolicyValue,
 } from '../utils/policy-definitions'
@@ -77,8 +81,7 @@ export class PoliciesService implements OnApplicationBootstrap {
         description:
           'Bên đơn phương chấm dứt hợp đồng thuê nhà ở phải thông báo cho bên kia biết trước ít nhất 30 ngày',
         unit: 'ngày',
-        legalReference:
-          'Khoản 3 Điều 130 Luật Nhà ở 2023 (Luật số 27/2023/QH15)',
+        legalReference: TERMINATION_NOTICE_REFERENCE,
       },
       {
         key: 'CONTRACT_MUST_BE_WRITTEN',
@@ -123,13 +126,13 @@ export class PoliciesService implements OnApplicationBootstrap {
           'Khoản 4 Điều 131 Luật Nhà ở 2023 (Luật số 27/2023/QH15)',
       },
 
-      // ── Gói thuê căn hộ chung cư theo thời hạn (thỏa thuận — Điều 130 LNO 2023) ──
+      // ── Gói thuê căn hộ chung cư theo thời hạn (thỏa thuận — khoản 1 Điều 170 LNO 2023) ──
       {
         key: 'LEASE_3M_MIN_MONTHS',
         value: '3',
         description: 'Gói thuê ngắn hạn: thời hạn tối thiểu',
         unit: 'tháng',
-        legalReference: 'Tự do thỏa thuận theo Điều 130 Luật Nhà ở 2023',
+        legalReference: `Tự do thỏa thuận theo ${RENT_TERMS_FREEDOM_BASIS}`,
       },
       {
         key: 'LEASE_3M_DEPOSIT_MONTHS',
@@ -151,7 +154,7 @@ export class PoliciesService implements OnApplicationBootstrap {
         value: '6',
         description: 'Gói thuê trung hạn: thời hạn tối thiểu',
         unit: 'tháng',
-        legalReference: 'Tự do thỏa thuận theo Điều 130 Luật Nhà ở 2023',
+        legalReference: `Tự do thỏa thuận theo ${RENT_TERMS_FREEDOM_BASIS}`,
       },
       {
         key: 'LEASE_6M_DEPOSIT_MONTHS',
@@ -180,7 +183,7 @@ export class PoliciesService implements OnApplicationBootstrap {
         value: '12',
         description: 'Gói thuê dài hạn: thời hạn tối thiểu',
         unit: 'tháng',
-        legalReference: 'Tự do thỏa thuận theo Điều 130 Luật Nhà ở 2023',
+        legalReference: `Tự do thỏa thuận theo ${RENT_TERMS_FREEDOM_BASIS}`,
       },
       {
         key: 'LEASE_12M_DEPOSIT_MONTHS',

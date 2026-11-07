@@ -1,3 +1,5 @@
+import { TERMINATION_NOTICE_BASIS } from '../../legal/utils/legal-citations'
+
 /** Giới hạn pháp lý mặc định khi chưa đọc được chính sách từ DB. */
 export const DEFAULT_LEASE_COMPLIANCE_LIMITS = Object.freeze({
   maxLatePenaltyRatePerYear: 20,
@@ -39,7 +41,7 @@ export function validateLeaseCompliance(
   if (input.terminationNoticeDays < limits.minTerminationNoticeDays) {
     violations.push(
       `Thời hạn báo trước chấm dứt ${input.terminationNoticeDays} ngày thấp hơn tối thiểu ${limits.minTerminationNoticeDays} ngày ` +
-        `theo Khoản 3 Điều 130 Luật Nhà ở 2023`
+        `theo ${TERMINATION_NOTICE_BASIS}`
     )
   }
 

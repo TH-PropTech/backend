@@ -38,6 +38,65 @@ describe('LedgerEvidenceQueryService', () => {
     )
   })
 
+  describe('signing provider', () => {
+    const activation = (providers: Array<string | undefined>): unknown => ({
+      _id: new ObjectId(),
+      aggregateType: 'contract',
+      aggregateId: 'contract-123456',
+      eventType: 'contract.activated',
+      status: 'confirmed',
+      attempts: 1,
+      payloadHash: 'a'.repeat(64),
+      payload: {
+        action: 'createContract',
+        args: ['PII-ARG'],
+        metadata: {
+          details: {
+            evidenceEnvelope: {
+              signatures: {
+                tenant: { provider: providers[0] },
+                landlord: { provider: providers[1] },
+              },
+            },
+          },
+        },
+      },
+    })
+
+    async function signingProviderFor(
+      events: unknown[]
+    ): Promise<string | null> {
+      outboxRepository.find.mockImplementation(
+        ({ where }: { where: Record<string, string> }) =>
+          Promise.resolve(where.aggregateType === 'contract' ? events : [])
+      )
+      const evidence = await service.getContractLedgerEvidence(
+        'contract-123456',
+        {}
+      )
+      return evidence.signingProvider
+    }
+
+    it('flags a contract signed through the dev-test path', async () => {
+      await expect(
+        signingProviderFor([activation(['dev-test', 'dev-test'])])
+      ).resolves.toBe('dev-test')
+    })
+
+    it('reports smartca when both parties signed with SmartCA', async () => {
+      await expect(
+        signingProviderFor([activation(['smartca', 'smartca'])])
+      ).resolves.toBe('smartca')
+    })
+
+    it('reports no provider before activation or for a contract anchored before ABI 3', async () => {
+      await expect(signingProviderFor([])).resolves.toBeNull()
+      await expect(
+        signingProviderFor([activation([undefined, undefined])])
+      ).resolves.toBeNull()
+    })
+  })
+
   it('aggregates contract, deposit, payment and amendment events without exposing payload args or PII', async () => {
     const depositId = new ObjectId()
     const paymentId = new ObjectId()

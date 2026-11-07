@@ -19,6 +19,10 @@ const TASKS: Task[] = [
     run: scheduler => scheduler.processPaymentReminders(),
   },
   {
+    name: 'assessLatePenalties',
+    run: scheduler => scheduler.assessLatePenalties(),
+  },
+  {
     name: 'markSettlementsOverdue',
     run: scheduler => scheduler.markSettlementsOverdue(),
   },
@@ -52,6 +56,7 @@ describe('RentalOpsScheduler', () => {
             applyAllDueAmendments: task,
             processResponseDeadlines: task,
             processDeadlines: task,
+            assessMissing: task,
           }),
         } as never
       )
@@ -80,6 +85,7 @@ describe('RentalOpsScheduler', () => {
         applyAllDueAmendments: jest.fn().mockResolvedValue(1),
         processResponseDeadlines: jest.fn().mockResolvedValue(1),
         processDeadlines: jest.fn().mockResolvedValue(1),
+        assessMissing: jest.fn().mockResolvedValue(1),
       }
       const scheduler = new RentalOpsScheduler(
         {

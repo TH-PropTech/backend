@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ForbiddenException,
   ConflictException,
   Injectable,
@@ -10,8 +11,9 @@ import { ModuleRef } from '@nestjs/core'
 import { InjectRepository } from '@nestjs/typeorm'
 import { ObjectId } from 'mongodb'
 import { createHash } from 'node:crypto'
-import { Repository } from 'typeorm'
+import type { FindOptionsWhere, Repository } from 'typeorm'
 import { Contract } from '../../contracts/schemas/contract.schema'
+import { FabricService } from '../../fabric/services/fabric.service'
 import { LedgerOutboxService } from '../../fabric/services/ledger-outbox.service'
 import { NotificationsService } from '../../notifications/services/notifications.service'
 import { generatePaymentSchedule } from '../utils/payment-schedule.util'
@@ -22,10 +24,24 @@ import { resolveEffectiveCommercial } from '../../contracts/commercial/resolve-e
 import { RentalTransactionEventService } from '../../rental/services/rental-transaction-event.service'
 import { PayoutsService } from '../../wallets/services/payouts.service'
 import { PlatformFeeScheduleRepository } from '../utils/platform-fee-schedule.repository'
+import { buildPaymentLedgerArgs } from '../utils/payment-ledger-args'
+import { computeLatePenalty, daysLateBetween } from '../utils/late-penalty'
+import { resolveLatePenaltyRate } from '../../contracts/commercial/resolve-late-penalty-rate'
+import { LatePenaltyService } from './late-penalty.service'
 
 /** Link chuông thông báo -> tab ví trong hồ sơ (nơi chủ nhà thanh toán hóa đơn). */
 const PLATFORM_FEE_NOTIFICATION_LINK = '/profile?tab=wallet'
 const DEFAULT_LANDLORD_FEE_DUE_DAYS = 7
+/** Hợp đồng cho phép Bên cho thuê đơn phương chấm dứt khi tiền thuê trễ quá số ngày này. */
+const LEASE_TERMINATION_RIGHT_AFTER_DAYS = 15
+
+/** Hóa đơn kèm các trường chỉ để hiển thị; không lưu xuống DB. */
+export type PaymentView = Payment & {
+  /** Số ngày trễ tính đến hôm nay (hóa đơn `rent` đang `overdue`), ngược lại `null`. */
+  daysLate: number | null
+  /** Lãi tạm tính; `null` khi không phải hóa đơn `rent` quá hạn hoặc hợp đồng không có lãi. */
+  accruedLateInterest: number | null
+}
 
 @Injectable()
 export class PaymentsService {
@@ -47,7 +63,9 @@ export class PaymentsService {
     // giữ nguyên ngữ nghĩa optional cũ (không có thì dùng fallback check).
     @Optional() private readonly moduleRef?: ModuleRef,
     @Optional()
-    private readonly feeScheduleRepository?: PlatformFeeScheduleRepository
+    private readonly feeScheduleRepository?: PlatformFeeScheduleRepository,
+    @Optional() private readonly fabricService?: FabricService,
+    @Optional() private readonly latePenaltyService?: LatePenaltyService
   ) {}
 
   /** dueDaysAfterActivation theo biểu phí đã chốt trong snapshot hợp đồng; mặc định 7. */
@@ -281,11 +299,79 @@ export class PaymentsService {
     return saved
   }
 
+  /**
+   * Chủ nhà miễn khoản lãi chậm trả chưa thanh toán. Sàn không thu hay giữ khoản phạt nên
+   * quyết định miễn thuộc hoàn toàn về chủ nhà; việc miễn được ghi thành sự kiện giao dịch.
+   */
+  async waivePenalty(
+    paymentId: string,
+    landlordId: string,
+    reason: string
+  ): Promise<Payment> {
+    if (!ObjectId.isValid(paymentId)) {
+      throw new NotFoundException('PAYMENT_NOT_FOUND')
+    }
+    const payment = await this.paymentRepository.findOne({
+      where: { _id: new ObjectId(paymentId) },
+    })
+    if (!payment || payment.type !== 'penalty') {
+      throw new NotFoundException('PAYMENT_NOT_FOUND')
+    }
+    const contract = await this.findContract(payment.contractId)
+    if (contract.landlordId !== landlordId) {
+      throw new ForbiddenException('PAYMENT_ACCESS_DENIED')
+    }
+    if (payment.status === 'paid') {
+      throw new ConflictException('PENALTY_ALREADY_PAID')
+    }
+    if (payment.status === 'waived') return payment
+    const trimmedReason = reason?.trim() ?? ''
+    if (!trimmedReason) {
+      throw new BadRequestException('PENALTY_WAIVE_REASON_REQUIRED')
+    }
+
+    payment.status = 'waived'
+    payment.waivedBy = landlordId
+    payment.waivedAt = new Date()
+    payment.waiveReason = trimmedReason
+    const saved = await this.paymentRepository.save(payment)
+    await this.recordTransactionEvent({
+      contractId: saved.contractId,
+      eventType: 'penalty.waived',
+      actorRole: 'landlord',
+      actorId: landlordId,
+      reasonCode: trimmedReason,
+      refs: { paymentId: saved._id.toHexString() },
+      transitionKey: `penalty:${saved._id.toHexString()}:waived`,
+    })
+    await this.notifyPenaltyWaived(saved)
+    return saved
+  }
+
+  private async notifyPenaltyWaived(penalty: Payment): Promise<void> {
+    if (!this.notificationsService) return
+    try {
+      const paymentId = penalty._id.toHexString()
+      await this.notificationsService.createNotificationOnce(
+        penalty.tenantId,
+        `penalty:${paymentId}:waived`,
+        'Chủ nhà đã miễn lãi chậm trả',
+        `Chủ nhà đã miễn khoản lãi chậm trả ${penalty.amount.toLocaleString('vi-VN')} VND. Lý do: ${penalty.waiveReason ?? ''}. Bạn không cần thanh toán khoản này.`,
+        'LATE_PENALTY_WAIVED',
+        { paymentId, contractId: penalty.contractId, amount: penalty.amount }
+      )
+    } catch (error) {
+      this.logger.warn(
+        `Penalty waiver notification failed for ${penalty._id.toHexString()}: ${error instanceof Error ? error.message : 'unknown'}`
+      )
+    }
+  }
+
   async getByContract(
     contractId: string,
     actorId: string,
     isStaff: boolean
-  ): Promise<Payment[]> {
+  ): Promise<PaymentView[]> {
     const contract = await this.findContract(contractId)
     const ownershipTransferResolver = this.resolveOwnershipTransferResolver()
     const canAccess = ownershipTransferResolver
@@ -308,6 +394,8 @@ export class PaymentsService {
       where: { contractId },
       order: { dueDate: 'ASC' },
     })
+    const ratePerYear = resolveLatePenaltyRate(contract)
+    const now = new Date()
     return payments
       .filter(
         payment =>
@@ -320,7 +408,30 @@ export class PaymentsService {
         payerId: payment.payerId ?? payment.tenantId,
         payerRole: payment.payerRole ?? 'tenant',
         payeeRole: payment.payeeRole ?? 'landlord',
+        ...this.accruedLateInterest(payment, ratePerYear, now),
       }))
+  }
+
+  /**
+   * Lãi tạm tính của hóa đơn `rent` đang quá hạn, chỉ để hiển thị: không lưu, không sinh hóa
+   * đơn, không ghi sổ cái. Số tiền chốt khi hóa đơn được thanh toán (`LatePenaltyService`).
+   */
+  private accruedLateInterest(
+    payment: Payment,
+    ratePerYear: number,
+    now: Date
+  ): Pick<PaymentView, 'daysLate' | 'accruedLateInterest'> {
+    if ((payment.type ?? 'rent') !== 'rent' || payment.status !== 'overdue') {
+      return { daysLate: null, accruedLateInterest: null }
+    }
+    const daysLate = Math.max(0, daysLateBetween(payment.dueDate, now))
+    return {
+      daysLate,
+      accruedLateInterest:
+        ratePerYear > 0
+          ? computeLatePenalty(payment.amount, ratePerYear, daysLate)
+          : null,
+    }
   }
 
   async confirmPayment(
@@ -352,12 +463,10 @@ export class PaymentsService {
         aggregateId: payment._id.toHexString(),
         eventType: 'payment.paid',
         action: 'recordPayment',
-        args: [
-          payment._id.toHexString(),
-          payment.contractId,
-          payment.amount.toString(),
-          payment.paymentHash,
-        ],
+        args: buildPaymentLedgerArgs(
+          { ...payment, paymentHash: payment.paymentHash },
+          this.fabricService?.getChaincodeAbiVersion() ?? 2
+        ),
         metadata: {
           paymentId: payment._id.toHexString(),
           contractId: payment.contractId,
@@ -367,7 +476,20 @@ export class PaymentsService {
       })
     }
     await this.createPayoutFor(saved)
+    await this.assessLatePenalty(saved)
     return saved
+  }
+
+  /** Lỗi tính lãi không được làm hỏng giao dịch đã thanh toán; job quét bù sẽ tạo lại khoản còn thiếu. */
+  private async assessLatePenalty(payment: Payment): Promise<void> {
+    if (!this.latePenaltyService) return
+    try {
+      await this.latePenaltyService.assessForPaidRent(payment)
+    } catch (error) {
+      this.logger.warn(
+        `Late penalty assessment failed for payment ${payment._id.toHexString()}: ${error instanceof Error ? error.message : 'unknown'}`
+      )
+    }
   }
 
   private async createPayoutFor(payment: Payment): Promise<void> {
@@ -449,7 +571,97 @@ export class PaymentsService {
       await this.paymentRepository.save(payment)
     }
 
+    await this.sendOverdueEscalations(now)
     return { overdue, reminders }
+  }
+
+  /**
+   * Bậc thang vi phạm thanh toán tiền thuê: thông báo quá hạn (văn bản nhắc theo hợp đồng) và
+   * thông báo Bên cho thuê đủ điều kiện đơn phương chấm dứt khi trễ quá 15 ngày. Mỗi loại gửi
+   * đúng một lần (cờ trên hóa đơn cộng khóa chống trùng của thông báo). Hệ thống không tự
+   * chấm dứt hợp đồng.
+   */
+  private async sendOverdueEscalations(now: Date): Promise<void> {
+    if (!this.notificationsService) return
+    const candidates = await this.paymentRepository.find({
+      // Mongo `{ field: null }` khớp cả trường chưa tồn tại (hóa đơn cũ).
+      where: {
+        status: 'overdue',
+        type: 'rent',
+        terminationRightNotifiedAt: null,
+      } as unknown as FindOptionsWhere<Payment>,
+    })
+    for (const payment of candidates) {
+      if (
+        payment.status !== 'overdue' ||
+        (payment.type ?? 'rent') !== 'rent' ||
+        payment.terminationRightNotifiedAt
+      ) {
+        continue
+      }
+      try {
+        await this.escalateOverdueRent(payment, now)
+      } catch (error) {
+        this.logger.warn(
+          `Overdue escalation failed for ${payment._id.toHexString()}: ${error instanceof Error ? error.message : 'unknown'}`
+        )
+      }
+    }
+  }
+
+  private async escalateOverdueRent(
+    payment: Payment,
+    now: Date
+  ): Promise<void> {
+    const notifications = this.notificationsService
+    if (!notifications) return
+    const paymentId = payment._id.toHexString()
+    const label = payment.periodKey ?? paymentId
+    const dueDateKey = vietnamDateKey(payment.dueDate)
+    const daysLate = daysLateBetween(payment.dueDate, now)
+    const data = {
+      paymentId,
+      contractId: payment.contractId,
+      dueDate: dueDateKey,
+      daysLate,
+    }
+
+    if (!payment.overdueNoticeSentAt) {
+      await notifications.createNotificationOnce(
+        payment.tenantId,
+        `rent:${paymentId}:overdue`,
+        'Hóa đơn tiền thuê đã quá hạn',
+        `Hóa đơn tiền thuê ${label} đã quá hạn từ ngày ${dueDateKey}. Đây là thông báo nhắc thanh toán theo hợp đồng. Lãi chậm trả được tính theo hợp đồng và chốt khi bạn thanh toán.`,
+        'PAYMENT_OVERDUE',
+        data
+      )
+      payment.overdueNoticeSentAt = now
+      await this.paymentRepository.save(payment)
+    }
+
+    if (daysLate <= LEASE_TERMINATION_RIGHT_AFTER_DAYS) return
+    const recipients: Array<[string, string]> = [
+      [
+        payment.tenantId,
+        `Hóa đơn tiền thuê ${label} đã quá hạn ${daysLate} ngày. Theo hợp đồng đã ký, Bên cho thuê đủ điều kiện đơn phương chấm dứt hợp đồng. Hệ thống không tự chấm dứt hợp đồng; hãy thanh toán hoặc liên hệ chủ nhà.`,
+      ],
+      [
+        payment.landlordId,
+        `Hóa đơn tiền thuê ${label} đã quá hạn ${daysLate} ngày. Theo hợp đồng đã ký, bạn đủ điều kiện đơn phương chấm dứt hợp đồng. Hệ thống không tự chấm dứt hợp đồng; quyết định thuộc về bạn.`,
+      ],
+    ]
+    for (const [userId, body] of recipients) {
+      await notifications.createNotificationOnce(
+        userId,
+        `rent:${paymentId}:termination-right`,
+        'Đủ điều kiện đơn phương chấm dứt hợp đồng',
+        body,
+        'LEASE_TERMINATION_RIGHT',
+        data
+      )
+    }
+    payment.terminationRightNotifiedAt = now
+    await this.paymentRepository.save(payment)
   }
 
   private async findContract(contractId: string): Promise<Contract> {

@@ -66,6 +66,69 @@ describe('signed contract ledger evidence envelope', () => {
     )
   })
 
+  it('adds signature provider and late-penalty terms only when supplied, leaving the legacy hash unchanged', () => {
+    const legacy = buildSignedContractLedgerEvidence({
+      contractId: 'contract-1',
+      artifact,
+      signatures,
+    })
+    expect(legacy.signatures.tenant).not.toHaveProperty('provider')
+    expect(legacy).not.toHaveProperty('terms')
+
+    const withAbi3 = buildSignedContractLedgerEvidence({
+      contractId: 'contract-1',
+      artifact,
+      signatures: {
+        tenant: { ...signatures.tenant, provider: 'smartca' },
+        landlord: { ...signatures.landlord, provider: 'dev-test' },
+      },
+      terms: { latePenaltyRatePerYear: 10 },
+    })
+    expect(withAbi3.signatures.tenant.provider).toBe('smartca')
+    expect(withAbi3.signatures.landlord.provider).toBe('dev-test')
+    expect(withAbi3.terms).toEqual({ latePenaltyRatePerYear: 10 })
+    expect(hashSignedContractLedgerEvidence(withAbi3)).not.toBe(
+      hashSignedContractLedgerEvidence(legacy)
+    )
+
+    // Still free of personal data and still verifiable against the current signatures.
+    expect(JSON.stringify(withAbi3)).not.toContain('CN=Tenant')
+    expect(() =>
+      assertSignedContractLedgerEvidence(withAbi3, { artifact, signatures })
+    ).not.toThrow()
+  })
+
+  it('rejects an unknown signature provider and a late-penalty rate outside 0..20', () => {
+    expect(() =>
+      buildSignedContractLedgerEvidence({
+        contractId: 'contract-1',
+        artifact,
+        signatures: {
+          ...signatures,
+          tenant: { ...signatures.tenant, provider: 'other' as never },
+        },
+      })
+    ).toThrow('LEDGER_EVIDENCE_SIGNATURE_INVALID')
+    for (const latePenaltyRatePerYear of [-1, 25, Number.NaN]) {
+      expect(() =>
+        buildSignedContractLedgerEvidence({
+          contractId: 'contract-1',
+          artifact,
+          signatures,
+          terms: { latePenaltyRatePerYear },
+        })
+      ).toThrow('LEDGER_EVIDENCE_TERMS_INVALID')
+    }
+    expect(
+      buildSignedContractLedgerEvidence({
+        contractId: 'contract-1',
+        artifact,
+        signatures,
+        terms: { latePenaltyRatePerYear: 0 },
+      }).terms
+    ).toEqual({ latePenaltyRatePerYear: 0 })
+  })
+
   it('reads a legacy artifact envelope without inventing signature evidence', () => {
     const parsed = parseSignedContractLedgerEvidence({
       contractHash: 'a'.repeat(64),

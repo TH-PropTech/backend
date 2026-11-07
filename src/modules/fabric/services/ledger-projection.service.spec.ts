@@ -200,4 +200,85 @@ describe('LedgerProjectionService', () => {
       })
     ).rejects.toThrow('Mongo network timeout')
   })
+
+  describe('late penalty evidence (aggregateType penalty)', () => {
+    const penaltyId = new ObjectId()
+    const penaltyEvent = {
+      _id: new ObjectId(),
+      aggregateType: 'penalty',
+      aggregateId: penaltyId.toHexString(),
+      eventType: 'penalty.assessed',
+    } as LedgerOutbox
+    const pendingEvidence = {
+      manifestVersion: 1,
+      manifestHash: 'e'.repeat(64),
+      ledgerStatus: 'pending' as const,
+      txHash: null,
+      blockNumber: null,
+      recordedAt: new Date('2026-11-25T00:00:00.000Z'),
+    }
+
+    it('projects the Fabric commit onto assessmentEvidence without touching the receipt ledgerStatus', async () => {
+      const penalty = {
+        _id: penaltyId,
+        ledgerStatus: 'not-required',
+        assessmentEvidence: { ...pendingEvidence },
+      }
+      paymentRepo.findOne.mockResolvedValue(penalty)
+
+      await service.projectResult(penaltyEvent, {
+        txHash: 'tx-penalty',
+        blockNumber: 12,
+        networkMode: 'fabric',
+      })
+
+      expect(penalty.assessmentEvidence).toMatchObject({
+        manifestHash: 'e'.repeat(64),
+        ledgerStatus: 'confirmed-fabric',
+        txHash: 'tx-penalty',
+        blockNumber: 12,
+      })
+      expect(penalty.ledgerStatus).toBe('not-required')
+      expect(paymentRepo.save).toHaveBeenCalledWith(penalty)
+    })
+
+    it('labels simulation honestly with no transaction or block', async () => {
+      const penalty = {
+        _id: penaltyId,
+        assessmentEvidence: { ...pendingEvidence },
+      }
+      paymentRepo.findOne.mockResolvedValue(penalty)
+
+      await service.projectResult(penaltyEvent, {
+        txHash: 'simulated-tx',
+        networkMode: 'simulation',
+      })
+
+      expect(penalty.assessmentEvidence).toMatchObject({
+        ledgerStatus: 'confirmed-simulation',
+        txHash: null,
+        blockNumber: null,
+      })
+    })
+
+    it('marks the evidence failed-terminal on a terminal ledger failure', async () => {
+      const penalty = {
+        _id: penaltyId,
+        assessmentEvidence: { ...pendingEvidence },
+      }
+      paymentRepo.findOne.mockResolvedValue(penalty)
+
+      await service.projectFailure(penaltyEvent)
+
+      expect(penalty.assessmentEvidence.ledgerStatus).toBe('failed-terminal')
+    })
+
+    it('does not invent evidence for a penalty without a manifest', async () => {
+      paymentRepo.findOne.mockResolvedValue({ _id: penaltyId })
+
+      await service.projectResult(penaltyEvent, { txHash: 'tx-penalty' })
+
+      expect(paymentRepo.save).not.toHaveBeenCalled()
+    })
+  })
 })

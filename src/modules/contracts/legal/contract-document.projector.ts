@@ -1,11 +1,17 @@
 import { createHash } from 'crypto'
 import { vndInWords } from './vnd-in-words'
 import {
+  LATE_PAYMENT_AGREED_INTEREST_BASIS,
+  TERMINATION_NOTICE_BASIS,
+  WRONGFUL_TERMINATION_DEPOSIT_BASIS,
+} from '../../legal/utils/legal-citations'
+import {
   DEFAULT_MOVE_OUT_RESPONSE_DAYS,
   DEPOSIT_REFUND_DUE_TEXT,
 } from '../../rental/utils/deposit-refund.constants'
 import type { Contract } from '../schemas/contract.schema'
 import { resolveEffectiveCommercial } from '../commercial/resolve-effective-commercial'
+import { resolveLatePenaltyRate } from '../commercial/resolve-late-penalty-rate'
 import {
   CUSTOM_CLAUSES_ANNEX_ID,
   OCCUPANTS_ANNEX_ID,
@@ -212,7 +218,10 @@ export class ContractDocumentProjector {
       ),
       paymentDay: String(commercial?.paymentDay ?? contract.paymentDay),
       latePenaltyRate: String(
-        commercial?.latePenaltyRate ?? contract.latePenaltyRate
+        resolveLatePenaltyRate(contract, {
+          renderBranch: 'template',
+          source: 'signed',
+        })
       ),
       terminationNoticeDays: String(
         commercial?.terminationNoticeDays ?? contract.terminationNoticeDays
@@ -455,9 +464,9 @@ export class ContractDocumentProjector {
       {
         number: 9,
         title: 'Trách nhiệm do vi phạm hợp đồng và bồi thường thiệt hại',
-        content: `1. Trách nhiệm do vi phạm nghĩa vụ thanh toán: Trường hợp Bên Thuê chậm thanh toán tiền thuê nhà theo thời hạn quy định tại Điều 3, Bên Thuê phải chịu lãi phạt chậm thanh toán tương đương ${contract.latePenaltyRate || 10}%/năm tính trên số tiền và số ngày chậm trả thực tế theo Khoản 1 Điều 468 Bộ luật Dân sự 2015.
-2. Đơn phương chấm dứt hợp đồng trước hạn: Bên muốn đơn phương chấm dứt hợp đồng trước hạn phải thông báo bằng văn bản cho bên kia trước ít nhất ${contract.terminationNoticeDays || 30} ngày theo Khoản 3 Điều 130 Luật Nhà ở 2023.
-3. Chế tài vi phạm: Nếu Bên Cho Thuê đơn phương chấm dứt hợp đồng trái quy định thì phải hoàn trả lại tiền đặt cọc và bồi thường cho Bên Thuê một khoản tiền tương đương 01 tháng tiền thuê. Nếu Bên Thuê đơn phương chấm dứt trái quy định thì không được nhận lại số tiền đặt cọc bảo đảm.`,
+        content: `1. Trách nhiệm do vi phạm nghĩa vụ thanh toán: Trường hợp Bên Thuê chậm thanh toán tiền thuê nhà theo thời hạn quy định tại Điều 3, Bên Thuê phải chịu lãi phạt chậm thanh toán tương đương ${resolveLatePenaltyRate(contract, { renderBranch: 'structured', source: 'signed' })}%/năm tính trên số tiền và số ngày chậm trả thực tế theo ${LATE_PAYMENT_AGREED_INTEREST_BASIS}.
+2. Đơn phương chấm dứt hợp đồng trước hạn: Bên muốn đơn phương chấm dứt hợp đồng trước hạn phải thông báo bằng văn bản cho bên kia trước ít nhất ${contract.terminationNoticeDays || 30} ngày theo ${TERMINATION_NOTICE_BASIS}.
+3. Chế tài vi phạm: Nếu Bên Cho Thuê đơn phương chấm dứt hợp đồng trái quy định thì phải hoàn trả tiền đặt cọc và bồi thường cho Bên Thuê một khoản tiền tương đương số tiền đặt cọc theo ${WRONGFUL_TERMINATION_DEPOSIT_BASIS}. Nếu Bên Thuê đơn phương chấm dứt trái quy định thì không được nhận lại số tiền đặt cọc bảo đảm.`,
         protected: true,
       },
       {

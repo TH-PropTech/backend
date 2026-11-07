@@ -375,7 +375,7 @@ describe('ContractCommercialEditorService consent and legal checks', () => {
       'admin-1',
       true
     )
-    expect(result.errors.join(' ')).toContain('Điều 130 Luật Nhà ở 2023')
+    expect(result.errors.join(' ')).toContain('Điều 172 Luật Nhà ở 2023')
   })
 
   it('shows custom clauses read-only and refuses to take them from the payload', async () => {

@@ -62,13 +62,15 @@ export type FabricIdentityCheck = {
   errorCode: string | null
 }
 
+export type ChaincodeAbiVersion = 1 | 2 | 3
+
 export interface FabricStatus {
   mode: FabricMode
   connectionState: FabricConnectionState
   ready: boolean
   channel?: string | undefined
   chaincode?: string | undefined
-  chaincodeAbiVersion: 1 | 2
+  chaincodeAbiVersion: ChaincodeAbiVersion
   lastCheckedAt: string
   errorCode?: string | null
   /** PROP-399 D5 — các trường bên dưới chỉ bổ sung, không đổi nghĩa trường cũ. */
@@ -121,7 +123,7 @@ export class FabricService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(FabricService.name)
   private mode: FabricMode = 'simulation'
   private configErrorCode: string | null = null
-  private chaincodeAbiVersion: 1 | 2 = 2
+  private chaincodeAbiVersion: ChaincodeAbiVersion = 2
   private abiDetected = false
   /** Evidence schema versions mà chaincode quảng bá qua getChaincodeInfo (PROP-399 D2). */
   private chaincodeEvidenceSchemaVersions: number[] = [2]
@@ -482,12 +484,14 @@ export class FabricService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private parseChaincodeAbiVersion(result: Uint8Array): 1 | 2 {
+  private parseChaincodeAbiVersion(result: Uint8Array): ChaincodeAbiVersion {
     const decoded = utf8Decoder.decode(result).trim()
     if (!decoded) return 2
     try {
       const info = JSON.parse(decoded) as { abiVersion?: unknown }
-      return info.abiVersion === 1 ? 1 : 2
+      return info.abiVersion === 1 || info.abiVersion === 3
+        ? info.abiVersion
+        : 2
     } catch {
       return 2
     }
@@ -1201,7 +1205,7 @@ export class FabricService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  getChaincodeAbiVersion(): 1 | 2 {
+  getChaincodeAbiVersion(): ChaincodeAbiVersion {
     return this.chaincodeAbiVersion
   }
 

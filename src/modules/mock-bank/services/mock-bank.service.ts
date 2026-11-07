@@ -37,7 +37,10 @@ import type {
   PaymentProviderName,
 } from '../providers/payment-provider.port'
 import type { PaymentsConfig } from '../../../config/configuration'
+import { FabricService } from '../../fabric/services/fabric.service'
 import { LedgerOutboxService } from '../../fabric/services/ledger-outbox.service'
+import { buildPaymentLedgerArgs } from '../../payments/utils/payment-ledger-args'
+import { LatePenaltyService } from '../../payments/services/late-penalty.service'
 import {
   buildPaymentRequest,
   type PaymentRequestView,
@@ -166,7 +169,9 @@ export class MockBankService {
     private readonly walletsService?: WalletsService,
     @Optional()
     @InjectRepository(RentalApplication)
-    private readonly rentalApplicationRepository?: Repository<RentalApplication>
+    private readonly rentalApplicationRepository?: Repository<RentalApplication>,
+    @Optional() private readonly fabricService?: FabricService,
+    @Optional() private readonly latePenaltyService?: LatePenaltyService
   ) {}
 
   private async recordTransactionEvent(input: {
@@ -443,6 +448,9 @@ export class MockBankService {
     }
     if (payment.status === 'paid')
       throw new ConflictException('PAYMENT_ALREADY_PAID')
+    // Chủ nhà đã miễn khoản phạt: không cho khởi tạo thanh toán nữa.
+    if (payment.status === 'waived')
+      throw new ConflictException('PAYMENT_WAIVED')
     const { payment: init } = await this.createAttempt({
       userId: payment.tenantId,
       amount: payment.amount,
@@ -873,6 +881,19 @@ export class MockBankService {
     await this.paymentRepository.save(payment)
     await this.enqueuePaymentLedgerEvent(payment)
     await this.createPayoutFor(payment, attempt)
+    await this.assessLatePenalty(payment)
+  }
+
+  /** Lỗi tính lãi không được làm hỏng giao dịch đã thanh toán; job quét bù sẽ tạo lại khoản còn thiếu. */
+  private async assessLatePenalty(payment: Payment): Promise<void> {
+    if (!this.latePenaltyService) return
+    try {
+      await this.latePenaltyService.assessForPaidRent(payment)
+    } catch (error) {
+      this.logger.warn(
+        `Late penalty assessment failed for payment ${payment._id.toHexString()}: ${error instanceof Error ? error.message : 'unknown'}`
+      )
+    }
   }
 
   /** Payout failures must never fail the tenant's already-recorded payment. */
@@ -1364,12 +1385,10 @@ export class MockBankService {
       aggregateId: payment._id.toHexString(),
       eventType: 'payment.paid',
       action: 'recordPayment',
-      args: [
-        payment._id.toHexString(),
-        payment.contractId,
-        payment.amount.toString(),
-        payment.paymentHash,
-      ],
+      args: buildPaymentLedgerArgs(
+        { ...payment, paymentHash: payment.paymentHash },
+        this.fabricService?.getChaincodeAbiVersion() ?? 2
+      ),
       metadata: {
         paymentId: payment._id.toHexString(),
         contractId: payment.contractId,

@@ -92,6 +92,18 @@ export class LedgerProjectionService {
     await this.settlementRepository.save(settlement)
   }
 
+  /** Bằng chứng lãi chậm trả nằm ở `Payment.assessmentEvidence`, tách khỏi `ledgerStatus` của biên nhận thanh toán. */
+  private async projectPenaltyEvidence(
+    id: ObjectId,
+    update: (ref: LedgerEvidenceRef) => LedgerEvidenceRef
+  ): Promise<void> {
+    const penalty = await this.paymentRepository.findOne({ where: { _id: id } })
+    const current = penalty?.assessmentEvidence
+    if (!penalty || !current) return // không bịa bằng chứng khi khoản phạt chưa có manifest
+    penalty.assessmentEvidence = update(current)
+    await this.paymentRepository.save(penalty)
+  }
+
   async projectResult(
     event: LedgerOutbox,
     result: ProjectionResultInput
@@ -155,6 +167,15 @@ export class LedgerProjectionService {
               `Projected Fabric confirmation to Payment [${event.aggregateId}], tx: ${result.txHash}`
             )
           }
+          break
+        }
+        case 'penalty': {
+          const fields = this.ledgerEvidenceFields(result)
+          await this.projectPenaltyEvidence(objId, ref => ({
+            ...ref,
+            ...fields,
+            recordedAt,
+          }))
           break
         }
         case 'contract-amendment': {
@@ -252,6 +273,12 @@ export class LedgerProjectionService {
           }
           break
         }
+        case 'penalty':
+          await this.projectPenaltyEvidence(objId, ref => ({
+            ...ref,
+            ledgerStatus: 'failed-terminal',
+          }))
+          break
         case 'contract-amendment': {
           if (!this.amendmentRepository) break
           const amendment = await this.amendmentRepository.findOne({

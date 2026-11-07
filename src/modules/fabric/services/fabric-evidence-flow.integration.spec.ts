@@ -556,6 +556,58 @@ describe('PROP-399 task 13.1: deposit + governance -> activation -> settlement -
       ).toBe(before)
     })
 
+    it('anchors a late-rent penalty only after its source payment, and only on a chaincode with ABI 3', async () => {
+      const paymentKey = `payment:${PAYMENT_ID.toHexString()}:payment.paid`
+      const penaltyId = new ObjectId().toHexString()
+      await world.outbox.enqueue({
+        aggregateType: 'penalty',
+        aggregateId: penaltyId,
+        eventType: 'penalty.assessed',
+        action: 'recordPenalty',
+        args: [
+          penaltyId,
+          CONTRACT_ID.toHexString(),
+          PAYMENT_ID.toHexString(),
+          '10000000',
+          '10',
+          '20',
+          '54795',
+          'f'.repeat(64),
+        ],
+        metadata: {
+          contractId: CONTRACT_ID.toHexString(),
+          minimumAbiVersion: 3,
+          waitingCode: 'CHAINCODE_UPGRADE_REQUIRED',
+        },
+        dependencyKey: paymentKey,
+      })
+      const penaltyItem = `penalty:${penaltyId}:penalty.assessed`
+
+      // Source payment is confirmed, but the live chaincode is still ABI 2: wait, do not submit.
+      await world.cycle()
+      expect(world.item(penaltyItem)).toMatchObject({
+        status: 'pending',
+        errorCode: 'CHAINCODE_UPGRADE_REQUIRED',
+        attempts: 0,
+      })
+      expect(actions(world)).not.toContain('recordPenalty')
+
+      world.ledger.abiVersion = 3
+      try {
+        await world.cycle()
+      } finally {
+        world.ledger.abiVersion = 2
+      }
+      expect(world.item(penaltyItem).status).toBe('confirmed')
+      expect(
+        world.ledger.world.get(`PENALTY_${PAYMENT_ID.toHexString()}`)
+      ).toMatchObject({
+        penaltyId,
+        contractId: CONTRACT_ID.toHexString(),
+        amount: 54795,
+      })
+    })
+
     it('anchors settlement and handover only after the contract, with allowlisted args and canonical keys', async () => {
       await world.addSettlementAndHandover()
       const settled = world.item(
