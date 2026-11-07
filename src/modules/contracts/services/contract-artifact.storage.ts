@@ -1,7 +1,9 @@
-import { Injectable, OnModuleDestroy } from '@nestjs/common'
-import { ConfigService } from '@nestjs/config'
-import { GridFSBucket, MongoClient, ObjectId } from 'mongodb'
+import { Injectable } from '@nestjs/common'
+import { InjectDataSource } from '@nestjs/typeorm'
+import { GridFSBucket, ObjectId } from 'mongodb'
 import type { Readable } from 'node:stream'
+import { DataSource } from 'typeorm'
+import { getSharedMongoClient } from './shared-mongo-client'
 
 export const CONTRACT_ARTIFACT_STORAGE = Symbol('CONTRACT_ARTIFACT_STORAGE')
 
@@ -16,16 +18,11 @@ export interface ContractArtifactStorage {
 }
 
 @Injectable()
-export class MongoGridFsArtifactStorage
-  implements ContractArtifactStorage, OnModuleDestroy
-{
-  private client: MongoClient | null = null
-  private clientPromise: Promise<MongoClient> | null = null
-
-  constructor(private readonly configService: ConfigService) {}
+export class MongoGridFsArtifactStorage implements ContractArtifactStorage {
+  constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
 
   async upload(bytes: Buffer, filename: string): Promise<ObjectId> {
-    const bucket = await this.bucket()
+    const bucket = this.bucket()
     return new Promise<ObjectId>((resolve, reject) => {
       const stream = bucket.openUploadStream(filename, {
         contentType: 'application/pdf',
@@ -37,7 +34,7 @@ export class MongoGridFsArtifactStorage
   }
 
   async download(fileId: ObjectId): Promise<Buffer> {
-    const bucket = await this.bucket()
+    const bucket = this.bucket()
     return new Promise<Buffer>((resolve, reject) => {
       const chunks: Buffer[] = []
       const stream = bucket.openDownloadStream(fileId)
@@ -47,28 +44,15 @@ export class MongoGridFsArtifactStorage
     })
   }
 
-  async openDownloadStream(fileId: ObjectId): Promise<Readable> {
-    const bucket = await this.bucket()
-    return bucket.openDownloadStream(fileId)
-  }
-
-  async onModuleDestroy(): Promise<void> {
-    if (this.client) await this.client.close()
-    this.client = null
-    this.clientPromise = null
-  }
-
-  private async bucket(): Promise<GridFSBucket> {
-    const client = await this.getClient()
-    return new GridFSBucket(client.db(), { bucketName: 'contract_artifacts' })
-  }
-
-  private async getClient(): Promise<MongoClient> {
-    if (this.client) return this.client
-    this.clientPromise ??= MongoClient.connect(
-      this.configService.getOrThrow<string>('database.url')
+  openDownloadStream(fileId: ObjectId): Promise<Readable> {
+    // Promise.resolve().then: lỗi "client chưa sẵn sàng" vẫn trả về dạng rejection như trước.
+    return Promise.resolve().then(() =>
+      this.bucket().openDownloadStream(fileId)
     )
-    this.client = await this.clientPromise
-    return this.client
+  }
+
+  private bucket(): GridFSBucket {
+    const client = getSharedMongoClient(this.dataSource)
+    return new GridFSBucket(client.db(), { bucketName: 'contract_artifacts' })
   }
 }

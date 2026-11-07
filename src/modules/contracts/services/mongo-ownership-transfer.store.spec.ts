@@ -34,6 +34,8 @@ type MockSession = {
 
 interface StoreFixture {
   store: MongoOwnershipTransferStore
+  dataSource: { mongoManager: { mongoQueryRunner: unknown } }
+  connectSpy: jest.SpyInstance
   transferCollection: MockCollection
   recordCollection: MockCollection
   apartmentCollection: MockCollection
@@ -91,19 +93,19 @@ function createStoreFixture(): StoreFixture {
     >,
   }
 
-  jest
+  const connectSpy = jest
     .spyOn(MongoClient, 'connect')
-    .mockResolvedValue(client as unknown as MongoClient)
+    .mockRejectedValue(new Error('MongoClient.connect must not be called'))
 
-  const configService = {
-    getOrThrow: jest
-      .fn()
-      .mockReturnValue('mongodb://localhost:27017/th_proptech'),
+  const dataSource = {
+    mongoManager: { mongoQueryRunner: { databaseConnection: client } },
   }
-  const store = new MongoOwnershipTransferStore(configService as never)
+  const store = new MongoOwnershipTransferStore(dataSource as never)
 
   return {
     store,
+    dataSource,
+    connectSpy,
     transferCollection,
     recordCollection,
     apartmentCollection,
@@ -290,5 +292,81 @@ describe('MongoOwnershipTransferStore', () => {
       })
     ).rejects.toThrow('write failed')
     expect(fixture.session.endSession).toHaveBeenCalledTimes(1)
+  })
+
+  it('uses the shared TypeORM client and never opens its own connection', async () => {
+    const fixture = createStoreFixture()
+    fixture.transferCollection.findOne.mockResolvedValue(baseTransfer())
+
+    await fixture.store.apply({
+      transferId: TRANSFER_ID,
+      targetLandlordId: 'target-landlord',
+      idempotencyKey: 'request-6',
+      expectedPreviewHash: PREVIEW_HASH,
+      records: [],
+    })
+
+    expect(fixture.client.startSession).toHaveBeenCalledTimes(1)
+    expect(fixture.connectSpy).not.toHaveBeenCalled()
+  })
+
+  it('fails with a clear error when the shared client is not ready', async () => {
+    const fixture = createStoreFixture()
+    fixture.dataSource.mongoManager.mongoQueryRunner = undefined
+
+    await expect(
+      fixture.store.apply({
+        transferId: TRANSFER_ID,
+        targetLandlordId: 'target-landlord',
+        idempotencyKey: 'request-7',
+        expectedPreviewHash: PREVIEW_HASH,
+        records: [],
+      })
+    ).rejects.toThrow('MongoDB client chưa sẵn sàng')
+    expect(fixture.client.startSession).not.toHaveBeenCalled()
+  })
+
+  it('rolls back: no completion write when a record update throws mid-transaction', async () => {
+    const fixture = createStoreFixture()
+    fixture.transferCollection.findOne.mockResolvedValue(baseTransfer())
+    fixture.apartmentCollection.updateOne.mockRejectedValue(
+      new Error('write failed')
+    )
+
+    await expect(
+      fixture.store.apply({
+        transferId: TRANSFER_ID,
+        targetLandlordId: 'target-landlord',
+        idempotencyKey: 'request-8',
+        expectedPreviewHash: PREVIEW_HASH,
+        records: [
+          {
+            entityType: 'apartment',
+            entityId: APARTMENT_ID,
+            fromLandlordId: 'source-landlord',
+            toLandlordId: 'target-landlord',
+            version: 'v1',
+          },
+        ],
+      })
+    ).rejects.toThrow('write failed')
+    expect(fixture.transferCollection.updateOne).not.toHaveBeenCalled()
+    expect(fixture.recordCollection.updateOne).not.toHaveBeenCalled()
+    expect(fixture.session.endSession).toHaveBeenCalledTimes(1)
+  })
+
+  it('has no module-destroy hook and never closes the shared client', async () => {
+    const fixture = createStoreFixture()
+    fixture.transferCollection.findOne.mockResolvedValue(baseTransfer())
+    await fixture.store.apply({
+      transferId: TRANSFER_ID,
+      targetLandlordId: 'target-landlord',
+      idempotencyKey: 'request-9',
+      expectedPreviewHash: PREVIEW_HASH,
+      records: [],
+    })
+
+    expect(fixture.store).not.toHaveProperty('onModuleDestroy')
+    expect(fixture.client.close).not.toHaveBeenCalled()
   })
 })
