@@ -3,6 +3,7 @@ import { Transform, Type } from 'class-transformer'
 import {
   ArrayMaxSize,
   IsArray,
+  IsDefined,
   IsIn,
   IsInt,
   IsISO8601,
@@ -68,11 +69,11 @@ export class RecordMoveOutHandoverDto {
   @Min(0)
   keyCount!: number
 
-  @ApiPropertyOptional({ type: MeterPhotosDto })
-  @IsOptional()
+  @ApiProperty({ type: MeterPhotosDto })
+  @IsDefined({ message: 'Vui lòng tải ảnh công tơ điện và nước.' })
   @ValidateNested()
   @Type(() => MeterPhotosDto)
-  meterPhotos?: MeterPhotosDto
+  meterPhotos!: MeterPhotosDto
 
   @ApiPropertyOptional({
     description:

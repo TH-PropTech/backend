@@ -50,6 +50,8 @@ export class UpdateContractAmendmentDto extends CreateContractAmendmentDto {
 
 export class AmendmentActionDto {
   @ApiProperty({ minimum: 0 })
+  // Form multipart (đính kèm PDF phụ lục) gửi mọi trường dưới dạng chuỗi.
+  @Type(() => Number)
   @IsInt()
   @Min(0)
   expectedRevision!: number

@@ -713,6 +713,10 @@ describe('rental flow E2E integration — SIGN_FIRST with holding deposit paid b
         electricity: 120,
         water: 15,
         keyCount: 2,
+        meterPhotos: {
+          electricity: ['https://cdn.example.com/dien.jpg'],
+          water: ['https://cdn.example.com/nuoc.png'],
+        },
       }
     )
     expect(recorded.handover?.handoverHash).toBeTruthy()

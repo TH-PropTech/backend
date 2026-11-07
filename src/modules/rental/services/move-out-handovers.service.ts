@@ -44,7 +44,7 @@ export type RecordMoveOutInput = {
   handedBackAt: string
   electricity: number
   water: number
-  meterPhotos?: { electricity: string[]; water: string[] }
+  meterPhotos: { electricity: string[]; water: string[] }
   acknowledgeMeterRegression?: boolean
   keyCount: number
   inventoryItems?: Array<{
