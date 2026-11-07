@@ -1,8 +1,10 @@
-import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common'
-import { ConfigService } from '@nestjs/config'
-import { MongoClient, ObjectId, type ClientSession } from 'mongodb'
+import { Injectable, Logger } from '@nestjs/common'
+import { InjectDataSource } from '@nestjs/typeorm'
+import { ObjectId, type ClientSession, type Db } from 'mongodb'
+import { DataSource } from 'typeorm'
 import type { OwnershipTransferManifestRecord } from '../utils/ownership-transfer.manifest'
 import type { OwnershipTransferFinalReport } from '../schemas/property-ownership-transfer.schema'
+import { getSharedMongoClient } from './shared-mongo-client'
 import {
   OwnershipTransferApplyConflictError,
   OwnershipTransferTransactionUnavailableError,
@@ -12,19 +14,17 @@ import {
 } from './ownership-transfer.store'
 
 @Injectable()
-export class MongoOwnershipTransferStore
-  implements OwnershipTransferStore, OnModuleDestroy
-{
+export class MongoOwnershipTransferStore implements OwnershipTransferStore {
   private readonly logger = new Logger(MongoOwnershipTransferStore.name)
-  private client: MongoClient | null = null
-  private clientPromise: Promise<MongoClient> | null = null
 
-  public constructor(private readonly configService: ConfigService) {}
+  public constructor(
+    @InjectDataSource() private readonly dataSource: DataSource
+  ) {}
 
   public async apply(
     input: OwnershipTransferApplyInput
   ): Promise<OwnershipTransferFinalReport> {
-    const client = await this.getClient()
+    const client = getSharedMongoClient(this.dataSource)
     const session = client.startSession()
     try {
       const report = await session.withTransaction(async () => {
@@ -164,27 +164,12 @@ export class MongoOwnershipTransferStore
       await session.endSession()
     }
   }
-
-  public async onModuleDestroy(): Promise<void> {
-    if (this.client) await this.client.close()
-    this.client = null
-    this.clientPromise = null
-  }
-
-  private async getClient(): Promise<MongoClient> {
-    if (this.client) return this.client
-    this.clientPromise ??= MongoClient.connect(
-      this.configService.getOrThrow<string>('database.url')
-    )
-    this.client = await this.clientPromise
-    return this.client
-  }
 }
 
 type OperationalEntityType = 'apartment' | 'booking' | 'rentalApplication'
 
 async function updateOperationalRecord(
-  database: ReturnType<MongoClient['db']>,
+  database: Db,
   record: OwnershipTransferManifestRecord,
   targetLandlordId: string,
   transferId: string,

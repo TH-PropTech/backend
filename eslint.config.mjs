@@ -36,6 +36,29 @@ export default tseslint.config(
       '@typescript-eslint/explicit-function-return-type': 'error',
       '@typescript-eslint/no-unused-vars': 'error',
       'no-console': 'error',
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: 'mongodb',
+              importNames: ['MongoClient'],
+              allowTypeImports: true,
+              message:
+                'Không mở kết nối MongoDB riêng. Inject DataSource và dùng getSharedMongoClient().',
+            },
+          ],
+        },
+      ],
     },
+  },
+  {
+    files: [
+      'src/data/migrations/**',
+      'src/scripts/**',
+      '**/*.spec.ts',
+      'test/**',
+    ],
+    rules: { 'no-restricted-imports': 'off' },
   }
 )

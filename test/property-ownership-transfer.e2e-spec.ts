@@ -1,5 +1,5 @@
 import { MongoClient, ObjectId, type Db } from 'mongodb'
-import type { ConfigService } from '@nestjs/config'
+import type { DataSource } from 'typeorm'
 import { MongoOwnershipTransferStore } from '../src/modules/contracts/services/mongo-ownership-transfer.store'
 import type { OwnershipTransferManifestRecord } from '../src/modules/contracts/utils/ownership-transfer.manifest'
 
@@ -23,14 +23,13 @@ describeTransactionIntegration(
         `th_proptech_ownership_transfer_${Date.now().toString(36)}`
       )
       store = new MongoOwnershipTransferStore({
-        getOrThrow: (): string => transactionMongoUri,
-      } as unknown as ConfigService)
+        mongoManager: { mongoQueryRunner: { databaseConnection: client } },
+      } as unknown as DataSource)
     })
 
     afterAll(async () => {
       await database?.dropDatabase()
       await client?.close()
-      await store?.onModuleDestroy()
     })
 
     it('applies operational ownership while preserving immutable records and supports idempotent retry', async () => {
