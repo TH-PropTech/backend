@@ -1,5 +1,5 @@
 import { ObjectId } from 'mongodb'
-import { MocbankEscrowError } from './mocbank-escrow.client'
+import { MocbankAccountLookupError } from './mocbank-account-lookup.client'
 import { WalletsService } from './wallets.service'
 
 const USER = new ObjectId().toHexString()
@@ -80,7 +80,7 @@ describe('WalletsService.getReceivingStatus', () => {
       if (n === '810000000003')
         return Promise.resolve({ accountName: 'A', brand: 'zalopay' })
       if (n === '4')
-        return Promise.reject(new MocbankEscrowError('WALLET_NOT_FOUND'))
+        return Promise.reject(new MocbankAccountLookupError('WALLET_NOT_FOUND'))
       return Promise.reject(new Error('boom'))
     })
 

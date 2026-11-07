@@ -14,17 +14,17 @@ import {
 } from '../../mock-bank/providers/mocbank.adapter'
 
 /** Raised when Ví Mộc did not confirm the call; `code` is safe to store and log. */
-export class MocbankEscrowError extends Error {
+export class MocbankAccountLookupError extends Error {
   constructor(readonly code: string) {
-    super(`MOCBANK_ESCROW_${code}`)
-    this.name = 'MocbankEscrowError'
+    super(`MOCBANK_ACCOUNT_LOOKUP_${code}`)
+    this.name = 'MocbankAccountLookupError'
   }
 }
 
 /** Ví Mộc account lookups used when linking a payout wallet (no funds are held by the platform). */
 @Injectable()
-export class MocbankEscrowClient {
-  private readonly logger = new Logger(MocbankEscrowClient.name)
+export class MocbankAccountLookupClient {
+  private readonly logger = new Logger(MocbankAccountLookupClient.name)
   private readonly fetcher: GatewayFetcher
 
   constructor(
@@ -56,12 +56,12 @@ export class MocbankEscrowClient {
       isSuccessStatus(reply.status) && data ? data.accountName : null
     if (typeof accountName !== 'string' || !accountName) {
       if (reply.status === 404) {
-        throw new MocbankEscrowError('WALLET_NOT_FOUND')
+        throw new MocbankAccountLookupError('WALLET_NOT_FOUND')
       }
       this.logger.warn(
         `Ví Mộc account resolve failed http=${logField(reply.status)}`
       )
-      throw new MocbankEscrowError('GATEWAY_UNAVAILABLE')
+      throw new MocbankAccountLookupError('GATEWAY_UNAVAILABLE')
     }
     const rawBrand =
       typeof data?.brand === 'string' ? data.brand.toLowerCase() : ''
@@ -77,7 +77,7 @@ export class MocbankEscrowClient {
       'rentalFlow.payments.mocbank'
     )
     if (!config?.baseUrl || !config.merchantId || !config.merchantSecret) {
-      throw new MocbankEscrowError('NOT_CONFIGURED')
+      throw new MocbankAccountLookupError('NOT_CONFIGURED')
     }
     return {
       config,

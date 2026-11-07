@@ -11,7 +11,7 @@ import { PayoutsController } from './controllers/payouts.controller'
 import { WalletController } from './controllers/wallet.controller'
 import { Payout } from './schemas/payout.schema'
 import { Wallet } from './schemas/wallet.schema'
-import { MocbankEscrowClient } from './services/mocbank-escrow.client'
+import { MocbankAccountLookupClient } from './services/mocbank-account-lookup.client'
 import { MocbankPayoutClient } from './services/mocbank-payout.client'
 import { PayoutsService } from './services/payouts.service'
 import { WalletsService } from './services/wallets.service'
@@ -34,8 +34,8 @@ import { WalletsService } from './services/wallets.service'
     WalletsService,
     PayoutsService,
     MocbankPayoutClient,
-    MocbankEscrowClient,
+    MocbankAccountLookupClient,
   ],
-  exports: [WalletsService, PayoutsService, MocbankEscrowClient],
+  exports: [WalletsService, PayoutsService, MocbankAccountLookupClient],
 })
 export class WalletsModule {}
