@@ -28,7 +28,7 @@ export class FakeFabricLedger {
   readonly submitted: Array<{ action: string; args: string[] }> = []
   replays = 0
   mode: 'fabric' | 'simulation' = 'fabric'
-  abiVersion: 1 | 2 = 2
+  abiVersion: 1 | 2 | 3 = 2
   evidenceSchemaVersions: number[] = [2, 3]
   unavailable = false
   private readonly failures = new Map<string, Error[]>()
@@ -38,7 +38,7 @@ export class FakeFabricLedger {
     this.failures.set(action, [...(this.failures.get(action) ?? []), error])
   }
 
-  getChaincodeAbiVersion(): 1 | 2 {
+  getChaincodeAbiVersion(): 1 | 2 | 3 {
     return this.abiVersion
   }
 
@@ -182,6 +182,22 @@ export class FakeFabricLedger {
           },
         }
       }
+      case 'recordPenalty':
+        this.requireContract(args[1])
+        return {
+          key: `PENALTY_${args[2]}`,
+          record: {
+            penaltyId: args[0],
+            contractId: args[1],
+            sourcePaymentId: args[2],
+            baseAmount: Number(args[3]),
+            ratePerYear: Number(args[4]),
+            daysLate: Number(args[5]),
+            amount: Number(args[6]),
+            penaltyHash: args[7],
+            txId,
+          },
+        }
       case 'recordMoveInSettlement':
         this.requireContract(args[1])
         return {

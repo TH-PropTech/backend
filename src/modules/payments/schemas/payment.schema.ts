@@ -7,6 +7,7 @@ import {
   UpdateDateColumn,
   Index,
 } from 'typeorm'
+import type { LedgerEvidenceRef } from '../../rental/schemas/move-in-settlement.schema'
 
 export type PaymentType =
   | 'deposit'
@@ -113,6 +114,32 @@ export class Payment {
   @Column({ nullable: true }) waivedBy?: string | null
   @Column({ nullable: true }) waivedAt?: Date | null
   @Column({ nullable: true }) waiveReason?: string | null
+
+  /** Hóa đơn `penalty`: id hóa đơn `rent` trả trễ đã sinh ra khoản này. */
+  @Column({ nullable: true })
+  sourcePaymentId?: string | null
+
+  /** Hóa đơn `penalty`: dữ liệu chốt lãi chậm trả; ngày theo lịch Asia/Ho_Chi_Minh. */
+  @Column({ nullable: true })
+  latePenalty?: {
+    baseAmount: number
+    ratePerYear: number
+    daysLate: number
+    dueDateKey: string
+    paidDateKey: string
+  } | null
+
+  /** Hóa đơn `penalty`: trạng thái bằng chứng `recordPenalty` trên sổ cái. */
+  @Column({ nullable: true })
+  assessmentEvidence?: LedgerEvidenceRef | null
+
+  /** Hóa đơn `rent`: thời điểm gửi thông báo quá hạn D+1 (idempotent). */
+  @Column({ nullable: true })
+  overdueNoticeSentAt?: Date | null
+
+  /** Hóa đơn `rent`: thời điểm gửi thông báo đủ điều kiện đơn phương chấm dứt (trễ quá 15 ngày). */
+  @Column({ nullable: true })
+  terminationRightNotifiedAt?: Date | null
 
   @Column({ nullable: true })
   reminderSentForDate?: string | null

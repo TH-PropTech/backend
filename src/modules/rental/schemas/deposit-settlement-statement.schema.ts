@@ -40,6 +40,14 @@ export type DepositStatementLine = {
   } | null
 }
 
+/** Lãi chủ nhà chậm hoàn cọc: chỉ để tính và thông báo, hai bên tự thanh toán cho nhau. */
+export type DepositRefundLateInterest = {
+  ratePerYear: number
+  daysLate: number
+  amount: number
+  legalBasis: string
+}
+
 /** Khai báo của chủ nhà; không có tệp đính kèm, `transactionRef` chỉ là văn bản. */
 export type DepositRefundRecord = {
   id: string
@@ -51,6 +59,8 @@ export type DepositRefundRecord = {
   recordedBy: string
   tenantAcknowledgedAt: Date | null
   evidence: LedgerEvidenceRef | null
+  /** `null` khi hoàn đúng hạn; bản ghi tạo trước change này đọc ra `null`. */
+  lateInterest: DepositRefundLateInterest | null
 }
 
 export type DepositStatementAuditEntry = {

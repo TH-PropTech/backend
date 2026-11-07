@@ -59,6 +59,23 @@ export class RentalOpsProcessPaymentRemindersJob extends BaseJob {
 }
 
 @Injectable()
+export class RentalOpsAssessLatePenaltiesJob extends BaseJob {
+  readonly name = 'rental-ops-assess-late-penalties'
+  readonly description =
+    'Quét bù lãi chậm trả tiền thuê chưa được tạo (hằng ngày 07:30 Asia/Ho_Chi_Minh)'
+  readonly cron = '30 7 * * *'
+  readonly timeZone = VIETNAM_TIME_ZONE
+
+  constructor(private readonly ops: RentalOpsScheduler) {
+    super()
+  }
+
+  run(): Promise<number> {
+    return this.ops.assessLatePenalties()
+  }
+}
+
+@Injectable()
 export class RentalOpsMarkSettlementsOverdueJob extends BaseJob {
   readonly name = 'rental-ops-mark-settlements-overdue'
   readonly description =

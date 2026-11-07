@@ -1,5 +1,5 @@
 import { ObjectId } from 'mongodb'
-import { MocbankEscrowError } from './mocbank-escrow.client'
+import { MocbankAccountLookupError } from './mocbank-account-lookup.client'
 import { WalletsService } from './wallets.service'
 
 const USER = new ObjectId().toHexString()
@@ -123,7 +123,7 @@ describe('WalletsService.link', () => {
 
   it('rejects an account number Ví Mộc has no wallet for', async () => {
     const { service, wallets } = setup({
-      resolveError: new MocbankEscrowError('WALLET_NOT_FOUND'),
+      resolveError: new MocbankAccountLookupError('WALLET_NOT_FOUND'),
     })
     await expect(service.link(USER, LINK)).rejects.toThrow('WALLET_NOT_FOUND')
     expect(wallets.save).not.toHaveBeenCalled()
@@ -131,7 +131,7 @@ describe('WalletsService.link', () => {
 
   it('rejects when Ví Mộc is unreachable instead of silently linking', async () => {
     const { service } = setup({
-      resolveError: new MocbankEscrowError('GATEWAY_UNAVAILABLE'),
+      resolveError: new MocbankAccountLookupError('GATEWAY_UNAVAILABLE'),
     })
     await expect(service.link(USER, LINK)).rejects.toThrow(
       'MOCBANK_UNAVAILABLE'
@@ -559,7 +559,7 @@ describe('WalletsService extra brand accounts', () => {
   it('maps an unknown extra account to WALLET_NOT_FOUND', async () => {
     const { service } = setup({
       wallet: { ...PRIMARY },
-      resolveError: new MocbankEscrowError('WALLET_NOT_FOUND'),
+      resolveError: new MocbankAccountLookupError('WALLET_NOT_FOUND'),
     })
     await expect(
       service.link(USER, { accountNumber: MOMO_NUMBER, brand: 'momo' })

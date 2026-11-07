@@ -285,6 +285,104 @@ describe('LedgerOutboxService', () => {
       expect(fabricService.submitTransaction).not.toHaveBeenCalled()
     })
 
+    describe('recordPayment arity follows the live chaincode', () => {
+      const payment = (args: string[]): LedgerOutbox =>
+        ({
+          _id: new ObjectId(),
+          status: 'pending',
+          attempts: 0,
+          nextRetryAt: new Date(Date.now() - 1000),
+          dependencyKey: null,
+          payload: { action: 'recordPayment', args },
+        }) as unknown as LedgerOutbox
+
+      it('appends the empty period start to a 4-arg item once the chaincode is ABI 3', async () => {
+        const event = payment(['p1', 'c1', '100', 'a'.repeat(64)])
+        repository.find.mockResolvedValue([event])
+        repository.findOne.mockResolvedValue(event)
+        fabricService.getChaincodeAbiVersion.mockReturnValue(3)
+
+        await service.processPending(1)
+
+        expect(fabricService.submitTransaction).toHaveBeenCalledWith(
+          'recordPayment',
+          ['p1', 'c1', '100', 'a'.repeat(64), ''],
+          undefined
+        )
+        // The stored item is not rewritten, so its payload hash stays stable.
+        expect(event.payload.args).toHaveLength(4)
+      })
+
+      it('drops the period start of a 5-arg item if the chaincode is still ABI 2', async () => {
+        const event = payment(['p1', 'c1', '100', 'a'.repeat(64), ''])
+        repository.find.mockResolvedValue([event])
+        repository.findOne.mockResolvedValue(event)
+        fabricService.getChaincodeAbiVersion.mockReturnValue(2)
+
+        await service.processPending(1)
+
+        expect(fabricService.submitTransaction).toHaveBeenCalledWith(
+          'recordPayment',
+          ['p1', 'c1', '100', 'a'.repeat(64)],
+          undefined
+        )
+      })
+    })
+
+    describe('recordPenalty needs ABI 3', () => {
+      const penaltyEvent = (): LedgerOutbox =>
+        ({
+          _id: new ObjectId(),
+          status: 'pending',
+          attempts: 0,
+          nextRetryAt: new Date(Date.now() - 1000),
+          dependencyKey: null,
+          payload: {
+            action: 'recordPenalty',
+            args: [
+              'pen-1',
+              'contract-1',
+              'pay-1',
+              '5000000',
+              '10',
+              '20',
+              '27397',
+              'a'.repeat(64),
+            ],
+            metadata: { minimumAbiVersion: 3 },
+          },
+        }) as unknown as LedgerOutbox
+
+      it('stays pending without consuming attempts while the chaincode is on ABI 2', async () => {
+        const event = penaltyEvent()
+        repository.find.mockResolvedValue([event])
+        repository.findOne.mockResolvedValue(event)
+        fabricService.getChaincodeAbiVersion.mockReturnValue(2)
+
+        await expect(service.processPending(1)).resolves.toBe(0)
+
+        expect(event.status).toBe('pending')
+        expect(event.attempts).toBe(0)
+        expect(event.errorCode).toBe('CHAINCODE_UPGRADE_REQUIRED')
+        expect(fabricService.submitTransaction).not.toHaveBeenCalled()
+      })
+
+      it('is submitted once the chaincode advertises ABI 3', async () => {
+        const event = penaltyEvent()
+        repository.find.mockResolvedValue([event])
+        repository.findOne.mockResolvedValue(event)
+        fabricService.getChaincodeAbiVersion.mockReturnValue(3)
+
+        await expect(service.processPending(1)).resolves.toBe(1)
+
+        expect(fabricService.submitTransaction).toHaveBeenCalledWith(
+          'recordPenalty',
+          event.payload.args,
+          event.payload.metadata
+        )
+      })
+    })
+
     it('keeps a Fabric event retryable when the gateway is unavailable and never projects confirmation', async () => {
       const event = {
         _id: new ObjectId(),

@@ -43,6 +43,7 @@ import {
   buildSignedContractLedgerEvidence,
   buildSignedContractLedgerEvidenceV3,
   hashSignedContractLedgerEvidence,
+  type LedgerEvidenceSignatureInput,
   type SignedContractGovernanceReference,
 } from '../../fabric/utils/ledger-evidence-envelope'
 import { FabricGovernanceService } from '../../fabric/services/fabric-governance.service'
@@ -60,6 +61,7 @@ import {
   validateLeaseCompliance,
 } from '../legal/lease-compliance.validator'
 import { resolveEffectiveCommercial } from '../commercial/resolve-effective-commercial'
+import { resolveLatePenaltyRate } from '../commercial/resolve-late-penalty-rate'
 import { MoveInSettlementsService } from '../../rental/services/move-in-settlements.service'
 import { ContractLayoutService } from '../layout/contract-layout.service'
 import { RentalTransactionEventService } from '../../rental/services/rental-transaction-event.service'
@@ -254,9 +256,11 @@ export class ContractsService {
     /** PROP-399: evidence có governance không được bị bỏ rơi bởi args ABI v1 → luôn dạng v2. */
     requireAbiV2?: boolean | undefined
   }): { args: string[]; argsVersion: 1 | 2 } {
-    const argsVersion = input.requireAbiV2
-      ? 2
-      : this.fabricService.getChaincodeAbiVersion()
+    // Arity của createContract chỉ khác nhau giữa ABI 1 và từ ABI 2 trở lên (ABI 3 giữ nguyên arity ABI 2).
+    const argsVersion: 1 | 2 =
+      !input.requireAbiV2 && this.fabricService.getChaincodeAbiVersion() === 1
+        ? 1
+        : 2
     const baseArgs = [
       input.contractId,
       input.contractCode,
@@ -348,6 +352,49 @@ export class ContractsService {
       appliedPolicies: policies,
     })
     return crypto.createHash('sha256').update(payload).digest('hex')
+  }
+
+  /**
+   * Envelope bằng chứng chữ ký gửi lên chaincode, dùng chung cho đường SmartCA và đường ký thử.
+   * Mọi đường kích hoạt đều phải mang chữ ký của cả hai bên và tỷ lệ lãi chậm trả hiệu lực,
+   * vì chaincode ABI 3 từ chối `createContract` thiếu hai thứ này.
+   */
+  private buildActivationLedgerEvidence(input: {
+    contract: Contract
+    reference: ReturnType<typeof requireCanonicalArtifactReference>
+    signatures: {
+      tenant: LedgerEvidenceSignatureInput
+      landlord: LedgerEvidenceSignatureInput
+    }
+    governance?: SignedContractGovernanceReference | null
+  }): {
+    evidence:
+      | ReturnType<typeof buildSignedContractLedgerEvidence>
+      | ReturnType<typeof buildSignedContractLedgerEvidenceV3>
+    evidenceHash: string
+  } {
+    const { contract, reference, signatures, governance } = input
+    const evidenceInput = {
+      contractId: contract._id.toHexString(),
+      artifact: {
+        artifactId: reference.artifactId,
+        revision: reference.revision,
+        artifactHash: reference.artifactHash,
+        contentType: reference.contentType,
+      },
+      signatures,
+      depositId: contract.depositId ?? null,
+      depositHash: contract.depositHash ?? null,
+      terms: { latePenaltyRatePerYear: resolveLatePenaltyRate(contract) },
+    }
+    // Có governance → evidence v3 (chaincode kiểm GOVERNANCE_<snapshotId>); không có → v2 như cũ.
+    const evidence = governance
+      ? buildSignedContractLedgerEvidenceV3({ ...evidenceInput, governance })
+      : buildSignedContractLedgerEvidence(evidenceInput)
+    return {
+      evidence,
+      evidenceHash: hashSignedContractLedgerEvidence(evidence),
+    }
   }
 
   private async projectApartmentRental(contract: Contract): Promise<void> {
@@ -731,45 +778,35 @@ export class ContractsService {
       throw new ConflictException('SMARTCA_SIGNATURES_REQUIRED')
     }
     const governanceReference = await this.bindGovernanceSnapshot(contract)
-    const ledgerEvidenceInput = {
-      contractId: contract._id.toHexString(),
-      artifact: {
-        artifactId: canonicalReference.artifactId,
-        revision: canonicalReference.revision,
-        artifactHash: canonicalReference.artifactHash,
-        contentType: canonicalReference.contentType,
-      },
-      signatures: {
-        tenant: {
-          providerTransactionId: tenantSignature.providerTransactionId ?? '',
-          certificateSerial: tenantSignature.certificateSerial ?? '',
-          certificateSubject: tenantSignature.certificateSubject ?? null,
-          certificateIssuer: tenantSignature.certificateIssuer ?? null,
-          signatureHash: tenantSignature.signatureHash ?? null,
-          signatureAlgorithm: tenantSignature.signatureAlgorithm ?? null,
-          signatureValueRef: tenantSignature.signatureValueRef ?? null,
+    const { evidence: ledgerEvidence, evidenceHash: ledgerEvidenceHash } =
+      this.buildActivationLedgerEvidence({
+        contract,
+        reference: canonicalReference,
+        governance: governanceReference,
+        signatures: {
+          tenant: {
+            provider: 'smartca',
+            providerTransactionId: tenantSignature.providerTransactionId ?? '',
+            certificateSerial: tenantSignature.certificateSerial ?? '',
+            certificateSubject: tenantSignature.certificateSubject ?? null,
+            certificateIssuer: tenantSignature.certificateIssuer ?? null,
+            signatureHash: tenantSignature.signatureHash ?? null,
+            signatureAlgorithm: tenantSignature.signatureAlgorithm ?? null,
+            signatureValueRef: tenantSignature.signatureValueRef ?? null,
+          },
+          landlord: {
+            provider: 'smartca',
+            providerTransactionId:
+              landlordSignature.providerTransactionId ?? '',
+            certificateSerial: landlordSignature.certificateSerial ?? '',
+            certificateSubject: landlordSignature.certificateSubject ?? null,
+            certificateIssuer: landlordSignature.certificateIssuer ?? null,
+            signatureHash: landlordSignature.signatureHash ?? null,
+            signatureAlgorithm: landlordSignature.signatureAlgorithm ?? null,
+            signatureValueRef: landlordSignature.signatureValueRef ?? null,
+          },
         },
-        landlord: {
-          providerTransactionId: landlordSignature.providerTransactionId ?? '',
-          certificateSerial: landlordSignature.certificateSerial ?? '',
-          certificateSubject: landlordSignature.certificateSubject ?? null,
-          certificateIssuer: landlordSignature.certificateIssuer ?? null,
-          signatureHash: landlordSignature.signatureHash ?? null,
-          signatureAlgorithm: landlordSignature.signatureAlgorithm ?? null,
-          signatureValueRef: landlordSignature.signatureValueRef ?? null,
-        },
-      },
-      depositId: contract.depositId ?? null,
-      depositHash: contract.depositHash ?? null,
-    }
-    // Có governance → evidence v3 (chaincode kiểm GOVERNANCE_<snapshotId>); không có → v2 như cũ.
-    const ledgerEvidence = governanceReference
-      ? buildSignedContractLedgerEvidenceV3({
-          ...ledgerEvidenceInput,
-          governance: governanceReference,
-        })
-      : buildSignedContractLedgerEvidence(ledgerEvidenceInput)
-    const ledgerEvidenceHash = hashSignedContractLedgerEvidence(ledgerEvidence)
+      })
     contract.contractHash = canonicalHash
     contract.activationKey = `smartca:${canonicalHash}`
 
@@ -1234,6 +1271,15 @@ export class ContractsService {
 
     // Bước 3: Nếu cả hai đã ký → kích hoạt hợp đồng & neo hash lên blockchain
     if (contract.signedByTenant && contract.signedByLandlord) {
+      // Ledger ABI 3 chỉ nhận hợp đồng kèm bằng chứng chữ ký trên artifact canonical.
+      const resolveCanonicalReference = (): ReturnType<
+        typeof requireCanonicalArtifactReference
+      > => {
+        if (!contract.artifactRef) {
+          throw new ConflictException('CONTRACT_ARTIFACT_REQUIRED')
+        }
+        return requireCanonicalArtifactReference(contract)
+      }
       let depositIdToUse: string | null = null
       let depositHashToUse: string | null = null
       let dependencyKey: string | null = null
@@ -1268,6 +1314,8 @@ export class ContractsService {
             'Biên lai tiền cọc chưa có mã băm hợp lệ'
           )
         }
+        // Kiểm trước khi đổi trạng thái thỏa thuận cọc: thiếu artifact thì không kích hoạt.
+        resolveCanonicalReference()
 
         depositIdToUse = depositAgreement._id.toString()
         depositHashToUse = depositAgreement.depositHash
@@ -1285,6 +1333,7 @@ export class ContractsService {
         contract.depositHash = null
       }
 
+      const canonicalReference = resolveCanonicalReference()
       contract.status = 'active'
       contract.ledgerStatus = 'pending'
       contract.activationFailure = null
@@ -1318,8 +1367,25 @@ export class ContractsService {
       }
       contract.appliedPolicies = snapshot
 
-      // Tạo mã băm SHA-256 bất biến của nội dung hợp đồng (PII + điều khoản + chính sách pháp luật áp dụng)
-      contract.contractHash = this.buildContractHash(contract, snapshot)
+      // Ký thử cũng neo hash artifact canonical (như đường SmartCA) kèm envelope `dev-test`,
+      // để ledger phân biệt được ký thật và ký thử.
+      contract.contractHash = canonicalReference.artifactHash
+      const devTestSignature = (
+        signerRole: 'tenant' | 'landlord'
+      ): LedgerEvidenceSignatureInput => ({
+        provider: 'dev-test',
+        providerTransactionId: `dev-test:${signerRole}:${contractId}`,
+        certificateSerial: `dev-test:${signerRole}:${contractId}`,
+      })
+      const { evidence: ledgerEvidence, evidenceHash: ledgerEvidenceHash } =
+        this.buildActivationLedgerEvidence({
+          contract,
+          reference: canonicalReference,
+          signatures: {
+            tenant: devTestSignature('tenant'),
+            landlord: devTestSignature('landlord'),
+          },
+        })
 
       // Đẩy hash lên Hyperledger Fabric
       const createContractPayload = this.buildCreateContractArgs({
@@ -1333,6 +1399,7 @@ export class ContractsService {
         startDate: contract.startDate.toISOString(),
         depositId: depositIdToUse,
         depositHash: depositHashToUse,
+        evidenceJson: JSON.stringify(ledgerEvidence),
       })
 
       await this.ledgerOutboxService.enqueue({
@@ -1345,7 +1412,15 @@ export class ContractsService {
         metadata: {
           contractId,
           argsVersion: createContractPayload.argsVersion,
-          details: { contractHash: contract.contractHash },
+          details: {
+            contractHash: contract.contractHash,
+            artifactHash: canonicalReference.artifactHash,
+            artifactId: canonicalReference.artifactId,
+            artifactRevision: canonicalReference.revision,
+            evidenceSchemaVersion: ledgerEvidence.schemaVersion,
+            evidenceEnvelopeHash: ledgerEvidenceHash,
+            evidenceEnvelope: ledgerEvidence,
+          },
         },
       })
       contract.blockchainAddress = null

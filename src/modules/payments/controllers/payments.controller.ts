@@ -15,8 +15,9 @@ import { RolesGuard } from '../../../common/guards/roles.guard'
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard'
 import type { UserPayload } from '../../auth/interfaces/auth.interface'
 import { Payment } from '../schemas/payment.schema'
-import { PaymentsService } from '../services/payments.service'
+import { PaymentsService, type PaymentView } from '../services/payments.service'
 import { RequirePermission } from '../../rbac/guards/require-permission.decorator'
+import { WaivePenaltyDto } from '../dto/waive-penalty.dto'
 
 @ApiTags('payments')
 @ApiBearerAuth()
@@ -31,7 +32,7 @@ export class PaymentsController {
   getByContract(
     @Query('contractId') contractId: string,
     @CurrentUser() user: UserPayload
-  ): Promise<Payment[]> {
+  ): Promise<PaymentView[]> {
     if (!contractId || !user?._id) {
       throw new BadRequestException('CONTRACT_ID_REQUIRED')
     }
@@ -62,6 +63,18 @@ export class PaymentsController {
     @CurrentUser('id') actorId: string
   ): Promise<Payment> {
     return this.paymentsService.confirmPayment(paymentId, actorId, true)
+  }
+
+  @Post(':id/waive-penalty')
+  // Không gắn RequirePermission: bảng phân quyền chưa cấp 'update Payment' cho chủ nhà; quyền
+  // được kiểm bằng @Roles('landlord') và đối chiếu chủ nhà của hợp đồng trong service.
+  @Roles('landlord')
+  waivePenalty(
+    @Param('id') paymentId: string,
+    @Body() body: WaivePenaltyDto,
+    @CurrentUser('id') landlordId: string
+  ): Promise<Payment> {
+    return this.paymentsService.waivePenalty(paymentId, landlordId, body.reason)
   }
 
   @Post(':id/waive')

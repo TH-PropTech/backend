@@ -4,7 +4,7 @@ import {
   TEST_PAYMENTS,
   testConfigService,
 } from '../../mock-bank/providers/gateway-test.util'
-import { MocbankEscrowClient } from './mocbank-escrow.client'
+import { MocbankAccountLookupClient } from './mocbank-account-lookup.client'
 
 const moc = TEST_PAYMENTS.mocbank
 
@@ -17,9 +17,9 @@ async function failureOf(promise: Promise<unknown>): Promise<unknown> {
   }
 }
 
-describe('MocbankEscrowClient (account lookups)', () => {
-  const clientWith = (fetcher: jest.Mock): MocbankEscrowClient =>
-    new MocbankEscrowClient(testConfigService() as never, fetcher)
+describe('MocbankAccountLookupClient (account lookups)', () => {
+  const clientWith = (fetcher: jest.Mock): MocbankAccountLookupClient =>
+    new MocbankAccountLookupClient(testConfigService() as never, fetcher)
 
   beforeEach(() => {
     jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined)
@@ -76,7 +76,7 @@ describe('MocbankEscrowClient (account lookups)', () => {
 
   it('refuses to call Ví Mộc when merchant credentials are missing', async () => {
     const fetcher = jest.fn()
-    const client = new MocbankEscrowClient(
+    const client = new MocbankAccountLookupClient(
       testConfigService({
         ...TEST_PAYMENTS,
         mocbank: { ...moc, merchantSecret: '' },

@@ -830,6 +830,19 @@ describe('ContractsService activation', () => {
       depositAgreementId: '507f1f77bcf86cd799439099',
       depositId: null,
       depositTxHash: null,
+      contentLockedHash: 'a'.repeat(64),
+      contentLockedAt: new Date('2029-12-01T00:00:00.000Z'),
+      artifactRef: {
+        artifactId: 'artifact-1',
+        revision: 1,
+        templateKey: 'legacy-contract-template',
+        templateVersion: 1,
+        hashSchemaVersion: 1,
+        artifactHash: 'a'.repeat(64),
+        canonicalContentHash: 'a'.repeat(64),
+        contentType: 'application/pdf' as const,
+        lockedAt: new Date('2029-12-01T00:00:00.000Z'),
+      },
     } as unknown as Contract
 
     const contractRepository = {
@@ -891,7 +904,7 @@ describe('ContractsService activation', () => {
           'HD-1',
           'tenant-1',
           'landlord-1',
-          expect.any(String),
+          'a'.repeat(64),
           '10000000',
           '2030-01-01T00:00:00.000Z',
           '507f1f77bcf86cd799439099',
@@ -928,6 +941,19 @@ describe('ContractsService activation', () => {
         version: 1,
         strategy: 'SIGN_FIRST',
         contentHash: 'policy-hash',
+      },
+      contentLockedHash: 'a'.repeat(64),
+      contentLockedAt: new Date('2029-12-01T00:00:00.000Z'),
+      artifactRef: {
+        artifactId: 'artifact-1',
+        revision: 1,
+        templateKey: 'legacy-contract-template',
+        templateVersion: 1,
+        hashSchemaVersion: 1,
+        artifactHash: 'a'.repeat(64),
+        canonicalContentHash: 'a'.repeat(64),
+        contentType: 'application/pdf' as const,
+        lockedAt: new Date('2029-12-01T00:00:00.000Z'),
       },
     } as unknown as Contract
     const contractRepository = {
@@ -971,8 +997,63 @@ describe('ContractsService activation', () => {
     expect(contract.governanceSnapshotRef ?? null).toBeNull()
     const enqueueCalls = ledgerOutboxService.enqueue.mock
       .calls as unknown as ReadonlyArray<readonly unknown[]>
-    const event = enqueueCalls[0]?.[0] as { dependencyKeys?: string[] }
+    const event = enqueueCalls[0]?.[0] as {
+      dependencyKeys?: string[]
+      args: string[]
+    }
     expect(event.dependencyKeys).toBeUndefined()
+
+    // The dev-test path now anchors the canonical artifact hash with a "dev-test" envelope.
+    expect(event.args[4]).toBe('a'.repeat(64))
+    const evidence = JSON.parse(event.args[9] ?? '{}') as {
+      schemaVersion: number
+      artifact: { artifactHash: string }
+      signatures: Record<string, { provider: string }>
+      terms: { latePenaltyRatePerYear: number }
+    }
+    expect(evidence.schemaVersion).toBe(2)
+    expect(evidence.artifact.artifactHash).toBe('a'.repeat(64))
+    expect(evidence.signatures.tenant?.provider).toBe('dev-test')
+    expect(evidence.signatures.landlord?.provider).toBe('dev-test')
+    expect(evidence.terms.latePenaltyRatePerYear).toBe(10)
+    expect(contract.contractHash).toBe('a'.repeat(64))
+  })
+
+  it('refuses to activate through the dev-test path without a canonical artifact (CONTRACT_ARTIFACT_REQUIRED)', async () => {
+    const contract = {
+      _id: new ObjectId('507f1f77bcf86cd799439011'),
+      contractCode: 'HD-NO-ARTIFACT',
+      propertyId: 'property-1',
+      landlordId: 'landlord-1',
+      tenantId: 'tenant-1',
+      monthlyRent: 10_000_000,
+      deposit: 0,
+      startDate: new Date('2030-01-01T00:00:00.000Z'),
+      status: 'awaiting-signature' as const,
+      signedByTenant: true,
+      signedByLandlord: false,
+    } as unknown as Contract
+    const contractRepository = {
+      findOne: jest.fn().mockResolvedValue(contract),
+      save: jest.fn(
+        (value: Contract): Promise<Contract> => Promise.resolve(value)
+      ),
+    }
+    const ledgerOutboxService = { enqueue: jest.fn().mockResolvedValue({}) }
+    const service = Object.create(
+      ContractsService.prototype
+    ) as ContractsService
+    Reflect.set(service, 'contractRepository', contractRepository)
+    Reflect.set(service, 'ledgerOutboxService', ledgerOutboxService)
+    Reflect.set(service, 'kycService', {
+      findByUserId: jest.fn().mockResolvedValue({ status: 'verified' }),
+    })
+
+    await expect(
+      service.signContract(contract._id.toHexString(), 'landlord')
+    ).rejects.toThrow('CONTRACT_ARTIFACT_REQUIRED')
+    expect(ledgerOutboxService.enqueue).not.toHaveBeenCalled()
+    expect(contractRepository.save).not.toHaveBeenCalled()
   })
 
   it('persists fully-signed-pending-deposit for the sign-first policy', async () => {
@@ -1216,6 +1297,8 @@ describe('ContractsService activation', () => {
           revision?: number
           artifactHash?: string
         }
+        signatures?: Record<string, { provider?: string }>
+        terms?: { latePenaltyRatePerYear?: number }
       }
       expect(parsedEvidence.schemaVersion).toBe(2)
       expect(parsedEvidence.artifact).toEqual({
@@ -1224,6 +1307,9 @@ describe('ContractsService activation', () => {
         artifactHash: 'a'.repeat(64),
         contentType: 'application/pdf',
       })
+      expect(parsedEvidence.signatures?.tenant?.provider).toBe('smartca')
+      expect(parsedEvidence.signatures?.landlord?.provider).toBe('smartca')
+      expect(parsedEvidence.terms).toEqual({ latePenaltyRatePerYear: 10 })
       expect(ledgerEvent.metadata?.details).toEqual(
         expect.objectContaining({
           artifactId: 'artifact-1',

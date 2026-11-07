@@ -38,10 +38,17 @@ export interface LedgerEvidenceEventDto {
   explorerUrl: string | null
 }
 
+/**
+ * Nhà cung cấp chữ ký của hợp đồng đã neo. `dev-test` là ký thử ngoài production và phải
+ * được gắn nhãn "Ký thử" ở giao diện; `null` khi chưa neo hoặc hợp đồng neo trước ABI 3.
+ */
+export type LedgerSigningProvider = 'smartca' | 'dev-test'
+
 export interface LedgerEvidenceDto {
   networkMode: 'fabric' | 'simulation'
   connectionState: FabricStatus['connectionState']
   explorerAvailable: boolean
+  signingProvider: LedgerSigningProvider | null
   events: LedgerEvidenceEventDto[]
 }
 
@@ -192,8 +199,40 @@ export class LedgerEvidenceQueryService {
       networkMode: status.mode,
       connectionState: status.connectionState,
       explorerAvailable,
+      signingProvider: this.resolveSigningProvider(outboxEvents),
       events,
     }
+  }
+
+  /**
+   * Đọc nhà cung cấp chữ ký từ envelope của lần `createContract` đã gửi lên chaincode (cùng
+   * giá trị chaincode lưu ở `signatureProviders`). Chỉ cần một bên ký thử là cả hợp đồng bị
+   * coi là ký thử.
+   */
+  private resolveSigningProvider(
+    outboxEvents: LedgerOutbox[]
+  ): LedgerSigningProvider | null {
+    const activation = outboxEvents.find(
+      event =>
+        event.aggregateType === 'contract' &&
+        event.payload?.action === 'createContract'
+    )
+    const details = activation?.payload.metadata?.details as
+      | { evidenceEnvelope?: { signatures?: Record<string, unknown> } }
+      | undefined
+    const signatures = Object.values(
+      details?.evidenceEnvelope?.signatures ?? {}
+    )
+    const providers = signatures.map(signature =>
+      signature && typeof signature === 'object'
+        ? (signature as { provider?: unknown }).provider
+        : undefined
+    )
+    if (providers.includes('dev-test')) return 'dev-test'
+    if (providers.length > 0 && providers.every(p => p === 'smartca')) {
+      return 'smartca'
+    }
+    return null
   }
 
   private mapOutboxEvent(

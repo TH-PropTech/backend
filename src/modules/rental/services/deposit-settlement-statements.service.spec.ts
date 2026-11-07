@@ -8,6 +8,7 @@ import { ObjectId } from 'mongodb'
 import type { Contract } from '../../contracts/schemas/contract.schema'
 import type { DepositSettlementStatement } from '../schemas/deposit-settlement-statement.schema'
 import type { MoveOutHandover } from '../schemas/move-out-handover.schema'
+import { sha256Hex } from '../../fabric/utils/canonical-json'
 import { DAY_MS } from '../utils/move-out.util'
 import {
   DepositSettlementStatementsService,
@@ -682,6 +683,202 @@ describe('DepositSettlementStatementsService', () => {
       expect(
         await service.processDeadlines(new Date(NOW.getTime() + 5 * DAY_MS))
       ).toBe(0)
+    })
+  })
+
+  describe('late refund interest (add-rental-penalty-enforcement)', () => {
+    // accepted() at NOW=2030-03-01 gives refundDueAt = 2030-03-08.
+    const onTime = { ...REFUND, paidAt: '2030-03-08T09:00:00+07:00' }
+    const nineDaysLate = {
+      ...REFUND,
+      amount: 4_000_000,
+      paidAt: '2030-03-17T09:00:00+07:00',
+    }
+
+    it('stores 10% interest on a refund recorded 9 days late and tells both parties', async () => {
+      const { service, support } = await accepted()
+
+      const result = await service.recordRefund(
+        CID,
+        'landlord',
+        nineDaysLate,
+        NOW
+      )
+
+      expect(result.refunds[0]!.lateInterest).toEqual({
+        ratePerYear: 10,
+        daysLate: 9,
+        amount: 9_863,
+        legalBasis: 'Điều 357 và khoản 2 Điều 468 Bộ luật Dân sự 2015',
+      })
+      const [recipients, , body] = support.notify.mock.calls.at(-1) as [
+        string[],
+        string,
+        string,
+      ]
+      expect([...recipients].sort()).toEqual(['landlord', 'tenant'])
+      expect(body).toContain('9.863')
+      expect(body).toContain('tự thanh toán')
+    })
+
+    it('has no interest when the refund is paid on the due date or earlier', async () => {
+      const { service } = await accepted()
+      const sameDay = await service.recordRefund(
+        CID,
+        'landlord',
+        { ...onTime, amount: 1_000_000 },
+        NOW
+      )
+      const early = await service.recordRefund(
+        CID,
+        'landlord',
+        { ...REFUND, amount: 1_000_000 },
+        NOW
+      )
+      expect(sameDay.refunds[0]!.lateInterest).toBeNull()
+      expect(early.refunds[1]!.lateInterest).toBeNull()
+    })
+
+    it('puts the interest into the anchored manifest, and leaves an on-time manifest unchanged', async () => {
+      const late = await accepted()
+      const lateResult = await late.service.recordRefund(
+        CID,
+        'landlord',
+        nineDaysLate,
+        NOW
+      )
+      const onTimeCtx = await accepted()
+      const onTimeResult = await onTimeCtx.service.recordRefund(
+        CID,
+        'landlord',
+        { ...nineDaysLate, paidAt: onTime.paidAt },
+        NOW
+      )
+
+      const lateRefund = lateResult.refunds[0]!
+      const onTimeRefund = onTimeResult.refunds[0]!
+      expect(lateRefund.evidence?.manifestHash).not.toBe(
+        onTimeRefund.evidence?.manifestHash
+      )
+      // Same shape as before this change for an on-time refund.
+      expect(onTimeRefund.evidence?.manifestHash).toBe(
+        sha256Hex({
+          schemaVersion: 1,
+          statementId: onTimeResult._id.toHexString(),
+          refundId: onTimeRefund.id,
+          contractId: CID,
+          amount: onTimeRefund.amount,
+          paidAt: onTimeRefund.paidAt.toISOString(),
+          transactionRefHash: sha256Hex('FT123'),
+          occurredAt: NOW.toISOString(),
+        })
+      )
+      expect(lateRefund.evidence?.manifestHash).toBe(
+        sha256Hex({
+          schemaVersion: 1,
+          statementId: lateResult._id.toHexString(),
+          refundId: lateRefund.id,
+          contractId: CID,
+          amount: lateRefund.amount,
+          paidAt: lateRefund.paidAt.toISOString(),
+          transactionRefHash: sha256Hex('FT123'),
+          lateInterest: lateRefund.lateInterest,
+          occurredAt: NOW.toISOString(),
+        })
+      )
+    })
+
+    it('shows provisional interest on the remaining refundable amount once the deadline has passed', async () => {
+      const { service } = await accepted()
+      const tenDaysAfterDue = new Date('2030-03-18T09:00:00+07:00')
+
+      const view = await service.findByContract(
+        CID,
+        'tenant',
+        false,
+        tenDaysAfterDue
+      )
+      expect(view.accruedRefundInterest).toBe(21_918) // 8,000,000 x 10% x 10 / 365
+
+      await service.recordRefund(
+        CID,
+        'landlord',
+        { ...REFUND, amount: 3_000_000 },
+        NOW
+      )
+      const afterPartial = await service.findByContract(
+        CID,
+        'landlord',
+        false,
+        tenDaysAfterDue
+      )
+      expect(afterPartial.accruedRefundInterest).toBe(13_699) // 5,000,000 remaining
+    })
+
+    it('shows no provisional interest before the deadline, once fully refunded, or while still waiting for the tenant', async () => {
+      const { service } = await accepted()
+      const beforeDue = new Date('2030-03-07T09:00:00+07:00')
+      expect(
+        (await service.findByContract(CID, 'tenant', false, beforeDue))
+          .accruedRefundInterest
+      ).toBeNull()
+
+      await service.recordRefund(CID, 'landlord', REFUND, NOW)
+      const afterFullRefund = new Date('2030-04-01T09:00:00+07:00')
+      expect(
+        (await service.findByContract(CID, 'tenant', false, afterFullRefund))
+          .accruedRefundInterest
+      ).toBeNull()
+
+      const waiting = await submitted()
+      expect(
+        (
+          await waiting.service.findByContract(
+            CID,
+            'tenant',
+            false,
+            afterFullRefund
+          )
+        ).accruedRefundInterest
+      ).toBeNull()
+    })
+
+    it('reads a refund recorded before this change as having no late interest', async () => {
+      const { service, statement } = await accepted()
+      const legacyRefund = {
+        id: 'legacy-1',
+        amount: 1_000_000,
+        transactionRef: 'FT0',
+        paidAt: new Date('2030-03-20T00:00:00Z'),
+        note: null,
+        recordedAt: NOW,
+        recordedBy: 'landlord',
+        tenantAcknowledgedAt: null,
+        evidence: null,
+      } as unknown as DepositSettlementStatement['refunds'][number]
+      statement.refunds = [legacyRefund]
+
+      const view = await service.findByContract(CID, 'tenant', false, NOW)
+
+      expect(view.refunds[0]!.lateInterest).toBeNull()
+    })
+
+    it('words the overdue notice around statutory interest and self-settlement, not "no sanction"', async () => {
+      const { service, statement, support } = await accepted()
+      await service.processDeadlines(
+        new Date(statement.refundDueAt!.getTime() + 1000)
+      )
+
+      const [, title, body] = support.notify.mock.calls.at(-1) as [
+        string[],
+        string,
+        string,
+      ]
+      expect(title).toBe('Đã quá hạn hoàn cọc')
+      expect(body).not.toContain('không áp dụng chế tài')
+      expect(body).toContain('10%/năm')
+      expect(body).toContain('Điều 357 và khoản 2 Điều 468')
+      expect(body).toContain('tự thanh toán')
     })
   })
 

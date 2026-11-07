@@ -165,7 +165,8 @@ export class FabricStatusResponseDto {
   @ApiProperty() ready!: boolean
   @ApiPropertyOptional() channel?: string | undefined
   @ApiPropertyOptional() chaincode?: string | undefined
-  @ApiPropertyOptional({ enum: [1, 2] }) chaincodeAbiVersion?: 1 | 2
+  @ApiPropertyOptional({ enum: [1, 2, 3] })
+  chaincodeAbiVersion?: 1 | 2 | 3
   @ApiProperty({ format: 'date-time' }) lastCheckedAt!: string
   @ApiPropertyOptional({ nullable: true, type: String })
   errorCode?: string | null

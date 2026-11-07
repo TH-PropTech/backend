@@ -5,6 +5,7 @@ import { ContractsModule } from '../contracts/contracts.module'
 import { Payment } from '../payments/schemas/payment.schema'
 import { PaymentAttempt } from '../payments/schemas/payment-attempt.schema'
 import { PaymentProvidersModule } from '../payment-providers/payment-providers.module'
+import { PaymentsModule } from '../payments/payments.module'
 import { MockBankController } from './controllers/mock-bank.controller'
 import { MockBankService } from './services/mock-bank.service'
 import { GatewayCallbackService } from './services/gateway-callback.service'
@@ -20,6 +21,7 @@ import { RentalApplication } from '../rental/schemas/rental-application.schema'
     ConfigModule,
     PaymentProvidersModule,
     ContractsModule,
+    PaymentsModule,
     FabricModule,
     WalletsModule,
     TypeOrmModule.forFeature([

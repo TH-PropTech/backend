@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config'
 import { ModuleRef } from '@nestjs/core'
 import { RedisService } from '../../health/services/redis.service'
 import { PaymentsService } from '../../payments/services/payments.service'
+import { LatePenaltyService } from '../../payments/services/late-penalty.service'
 import { MoveInSettlementsService } from './move-in-settlements.service'
 import { MockBankService } from '../../mock-bank/services/mock-bank.service'
 import { DepositAgreementsService } from '../../contracts/services/deposit-agreements.service'
@@ -59,6 +60,17 @@ export class RentalOpsScheduler {
       if (!service) return 0
       const result = await service.processReminders()
       return result.overdue + result.reminders
+    })
+  }
+
+  /** Quét bù lãi chậm trả cho hóa đơn tiền thuê đã trả trễ mà callback chưa kịp tạo khoản lãi. */
+  async assessLatePenalties(): Promise<number> {
+    return this.runIfEnabled('assess-late-penalties', async () => {
+      const service = this.moduleRef.get<LatePenaltyService>(
+        LatePenaltyService,
+        { strict: false }
+      )
+      return (await service?.assessMissing()) ?? 0
     })
   }
 

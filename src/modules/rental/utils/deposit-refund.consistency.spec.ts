@@ -25,6 +25,14 @@ describe('deposit refund wording stays consistent with the contract template', (
     expect(text).not.toMatch(/hợp đồng thông minh|bảo chứng|ký quỹ/i)
   })
 
+  it('FAQ says late-payment interest is calculated and notified but never collected by the platform', () => {
+    const faq = PLATFORM_FAQ_ENTRIES.map(entry => entry.content).join('\n')
+    expect(faq).toContain('không thu hộ')
+    expect(faq).toContain('hóa đơn lãi chậm trả')
+    expect(faq).toContain('lãi chậm hoàn 10%/năm')
+    expect(faq).not.toContain('Hệ thống không tự tính hay tự thu tiền phạt')
+  })
+
   it('FAQ describes the new flow and no longer says refunds are not automated', () => {
     const faq = PLATFORM_FAQ_ENTRIES.map(entry => entry.content).join('\n')
     expect(faq).toContain(DEPOSIT_REFUND_DUE_TEXT)

@@ -1,3 +1,8 @@
+import {
+  RENT_TERMS_FREEDOM_BASIS,
+  TERMINATION_NOTICE_REFERENCE,
+} from './legal-citations'
+
 export type PolicyDataType = 'percent' | 'number' | 'boolean' | 'string'
 
 export interface PolicyDefinition {
@@ -65,7 +70,7 @@ export const POLICY_DEFINITIONS: Record<string, PolicyDefinition> = {
     unit: 'ngày',
     description:
       'Bên đơn phương chấm dứt hợp đồng thuê nhà ở phải thông báo cho bên kia biết trước ít nhất 30 ngày',
-    legalReference: 'Khoản 3 Điều 130 Luật Nhà ở 2023 (Luật số 27/2023/QH15)',
+    legalReference: TERMINATION_NOTICE_REFERENCE,
     isPublic: true,
   },
   CONTRACT_MUST_BE_WRITTEN: {
@@ -125,7 +130,7 @@ export const POLICY_DEFINITIONS: Record<string, PolicyDefinition> = {
     max: 60,
     unit: 'tháng',
     description: 'Gói thuê ngắn hạn: thời hạn tối thiểu',
-    legalReference: 'Tự do thỏa thuận theo Điều 130 Luật Nhà ở 2023',
+    legalReference: `Tự do thỏa thuận theo ${RENT_TERMS_FREEDOM_BASIS}`,
     isPublic: true,
   },
   LEASE_3M_DEPOSIT_MONTHS: {
@@ -154,7 +159,7 @@ export const POLICY_DEFINITIONS: Record<string, PolicyDefinition> = {
     max: 60,
     unit: 'tháng',
     description: 'Gói thuê trung hạn: thời hạn tối thiểu',
-    legalReference: 'Tự do thỏa thuận theo Điều 130 Luật Nhà ở 2023',
+    legalReference: `Tự do thỏa thuận theo ${RENT_TERMS_FREEDOM_BASIS}`,
     isPublic: true,
   },
   LEASE_6M_DEPOSIT_MONTHS: {
@@ -192,7 +197,7 @@ export const POLICY_DEFINITIONS: Record<string, PolicyDefinition> = {
     max: 60,
     unit: 'tháng',
     description: 'Gói thuê dài hạn: thời hạn tối thiểu',
-    legalReference: 'Tự do thỏa thuận theo Điều 130 Luật Nhà ở 2023',
+    legalReference: `Tự do thỏa thuận theo ${RENT_TERMS_FREEDOM_BASIS}`,
     isPublic: true,
   },
   LEASE_12M_DEPOSIT_MONTHS: {

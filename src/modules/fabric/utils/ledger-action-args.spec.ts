@@ -3,6 +3,8 @@ import {
   buildGovernanceSnapshotArgs,
   buildHandoverArgs,
   buildMoveInSettlementArgs,
+  buildPenaltyArgs,
+  fitLedgerArgsToAbi,
   validateLedgerActionArgs,
 } from './ledger-action-args'
 
@@ -20,6 +22,7 @@ describe('ledger-action-args (PROP-399 D12)', () => {
         'recordHandover',
         'recordMoveInSettlement',
         'recordPayment',
+        'recordPenalty',
         'terminateContract',
       ].sort()
     )
@@ -53,6 +56,97 @@ describe('ledger-action-args (PROP-399 D12)', () => {
           ...override,
         })
       ).toThrow('LEDGER_ARGS_INVALID')
+    })
+  })
+
+  describe('buildPenaltyArgs / recordPenalty validation', () => {
+    const input = {
+      penaltyId: 'pen-1',
+      contractId: 'c-1',
+      sourcePaymentId: 'pay-1',
+      baseAmount: 5000000,
+      ratePerYear: 10,
+      daysLate: 20,
+      amount: 27397,
+      penaltyHash: HASH,
+    }
+
+    it('builds the 8 positional args for recordPenalty', () => {
+      const args = buildPenaltyArgs(input)
+      expect(args).toEqual([
+        'pen-1',
+        'c-1',
+        'pay-1',
+        '5000000',
+        '10',
+        '20',
+        '27397',
+        HASH,
+      ])
+      expect(validateLedgerActionArgs('recordPenalty', args)).toBeNull()
+    })
+
+    it.each([
+      ['empty penaltyId', { penaltyId: '' }],
+      ['empty sourcePaymentId', { sourcePaymentId: ' ' }],
+      ['zero base', { baseAmount: 0 }],
+      ['fractional base', { baseAmount: 1.5 }],
+      ['zero rate', { ratePerYear: 0 }],
+      ['zero days', { daysLate: 0 }],
+      ['negative amount', { amount: -1 }],
+      ['bad hash', { penaltyHash: 'xyz' }],
+    ])('rejects %s when building', (_label, override) => {
+      expect(() => buildPenaltyArgs({ ...input, ...override })).toThrow(
+        'LEDGER_ARGS_INVALID'
+      )
+    })
+
+    it('rejects a wrong arity or malformed stored args', () => {
+      const args = buildPenaltyArgs(input)
+      expect(validateLedgerActionArgs('recordPenalty', args.slice(1))).toBe(
+        'arity must be 8'
+      )
+      expect(
+        validateLedgerActionArgs('recordPenalty', [
+          ...args.slice(0, 7),
+          'not-a-hash',
+        ])
+      ).toBe('penaltyHash must be a SHA-256 hash')
+      expect(
+        validateLedgerActionArgs('recordPenalty', [
+          ...args.slice(0, 3),
+          '0',
+          ...args.slice(4),
+        ])
+      ).toBe('baseAmount must be a positive integer')
+    })
+  })
+
+  describe('fitLedgerArgsToAbi (Fabric enforces the chaincode arity)', () => {
+    const four = ['p', 'c', '100', HASH]
+
+    it('adds the empty period start for a recordPayment queued before the ABI 3 upgrade', () => {
+      expect(fitLedgerArgsToAbi('recordPayment', four, 3)).toEqual([
+        ...four,
+        '',
+      ])
+    })
+
+    it('drops the period start when the chaincode is below ABI 3', () => {
+      expect(
+        fitLedgerArgsToAbi(
+          'recordPayment',
+          [...four, '2026-12-01T00:00:00.000Z'],
+          2
+        )
+      ).toEqual(four)
+    })
+
+    it('leaves already-matching and other actions untouched', () => {
+      const five = [...four, '2026-12-01T00:00:00.000Z']
+      expect(fitLedgerArgsToAbi('recordPayment', five, 3)).toBe(five)
+      expect(fitLedgerArgsToAbi('recordPayment', four, 2)).toBe(four)
+      expect(fitLedgerArgsToAbi('recordDeposit', four, 3)).toBe(four)
     })
   })
 

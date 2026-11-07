@@ -211,6 +211,78 @@ describe('MockBankService', () => {
     }
   }
 
+  it('assesses late penalty after a paid transition and survives an assessment failure', async () => {
+    const { service, payment, attempt, paymentRepository } = createContext()
+    const assessForPaidRent = jest
+      .fn()
+      .mockRejectedValueOnce(new Error('db down'))
+      .mockResolvedValue(null)
+    Reflect.set(service, 'latePenaltyService', { assessForPaidRent })
+    const markPaymentPaid = (
+      service as unknown as {
+        markPaymentPaid(
+          payment: unknown,
+          attempt: unknown,
+          paidAt: Date,
+          secret: string,
+          types: { receiptType: string; hashType: string }
+        ): Promise<void>
+      }
+    ).markPaymentPaid.bind(service)
+    const types = { receiptType: 'rent', hashType: 'rent' }
+
+    await expect(
+      markPaymentPaid(payment, attempt, new Date(), 'secret', types)
+    ).resolves.toBeUndefined()
+    expect(payment.status).toBe('paid')
+    expect(paymentRepository.save).toHaveBeenCalledTimes(1)
+
+    await markPaymentPaid(payment, attempt, new Date(), 'secret', types)
+    expect(assessForPaidRent).toHaveBeenCalledTimes(2)
+    expect(assessForPaidRent).toHaveBeenCalledWith(payment)
+  })
+
+  it.each([
+    [2, 'rent', 4],
+    [3, 'rent', 5],
+    [3, 'penalty', 5],
+  ] as const)(
+    'enqueues recordPayment on chaincode ABI %i for a %s invoice with %i args',
+    async (abiVersion, type, argCount) => {
+      const { service, ledgerOutboxService } = createContext()
+      Reflect.set(service, 'fabricService', {
+        getChaincodeAbiVersion: () => abiVersion,
+      })
+      await (
+        service as unknown as {
+          enqueuePaymentLedgerEvent(payment: unknown): Promise<void>
+        }
+      ).enqueuePaymentLedgerEvent({
+        _id: new ObjectId(),
+        contractId: 'contract-1',
+        amount: 2_000_000,
+        type,
+        periodStart: new Date('2030-01-01T00:00:00.000Z'),
+        paymentHash: 'a'.repeat(64),
+      })
+
+      const call = ledgerOutboxService.enqueue.mock.calls[0]?.[0] as {
+        args: string[]
+      }
+      expect(call.args).toHaveLength(argCount)
+    }
+  )
+
+  it('refuses to start a payment for an invoice the landlord has waived', async () => {
+    const { service, payment, attemptRepository } = createContext()
+    Object.assign(payment, { status: 'waived', type: 'penalty' })
+
+    await expect(service.initRentPayment(paymentId, tenantId)).rejects.toThrow(
+      'PAYMENT_WAIVED'
+    )
+    expect(attemptRepository.save).not.toHaveBeenCalled()
+  })
+
   it('creates a rent payment attempt from server-side invoice data', async () => {
     const { service, attemptRepository } = createContext()
     attemptRepository.findOne.mockResolvedValueOnce(null)

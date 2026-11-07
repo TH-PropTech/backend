@@ -10,6 +10,7 @@ import {
 } from './move-in-settlement.job'
 import {
   RentalOpsApplyDueAmendmentsJob,
+  RentalOpsAssessLatePenaltiesJob,
   RentalOpsExpireAttemptsJob,
   RentalOpsExpireDepositAgreementsJob,
   RentalOpsMarkSettlementsOverdueJob,
@@ -26,6 +27,7 @@ describe('job schedules (unchanged from the former @Cron decorators)', () => {
     expireAttempts: jest.fn().mockResolvedValue(1),
     expireDepositAgreements: jest.fn().mockResolvedValue(1),
     processPaymentReminders: jest.fn().mockResolvedValue(1),
+    assessLatePenalties: jest.fn().mockResolvedValue(1),
     markSettlementsOverdue: jest.fn().mockResolvedValue(1),
     applyDueAmendments: jest.fn().mockResolvedValue(1),
     processMoveOutHandoverDeadlines: jest.fn().mockResolvedValue(2),
@@ -76,6 +78,12 @@ describe('job schedules (unchanged from the former @Cron decorators)', () => {
         'processPaymentReminders',
       ],
       [
+        new RentalOpsAssessLatePenaltiesJob(svc as never),
+        '30 7 * * *',
+        'Asia/Ho_Chi_Minh',
+        'assessLatePenalties',
+      ],
+      [
         new RentalOpsMarkSettlementsOverdueJob(svc as never),
         CronExpression.EVERY_DAY_AT_MIDNIGHT,
         undefined,
@@ -119,6 +127,7 @@ describe('job schedules (unchanged from the former @Cron decorators)', () => {
       'rental-ops-expire-attempts',
       'rental-ops-expire-deposit-agreements',
       'rental-ops-process-payment-reminders',
+      'rental-ops-assess-late-penalties',
       'rental-ops-mark-settlements-overdue',
       'rental-ops-apply-due-amendments',
       'rental-ops-process-move-out-deadlines',

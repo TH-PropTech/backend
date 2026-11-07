@@ -19,6 +19,7 @@ import {
   RentalOpsMarkSettlementsOverdueJob,
   RentalOpsProcessMoveOutDeadlinesJob,
   RentalOpsProcessPaymentRemindersJob,
+  RentalOpsAssessLatePenaltiesJob,
 } from './jobs/rental-ops.job'
 import { SystemConfig } from '../properties/schemas/system-config.schema'
 import { ActivityLog } from '../activity-log/schemas/activity-log.schema'
@@ -32,6 +33,7 @@ const JOB_CLASSES = [
   RentalOpsExpireAttemptsJob,
   RentalOpsExpireDepositAgreementsJob,
   RentalOpsProcessPaymentRemindersJob,
+  RentalOpsAssessLatePenaltiesJob,
   RentalOpsMarkSettlementsOverdueJob,
   RentalOpsApplyDueAmendmentsJob,
   RentalOpsProcessMoveOutDeadlinesJob,

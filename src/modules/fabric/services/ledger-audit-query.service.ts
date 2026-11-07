@@ -625,7 +625,9 @@ export class LedgerAuditQueryService {
   ): 'contract' | 'signature' | 'deposit' | 'payment' | 'ledger' {
     // PROP-399: nhóm bằng chứng mới có nhãn riêng, không rơi vào nhóm 'ledger' chung
     // (nhóm này quyết định trạng thái sổ cái tổng hợp của hợp đồng).
-    if (action === 'recordMoveInSettlement') return 'payment'
+    if (action === 'recordMoveInSettlement' || action === 'recordPenalty') {
+      return 'payment'
+    }
     if (action === 'recordHandover' || action === 'publishGovernanceSnapshot') {
       return 'contract'
     }
@@ -669,6 +671,8 @@ export class LedgerAuditQueryService {
         return `Ghi nhận thanh lý/chấm dứt hợp đồng trên sổ cái${suffix}`
       case 'recordMoveInSettlement':
         return `Ghi nhận quyết toán nhận nhà (đã thanh toán đủ) trên sổ cái${suffix}`
+      case 'recordPenalty':
+        return `Ghi nhận khoản lãi chậm trả tiền thuê (đã kiểm khoản gốc, tỷ lệ và công thức) trên sổ cái${suffix}`
       case 'recordHandover':
         return `Ghi nhận biên bản bàn giao nhận nhà đã hoàn tất trên sổ cái${suffix}`
       case 'publishGovernanceSnapshot':

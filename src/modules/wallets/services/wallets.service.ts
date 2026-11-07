@@ -22,9 +22,9 @@ import { Payout, type PayoutStatus } from '../schemas/payout.schema'
 import { humanizePayoutReason } from '../utils/payout-reason'
 import { Wallet, type WalletExtraAccount } from '../schemas/wallet.schema'
 import {
-  MocbankEscrowClient,
-  MocbankEscrowError,
-} from './mocbank-escrow.client'
+  MocbankAccountLookupClient,
+  MocbankAccountLookupError,
+} from './mocbank-account-lookup.client'
 
 const DUPLICATE_KEY_CODE = 11000
 const DEFAULT_PAGE_SIZE = 20
@@ -168,7 +168,7 @@ export class WalletsService {
     private readonly payoutRepository: MongoRepository<Payout>,
     @InjectRepository(Apartment)
     private readonly apartmentRepository: MongoRepository<Apartment>,
-    private readonly mocbankEscrowClient: MocbankEscrowClient
+    private readonly mocbankAccountLookupClient: MocbankAccountLookupClient
   ) {}
 
   /**
@@ -264,9 +264,9 @@ export class WalletsService {
     accountNumber: string
   ): Promise<{ accountName: string; brand: WalletBrand }> {
     try {
-      return await this.mocbankEscrowClient.resolveAccount(accountNumber)
+      return await this.mocbankAccountLookupClient.resolveAccount(accountNumber)
     } catch (error) {
-      if (error instanceof MocbankEscrowError) {
+      if (error instanceof MocbankAccountLookupError) {
         throw error.code === 'WALLET_NOT_FOUND'
           ? new NotFoundException('WALLET_NOT_FOUND')
           : new BadRequestException('MOCBANK_UNAVAILABLE')
@@ -465,7 +465,7 @@ export class WalletsService {
     let timer: ReturnType<typeof setTimeout> | undefined
     try {
       const resolved = await Promise.race([
-        this.mocbankEscrowClient.resolveAccount(accountNumber),
+        this.mocbankAccountLookupClient.resolveAccount(accountNumber),
         new Promise<never>((_, reject) => {
           timer = setTimeout(
             () => reject(new Error('RECEIVING_CHECK_TIMEOUT')),
@@ -476,7 +476,7 @@ export class WalletsService {
       return resolved.brand === brand ? 'active' : 'brand_mismatch'
     } catch (error) {
       if (
-        error instanceof MocbankEscrowError &&
+        error instanceof MocbankAccountLookupError &&
         error.code === 'WALLET_NOT_FOUND'
       ) {
         return 'not_found'

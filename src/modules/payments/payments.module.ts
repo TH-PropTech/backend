@@ -13,6 +13,7 @@ import { PaymentsController } from './controllers/payments.controller'
 import { PlatformFeesController } from './controllers/platform-fees.controller'
 import { AdminPaymentsController } from './controllers/admin-payments.controller'
 import { PaymentsService } from './services/payments.service'
+import { LatePenaltyService } from './services/late-penalty.service'
 import { PlatformFeesService } from './services/platform-fees.service'
 import { AdminPaymentsService } from './services/admin-payments.service'
 import { NotificationsModule } from '../notifications/notifications.module'
@@ -46,10 +47,16 @@ import { ActivityLogModule } from '../activity-log/activity-log.module'
   ],
   providers: [
     PaymentsService,
+    LatePenaltyService,
     PlatformFeesService,
     PlatformFeeScheduleRepository,
     AdminPaymentsService,
   ],
-  exports: [TypeOrmModule, PaymentsService, PlatformFeesService],
+  exports: [
+    TypeOrmModule,
+    PaymentsService,
+    LatePenaltyService,
+    PlatformFeesService,
+  ],
 })
 export class PaymentsModule {}

@@ -1,4 +1,9 @@
 import { DEPOSIT_REFUND_DUE_TEXT } from '../../rental/utils/deposit-refund.constants'
+import {
+  LATE_PAYMENT_AGREED_INTEREST_BASIS,
+  TERMINATION_NOTICE_BASIS,
+  WRONGFUL_TERMINATION_DEPOSIT_BASIS,
+} from '../../legal/utils/legal-citations'
 
 /**
  * 12 điều của hợp đồng thuê căn hộ (mẫu v2). Nội dung dùng biến {{...}} do
@@ -63,7 +68,9 @@ export const LEASE_ARTICLE_DEFINITIONS: readonly LeaseArticleDefinition[] = [
       '1. Để bảo đảm thực hiện hợp đồng này, Bên B đặt cọc cho Bên A số tiền {{deposit}}, theo quy định về đặt cọc tại Điều 328 Bộ luật Dân sự 2015 và theo Thỏa thuận đặt cọc tại Phụ lục 4.',
       '2. Tiền đặt cọc không được dùng để trừ vào tiền thuê hằng tháng, trừ khi hai Bên có thỏa thuận khác bằng văn bản.',
       `3. Tiền đặt cọc do Bên A giữ và được hoàn trả trực tiếp cho Bên B; nền tảng không nhận, không giữ và không chuyển tiền đặt cọc. Khi hợp đồng được thực hiện đúng, Bên A hoàn trả tiền đặt cọc cho Bên B trong thời hạn ${DEPOSIT_REFUND_DUE_TEXT} kể từ ngày bảng khấu trừ tiền cọc được Bên B chấp nhận hoặc được xem là đã chấp nhận theo khoản 4 Điều 9, sau khi khấu trừ các khoản Bên B còn nợ (tiền thuê, chi phí dịch vụ) và chi phí khắc phục hư hỏng do lỗi của Bên B (nếu có) có chứng từ hợp lệ. Số ngày trong hợp đồng này tính theo ngày dương lịch.`,
-      '4. Nếu Bên B từ chối giao kết hoặc đơn phương chấm dứt hợp đồng trái quy định thì mất khoản tiền đặt cọc; nếu Bên A từ chối giao kết hoặc đơn phương chấm dứt hợp đồng trái quy định thì phải hoàn trả khoản tiền đặt cọc và bồi thường cho Bên B một khoản tiền tương đương khoản đặt cọc, trừ khi hai Bên có thỏa thuận khác.',
+      '4. Nếu Bên B từ chối giao kết hoặc đơn phương chấm dứt hợp đồng trái quy định thì mất khoản tiền đặt cọc; nếu Bên A từ chối giao kết hoặc đơn phương chấm dứt hợp đồng trái quy định thì phải hoàn trả khoản tiền đặt cọc và bồi thường cho Bên B một khoản tiền tương đương khoản đặt cọc theo ' +
+        WRONGFUL_TERMINATION_DEPOSIT_BASIS +
+        ', trừ khi hai Bên có thỏa thuận khác.',
     ].join('\n'),
     ['deposit'],
   ],
@@ -138,7 +145,9 @@ export const LEASE_ARTICLE_DEFINITIONS: readonly LeaseArticleDefinition[] = [
     'Vi phạm hợp đồng, lãi chậm trả và bồi thường thiệt hại',
     [
       '1. Bên nào vi phạm nghĩa vụ theo hợp đồng thì phải chịu trách nhiệm theo Điều 351 Bộ luật Dân sự 2015, bao gồm việc khắc phục vi phạm và bồi thường thiệt hại thực tế.',
-      '2. Trường hợp Bên B chậm thanh toán tiền thuê hoặc các khoản đến hạn, Bên B phải trả lãi đối với số tiền chậm trả tương ứng với thời gian chậm trả theo mức {{latePenaltyRate}}%/năm, nhưng không vượt mức lãi suất tối đa mà pháp luật cho phép theo Điều 468 Bộ luật Dân sự 2015.',
+      '2. Trường hợp Bên B chậm thanh toán tiền thuê hoặc các khoản đến hạn, Bên B phải trả lãi đối với số tiền chậm trả tương ứng với thời gian chậm trả theo mức {{latePenaltyRate}}%/năm, nhưng không vượt mức lãi suất tối đa mà pháp luật cho phép, theo ' +
+        LATE_PAYMENT_AGREED_INTEREST_BASIS +
+        '.',
       '3. Bên bị vi phạm có nghĩa vụ thông báo bằng văn bản về hành vi vi phạm và cho Bên vi phạm một thời hạn hợp lý (tối thiểu 07 ngày) để khắc phục, trừ trường hợp vi phạm không thể khắc phục.',
       '4. Bên bị thiệt hại phải áp dụng các biện pháp cần thiết, hợp lý để hạn chế thiệt hại; phần thiệt hại do không áp dụng biện pháp hạn chế thì không được bồi thường.',
       '5. Việc bồi thường thiệt hại phải có căn cứ, chứng từ hợp lệ và chỉ tính cho thiệt hại thực tế, trực tiếp phát sinh từ hành vi vi phạm.',
@@ -156,7 +165,9 @@ export const LEASE_ARTICLE_DEFINITIONS: readonly LeaseArticleDefinition[] = [
       '  đ) Các trường hợp khác theo quy định của pháp luật.',
       '2. Bên A có quyền đơn phương chấm dứt hợp đồng khi Bên B: (i) chậm thanh toán tiền thuê quá 15 (mười lăm) ngày kể từ ngày đến hạn mà đã được nhắc bằng văn bản; (ii) sử dụng nhà ở sai mục đích hoặc cho thuê lại trái quy định; (iii) tự ý phá dỡ, cải tạo làm hư hỏng nghiêm trọng nhà ở thuê; hoặc (iv) vi phạm nghiêm trọng nội quy tòa nhà, gây mất an ninh trật tự đã được nhắc nhở mà không khắc phục.',
       '3. Bên B có quyền đơn phương chấm dứt hợp đồng khi Bên A: (i) không bàn giao nhà ở thuê đúng hạn mà không có lý do chính đáng; (ii) không bảo đảm quyền sử dụng ổn định hoặc nhà ở thuê có khiếm khuyết nghiêm trọng ảnh hưởng đến việc ở mà đã được thông báo nhưng không khắc phục; hoặc (iii) tự ý tăng giá thuê, đơn phương thay đổi điều kiện hợp đồng trái thỏa thuận.',
-      '4. Ngoài các trường hợp tại khoản 2 và khoản 3, Bên nào muốn đơn phương chấm dứt hợp đồng trước hạn phải thông báo bằng văn bản cho Bên kia trước ít nhất {{terminationNoticeDays}} ngày. Việc đơn phương chấm dứt không đúng quy định là vi phạm hợp đồng và Bên vi phạm chịu trách nhiệm theo Điều 5 và Điều 10, đồng thời áp dụng quy định về đơn phương chấm dứt thực hiện hợp đồng tại Điều 428 Bộ luật Dân sự 2015.',
+      '4. Ngoài các trường hợp tại khoản 2 và khoản 3, Bên nào muốn đơn phương chấm dứt hợp đồng trước hạn phải thông báo bằng văn bản cho Bên kia trước ít nhất {{terminationNoticeDays}} ngày theo ' +
+        TERMINATION_NOTICE_BASIS +
+        '. Việc đơn phương chấm dứt không đúng quy định là vi phạm hợp đồng và Bên vi phạm chịu trách nhiệm theo Điều 5 và Điều 10, đồng thời áp dụng quy định về đơn phương chấm dứt thực hiện hợp đồng tại Điều 428 Bộ luật Dân sự 2015.',
       '5. Sự kiện bất khả kháng là sự kiện xảy ra một cách khách quan không thể lường trước được và không thể khắc phục được mặc dù đã áp dụng mọi biện pháp cần thiết và khả năng cho phép (Điều 156 Bộ luật Dân sự 2015), như thiên tai, dịch bệnh, chiến tranh, quyết định của cơ quan nhà nước. Bên gặp sự kiện bất khả kháng không phải chịu trách nhiệm đối với phần nghĩa vụ không thực hiện được, với điều kiện phải thông báo cho Bên kia trong vòng 03 (ba) ngày làm việc kể từ khi xảy ra và cung cấp tài liệu chứng minh. Nếu sự kiện kéo dài quá 30 (ba mươi) ngày, mỗi Bên có quyền chấm dứt hợp đồng mà không bị coi là vi phạm.',
       '6. Khi hợp đồng chấm dứt, hai Bên thực hiện việc bàn giao, thanh toán và thanh lý theo Điều 5 và Điều 9.',
     ].join('\n'),
