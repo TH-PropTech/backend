@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common'
+import { ForbiddenException, Injectable, Logger } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 import { ObjectId } from 'mongodb'
@@ -124,6 +124,12 @@ export class FavoritesService {
     userId: string,
     apartmentId: string
   ): Promise<{ isFavorite: true }> {
+    if ((await this.findOwnedIds(userId, [apartmentId])).size > 0) {
+      throw new ForbiddenException(
+        'Chủ nhà không thể yêu thích căn hộ của chính mình'
+      )
+    }
+
     const existing = await this.favoriteRepository.findOne({
       where: { userId, apartmentId },
     })
@@ -204,7 +210,10 @@ export class FavoritesService {
     }
 
     const uniqueIncoming = Array.from(new Set(apartmentIds.filter(Boolean)))
-    const toAdd = uniqueIncoming.filter(id => !existingIds.has(id))
+    const owned = await this.findOwnedIds(userId, uniqueIncoming)
+    const toAdd = uniqueIncoming.filter(
+      id => !existingIds.has(id) && !owned.has(id)
+    )
 
     if (toAdd.length > 0) {
       const newFavorites = toAdd.map(apartmentId =>
@@ -231,5 +240,20 @@ export class FavoritesService {
       where: { userId, apartmentId },
     })
     return Boolean(existing)
+  }
+
+  /** Trả về các apartmentId (trong `ids`) mà `userId` là chủ nhà. */
+  private async findOwnedIds(
+    userId: string,
+    ids: string[]
+  ): Promise<Set<string>> {
+    const keys = ids.map(id => (ObjectId.isValid(id) ? new ObjectId(id) : id))
+    if (keys.length === 0) return new Set()
+    const apartments = await this.apartmentRepository.find({
+      /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment -- Mongo $in filter is not expressible as FindOptionsWhere */
+      where: { _id: { $in: keys }, landlordId: userId } as any,
+      /* eslint-enable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment */
+    })
+    return new Set((apartments ?? []).map(a => String(a._id)))
   }
 }

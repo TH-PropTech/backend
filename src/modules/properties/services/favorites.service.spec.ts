@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/unbound-method -- jest mock assertions */
+import { ForbiddenException } from '@nestjs/common'
 import { ObjectId } from 'mongodb'
 import type { Repository } from 'typeorm'
 import { FavoritesService } from './favorites.service'
@@ -117,6 +118,17 @@ describe('FavoritesService', () => {
     const userId = 'user-123'
     const apartmentId = new ObjectId().toHexString()
 
+    it('rejects when the user is the landlord of the apartment', async () => {
+      apartmentRepository.find.mockResolvedValue([
+        { _id: new ObjectId(apartmentId), landlordId: userId } as Apartment,
+      ])
+
+      await expect(service.addFavorite(userId, apartmentId)).rejects.toThrow(
+        ForbiddenException
+      )
+      expect(favoriteRepository.save).not.toHaveBeenCalled()
+    })
+
     it('adds favorite idempotently if not already saved', async () => {
       favoriteRepository.findOne.mockResolvedValue(null)
 
@@ -233,6 +245,22 @@ describe('FavoritesService', () => {
 
   describe('syncFavorites', () => {
     const userId = 'user-123'
+
+    it('skips apartments owned by the user', async () => {
+      const ownId = new ObjectId()
+      favoriteRepository.find.mockResolvedValue([])
+      apartmentRepository.find.mockResolvedValue([
+        { _id: ownId, landlordId: userId } as Apartment,
+      ])
+
+      const result = await service.syncFavorites(userId, [
+        ownId.toHexString(),
+        'apt-other',
+      ])
+
+      expect(result.syncedCount).toBe(1)
+      expect(result.favorites).toEqual(['apt-other'])
+    })
 
     it('merges guest apartmentIds into user favorites idempotently', async () => {
       const existing: FavoriteApartment[] = [
