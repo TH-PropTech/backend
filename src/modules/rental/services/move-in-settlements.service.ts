@@ -487,7 +487,7 @@ export class MoveInSettlementsService {
       handedOverAt: string
       electricity: number
       water: number
-      meterPhotos?: { electricity: string[]; water: string[] }
+      meterPhotos: { electricity: string[]; water: string[] }
       keyCount: number
       inventoryItems?: Array<{
         name: string

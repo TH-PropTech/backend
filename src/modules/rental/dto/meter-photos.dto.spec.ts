@@ -40,17 +40,42 @@ describe.each([
     expect(await messages(cls, { ...payload, meterPhotos: photos })).toEqual([])
   })
 
-  it('accepts a handover without photos', async () => {
-    expect(await messages(cls, payload)).toEqual([])
+  it('accepts three photos per meter', async () => {
+    const three = (name: string): string[] =>
+      Array.from(
+        { length: 3 },
+        (_, i) => `https://cdn.example.com/${name}${i}.jpg`
+      )
+    expect(
+      await messages(cls, {
+        ...payload,
+        meterPhotos: { electricity: three('dien'), water: three('nuoc') },
+      })
+    ).toEqual([])
   })
 
-  it('accepts a meter with no photo when the other has one', async () => {
+  it('rejects a handover without photos', async () => {
+    expect(await messages(cls, payload)).toEqual([
+      'Vui lòng tải ảnh công tơ điện và nước.',
+    ])
+  })
+
+  it('rejects an empty electricity photo list', async () => {
     expect(
       await messages(cls, {
         ...payload,
         meterPhotos: { electricity: [], water: photos.water },
       })
-    ).toEqual([])
+    ).toEqual(['Vui lòng tải ít nhất một ảnh công tơ điện.'])
+  })
+
+  it('rejects an empty water photo list', async () => {
+    expect(
+      await messages(cls, {
+        ...payload,
+        meterPhotos: { electricity: photos.electricity, water: [] },
+      })
+    ).toEqual(['Vui lòng tải ít nhất một ảnh công tơ nước.'])
   })
 
   it('rejects non-image files and more than three photos', async () => {

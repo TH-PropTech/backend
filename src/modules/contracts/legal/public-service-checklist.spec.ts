@@ -18,7 +18,10 @@ describe('public service checklist', () => {
     expect(result.purpose).toBe('temporary-residence')
     expect(result.externalProcedureCompleted).toBe(false)
     expect(result.officialSourceUrl).toBe('https://dichvucong.bocongan.gov.vn/')
-    expect(result.disclaimer).toContain('POC_ECONSENT')
+    expect(result.disclaimer).toBe(
+      'Ký xác nhận ở chế độ thử nghiệm không phải chữ ký số có chứng thư và không thay thế công chứng/chứng thực.'
+    )
+    expect(result.disclaimer).not.toMatch(/[A-Z]{3,}(_[A-Z0-9]+)+/)
     expect(result.items).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -37,6 +40,7 @@ describe('public service checklist', () => {
     })
 
     expect(result.externalProcedureCompleted).toBe(false)
+    expect(result.disclaimer).not.toMatch(/[A-Z]{3,}(_[A-Z0-9]+)+/)
     expect(result.items).toEqual(
       expect.arrayContaining([
         expect.objectContaining({

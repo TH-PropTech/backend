@@ -25,6 +25,10 @@ const HANDOVER_INPUT = {
   electricity: 220,
   water: 80,
   keyCount: 2,
+  meterPhotos: {
+    electricity: [`${STORAGE_BASE}/apartments/dien.jpg`],
+    water: [`${STORAGE_BASE}/apartments/nuoc.png`],
+  },
   inventoryItems: [{ name: 'Sofa', quantity: 1, condition: 'good' as const }],
 }
 const LINE = {

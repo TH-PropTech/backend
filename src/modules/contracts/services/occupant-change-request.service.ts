@@ -9,7 +9,7 @@ import {
 } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { ObjectId } from 'mongodb'
-import { Repository } from 'typeorm'
+import { FindOptionsWhere, Repository } from 'typeorm'
 import { Apartment } from '../../properties/schemas/apartment.schema'
 import { NotificationsService } from '../../notifications/services/notifications.service'
 import { resolveEffectiveCommercial } from '../commercial/resolve-effective-commercial'
@@ -338,11 +338,12 @@ export class OccupantChangeRequestService {
   }
 
   private async assertNoOpenRequest(contractId: string): Promise<void> {
+    // MongoRepository không hỗ trợ `where` dạng mảng (OR) → driver ném lỗi, API trả 500.
     const open = await this.requests.findOne({
-      where: [
-        { contractId, status: 'pending-landlord' },
-        { contractId, status: 'pending-tenant' },
-      ],
+      where: {
+        contractId,
+        status: { $in: [...OPEN_STATUSES] },
+      } as unknown as FindOptionsWhere<OccupantChangeRequest>,
     })
     if (open) throw new ConflictException('OCCUPANT_REQUEST_IN_PROGRESS')
   }

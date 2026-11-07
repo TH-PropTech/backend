@@ -1,6 +1,7 @@
 import 'reflect-metadata'
 import { BadRequestException, ValidationPipe } from '@nestjs/common'
 import {
+  AmendmentActionDto,
   CreateContractAmendmentDto,
   UpdateContractAmendmentDto,
 } from './contract-amendment.dto'
@@ -78,6 +79,28 @@ describe('contract amendment DTOs (global ValidationPipe)', () => {
     ).resolves.toBeInstanceOf(UpdateContractAmendmentDto)
     await expect(
       parse(UpdateContractAmendmentDto, VALID)
+    ).rejects.toBeInstanceOf(BadRequestException)
+  })
+})
+
+describe('AmendmentActionDto from multipart form fields', () => {
+  it('converts a string expectedRevision to a number', async () => {
+    const result = (await parse(AmendmentActionDto, {
+      expectedRevision: '1',
+    })) as AmendmentActionDto
+
+    expect(result.expectedRevision).toBe(1)
+  })
+
+  it('rejects a non-numeric expectedRevision', async () => {
+    await expect(
+      parse(AmendmentActionDto, { expectedRevision: 'abc' })
+    ).rejects.toBeInstanceOf(BadRequestException)
+  })
+
+  it('still rejects a negative revision', async () => {
+    await expect(
+      parse(AmendmentActionDto, { expectedRevision: '-1' })
     ).rejects.toBeInstanceOf(BadRequestException)
   })
 })

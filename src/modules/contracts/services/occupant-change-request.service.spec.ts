@@ -25,6 +25,25 @@ type AmendmentCall = [
   { changes: Array<{ field: string; after: unknown }> },
 ]
 
+/**
+ * Giống MongoRepository thật: `where` dạng mảng (OR kiểu SQL) bị driver từ chối
+ * (MongoInvalidArgumentError → 500), nên mock cũng ném; `status.$in` được hiểu.
+ */
+function findStored(
+  stored: OccupantChangeRequest[],
+  where: unknown
+): OccupantChangeRequest | null {
+  if (Array.isArray(where)) {
+    throw new Error('MongoInvalidArgumentError: array where is not supported')
+  }
+  const status = (where as { status?: unknown }).status
+  if (status && typeof status === 'object' && '$in' in status) {
+    const allowed = (status as { $in: string[] }).$in
+    return stored.find(item => allowed.includes(item.status)) ?? null
+  }
+  return stored[0] ?? null
+}
+
 function build(
   options: {
     maxOccupants?: number | null
@@ -33,6 +52,7 @@ function build(
   } = {}
 ): {
   service: OccupantChangeRequestService
+  requests: { findOne: jest.Mock }
   amendments: { create: jest.Mock }
   notifications: { createNotification: jest.Mock }
   stored: OccupantChangeRequest[]
@@ -68,14 +88,9 @@ function build(
       return Promise.resolve(value)
     }),
     find: jest.fn(() => Promise.resolve(stored)),
-    findOne: jest.fn(({ where }: { where: unknown }) => {
-      if (Array.isArray(where)) {
-        return Promise.resolve(
-          stored.find(item => item.status.startsWith('pending')) ?? null
-        )
-      }
-      return Promise.resolve(stored[0] ?? null)
-    }),
+    findOne: jest.fn(({ where }: { where: unknown }) =>
+      Promise.resolve(findStored(stored, where))
+    ),
   }
   const contracts = { findOne: jest.fn().mockResolvedValue(contract) }
   const apartments = {
@@ -94,7 +109,7 @@ function build(
     amendments as never,
     notifications as never
   )
-  return { service, amendments, notifications, stored }
+  return { service, requests, amendments, notifications, stored }
 }
 
 describe('OccupantChangeRequestService', () => {
@@ -125,6 +140,32 @@ describe('OccupantChangeRequestService', () => {
     await expect(service.create(id, input, tenant)).rejects.toThrow(
       'OCCUPANT_REQUEST_IN_PROGRESS'
     )
+  })
+
+  it('rejects with a conflict when a request is pending the tenant', async () => {
+    const open = { status: 'pending-tenant' } as OccupantChangeRequest
+    const { service } = build({ existing: open })
+    await expect(service.create(id, input, tenant)).rejects.toThrow(
+      'OCCUPANT_REQUEST_IN_PROGRESS'
+    )
+  })
+
+  it('allows a new request when only closed requests exist', async () => {
+    const closed = { status: 'rejected' } as OccupantChangeRequest
+    const { service } = build({ existing: closed })
+    const request = await service.create(id, input, tenant)
+    expect(request.status).toBe('pending-landlord')
+  })
+
+  it('checks open requests with a Mongo $in query, never an array where', async () => {
+    const { service, requests } = build()
+    await service.create(id, input, tenant)
+    expect(requests.findOne).toHaveBeenCalledWith({
+      where: {
+        contractId: id,
+        status: { $in: ['pending-landlord', 'pending-tenant'] },
+      },
+    })
   })
 
   it('rejects people who are not the tenant and inactive contracts', async () => {

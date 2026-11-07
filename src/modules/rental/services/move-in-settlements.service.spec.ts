@@ -8,6 +8,11 @@ import type { Payment } from '../../payments/schemas/payment.schema'
 import { RentalTransactionEventService } from '../services/rental-transaction-event.service'
 import type { RentalTransactionEvent } from '../schemas/rental-transaction-event.schema'
 
+const METER_PHOTOS = {
+  electricity: ['https://cdn.example.com/dien.jpg'],
+  water: ['https://cdn.example.com/nuoc.png'],
+}
+
 function createInMemoryTransactionEventService(): {
   service: RentalTransactionEventService
   events: RentalTransactionEvent[]
@@ -356,13 +361,20 @@ describe('MoveInSettlementsService', () => {
         electricity: 10,
         water: 20,
         keyCount: 2,
+        meterPhotos: METER_PHOTOS,
       })
     ).rejects.toThrow('HANDOVER_REQUIRES_SETTLEMENT')
     row.status = 'paid'
     const first = await service.updateHandover(
       row._id.toHexString(),
       'landlord',
-      { handedOverAt: '2030-01-01', electricity: 10, water: 20, keyCount: 2 }
+      {
+        handedOverAt: '2030-01-01',
+        electricity: 10,
+        water: 20,
+        keyCount: 2,
+        meterPhotos: METER_PHOTOS,
+      }
     )
     const hash = first.handover?.handoverHash ?? ''
     await service.confirmHandover(
@@ -458,6 +470,7 @@ describe('MoveInSettlementsService handover (phương án A)', () => {
     electricity: 120,
     water: 45,
     keyCount: 2,
+    meterPhotos: METER_PHOTOS,
   }
   const T0 = new Date('2030-02-01T10:00:00.000Z')
   const AFTER_DEADLINE = new Date('2030-02-04T10:00:00.001Z')
@@ -552,28 +565,23 @@ describe('MoveInSettlementsService handover (phương án A)', () => {
       expect(a.handover?.handoverHash).not.toBe(b.handover?.handoverHash)
     })
 
-    it('stores meter photos in the hash only when present so legacy hashes stay valid', async () => {
-      const photos = {
-        electricity: ['https://cdn.example.com/dien.jpg'],
-        water: ['https://cdn.example.com/nuoc.png'],
+    it('stores meter photos and covers them in the handover hash', async () => {
+      const other = {
+        electricity: ['https://cdn.example.com/dien-2.jpg'],
+        water: METER_PHOTOS.water,
       }
-      const legacy = setup()
-      const a = await legacy.service.updateHandover(legacy.id, 'landlord', {
-        ...RECORD,
-      })
+      const first = setup()
+      const a = await first.service.updateHandover(first.id, 'landlord', RECORD)
       const again = setup()
-      const b = await again.service.updateHandover(again.id, 'landlord', {
+      const b = await again.service.updateHandover(again.id, 'landlord', RECORD)
+      const changed = setup()
+      const c = await changed.service.updateHandover(changed.id, 'landlord', {
         ...RECORD,
+        meterPhotos: other,
       })
-      const withPhotos = setup()
-      const c = await withPhotos.service.updateHandover(
-        withPhotos.id,
-        'landlord',
-        { ...RECORD, meterPhotos: photos }
-      )
-      expect(a.handover?.meterPhotos).toBeUndefined()
+      expect(a.handover?.meterPhotos).toEqual(METER_PHOTOS)
       expect(b.handover?.handoverHash).toBe(a.handover?.handoverHash)
-      expect(c.handover?.meterPhotos).toEqual(photos)
+      expect(c.handover?.meterPhotos).toEqual(other)
       expect(c.handover?.handoverHash).not.toBe(a.handover?.handoverHash)
     })
 

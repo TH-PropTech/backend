@@ -75,7 +75,7 @@ export function buildPublicServiceChecklist(
     notarizationStatus,
     disclaimer:
       executionMethod === 'POC_ECONSENT'
-        ? 'POC_ECONSENT không phải chữ ký số có chứng thư và không thay thế công chứng/chứng thực.'
+        ? 'Ký xác nhận ở chế độ thử nghiệm không phải chữ ký số có chứng thư và không thay thế công chứng/chứng thực.'
         : 'Hệ thống chỉ xuất checklist và bằng chứng hiện có; không tự nộp hoặc xác nhận thủ tục bên ngoài.',
     items: [
       {

@@ -14,11 +14,16 @@ import { createMemoryRepo, createSupportMock } from './move-out.fixtures'
 const NOW = new Date('2030-03-01T00:00:00.000Z')
 const CONTRACT_ID = new ObjectId()
 const CID = CONTRACT_ID.toHexString()
+const PHOTOS = {
+  electricity: ['https://cdn.example.com/dien.jpg'],
+  water: ['https://cdn.example.com/nuoc.png'],
+}
 const INPUT = {
   handedBackAt: '2030-03-01T09:00:00.000Z',
   electricity: 220,
   water: 80,
   keyCount: 2,
+  meterPhotos: PHOTOS,
   inventoryItems: [
     {
       name: ' Sofa ',
@@ -126,24 +131,20 @@ describe('MoveOutHandoversService', () => {
       )
     })
 
-    const PHOTOS = {
-      electricity: ['https://cdn.example.com/dien.jpg'],
-      water: ['https://cdn.example.com/nuoc.png'],
-    }
-
-    it('keeps the legacy hash without photos and changes it with photos', async () => {
-      const legacy = await setup().service.record(CID, 'landlord', INPUT, NOW)
-      const withPhotos = await setup().service.record(
+    it('stores meter photos and covers them in the handover hash', async () => {
+      const other = { ...PHOTOS, water: ['https://cdn.example.com/nuoc-2.png'] }
+      const first = await setup().service.record(CID, 'landlord', INPUT, NOW)
+      const changed = await setup().service.record(
         CID,
         'landlord',
-        { ...INPUT, meterPhotos: PHOTOS },
+        { ...INPUT, meterPhotos: other },
         NOW
       )
-      expect(legacy.meterPhotos).toBeNull()
-      expect(withPhotos.meterPhotos).toEqual(PHOTOS)
-      expect(withPhotos.handoverHash).not.toBe(legacy.handoverHash)
+      expect(first.meterPhotos).toEqual(PHOTOS)
+      expect(changed.meterPhotos).toEqual(other)
+      expect(changed.handoverHash).not.toBe(first.handoverHash)
       const again = await setup().service.record(CID, 'landlord', INPUT, NOW)
-      expect(again.handoverHash).toBe(legacy.handoverHash)
+      expect(again.handoverHash).toBe(first.handoverHash)
     })
 
     it('warns when meters are below the move-in readings until acknowledged', async () => {
@@ -173,6 +174,7 @@ describe('MoveOutHandoversService', () => {
           keyCount: 2,
           electricity: 0,
           water: 0,
+          meterPhotos: PHOTOS,
         },
         NOW
       )

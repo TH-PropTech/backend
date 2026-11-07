@@ -120,13 +120,20 @@ function build(): {
       return Promise.resolve(value)
     }),
     find: jest.fn(() => Promise.resolve(stored)),
-    findOne: jest.fn(({ where }: { where: unknown }) =>
-      Array.isArray(where)
-        ? Promise.resolve(
-            stored.find(item => item.status.startsWith('pending')) ?? null
-          )
-        : Promise.resolve(stored[0] ?? null)
-    ),
+    // MongoRepository thật từ chối `where` dạng mảng; kiểm "yêu cầu mở" dùng `status.$in`.
+    findOne: jest.fn(({ where }: { where: unknown }) => {
+      if (Array.isArray(where)) {
+        throw new Error(
+          'MongoInvalidArgumentError: array where is not supported'
+        )
+      }
+      const status = (where as { status?: { $in?: string[] } }).status
+      return Promise.resolve(
+        status?.$in
+          ? (stored.find(item => status.$in?.includes(item.status)) ?? null)
+          : (stored[0] ?? null)
+      )
+    }),
   }
   const occupants = new OccupantChangeRequestService(
     requestRepo as never,
