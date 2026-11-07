@@ -992,3 +992,218 @@ describe('RentalApplicationsService transaction audit', () => {
     expect(provisionedEvents).toHaveLength(1)
   })
 })
+
+describe('RentalApplicationsService reservation conflict', () => {
+  const APPLICATION_ID = '507f1f77bcf86cd799439011'
+
+  function build(
+    options: {
+      reserved?: boolean
+      depositFails?: boolean
+      notificationFails?: boolean
+    } = {}
+  ): {
+    service: RentalApplicationsService
+    events: RentalTransactionEvent[]
+    notifications: { createNotification: jest.Mock }
+    repository: { findOne: jest.Mock; save: jest.Mock }
+  } {
+    const repository = {
+      findOne: jest.fn(),
+      save: jest.fn((value: unknown) => Promise.resolve(value)),
+    }
+    const apartments = {
+      findOne: jest.fn().mockResolvedValue({ title: 'Apartment' }),
+      reserveRentalApplication: jest
+        .fn()
+        .mockResolvedValue(options.reserved ?? true),
+    }
+    const depositAgreementsService = {
+      createFromApplicationSnapshot: options.depositFails
+        ? jest.fn().mockRejectedValue(new Error('DEPOSIT_DOWN'))
+        : jest.fn().mockResolvedValue({ _id: new ObjectId() }),
+    }
+    const contractsService = {
+      createDraftFromApplication: jest
+        .fn()
+        .mockResolvedValue({ _id: new ObjectId() }),
+    }
+    const notifications = {
+      createNotification: options.notificationFails
+        ? jest.fn().mockRejectedValue(new Error('PUSH_DOWN'))
+        : jest.fn().mockResolvedValue(undefined),
+    }
+    const { service: transactionEventService, events } =
+      createInMemoryTransactionEventService()
+    const service = new RentalApplicationsService(
+      repository as unknown as Repository<RentalApplication>,
+      apartments as unknown as ApartmentsService,
+      undefined,
+      depositAgreementsService as never,
+      contractsService as never,
+      notifications as never,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      transactionEventService
+    )
+    return { service, events, notifications, repository }
+  }
+
+  function pending(
+    overrides: Partial<RentalApplication> = {}
+  ): RentalApplication {
+    return application({
+      _id: new ObjectId(APPLICATION_ID),
+      packageSnapshot: {} as never,
+      ...overrides,
+    })
+  }
+
+  it('provisions an accepted application when the reservation is won', async () => {
+    const { service, repository } = build()
+    repository.findOne.mockResolvedValue(pending())
+
+    const result = await service.respond(APPLICATION_ID, 'landlord-1', {
+      status: 'accepted',
+      reasonCode: 'APPROVED',
+    })
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        status: 'accepted',
+        provisioningStatus: 'ready',
+      })
+    )
+  })
+
+  it('auto-rejects with PROPERTY_UNAVAILABLE and responds 409 when the reservation is lost', async () => {
+    const { service, repository, events, notifications } = build({
+      reserved: false,
+    })
+    const app = pending()
+    repository.findOne.mockResolvedValue(app)
+
+    await expect(
+      service.respond(APPLICATION_ID, 'landlord-1', {
+        status: 'accepted',
+        reasonCode: 'APPROVED',
+      })
+    ).rejects.toThrow(new ConflictException('RENTAL_RESERVATION_CONFLICT'))
+
+    expect(app).toEqual(
+      expect.objectContaining({
+        status: 'rejected',
+        reasonCode: 'PROPERTY_UNAVAILABLE',
+        decisionNote:
+          'Căn hộ đã có hồ sơ khác được chấp thuận nên hồ sơ này được tự động từ chối.',
+        provisioningStatus: 'not-started',
+        provisioningErrorCode: null,
+        applicationRevision: 3,
+        depositAgreementId: null,
+        contractId: null,
+      })
+    )
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        eventType: 'application.auto-rejected',
+        actorRole: 'system',
+        reasonCode: 'PROPERTY_UNAVAILABLE',
+        transitionKey: `application:${APPLICATION_ID}:auto-rejected`,
+      })
+    )
+    expect(notifications.createNotification).toHaveBeenCalledWith(
+      'tenant-1',
+      expect.any(String),
+      expect.any(String),
+      'rental-application-rejected',
+      { applicationId: APPLICATION_ID }
+    )
+  })
+
+  it('auto-rejects a stuck accepted application whose provisioning previously failed', async () => {
+    const { service, repository } = build({ reserved: false })
+    const app = pending({
+      status: 'accepted',
+      provisioningStatus: 'failed',
+      provisioningErrorCode: 'RENTAL_RESERVATION_CONFLICT',
+    })
+    repository.findOne.mockResolvedValue(app)
+
+    await expect(
+      service.respond(APPLICATION_ID, 'landlord-1', {
+        status: 'accepted',
+        reasonCode: 'APPROVED',
+      })
+    ).rejects.toThrow(ConflictException)
+
+    expect(app).toEqual(
+      expect.objectContaining({
+        status: 'rejected',
+        reasonCode: 'PROPERTY_UNAVAILABLE',
+        provisioningStatus: 'not-started',
+        provisioningErrorCode: null,
+      })
+    )
+  })
+
+  it('auto-rejects a stuck application through staff retryProvisioning', async () => {
+    const { service, repository } = build({ reserved: false })
+    const app = pending({
+      status: 'accepted',
+      provisioningStatus: 'failed',
+    })
+    repository.findOne.mockResolvedValue(app)
+
+    await expect(
+      service.retryProvisioning(APPLICATION_ID, 'staff-1')
+    ).rejects.toThrow(ConflictException)
+
+    expect(app.status).toBe('rejected')
+  })
+
+  it('keeps accepted with failed provisioning when deposit creation throws', async () => {
+    const { service, repository, events } = build({ depositFails: true })
+    const app = pending()
+    repository.findOne.mockResolvedValue(app)
+
+    await expect(
+      service.respond(APPLICATION_ID, 'landlord-1', {
+        status: 'accepted',
+        reasonCode: 'APPROVED',
+      })
+    ).rejects.toThrow('DEPOSIT_DOWN')
+
+    expect(app).toEqual(
+      expect.objectContaining({
+        status: 'accepted',
+        provisioningStatus: 'failed',
+        provisioningErrorCode: 'DEPOSIT_DOWN',
+      })
+    )
+    expect(events.map(event => event.eventType)).not.toContain(
+      'application.auto-rejected'
+    )
+  })
+
+  it('still auto-rejects and responds 409 when the tenant notification fails', async () => {
+    const { service, repository } = build({
+      reserved: false,
+      notificationFails: true,
+    })
+    const app = pending()
+    repository.findOne.mockResolvedValue(app)
+
+    await expect(
+      service.respond(APPLICATION_ID, 'landlord-1', {
+        status: 'accepted',
+        reasonCode: 'APPROVED',
+      })
+    ).rejects.toThrow(new ConflictException('RENTAL_RESERVATION_CONFLICT'))
+
+    expect(app.status).toBe('rejected')
+  })
+})

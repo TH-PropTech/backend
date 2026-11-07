@@ -58,6 +58,8 @@ export interface RentalApplicationListResult {
 
 const COMPATIBILITY_PACKAGE_ID = 'compatibility-12m'
 const COMPATIBILITY_PACKAGE_VERSION = 1
+const AUTO_REJECT_NOTE =
+  'Căn hộ đã có hồ sơ khác được chấp thuận nên hồ sơ này được tự động từ chối.'
 
 @Injectable()
 export class RentalApplicationsService {
@@ -689,6 +691,7 @@ export class RentalApplicationsService {
     ) {
       return application
     }
+    let reservationLost = false
     try {
       const apartment = await this.apartmentsService.findOne(
         application.apartmentId
@@ -698,6 +701,7 @@ export class RentalApplicationsService {
         application._id.toHexString()
       )
       if (!reserved && application.provisioningStatus !== 'ready') {
+        reservationLost = true
         throw new ConflictException('RENTAL_RESERVATION_CONFLICT')
       }
       if (!application.packageSnapshot) {
@@ -767,6 +771,10 @@ export class RentalApplicationsService {
       }
       return saved
     } catch (error: unknown) {
+      if (reservationLost) {
+        await this.autoRejectLostReservation(application)
+        throw error
+      }
       application.provisioningStatus = 'failed'
       application.provisioningErrorCode =
         error instanceof Error
@@ -781,6 +789,40 @@ export class RentalApplicationsService {
         transitionKey: `application:${application._id.toHexString()}:provisioning:failed`,
       })
       throw error
+    }
+  }
+
+  private async autoRejectLostReservation(
+    application: RentalApplication
+  ): Promise<void> {
+    const applicationId = application._id.toHexString()
+    application.status = 'rejected'
+    application.reasonCode = 'PROPERTY_UNAVAILABLE'
+    application.decisionNote = AUTO_REJECT_NOTE
+    application.provisioningStatus = 'not-started'
+    application.provisioningErrorCode = null
+    application.applicationRevision = (application.applicationRevision ?? 1) + 1
+    await this.repository.save(application)
+    await this.recordTransactionEvent({
+      applicationId,
+      eventType: 'application.auto-rejected',
+      actorRole: 'system',
+      reasonCode: 'PROPERTY_UNAVAILABLE',
+      transitionKey: `application:${applicationId}:auto-rejected`,
+    })
+    if (!this.notificationsService) return
+    try {
+      await this.notificationsService.createNotification(
+        application.tenantId,
+        'Hồ sơ thuê đã bị từ chối',
+        AUTO_REJECT_NOTE,
+        'rental-application-rejected',
+        { applicationId }
+      )
+    } catch (error: unknown) {
+      this.logger.warn(
+        `Rental auto-reject notification failed: ${error instanceof Error ? error.message : String(error)}`
+      )
     }
   }
 
